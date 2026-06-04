@@ -27,6 +27,8 @@ export interface StoryMeta {
     generationMode?: 'standard' | 'prewriter'
     /** Prewriter asks clarifying questions before writing. Only active in prewriter mode. */
     clarifyBeforeGenerate?: boolean
+    /** How much the prewriter deliberates. Only active in prewriter mode. */
+    prewriterReasoning?: 'short' | 'normal' | 'extensive'
     disableLibrarianAutoAnalysis?: boolean
     autoApplyLibrarianSuggestions?: boolean
     disableLibrarianDirections?: boolean

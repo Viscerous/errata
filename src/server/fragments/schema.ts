@@ -111,6 +111,9 @@ export const StoryMetaSchema = z.object({
       // Let the prewriter ask the author clarifying questions before writing.
       // Only takes effect in prewriter mode. Off by default.
       clarifyBeforeGenerate: z.boolean().default(false),
+      // How much the prewriter deliberates. 'short' favors speed (terse brief,
+      // fewer tool steps), 'extensive' favors depth. Only used in prewriter mode.
+      prewriterReasoning: z.enum(['short', 'normal', 'extensive']).default('normal'),
       disableLibrarianAutoAnalysis: z.boolean().default(false),
       autoApplyLibrarianSuggestions: z.boolean().default(false),
       disableLibrarianDirections: z.boolean().default(false),
@@ -140,7 +143,7 @@ export const StoryMetaSchema = z.object({
       guidedSuggestPrompt: z.string().optional(),
       disableThinking: z.boolean().default(false),
     })
-    .default({ outputFormat: 'markdown', enabledPlugins: [], summarizationThreshold: 4, maxSteps: 10, modelOverrides: {}, generationMode: 'standard', clarifyBeforeGenerate: false, disableLibrarianAutoAnalysis: false, autoApplyLibrarianSuggestions: false, disableLibrarianDirections: false, disableLibrarianSuggestions: false, contextOrderMode: 'simple', fragmentOrder: [], enabledBuiltinTools: [], contextCompact: { type: 'proseLimit', value: 10 }, summaryCompact: { maxCharacters: 12000, targetCharacters: 9000 }, enableHierarchicalSummary: false, disableThinking: false }),
+    .default({ outputFormat: 'markdown', enabledPlugins: [], summarizationThreshold: 4, maxSteps: 10, modelOverrides: {}, generationMode: 'standard', clarifyBeforeGenerate: false, prewriterReasoning: 'normal', disableLibrarianAutoAnalysis: false, autoApplyLibrarianSuggestions: false, disableLibrarianDirections: false, disableLibrarianSuggestions: false, contextOrderMode: 'simple', fragmentOrder: [], enabledBuiltinTools: [], contextCompact: { type: 'proseLimit', value: 10 }, summaryCompact: { maxCharacters: 12000, targetCharacters: 9000 }, enableHierarchicalSummary: false, disableThinking: false }),
 })
 
 export type StoryMeta = z.infer<typeof StoryMetaSchema>

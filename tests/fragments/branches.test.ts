@@ -44,6 +44,7 @@ function makeStory(id: string = TEST_STORY_ID): StoryMeta {
       modelOverrides: {},
       generationMode: 'standard' as const,
       clarifyBeforeGenerate: false,
+      prewriterReasoning: 'normal' as const,
       autoApplyLibrarianSuggestions: false,
       disableLibrarianDirections: false,
       disableLibrarianSuggestions: false,

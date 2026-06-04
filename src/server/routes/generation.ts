@@ -269,7 +269,16 @@ export function generationRoutes(dataDir: string) {
               const prewriterActivityId = registerActiveAgent(params.storyId, 'generation.prewriter')
               try {
                 const configuredMax = story.settings.maxSteps ?? 10
-                const prewriterMaxSteps = Math.max(1, Math.floor(configuredMax / 2))
+                const prewriterReasoningLevel = story.settings.prewriterReasoning ?? 'normal'
+                // Scale the prewriter's tool-step budget by reasoning length so
+                // 'short' actually runs fewer round trips (the main speed win),
+                // while 'extensive' may explore the full budget.
+                const half = Math.max(1, Math.floor(configuredMax / 2))
+                const prewriterMaxSteps = prewriterReasoningLevel === 'short'
+                  ? Math.min(2, half)
+                  : prewriterReasoningLevel === 'extensive'
+                    ? configuredMax
+                    : half
                 const prewriterResult = await runPrewriter({
                   dataDir,
                   storyId: params.storyId,
@@ -283,6 +292,7 @@ export function generationRoutes(dataDir: string) {
                   clarifyEnabled,
                   clarifications,
                   round: clarifyRound,
+                  reasoning: prewriterReasoningLevel,
                   onEvent: (event) => {
                     if (event.type === 'text') {
                       emit({ type: 'prewriter-text', text: event.text })

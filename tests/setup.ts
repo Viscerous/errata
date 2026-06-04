@@ -18,6 +18,7 @@ export function makeTestSettings(overrides?: Partial<StorySettings>): StorySetti
     modelOverrides: {},
     generationMode: 'standard' as const,
     clarifyBeforeGenerate: false,
+    prewriterReasoning: 'normal' as const,
     disableLibrarianAutoAnalysis: false,
     autoApplyLibrarianSuggestions: false,
     disableLibrarianDirections: false,

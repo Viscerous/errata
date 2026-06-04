@@ -13,6 +13,7 @@ export const settings = {
     modelId?: string | null
     generationMode?: 'standard' | 'prewriter'
     clarifyBeforeGenerate?: boolean
+    prewriterReasoning?: 'short' | 'normal' | 'extensive'
     disableLibrarianAutoAnalysis?: boolean
     autoApplyLibrarianSuggestions?: boolean
     disableLibrarianDirections?: boolean

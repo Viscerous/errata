@@ -656,14 +656,28 @@ export function SettingsPanel({
               />
             </SettingRow>
             {(story.settings.generationMode ?? 'standard') === 'prewriter' && (
-              <SettingRow label="Clarify before writing" description="Let the prewriter ask you questions when your direction is ambiguous, before it writes.">
-                <ToggleSwitch
-                  on={story.settings.clarifyBeforeGenerate ?? false}
-                  onToggle={() => updateMutation.mutate({ clarifyBeforeGenerate: !(story.settings.clarifyBeforeGenerate ?? false) })}
-                  disabled={updateMutation.isPending}
-                  label="Toggle clarify before writing"
-                />
-              </SettingRow>
+              <>
+                <SettingRow label="Prewriter reasoning" description="How much the prewriter deliberates. Short favors speed; Extensive favors depth.">
+                  <SegmentedControl
+                    value={(story.settings.prewriterReasoning ?? 'normal') as 'short' | 'normal' | 'extensive'}
+                    options={[
+                      { value: 'short' as const, label: 'Short' },
+                      { value: 'normal' as const, label: 'Normal' },
+                      { value: 'extensive' as const, label: 'Extensive' },
+                    ]}
+                    onChange={(v) => updateMutation.mutate({ prewriterReasoning: v })}
+                    disabled={updateMutation.isPending}
+                  />
+                </SettingRow>
+                <SettingRow label="Clarify before writing" description="Let the prewriter ask you questions when your direction is ambiguous, before it writes.">
+                  <ToggleSwitch
+                    on={story.settings.clarifyBeforeGenerate ?? false}
+                    onToggle={() => updateMutation.mutate({ clarifyBeforeGenerate: !(story.settings.clarifyBeforeGenerate ?? false) })}
+                    disabled={updateMutation.isPending}
+                    label="Toggle clarify before writing"
+                  />
+                </SettingRow>
+              </>
             )}
             <SettingRow label="Output format" helpTopic="generation#output-format">
               <SegmentedControl

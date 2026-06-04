@@ -241,6 +241,7 @@ async function seedStory(dataDir: string, options: HarnessOptions): Promise<{
       modelOverrides: {},
       generationMode: 'standard' as const,
       clarifyBeforeGenerate: false,
+      prewriterReasoning: 'normal' as const,
       autoApplyLibrarianSuggestions: false,
       disableLibrarianDirections: false,
       disableLibrarianSuggestions: false,

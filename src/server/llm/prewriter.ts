@@ -42,7 +42,8 @@ Your brief MUST include:
    - "Do NOT skip ahead in time"
    - "Do NOT introduce new characters"
 
-Keep the brief under 1000 words. Be direct and specific.
+Be direct and specific. The Reasoning Length guidance below sets how long and
+how deeply to plan — follow it for the brief's length and level of detail.
 Spend the most space on CHARACTER VOICES — the writer depends entirely on your
 character direction to capture each character faithfully.
 
@@ -70,6 +71,32 @@ export interface PrewriterDirection {
 
 /** Hard cap on how many question rounds the prewriter may run before it must finalize. */
 export const MAX_CLARIFY_ROUNDS = 3
+
+/** How much the prewriter deliberates — trades speed against depth. */
+export type PrewriterReasoning = 'short' | 'normal' | 'extensive'
+
+/**
+ * Per-level guidance appended to the prewriter prompt. The prompt is the primary
+ * lever (brief length + how much to deliberate); the route additionally scales
+ * the prewriter's tool-step budget so 'short' is genuinely faster.
+ */
+export const PREWRITER_REASONING_DIRECTIVES: Record<PrewriterReasoning, string> = {
+  short: `## Reasoning Length: SHORT — favor speed
+Move fast. Do NOT deliberate at length or chase optional tool lookups — decide
+from the context you already have. Write a tight, skimmable brief of roughly
+300 words. Give voice notes only for characters who actually speak in this
+scene, a line or two each. Getting the writer moving quickly matters more than
+exhaustive coverage.`,
+  normal: `## Reasoning Length: NORMAL — balanced
+Plan thoughtfully but efficiently. Aim for a brief of around 800 words. Cover
+the active characters' voices well without exhausting every detail.`,
+  extensive: `## Reasoning Length: EXTENSIVE — favor depth
+Reason thoroughly before committing. Weigh subtext, character interiority, and
+alternative beats, and look things up when it genuinely helps. Write a detailed
+brief (1200–1800 words is fine). Give every active character a rich voice
+profile with an example line, and think carefully about pacing and exactly
+where this passage should end.`,
+}
 
 /** Appended to the prewriter prompt when clarify-before-generate is enabled. */
 export const CLARIFY_INSTRUCTIONS = `## Clarifying Questions
@@ -128,6 +155,8 @@ export interface RunPrewriterArgs {
   clarifications?: Clarification[]
   /** Which clarify round this is (0-based). At MAX_CLARIFY_ROUNDS the ask tool is withheld. */
   round?: number
+  /** How much the prewriter deliberates (brief length + depth). Defaults to 'normal'. */
+  reasoning?: PrewriterReasoning
 }
 
 export interface PrewriterResult {
@@ -150,7 +179,7 @@ export interface PrewriterResult {
  * that the writer will use instead of the full context.
  */
 export async function runPrewriter(args: RunPrewriterArgs): Promise<PrewriterResult> {
-  const { dataDir, storyId, compiledMessages, authorInput, mode, tools, maxSteps = 3, abortSignal, onEvent, providerOptions, clarifyEnabled = false, clarifications = [], round = 0 } = args
+  const { dataDir, storyId, compiledMessages, authorInput, mode, tools, maxSteps = 3, abortSignal, onEvent, providerOptions, clarifyEnabled = false, clarifications = [], round = 0, reasoning = 'normal' } = args
   const requestLogger = logger.child({ storyId })
   const canAskQuestions = clarifyEnabled && round < MAX_CLARIFY_ROUNDS
 
@@ -209,6 +238,19 @@ export async function runPrewriter(args: RunPrewriterArgs): Promise<PrewriterRes
     }
     return { ...b, content }
   })
+
+  // Reasoning-length guidance — its own block so it survives user overrides of
+  // the base instructions and renders right after them.
+  prewriterBlocks = [
+    ...prewriterBlocks,
+    {
+      id: 'reasoning-length',
+      role: 'system' as const,
+      content: PREWRITER_REASONING_DIRECTIVES[reasoning],
+      order: 110,
+      source: 'builtin',
+    },
+  ]
 
   // When clarify is enabled, append guidance telling the prewriter it may ask
   // questions via the askQuestions tool. Kept as its own block so it survives

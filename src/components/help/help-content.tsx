@@ -244,6 +244,13 @@ export const HELP_SECTIONS: HelpSection[] = [
               which can improve structure when you want more guided output.
             </P>
             <P>
+              <strong className="text-foreground/75">Prewriter reasoning</strong> tunes how long that
+              planning pass takes. <em>Short</em> favors speed — a terse brief and fewer tool steps,
+              best when prewriting feels slow. <em>Normal</em> is balanced. <em>Extensive</em> favors
+              depth — a longer, more thorough brief with richer character work. Pick Short if the
+              planning pass is holding you up.
+            </P>
+            <P>
               With Prewriter on, you can also enable <strong className="text-foreground/75">Clarify
               before writing</strong>. When your direction is ambiguous, the prewriter pauses to ask
               you a few targeted questions — pick from the offered options or type your own — and
