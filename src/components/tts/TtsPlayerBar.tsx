@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react'
-import { Play, Pause, Square, Loader2, AlertCircle } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { Play, Pause, Square, Loader2, AlertCircle, Volume2, Volume1, VolumeX } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { useTtsState, togglePlayPause, stopTts } from '@/lib/tts'
+import { useTtsState, useTtsSettings, togglePlayPause, stopTts, setTtsVolume } from '@/lib/tts'
 
 /**
  * Persistent "now reading" bar pinned to the bottom of the viewport while a
@@ -10,7 +10,15 @@ import { useTtsState, togglePlayPause, stopTts } from '@/lib/tts'
  */
 export function TtsPlayerBar() {
   const { status, title, chunkIndex, chunkCount, engine, error } = useTtsState()
+  const [settings, updateSettings] = useTtsSettings()
   const visible = status !== 'idle' || !!error
+
+  const volume = settings.volume
+  const lastAudible = useRef(volume > 0 ? volume : 1)
+  useEffect(() => { if (volume > 0) lastAudible.current = volume }, [volume])
+  const setVolume = (v: number) => { updateSettings({ volume: v }); setTtsVolume(v) }
+  const toggleMute = () => setVolume(volume > 0 ? 0 : lastAudible.current || 1)
+  const VolumeIcon = volume === 0 ? VolumeX : volume < 0.5 ? Volume1 : Volume2
 
   // Mount-in transition (re-runs each time the bar appears for a new passage).
   const [shown, setShown] = useState(false)
@@ -102,6 +110,30 @@ export function TtsPlayerBar() {
             </div>
           )}
         </div>
+
+        {/* Volume */}
+        {!error && (
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={toggleMute}
+              aria-label={volume === 0 ? 'Unmute' : 'Mute'}
+              className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+            >
+              <VolumeIcon className="size-3.5" />
+            </button>
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.05}
+              value={volume}
+              onChange={(e) => setVolume(parseFloat(e.target.value))}
+              aria-label="Volume"
+              className="hidden h-1 w-16 cursor-pointer appearance-none rounded-full bg-border/60 accent-foreground sm:block"
+            />
+          </div>
+        )}
 
         {/* Engine hint + stop */}
         {engine && !error && (

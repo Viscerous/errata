@@ -336,6 +336,18 @@ export function togglePlayPause(): void {
   else if (state.status === 'paused') resumeTts()
 }
 
+/**
+ * Adjust playback volume live. Updates the playing audio immediately (Piper) and
+ * the active session so subsequent chunks use it too. Persisting the preference
+ * is the caller's job (via useTtsSettings).
+ */
+export function setTtsVolume(v: number): void {
+  const vol = Math.max(0, Math.min(1, v))
+  if (!session) return
+  session.settings = { ...session.settings, volume: vol }
+  if (session.audio) session.audio.volume = vol
+}
+
 /** Advance to chunk `i`, inserting the inter-sentence pause before it. */
 function scheduleAdvance(i: number, play: (i: number) => void) {
   const count = session?.chunks.length ?? 0
