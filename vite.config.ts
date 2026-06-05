@@ -18,6 +18,11 @@ const config = defineConfig({
       '@': fileURLToPath(new URL('./src', import.meta.url)),
     },
   },
+  // The Piper TTS worker dynamically imports onnxruntime-web, so it needs ES
+  // module output (the default 'iife' can't code-split).
+  worker: {
+    format: 'es',
+  },
   plugins: [
     devtools(),
     nitro({

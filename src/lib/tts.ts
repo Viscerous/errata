@@ -238,20 +238,8 @@ export function useIsReadingFragment(id: string): boolean {
   )
 }
 
-interface PiperWasmPaths { onnxWasm: string; piperData: string; piperWasm: string }
-interface PiperModule {
-  /** Base URL for the piper phonemizer wasm/data (e.g. '…/piper_phonemize'). */
-  WASM_BASE?: string
-  TtsSession: { create(opts: { voiceId: string; wasmPaths?: PiperWasmPaths }): Promise<{ predict(text: string): Promise<Blob> }> }
-}
-
-/**
- * ONNX Runtime Web assets, hotlinked from cdnjs. This version MUST match the
- * pinned `onnxruntime-web` in package.json — the bundled runtime and these
- * wasm files have to agree, or the loader fetches a module it can't use. Bump
- * both together.
- */
-const ONNX_WASM_BASE = 'https://cdnjs.cloudflare.com/ajax/libs/onnxruntime-web/1.18.0/'
+/** A natural breath inserted between chunks so sentences don't run together. */
+const INTER_CHUNK_PAUSE_MS = 280
 
 interface Session {
   id: string
@@ -259,13 +247,48 @@ interface Session {
   settings: TtsSettings
   token: number
   blobs: Map<number, Promise<Blob>>
-  piper?: { predict(text: string): Promise<Blob> }
   audio: HTMLAudioElement | null
 }
 
 let session: Session | null = null
 let token = 0
-let piperCache: { voiceId: string; session: { predict(text: string): Promise<Blob> } } | null = null
+
+// --- Piper worker: synthesis runs off the main thread so the UI never freezes,
+// and the model stays warm across chunks. ---
+
+let piperWorker: Worker | null = null
+let piperReqId = 0
+const piperPending = new Map<number, { resolve: (b: Blob) => void; reject: (e: Error) => void }>()
+
+function getPiperWorker(): Worker {
+  if (piperWorker) return piperWorker
+  const worker = new Worker(new URL('./piper.worker.ts', import.meta.url), { type: 'module' })
+  worker.onmessage = (e: MessageEvent) => {
+    const { id, ok, buf, mime, error } = e.data as { id: number; ok: boolean; buf?: ArrayBuffer; mime?: string; error?: string }
+    const pending = piperPending.get(id)
+    if (!pending) return
+    piperPending.delete(id)
+    if (ok && buf) pending.resolve(new Blob([buf], { type: mime || 'audio/x-wav' }))
+    else pending.reject(new Error(error || 'Speech synthesis failed'))
+  }
+  worker.onerror = () => {
+    for (const p of piperPending.values()) p.reject(new Error('The speech engine crashed.'))
+    piperPending.clear()
+    piperWorker?.terminate()
+    piperWorker = null
+  }
+  piperWorker = worker
+  return worker
+}
+
+function synthChunk(voiceId: string, text: string): Promise<Blob> {
+  const worker = getPiperWorker()
+  const id = ++piperReqId
+  return new Promise<Blob>((resolve, reject) => {
+    piperPending.set(id, { resolve, reject })
+    worker.postMessage({ id, type: 'synth', voiceId, text })
+  })
+}
 
 function alive(t: number): boolean {
   return session !== null && session.token === t && token === t
@@ -313,6 +336,17 @@ export function togglePlayPause(): void {
   else if (state.status === 'paused') resumeTts()
 }
 
+/** Advance to chunk `i`, inserting the inter-sentence pause before it. */
+function scheduleAdvance(i: number, play: (i: number) => void) {
+  const count = session?.chunks.length ?? 0
+  if (INTER_CHUNK_PAUSE_MS > 0 && i > 0 && i < count) {
+    const t = token
+    window.setTimeout(() => { if (alive(t)) play(i) }, INTER_CHUNK_PAUSE_MS)
+  } else {
+    play(i)
+  }
+}
+
 // --- Browser engine: one queued utterance per chunk ---
 
 function browserPlay(i: number) {
@@ -327,16 +361,28 @@ function browserPlay(i: number) {
   u.rate = session.settings.rate
   u.pitch = session.settings.pitch
   u.volume = session.settings.volume
-  u.onend = () => { if (alive(t)) browserPlay(i + 1) }
-  u.onerror = () => { if (alive(t)) browserPlay(i + 1) } // skip a failed chunk
+  u.onend = () => { if (alive(t)) scheduleAdvance(i + 1, browserPlay) }
+  u.onerror = () => { if (alive(t)) scheduleAdvance(i + 1, browserPlay) } // skip a failed chunk
   window.speechSynthesis.speak(u)
 }
 
-// --- Piper engine: synthesize chunk i, prefetch i+1, play, advance ---
+// --- Piper engine: a sequential producer synthesizes chunks ahead of playback
+// (one at a time, off the main thread), while playback consumes the buffer. ---
 
-function ensureBlob(i: number) {
-  if (!session || !session.piper || i < 0 || i >= session.chunks.length) return
-  if (!session.blobs.has(i)) session.blobs.set(i, session.piper.predict(session.chunks[i]))
+function ensureSynth(i: number) {
+  if (!session || i < 0 || i >= session.chunks.length) return
+  if (!session.blobs.has(i)) session.blobs.set(i, synthChunk(session.settings.piperVoiceId, session.chunks[i]))
+}
+
+/** Synthesize every chunk in order, racing ahead of playback to fill the buffer. */
+function startPiperProducer(s: Session) {
+  void (async () => {
+    for (let i = 0; i < s.chunks.length; i++) {
+      if (token !== s.token) return
+      ensureSynth(i)
+      try { await s.blobs.get(i) } catch { /* a failed chunk is skipped at play time */ }
+    }
+  })()
 }
 
 async function piperPlay(i: number) {
@@ -344,9 +390,9 @@ async function piperPlay(i: number) {
   if (!alive(t) || !session) return
   if (i >= session.chunks.length) { stopTts(); return }
 
-  emit({ chunkIndex: i, status: session.blobs.has(i) ? 'playing' : 'loading' })
-  ensureBlob(i)
-  ensureBlob(i + 1) // prefetch the next chunk while this one plays
+  ensureSynth(i)
+  // If the buffer hasn't caught up yet, reflect that as loading.
+  emit({ chunkIndex: i, status: 'loading' })
 
   let blob: Blob
   try {
@@ -357,16 +403,15 @@ async function piperPlay(i: number) {
     return
   }
   if (!alive(t) || !session) return
-  ensureBlob(i + 1)
 
   const audio = new Audio(URL.createObjectURL(blob))
   audio.volume = session.settings.volume
   audio.playbackRate = session.settings.rate
   audio.onended = () => {
     if (audio.src) URL.revokeObjectURL(audio.src)
-    if (alive(t)) piperPlay(i + 1)
+    if (alive(t)) scheduleAdvance(i + 1, (n) => { void piperPlay(n) })
   }
-  audio.onerror = () => { if (alive(t)) piperPlay(i + 1) }
+  audio.onerror = () => { if (alive(t)) scheduleAdvance(i + 1, (n) => { void piperPlay(n) }) }
   session.audio = audio
   emit({ chunkIndex: i, status: 'playing' })
   try { await audio.play() } catch { /* autoplay/interruption — state already set */ }
@@ -376,9 +421,12 @@ async function piperPlay(i: number) {
  * Read `rawText` aloud, attributing playback to `id` so the player can show
  * which passage is active. Replaces any current playback.
  */
-export async function playFragment(id: string, rawText: string, title: string, settings: TtsSettings): Promise<void> {
+export function playFragment(id: string, rawText: string, title: string, settings: TtsSettings): void {
   stopTts()
-  const chunks = chunkText(toPlainText(rawText))
+  // Piper pays a fixed cost per chunk, so use larger chunks for it (espeak still
+  // pauses at sentence punctuation within a chunk); the browser engine is cheap.
+  const max = settings.engine === 'piper' ? 360 : 240
+  const chunks = chunkText(toPlainText(rawText), { max })
   if (chunks.length === 0) return
 
   const t = ++token
@@ -403,25 +451,7 @@ export async function playFragment(id: string, rawText: string, title: string, s
     return
   }
 
-  // Piper — lazy-load the WASM/ONNX engine and reuse a warm session per voice.
-  try {
-    const piper = (await import('@mintplex-labs/piper-tts-web')) as unknown as PiperModule
-    if (!alive(t) || !session) return
-    if (!piperCache || piperCache.voiceId !== settings.piperVoiceId) {
-      // Explicitly hotlink the ONNX runtime so the path is pinned in our code
-      // rather than relying on the package's internal default. Keep the piper
-      // phonemizer on its own default CDN base.
-      const wasmPaths: PiperWasmPaths | undefined = piper.WASM_BASE
-        ? { onnxWasm: ONNX_WASM_BASE, piperWasm: `${piper.WASM_BASE}.wasm`, piperData: `${piper.WASM_BASE}.data` }
-        : undefined
-      const created = await piper.TtsSession.create({ voiceId: settings.piperVoiceId, ...(wasmPaths ? { wasmPaths } : {}) })
-      if (!alive(t) || !session) return
-      piperCache = { voiceId: settings.piperVoiceId, session: created }
-    }
-    session.piper = piperCache.session
-    piperPlay(0)
-  } catch (err) {
-    if (alive(t)) emit({ status: 'idle', activeId: null, error: err instanceof Error ? err.message : 'Could not load the neural voice.' })
-    reset()
-  }
+  // Piper: kick off the producer (synthesizes in the worker) and start playback.
+  startPiperProducer(session)
+  void piperPlay(0)
 }
