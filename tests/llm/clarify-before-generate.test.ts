@@ -25,6 +25,9 @@ vi.mock('ai', async () => {
 })
 
 import { createApp } from '@/server/api'
+import { createFragment } from '@/server/fragments/storage'
+import { ClarifyQuestionsInputSchema, MAX_CLARIFY_ROUNDS } from '@/server/llm/prewriter'
+import type { Fragment } from '@/server/fragments/schema'
 
 function makeStory(overrides?: Partial<StoryMeta['settings']>): StoryMeta {
   const now = new Date().toISOString()
@@ -90,6 +93,45 @@ const SAMPLE_QUESTION = {
   multiSelect: false,
   options: [{ label: 'Alice' }, { label: 'Bob' }],
 }
+
+function makeProseFragment(id: string): Fragment {
+  const now = new Date().toISOString()
+  return { id, type: 'prose', name: id, description: '', content: 'Prior prose.', tags: [], refs: [], sticky: false, placement: 'user', createdAt: now, updatedAt: now, order: 0, meta: {}, archived: false }
+}
+
+describe('askQuestions input schema', () => {
+  const one = (q: unknown) => ClarifyQuestionsInputSchema.safeParse({ questions: [q] })
+
+  it('accepts a question with 2-4 options', () => {
+    expect(one({ question: 'Whose POV?', header: 'POV', options: [{ label: 'Alice' }, { label: 'Bob' }] }).success).toBe(true)
+  })
+  it('accepts a free-text question (no options)', () => {
+    expect(one({ question: 'What is the mood?', header: 'Mood' }).success).toBe(true)
+  })
+  it('accepts an option description and multiSelect', () => {
+    expect(one({ question: 'q', header: 'h', multiSelect: true, options: [{ label: 'a', description: 'desc' }, { label: 'b' }] }).success).toBe(true)
+  })
+  it('defaults multiSelect to false when omitted', () => {
+    const parsed = ClarifyQuestionsInputSchema.parse({ questions: [{ question: 'q', header: 'h', options: [{ label: 'a' }, { label: 'b' }] }] })
+    expect(parsed.questions[0].multiSelect).toBe(false)
+  })
+  it('rejects an empty questions array', () => {
+    expect(ClarifyQuestionsInputSchema.safeParse({ questions: [] }).success).toBe(false)
+  })
+  it('rejects more than 4 questions', () => {
+    const q = { question: 'q', header: 'h' }
+    expect(ClarifyQuestionsInputSchema.safeParse({ questions: [q, q, q, q, q] }).success).toBe(false)
+  })
+  it('rejects a header longer than 12 chars', () => {
+    expect(one({ question: 'q', header: 'ThisHeaderIsTooLong' }).success).toBe(false)
+  })
+  it('rejects fewer than 2 options', () => {
+    expect(one({ question: 'q', header: 'h', options: [{ label: 'only-one' }] }).success).toBe(false)
+  })
+  it('rejects more than 4 options', () => {
+    expect(one({ question: 'q', header: 'h', options: [1, 2, 3, 4, 5].map((n) => ({ label: `o${n}` })) }).success).toBe(false)
+  })
+})
 
 describe('clarify-before-generate', () => {
   beforeAll(() => {
@@ -273,6 +315,92 @@ describe('clarify-before-generate', () => {
       expect(events.some((e) => e.type === 'clarify-questions')).toBe(false)
       expect(mockAgentCtor).toHaveBeenCalledTimes(1)
       expect('askQuestions' in lastAgentTools()).toBe(false)
+    })
+
+    it('still offers the ask tool at the last allowed round (MAX-1)', async () => {
+      await createStory(dataDir, makeStory({ generationMode: 'prewriter', clarifyBeforeGenerate: true }))
+      let n = 0
+      mockAgentStream.mockImplementation(() => { n++; return createMockStreamResult(n === 1 ? 'A brief.' : 'Prose.') as never })
+
+      const res = await generate({
+        input: 'Continue',
+        saveResult: false,
+        clarifyRound: MAX_CLARIFY_ROUNDS - 1,
+        clarifications: [{ question: 'q', answer: 'a' }],
+      })
+      expect(res.status).toBe(200)
+      await res.text()
+
+      expect('askQuestions' in prewriterTools()).toBe(true)
+    })
+
+    it('lets the prewriter ask again on a later round (multi-round loop)', async () => {
+      await createStory(dataDir, makeStory({ generationMode: 'prewriter', clarifyBeforeGenerate: true }))
+      // Round 1: the prewriter asks a second time after the first answer.
+      mockAgentStream.mockImplementation(async () => {
+        const tools = lastAgentTools() as { askQuestions?: { execute: (a: unknown) => Promise<unknown> } }
+        if (tools.askQuestions) {
+          await tools.askQuestions.execute({ questions: [{ ...SAMPLE_QUESTION, question: 'And the tone?', header: 'Tone' }] })
+        }
+        return createMockStreamResult('') as never
+      })
+
+      const res = await generate({
+        input: 'Continue',
+        saveResult: true,
+        clarifyRound: 1,
+        clarifications: [{ question: 'Whose POV?', answer: 'Alice' }],
+      })
+      const events = await parseNDJSON(res)
+
+      const clarify = events.find((e) => e.type === 'clarify-questions') as { questions: Array<{ question: string }>; round: number } | undefined
+      expect(clarify).toBeDefined()
+      expect(clarify!.round).toBe(1)
+      expect(clarify!.questions[0].question).toContain('tone')
+      // Still no prose written, no second agent constructed.
+      expect(events.some((e) => e.type === 'text')).toBe(false)
+      expect(mockAgentCtor).toHaveBeenCalledTimes(1)
+    })
+
+    it('renders every prior clarification into the prewriter prompt', async () => {
+      await createStory(dataDir, makeStory({ generationMode: 'prewriter', clarifyBeforeGenerate: true }))
+      let n = 0
+      mockAgentStream.mockImplementation(() => { n++; return createMockStreamResult(n === 1 ? 'Brief.' : 'Prose.') as never })
+
+      await generate({
+        input: 'Continue',
+        saveResult: false,
+        clarifyRound: 1,
+        clarifications: [
+          { question: 'Whose POV?', answer: 'Alice' },
+          { question: 'What tone?', answer: 'Somber' },
+        ],
+      }).then((r) => r.text())
+
+      const prewriterArgs = mockAgentStream.mock.calls[0][0] as { messages: Array<{ role: string; content: unknown }> }
+      const text = prewriterArgs.messages.map((m) => typeof m.content === 'string' ? m.content : JSON.stringify(m.content)).join('\n')
+      expect(text).toContain('Alice')
+      expect(text).toContain('Somber')
+      expect(text).toContain('Whose POV?')
+      expect(text).toContain('What tone?')
+    })
+
+    it('supports the ask tool in regenerate mode', async () => {
+      await createStory(dataDir, makeStory({ generationMode: 'prewriter', clarifyBeforeGenerate: true }))
+      await createFragment(dataDir, storyId, makeProseFragment('pr-existing'))
+
+      mockAgentStream.mockImplementation(async () => {
+        const tools = lastAgentTools() as { askQuestions?: { execute: (a: unknown) => Promise<unknown> } }
+        if (tools.askQuestions) await tools.askQuestions.execute({ questions: [SAMPLE_QUESTION] })
+        return createMockStreamResult('') as never
+      })
+
+      const res = await generate({ input: 'Try again', mode: 'regenerate', fragmentId: 'pr-existing', saveResult: true })
+      expect(res.status).toBe(200)
+      const events = await parseNDJSON(res)
+
+      expect('askQuestions' in prewriterTools()).toBe(true)
+      expect(events.some((e) => e.type === 'clarify-questions')).toBe(true)
     })
   })
 })

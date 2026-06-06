@@ -125,6 +125,24 @@ export interface ClarifyQuestion {
   options?: ClarifyQuestionOption[]
 }
 
+/** Schema for a single clarifying question the prewriter may ask the author. */
+export const ClarifyQuestionSchema = z.object({
+  question: z.string().describe('The question to ask the author'),
+  header: z.string().max(12).describe('Short chip label, <= 12 chars'),
+  multiSelect: z.boolean().default(false).describe('Allow selecting multiple options'),
+  options: z
+    .array(z.object({ label: z.string(), description: z.string().optional() }))
+    .min(2)
+    .max(4)
+    .optional()
+    .describe('2-4 suggested options, or omit for a free-text answer'),
+})
+
+/** Input schema for the askQuestions tool: 1–4 clarifying questions. */
+export const ClarifyQuestionsInputSchema = z.object({
+  questions: z.array(ClarifyQuestionSchema).min(1).max(4),
+})
+
 export interface Clarification {
   question: string
   answer: string
@@ -297,17 +315,7 @@ export async function runPrewriter(args: RunPrewriterArgs): Promise<PrewriterRes
   let capturedQuestions: ClarifyQuestion[] | null = null
   const askQuestionsTool = tool({
     description: 'Ask the author up to 4 clarifying questions before writing. Use ONLY when the direction is genuinely ambiguous. Calling this ends your turn — do not also write a brief or suggest directions.',
-    inputSchema: z.object({
-      questions: z.array(z.object({
-        question: z.string().describe('The question to ask the author'),
-        header: z.string().max(12).describe('Short chip label, <= 12 chars'),
-        multiSelect: z.boolean().default(false).describe('Allow selecting multiple options'),
-        options: z.array(z.object({
-          label: z.string(),
-          description: z.string().optional(),
-        })).min(2).max(4).optional().describe('2-4 suggested options, or omit for a free-text answer'),
-      })).min(1).max(4),
-    }),
+    inputSchema: ClarifyQuestionsInputSchema,
     execute: async ({ questions }) => {
       capturedQuestions = questions as ClarifyQuestion[]
       onEvent?.({ type: 'questions', questions: capturedQuestions })
