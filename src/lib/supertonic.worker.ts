@@ -9,6 +9,25 @@
  */
 import { pipeline, env, type TextToAudioPipeline } from '@huggingface/transformers'
 
+// Vite's dev HMR client is injected into worker modules and touches `document`,
+// which doesn't exist in a worker — so HMR updates throw "document is not
+// defined". Stub the handful of members it uses. No effect in production builds
+// (no HMR client is injected there).
+const g = globalThis as unknown as Record<string, unknown>
+if (typeof g.document === 'undefined') {
+  const noop = () => {}
+  g.document = {
+    querySelectorAll: () => [] as unknown[],
+    querySelector: () => null,
+    getElementById: () => null,
+    createElement: () => ({ setAttribute: noop, appendChild: noop, remove: noop, style: {} }),
+    head: { appendChild: noop, removeChild: noop, insertBefore: noop },
+    body: { appendChild: noop, removeChild: noop },
+    addEventListener: noop,
+    removeEventListener: noop,
+  }
+}
+
 // Models are fetched from the Hugging Face Hub and cached by the browser.
 env.allowLocalModels = false
 
