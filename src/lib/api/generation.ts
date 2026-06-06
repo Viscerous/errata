@@ -7,9 +7,14 @@ export interface ClarifyOpts {
   clarifyRound?: number
 }
 
-function clarifyBody(opts?: ClarifyOpts): Record<string, unknown> {
-  if (!opts?.clarifications?.length) return {}
-  return { clarifications: opts.clarifications, clarifyRound: opts.clarifyRound ?? 0 }
+export function clarifyBody(opts?: ClarifyOpts): Record<string, unknown> {
+  const clarifications = opts?.clarifications ?? []
+  const round = opts?.clarifyRound ?? 0
+  // Send the round even with no clarifications so "write anyway" (a high
+  // force-proceed round) actually withholds the ask tool server-side. Without
+  // this, skipping on the first round would just re-ask.
+  if (!clarifications.length && round <= 0) return {}
+  return { clarifications, clarifyRound: round }
 }
 
 export const generation = {
