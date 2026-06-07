@@ -10,6 +10,7 @@ import { ThemeProvider } from '@/lib/theme'
 import { HelpProvider } from '@/hooks/use-help'
 import { HelpPanel } from '@/components/help/HelpPanel'
 import { TtsPlayerBar } from '@/components/tts/TtsPlayerBar'
+import { DesktopUpdateBanner } from '@/components/desktop/DesktopUpdateBanner'
 import { CustomCssStyles } from '@/components/settings/CustomCssPanel'
 import { useCustomCss } from '@/lib/theme'
 import appCss from '../styles.css?url'
@@ -114,6 +115,7 @@ function RootComponent() {
             <Outlet />
             <HelpPanel />
             <TtsPlayerBar />
+            <DesktopUpdateBanner />
           </HelpProvider>
         </TooltipProvider>
       </QueryClientProvider>

@@ -8,9 +8,10 @@ export type DesktopUpdateStatus =
   | 'idle'
   | 'checking'
   | 'available'
-  | 'not-available'
   | 'downloading'
   | 'downloaded'
+  | 'skipped'
+  | 'not-available'
   | 'error'
 
 export interface DesktopUpdateState {
@@ -20,11 +21,26 @@ export interface DesktopUpdateState {
   error?: string
 }
 
+export interface DesktopUpdatePrefs {
+  /** When true, updates download + install automatically without a prompt. */
+  autoInstall: boolean
+  /** The version the user chose to skip, if any. */
+  skippedVersion: string | null
+}
+
 export interface ErrataDesktop {
   isDesktop: true
   getVersion(): Promise<string>
   getUpdateState(): Promise<DesktopUpdateState>
+  getUpdatePrefs(): Promise<DesktopUpdatePrefs>
+  /** Toggle silent auto-update. Returns the updated prefs. */
+  setAutoInstall(enabled: boolean): Promise<DesktopUpdatePrefs>
   checkForUpdates(): Promise<DesktopUpdateState>
+  /** Start downloading the available update (also used to download a skipped version). */
+  downloadUpdate(): Promise<void>
+  /** Skip a specific version; it can still be downloaded later. Returns updated prefs. */
+  skipUpdate(version: string): Promise<DesktopUpdatePrefs>
+  /** Back up stories, then quit and install the downloaded update. */
   installUpdate(): Promise<void>
   /** Subscribe to update-state pushes. Returns an unsubscribe function. */
   onUpdateState(cb: (state: DesktopUpdateState) => void): () => void

@@ -19,6 +19,11 @@ export interface SidecarHandle {
 
 const PREFERRED_DESKTOP_PORT = 3000
 
+/** The story/data directory the server runs against. Shared with the updater's backup. */
+export function errataDataDir(): string {
+  return join(app.getPath('userData'), 'data')
+}
+
 /** Ask the OS for a TCP port on loopback, then release it before spawning the sidecar. */
 function reservePort(port: number): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -132,7 +137,7 @@ export async function startSidecar(options: StartSidecarOptions = {}): Promise<S
   }
 
   const port = await findSidecarPort()
-  const dataDir = join(app.getPath('userData'), 'data')
+  const dataDir = errataDataDir()
 
   const child = spawn(binaryPath, [], {
     cwd: dirname(binaryPath),
