@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, type StoryMeta, type GlobalConfigSafe } from '@/lib/api'
-import { useTheme, useQuickSwitch, useCharacterMentions, useTimelineBar, useProseWidth, useUiFontSize, UI_FONT_SIZE_LABELS, useProseFontSize, PROSE_FONT_SIZE_LABELS, useFontPreferences, getActiveFont, FONT_CATALOGUE, loadFullFontCatalogue, useCustomCss, useWritingTransforms, type FontRole, type ProseWidth, type UiFontSize, type ProseFontSize } from '@/lib/theme'
+import { useTheme, useQuickSwitch, useCharacterMentions, useTimelineBar, useProseWidth, useUiFontSize, UI_FONT_SIZE_LABELS, useProseFontSize, PROSE_FONT_SIZE_LABELS, useFontPreferences, getActiveFont, FONT_CATALOGUE, loadFullFontCatalogue, useCustomCss, useWritingTransforms, useTransformContext, TRANSFORM_CONTEXT_LABELS, type TransformContext, type FontRole, type ProseWidth, type UiFontSize, type ProseFontSize } from '@/lib/theme'
 import { Settings2, ChevronRight, ExternalLink, Eye, EyeOff, Puzzle, RotateCcw, CircleHelp, Code } from 'lucide-react'
 import { useHelp } from '@/hooks/use-help'
 import { CustomCssPanel } from '@/components/settings/CustomCssPanel'
@@ -322,6 +322,7 @@ export function SettingsPanel({
   const [customCssPanelOpen, setCustomCssPanelOpen] = useState(false)
   const [writingTransforms] = useWritingTransforms()
   const enabledTransformCount = writingTransforms.filter(t => t.enabled).length
+  const [transformContext, setTransformContext] = useTransformContext()
   const { openHelp } = useHelp()
   const { theme, setTheme } = useTheme()
   const [quickSwitch, setQuickSwitch] = useQuickSwitch()
@@ -723,6 +724,15 @@ export function SettingsPanel({
                 Quick rewrites in the floating toolbar when you select text. Drag to reorder, toggle to show or hide.
               </p>
             </div>
+            <SettingsCard>
+              <SettingRow label="Surrounding context" description="How much of the passage around your selection a transform can read.">
+                <SegmentedControl
+                  value={transformContext}
+                  options={(['tight', 'wide', 'passage'] as TransformContext[]).map((v) => ({ value: v, label: TRANSFORM_CONTEXT_LABELS[v] }))}
+                  onChange={setTransformContext}
+                />
+              </SettingRow>
+            </SettingsCard>
             <CustomTransformsControls />
           </div>
 
