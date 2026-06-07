@@ -30,13 +30,11 @@ function statusText(state: DesktopUpdateState): string {
 }
 
 export function DesktopUpdatesControls() {
-  const [version, setVersion] = useState<string | null>(null)
   const [state, setState] = useState<DesktopUpdateState>({ status: 'idle' })
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
     if (!desktop) return
-    desktop.getVersion().then(setVersion).catch(() => {})
     desktop.getUpdateState().then(setState).catch(() => {})
     return desktop.onUpdateState(setState)
   }, [])
@@ -58,14 +56,9 @@ export function DesktopUpdatesControls() {
 
   return (
     <div>
-      <SectionHeading label="Desktop app" />
+      <SectionHeading label="Updates" />
       <SettingsCard>
-        <SettingRow label="Version">
-          <span className="font-mono text-[0.6875rem] tabular-nums text-muted-foreground">
-            v{version ?? __BUILD_VERSION__}
-          </span>
-        </SettingRow>
-        <SettingRow label="Updates" description={statusText(state)}>
+        <SettingRow label="Automatic updates" description={statusText(state)}>
           {ready ? (
             <button
               type="button"

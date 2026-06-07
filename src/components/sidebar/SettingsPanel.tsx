@@ -10,6 +10,7 @@ import { SharingPanel } from '@/components/settings/SharingPanel'
 import { ProseColorsControls } from '@/components/settings/ProseColorsPanel'
 import { CustomTransformsControls } from '@/components/settings/CustomTransformsPanel'
 import { DesktopUpdatesControls } from '@/components/settings/DesktopUpdatesPanel'
+import { AboutSection } from '@/components/settings/AboutPanel'
 import { ModelSelect } from '@/components/settings/ModelSelect'
 import { ProviderSelect } from '@/components/settings/ProviderSelect'
 import { resolveProvider, getInheritLabel } from '@/lib/model-role-helpers'
@@ -829,25 +830,13 @@ export function SettingsPanel({
         )}
       </SettingsSection>
 
-      {/* Desktop app + updates (Electron only; renders nothing in the browser) */}
-      <DesktopUpdatesControls />
-
-      {/* Attribution */}
+      {/* About: version, links (docs, Discord, GitHub, releases), attribution */}
       <div className="pt-4 mt-2 border-t border-border/20">
-        <p className="text-[0.625rem] text-muted-foreground text-center leading-relaxed">
-          Errata v{__BUILD_VERSION__}
-          <br />
-          Built by{' '}
-          <a
-            href="https://github.com/tealios"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="underline hover:text-muted-foreground transition-colors"
-          >
-            Tealios
-          </a>
-        </p>
+        <AboutSection />
       </div>
+
+      {/* Desktop app updates (Electron only; renders nothing in the browser) */}
+      <DesktopUpdatesControls />
     </div>
   )
 }
