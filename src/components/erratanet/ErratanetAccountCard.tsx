@@ -37,6 +37,9 @@ export function ErratanetAccountCard({ storyId }: { storyId?: string }) {
 
   const [hubUrl, setHubUrl] = useState('')
   const [token, setToken] = useState('')
+  const [identifier, setIdentifier] = useState('')
+  const [password, setPassword] = useState('')
+  const [mode, setMode] = useState<'password' | 'token'>('password')
   const [error, setError] = useState<string | null>(null)
 
   // The hub URL field is seeded from config but stays editable.
@@ -59,6 +62,18 @@ export function ErratanetAccountCard({ storyId }: { storyId?: string }) {
     onError,
   })
 
+  const loginMut = useMutation({
+    mutationFn: (data: { hubUrl: string; identifier: string; password: string }) =>
+      api.erratanet.login(data),
+    onSuccess: (acct: ErratanetAccount) => {
+      qc.invalidateQueries({ queryKey: ['erratanet-config'] })
+      qc.setQueryData(['erratanet-account'], acct)
+      setPassword('')
+      setError(acct.connected ? null : acct.error ?? 'Could not log in.')
+    },
+    onError,
+  })
+
   const disconnectMut = useMutation({
     mutationFn: () => api.erratanet.setConfig({ token: '' }),
     onSuccess: (cfg: ErratanetConfigResponse) => {
@@ -70,7 +85,7 @@ export function ErratanetAccountCard({ storyId }: { storyId?: string }) {
     onError,
   })
 
-  const busy = connectMut.isPending || disconnectMut.isPending
+  const busy = connectMut.isPending || disconnectMut.isPending || loginMut.isPending
 
   return (
     <>
@@ -126,38 +141,99 @@ export function ErratanetAccountCard({ storyId }: { storyId?: string }) {
               className={inputClass}
               value={hubUrlValue}
               onChange={(e) => setHubUrl(e.target.value)}
-              placeholder="Hub URL (https://hub.example.com)"
+              placeholder="Hub URL (https://errata.tealios.com)"
               autoComplete="off"
               spellCheck={false}
             />
-            <input
-              className={inputClass}
-              type="password"
-              value={token}
-              onChange={(e) => setToken(e.target.value)}
-              placeholder="Access token"
-              autoComplete="new-password"
-            />
-            <button
-              onClick={() => {
-                const url = hubUrlValue.trim()
-                if (!url) {
-                  setError('Enter a hub URL.')
-                  return
-                }
-                if (!token.trim()) {
-                  setError('Enter an access token.')
-                  return
-                }
-                setError(null)
-                connectMut.mutate({ hubUrl: url, token: token.trim() })
-              }}
-              disabled={busy || !hubUrlValue.trim() || !token.trim()}
-              className="inline-flex items-center gap-1.5 rounded-md bg-foreground px-2.5 py-1 text-[0.6875rem] font-medium text-background transition-opacity hover:opacity-90 disabled:opacity-40"
-            >
-              {connectMut.isPending ? <Loader2 className="size-3 animate-spin" /> : <Plug className="size-3" />}
-              Connect
-            </button>
+
+            {mode === 'password' ? (
+              <>
+                <input
+                  className={inputClass}
+                  value={identifier}
+                  onChange={(e) => setIdentifier(e.target.value)}
+                  placeholder="Username or email"
+                  autoComplete="username"
+                  autoCapitalize="none"
+                  spellCheck={false}
+                />
+                <input
+                  className={inputClass}
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Password"
+                  autoComplete="current-password"
+                  onKeyDown={(e) => {
+                    if (e.key !== 'Enter') return
+                    const url = hubUrlValue.trim()
+                    if (!url || !identifier.trim() || !password) return
+                    setError(null)
+                    loginMut.mutate({ hubUrl: url, identifier: identifier.trim(), password })
+                  }}
+                />
+                <button
+                  onClick={() => {
+                    const url = hubUrlValue.trim()
+                    if (!url) { setError('Enter a hub URL.'); return }
+                    if (!identifier.trim()) { setError('Enter your username or email.'); return }
+                    if (!password) { setError('Enter your password.'); return }
+                    setError(null)
+                    loginMut.mutate({ hubUrl: url, identifier: identifier.trim(), password })
+                  }}
+                  disabled={busy || !hubUrlValue.trim() || !identifier.trim() || !password}
+                  className="inline-flex items-center gap-1.5 rounded-md bg-foreground px-2.5 py-1 text-[0.6875rem] font-medium text-background transition-opacity hover:opacity-90 disabled:opacity-40"
+                >
+                  {loginMut.isPending ? <Loader2 className="size-3 animate-spin" /> : <Plug className="size-3" />}
+                  Log in
+                </button>
+                <p className="text-[0.625rem] leading-snug text-muted-foreground">
+                  No account?{' '}
+                  <a
+                    href={`${hubUrlValue.trim().replace(/\/+$/, '')}/register`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="underline hover:text-foreground"
+                  >
+                    Create one
+                  </a>
+                  {'  ·  '}
+                  <button onClick={() => { setMode('token'); setError(null) }} className="underline hover:text-foreground">
+                    Use a token
+                  </button>
+                </p>
+              </>
+            ) : (
+              <>
+                <input
+                  className={inputClass}
+                  type="password"
+                  value={token}
+                  onChange={(e) => setToken(e.target.value)}
+                  placeholder="Access token (ern_…)"
+                  autoComplete="new-password"
+                />
+                <button
+                  onClick={() => {
+                    const url = hubUrlValue.trim()
+                    if (!url) { setError('Enter a hub URL.'); return }
+                    if (!token.trim()) { setError('Enter an access token.'); return }
+                    setError(null)
+                    connectMut.mutate({ hubUrl: url, token: token.trim() })
+                  }}
+                  disabled={busy || !hubUrlValue.trim() || !token.trim()}
+                  className="inline-flex items-center gap-1.5 rounded-md bg-foreground px-2.5 py-1 text-[0.6875rem] font-medium text-background transition-opacity hover:opacity-90 disabled:opacity-40"
+                >
+                  {connectMut.isPending ? <Loader2 className="size-3 animate-spin" /> : <Plug className="size-3" />}
+                  Connect
+                </button>
+                <p className="text-[0.625rem] text-muted-foreground">
+                  <button onClick={() => { setMode('password'); setError(null) }} className="underline hover:text-foreground">
+                    Log in with a password instead
+                  </button>
+                </p>
+              </>
+            )}
           </div>
         )}
 

@@ -64,7 +64,7 @@ export function FragmentExportPanel({ storyId, storyName, onClose }: FragmentExp
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [copied, setCopied] = useState(false)
   const [includeConfigs, setIncludeConfigs] = useState(false)
-  const [publishOpen, setPublishOpen] = useState(false)
+  const [publishMode, setPublishMode] = useState<null | 'fragments' | 'story'>(null)
 
   const { data: allFragments } = useQuery({
     queryKey: ['fragments', storyId],
@@ -389,10 +389,19 @@ export function FragmentExportPanel({ storyId, storyName, onClose }: FragmentExp
           variant="outline"
           className="gap-1.5"
           disabled={selected.size === 0}
-          onClick={() => setPublishOpen(true)}
+          onClick={() => setPublishMode('fragments')}
         >
           <UploadCloud className="size-3.5" />
-          Publish to erratanet
+          Publish pack
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          className="gap-1.5"
+          onClick={() => setPublishMode('story')}
+        >
+          <UploadCloud className="size-3.5" />
+          Publish story
         </Button>
         <Button size="sm" variant="ghost" className="ml-auto" onClick={onClose}>
           Cancel
@@ -400,8 +409,10 @@ export function FragmentExportPanel({ storyId, storyName, onClose }: FragmentExp
       </PanelFooter>
 
       <PublishPackDialog
-        open={publishOpen}
-        onOpenChange={setPublishOpen}
+        open={publishMode !== null}
+        onOpenChange={(o) => { if (!o) setPublishMode(null) }}
+        mode={publishMode ?? 'fragments'}
+        storyId={storyId}
         selectedFragments={selectedFragments}
         mediaById={mediaById}
         storyName={storyName}

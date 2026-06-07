@@ -12,6 +12,7 @@ const hubMocks = vi.hoisted(() => ({
   getPack: vi.fn(),
   downloadPack: vi.fn(),
   publishVersion: vi.fn(),
+  login: vi.fn(),
 }))
 
 vi.mock('@/server/erratanet/hub-client', () => ({
@@ -20,6 +21,7 @@ vi.mock('@/server/erratanet/hub-client', () => ({
   getPack: hubMocks.getPack,
   downloadPack: hubMocks.downloadPack,
   publishVersion: hubMocks.publishVersion,
+  login: hubMocks.login,
 }))
 
 import { createTempDir, makeTestSettings } from '../setup'
@@ -89,6 +91,7 @@ describe('erratanet routes', () => {
     hubMocks.getPack.mockReset()
     hubMocks.downloadPack.mockReset()
     hubMocks.publishVersion.mockReset()
+    hubMocks.login.mockReset()
 
     await createStory(dataDir, {
       id: storyId,
@@ -187,6 +190,44 @@ describe('erratanet routes', () => {
     expect(body.error).toBe('boom')
   })
 
+  // --- login ---
+
+  it('POST /erratanet/login exchanges credentials for a token and stores it', async () => {
+    hubMocks.login.mockResolvedValueOnce({ token: 'ern_minted', handle: 'alice', displayName: 'Alice' })
+
+    const res = await post('/erratanet/login', {
+      hubUrl: 'https://hub.example.com',
+      identifier: 'alice',
+      password: 'secret',
+    })
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.connected).toBe(true)
+    expect(body.handle).toBe('alice')
+    expect(hubMocks.login).toHaveBeenCalledWith('https://hub.example.com', 'alice', 'secret')
+
+    // The minted token + handle are stored; the response never exposes the raw token.
+    const stored = await getErratanetConfig(dataDir)
+    expect(stored.token).toBe('ern_minted')
+    expect(stored.handle).toBe('alice')
+    expect(JSON.stringify(body)).not.toContain('ern_minted')
+  })
+
+  it('POST /erratanet/login 401s on bad credentials and stores nothing', async () => {
+    hubMocks.login.mockRejectedValueOnce(new Error('Wrong username/email or password.'))
+    const res = await post('/erratanet/login', {
+      hubUrl: 'https://hub.example.com',
+      identifier: 'alice',
+      password: 'wrong',
+    })
+    expect(res.status).toBe(401)
+    const body = await res.json()
+    expect(body.connected).toBe(false)
+    expect(body.error).toContain('Wrong')
+    const stored = await getErratanetConfig(dataDir)
+    expect(stored.token).toBe('')
+  })
+
   // --- publish ---
 
   it('POST /erratanet/publish builds a pack and calls hub publishVersion', async () => {
@@ -215,6 +256,26 @@ describe('erratanet routes', () => {
     // Trust model: MVP packs declare no capabilities.
     expect(builtManifest.capabilities).toEqual([])
     // The zip is real bytes.
+    expect(callArgs[3]).toBeInstanceOf(Uint8Array)
+    expect(callArgs[3].byteLength).toBeGreaterThan(0)
+  })
+
+  it('POST /erratanet/publish with a storyId builds a story pack', async () => {
+    await post('/erratanet/config', { hubUrl: 'https://hub.example.com', token: 'tok' })
+    hubMocks.publishVersion.mockResolvedValueOnce({ id: '@me/my-story', version: '1.0.0' })
+
+    const res = await post('/erratanet/publish', {
+      storyId,
+      manifest: { ...manifest, id: '@me/my-story' },
+    })
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.id).toBe('@me/my-story')
+
+    expect(hubMocks.publishVersion).toHaveBeenCalledTimes(1)
+    const callArgs = hubMocks.publishVersion.mock.calls[0]
+    expect(callArgs[1]).toBe('@me/my-story')
+    expect(callArgs[2].contentKind).toBe('story')
     expect(callArgs[3]).toBeInstanceOf(Uint8Array)
     expect(callArgs[3].byteLength).toBeGreaterThan(0)
   })

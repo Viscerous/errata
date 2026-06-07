@@ -6,6 +6,7 @@ import {
   getPack as hubGetPack,
   downloadPack as hubDownloadPack,
   publishVersion as hubPublishVersion,
+  login as hubLogin,
 } from '../erratanet/hub-client'
 import { buildFragmentPack, buildStoryPack, type PackManifestInput } from '../erratanet/pack-build'
 import { unwrapPack, installFragmentBundle, installStoryPack } from '../erratanet/pack-install'
@@ -72,6 +73,40 @@ export function erratanetRoutes(dataDir: string) {
       body: t.Object({
         hubUrl: t.Optional(t.String()),
         token: t.Optional(t.String()),
+      }),
+    })
+
+    // Log in with username/email + password. Exchanges the credentials for a
+    // fresh API token via the hub, stores the hub URL + token + handle, and
+    // returns the connected account. The password never touches local storage.
+    .post('/erratanet/login', async ({ body, set }) => {
+      const hubUrl = body.hubUrl.trim()
+      if (!hubUrl) {
+        set.status = 422
+        return { connected: false, error: 'Enter a hub URL.' }
+      }
+      if (!body.identifier.trim() || !body.password) {
+        set.status = 422
+        return { connected: false, error: 'Enter your username and password.', hubUrl }
+      }
+      try {
+        const result = await hubLogin(hubUrl, body.identifier.trim(), body.password)
+        await updateErratanetConfig(dataDir, {
+          hubUrl,
+          token: result.token,
+          handle: result.handle,
+        })
+        return { connected: true, handle: result.handle, displayName: result.displayName, hubUrl }
+      } catch (e) {
+        set.status = 401
+        return { connected: false, error: errorMessage(e), hubUrl }
+      }
+    }, {
+      detail: { summary: 'Log in with credentials and store a hub token' },
+      body: t.Object({
+        hubUrl: t.String(),
+        identifier: t.String(),
+        password: t.String(),
       }),
     })
 

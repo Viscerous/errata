@@ -31,6 +31,10 @@ import {
 interface PublishPackDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+  /** 'fragments' publishes the selection; 'story' publishes the whole story. */
+  mode?: 'fragments' | 'story'
+  /** Required for story mode: the story to publish whole. */
+  storyId?: string
   /** The guideline / character / knowledge fragments to publish. */
   selectedFragments: Fragment[]
   /** Image + icon fragments by id, for resolving attachments and thumbnails. */
@@ -83,10 +87,13 @@ async function sha256Hex(text: string): Promise<string> {
 export function PublishPackDialog({
   open,
   onOpenChange,
+  mode = 'fragments',
+  storyId,
   selectedFragments,
   mediaById,
   storyName,
 }: PublishPackDialogProps) {
+  const isStory = mode === 'story'
   const [slug, setSlug] = useState('')
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
@@ -177,36 +184,51 @@ export function PublishPackDialog({
       }
       if (!title.trim()) throw new Error('Enter a title.')
       if (description.length > 250) throw new Error('Description must be 250 characters or fewer.')
-      if (selectedFragments.length === 0) throw new Error('Select at least one fragment to publish.')
 
-      // Bundle the fragments client-side. MVP packs carry fragments + assets
-      // only, so no blockConfig / agentBlockConfigs are attached.
-      const bundleJson = serializeBundle(selectedFragments, mediaById, storyName)
-
-      const fragmentTypes = Array.from(new Set(selectedFragments.map((f) => f.type)))
       const thumbnailFragment = thumbnailId ? mediaById.get(thumbnailId) : undefined
 
-      const manifest: ErratapackManifest = {
-        errataPack: 1,
+      // Fields shared by both content kinds. The server fills in contentKind,
+      // fragment counts, and the payload hash; MVP packs carry no blockConfig /
+      // agentBlockConfigs.
+      const base = {
+        errataPack: 1 as const,
         id,
         version: nextVersion,
         title: title.trim(),
         description: description.trim(),
         license,
-        contentKind: 'fragment-pack',
         errataFormatVersion: 1,
-        fragmentTypes,
-        fragmentCount: selectedFragments.length,
         tags,
         nsfw,
         ...(thumbnailFragment ? { thumbnail: thumbnailFragment.content } : {}),
-        capabilities: [],
-        dependencies: [],
-        payloadHash: await sha256Hex(bundleJson),
+        capabilities: [] as string[],
+        dependencies: [] as ErratapackManifest['dependencies'],
         ...(handle ? { publisher: `@${handle}` } : {}),
         createdAt: new Date().toISOString(),
       }
 
+      if (isStory) {
+        if (!storyId) throw new Error('No story to publish.')
+        // The server derives fragmentTypes/count + payloadHash from the story zip.
+        const manifest: ErratapackManifest = {
+          ...base,
+          contentKind: 'story',
+          fragmentTypes: [],
+          fragmentCount: 0,
+          payloadHash: '',
+        }
+        return api.erratanet.publish({ storyId, manifest })
+      }
+
+      if (selectedFragments.length === 0) throw new Error('Select at least one fragment to publish.')
+      const bundleJson = serializeBundle(selectedFragments, mediaById, storyName)
+      const manifest: ErratapackManifest = {
+        ...base,
+        contentKind: 'fragment-pack',
+        fragmentTypes: Array.from(new Set(selectedFragments.map((f) => f.type))),
+        fragmentCount: selectedFragments.length,
+        payloadHash: await sha256Hex(bundleJson),
+      }
       return api.erratanet.publish({ bundleJson, manifest })
     },
     onSuccess: (res) => {
@@ -224,7 +246,7 @@ export function PublishPackDialog({
     !!slug.trim() &&
     !!title.trim() &&
     !descOver &&
-    selectedFragments.length > 0 &&
+    (isStory || selectedFragments.length > 0) &&
     !publishMut.isPending
 
   return (
@@ -236,7 +258,9 @@ export function PublishPackDialog({
             Publish to erratanet
           </DialogTitle>
           <DialogDescription>
-            Share {selectedFragments.length} fragment{selectedFragments.length !== 1 ? 's' : ''} as a reusable pack.
+            {isStory
+              ? 'Publish this whole story: branches, prose chain, and fragments.'
+              : `Share ${selectedFragments.length} fragment${selectedFragments.length !== 1 ? 's' : ''} as a reusable pack.`}
           </DialogDescription>
         </DialogHeader>
 
@@ -441,8 +465,9 @@ export function PublishPackDialog({
 
             {/* MVP note */}
             <p className="text-[0.625rem] leading-snug text-muted-foreground">
-              Packs carry fragments and their images only. Context blocks and agent
-              configuration are not included.
+              {isStory
+                ? 'The whole story is published: branches, prose chain, fragments, and images. Context blocks and agent configuration are not included.'
+                : 'Packs carry fragments and their images only. Context blocks and agent configuration are not included.'}
             </p>
 
             {error && <p className="text-[0.6875rem] text-destructive">{error}</p>}

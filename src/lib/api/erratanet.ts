@@ -18,6 +18,11 @@ export const erratanet = {
       body: JSON.stringify(data),
     }),
   getAccount: () => apiFetch<ErratanetAccount>('/erratanet/account'),
+  login: (body: { hubUrl: string; identifier: string; password: string }) =>
+    apiFetch<ErratanetAccount>('/erratanet/login', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   search: (q: string) =>
     apiFetch<ErratanetSearchResponse>(`/erratanet/search?q=${encodeURIComponent(q)}`),
   getPack: (id: string, version?: string) =>

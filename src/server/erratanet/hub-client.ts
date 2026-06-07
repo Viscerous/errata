@@ -34,6 +34,13 @@ export interface HubPublishResult {
   [key: string]: unknown
 }
 
+/** Result of exchanging credentials for an API token. */
+export interface HubLoginResult {
+  token: string
+  handle: string
+  displayName?: string
+}
+
 export interface HubClient {
   getAccount(dataDir: string): Promise<HubAccount>
   search(dataDir: string, query: string): Promise<HubPackageSummary[]>
@@ -45,6 +52,12 @@ export interface HubClient {
     manifest: ErratapackManifest,
     packZip: Uint8Array,
   ): Promise<HubPublishResult>
+  login(
+    hubUrl: string,
+    identifier: string,
+    password: string,
+    name?: string,
+  ): Promise<HubLoginResult>
 }
 
 /** Read hub connection config, throwing a clear error when not configured. */
@@ -176,6 +189,27 @@ export async function publishVersion(
   return parseJson<HubPublishResult>(res)
 }
 
+/**
+ * Exchange username/email + password for a fresh API token. Unlike the other
+ * calls this takes the hub URL + credentials directly: there is no stored token
+ * yet, this is how one is obtained. The caller stores the returned token.
+ */
+export async function login(
+  hubUrl: string,
+  identifier: string,
+  password: string,
+  name = 'Errata',
+): Promise<HubLoginResult> {
+  const base = hubUrl.trim().replace(/\/+$/, '')
+  if (!base) throw new Error('Enter a hub URL.')
+  const res = await fetch(hubEndpoint(base, '/api/v1/tokens'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({ identifier, password, name }),
+  })
+  return parseJson<HubLoginResult>(res)
+}
+
 /** Convenience object implementing the `HubClient` interface. */
 export const hubClient: HubClient = {
   getAccount,
@@ -183,4 +217,5 @@ export const hubClient: HubClient = {
   getPack,
   downloadPack,
   publishVersion,
+  login,
 }
