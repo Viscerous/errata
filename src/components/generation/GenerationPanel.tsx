@@ -36,24 +36,28 @@ export function GenerationPanel({ storyId, onBack }: GenerationPanelProps) {
   const abortRef = useRef<AbortController | null>(null)
   const outputRef = useRef<HTMLDivElement>(null)
   // In-flight generation context, preserved across the clarify round trip.
-  const genCtxRef = useRef<{ saveResult: boolean; clarifications: Clarification[]; round: number }>({
+  const genCtxRef = useRef<{ input: string; saveResult: boolean; clarifications: Clarification[]; round: number }>({
+    input: '',
     saveResult: true,
     clarifications: [],
     round: 0,
   })
 
   const runGeneration = useCallback(async (
+    genInput: string,
     saveResult: boolean,
     clarifications: Clarification[],
     round: number,
   ) => {
-    if (!input.trim()) return
+    if (!genInput.trim()) return
 
     setIsGenerating(true)
     setError(null)
     setPendingQuestions(null)
     if (round === 0) setStreamedText('')
-    genCtxRef.current = { saveResult, clarifications, round }
+    // Preserve the prompt that started this round so answering/skipping reruns
+    // against it, even if the author edits the textarea while questions show.
+    genCtxRef.current = { input: genInput, saveResult, clarifications, round }
 
     const ac = new AbortController()
     abortRef.current = ac
@@ -64,8 +68,8 @@ export function GenerationPanel({ storyId, onBack }: GenerationPanelProps) {
         ? { clarifications, clarifyRound: round }
         : undefined
       const stream = saveResult
-        ? await api.generation.generateAndSave(storyId, input, ac.signal, opts)
-        : await api.generation.stream(storyId, input, ac.signal, opts)
+        ? await api.generation.generateAndSave(storyId, genInput, ac.signal, opts)
+        : await api.generation.stream(storyId, genInput, ac.signal, opts)
 
       const reader = stream.getReader()
       let accumulated = ''
@@ -112,21 +116,21 @@ export function GenerationPanel({ storyId, onBack }: GenerationPanelProps) {
       setIsGenerating(false)
       abortRef.current = null
     }
-  }, [input, storyId, queryClient])
+  }, [storyId, queryClient])
 
   const handleGenerate = useCallback((saveResult: boolean) => {
     if (isGenerating) return
-    runGeneration(saveResult, [], 0)
-  }, [isGenerating, runGeneration])
+    runGeneration(input, saveResult, [], 0)
+  }, [isGenerating, runGeneration, input])
 
   const handleAnswers = useCallback((answers: Clarification[]) => {
-    const { saveResult, clarifications, round } = genCtxRef.current
-    runGeneration(saveResult, [...clarifications, ...answers], round + 1)
+    const { input: gi, saveResult, clarifications, round } = genCtxRef.current
+    runGeneration(gi, saveResult, [...clarifications, ...answers], round + 1)
   }, [runGeneration])
 
   const handleSkipQuestions = useCallback(() => {
-    const { saveResult, clarifications } = genCtxRef.current
-    runGeneration(saveResult, clarifications, FORCE_PROCEED_ROUND)
+    const { input: gi, saveResult, clarifications } = genCtxRef.current
+    runGeneration(gi, saveResult, clarifications, FORCE_PROCEED_ROUND)
   }, [runGeneration])
 
   const handleStop = useCallback(() => {
