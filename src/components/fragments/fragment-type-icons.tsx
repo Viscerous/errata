@@ -47,6 +47,10 @@ const ICONS: Record<string, LucideIcon> = {
   Sparkles,
 }
 
+export function getFragmentTypeIconLabel(icon?: string) {
+  return FRAGMENT_TYPE_ICON_OPTIONS.find((option) => option.value === icon)?.label ?? 'Hash'
+}
+
 export function FragmentTypeIcon({ icon, className }: { icon?: string; className?: string }) {
   const Icon = icon ? ICONS[icon] ?? Hash : Hash
   return <Icon className={className} />
