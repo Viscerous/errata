@@ -16,6 +16,9 @@ export interface DesktopUpdateState {
     | 'not-available'
     | 'error'
   version?: string
+  releaseName?: string
+  releaseDate?: string
+  releaseNotes?: string
   percent?: number
   error?: string
 }

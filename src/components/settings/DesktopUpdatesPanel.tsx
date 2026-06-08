@@ -38,8 +38,33 @@ function statusText(state: DesktopUpdateState): string {
   }
 }
 
+function nextVersionText(state: DesktopUpdateState): string {
+  if (state.version) return `v${state.version}`
+  if (state.status === 'checking') return 'Checking...'
+  if (state.status === 'not-available') return 'None available'
+  return 'Check to load'
+}
+
+function changelogText(state: DesktopUpdateState): string {
+  if (state.releaseNotes) return state.releaseNotes
+  if (state.status === 'available' || state.status === 'downloaded' || state.status === 'skipped') {
+    return 'No changelog was included with this update.'
+  }
+  if (state.status === 'checking') return 'Checking release metadata...'
+  return 'Run a manual update check to load the latest release notes.'
+}
+
+function releaseMetaText(state: DesktopUpdateState): string | undefined {
+  const parts = [
+    state.releaseName,
+    state.releaseDate ? new Date(state.releaseDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : undefined,
+  ].filter(Boolean)
+  return parts.length > 0 ? parts.join(' / ') : undefined
+}
+
 export function DesktopUpdatesControls() {
   const [bridge, setBridge] = useState<ErrataDesktop | null>(() => getDesktopBridge())
+  const [currentVersion, setCurrentVersion] = useState(__APP_VERSION__)
   const [state, setState] = useState<DesktopUpdateState>({ status: 'idle' })
   const [busy, setBusy] = useState(false)
 
@@ -47,6 +72,7 @@ export function DesktopUpdatesControls() {
     let unsubscribeUpdates: (() => void) | undefined
     const stopWaiting = onDesktopBridgeReady((currentBridge) => {
       setBridge(currentBridge)
+      currentBridge.getVersion().then(setCurrentVersion).catch(() => {})
       currentBridge.getUpdateState().then(setState).catch(() => {})
       unsubscribeUpdates = currentBridge.onUpdateState(setState)
     })
@@ -119,9 +145,21 @@ export function DesktopUpdatesControls() {
     <div>
       <SectionHeading label="Updates" />
       <SettingsCard>
+        <SettingRow label="Installed version">
+          <span className="font-mono text-[0.6875rem] tabular-nums text-muted-foreground">v{currentVersion}</span>
+        </SettingRow>
+        <SettingRow label="Next version" description={releaseMetaText(state)}>
+          <span className="font-mono text-[0.6875rem] tabular-nums text-muted-foreground">{nextVersionText(state)}</span>
+        </SettingRow>
         <SettingRow label="Desktop updates" description={statusText(state)}>
           {actions()}
         </SettingRow>
+        <div className="px-3 py-2.5">
+          <p className="text-[0.75rem] font-medium text-foreground/80">Changelog</p>
+          <pre className="mt-1.5 max-h-44 whitespace-pre-wrap overflow-y-auto rounded-md bg-accent/20 px-2.5 py-2 font-sans text-[0.6875rem] leading-relaxed text-muted-foreground">
+            {changelogText(state)}
+          </pre>
+        </div>
       </SettingsCard>
       <p className="mt-1.5 px-3 text-[0.625rem] leading-snug text-muted-foreground">
         Errata only checks for updates when you click the button. Your stories are backed up before every install.

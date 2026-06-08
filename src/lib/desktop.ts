@@ -17,6 +17,9 @@ export type DesktopUpdateStatus =
 export interface DesktopUpdateState {
   status: DesktopUpdateStatus
   version?: string
+  releaseName?: string
+  releaseDate?: string
+  releaseNotes?: string
   percent?: number
   error?: string
 }

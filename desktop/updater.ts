@@ -14,23 +14,7 @@ import { readFile, writeFile, mkdir, cp, readdir, rm } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { errataDataDir } from './sidecar'
-
-export type UpdateStatus =
-  | 'idle'
-  | 'checking'
-  | 'available'
-  | 'downloading'
-  | 'downloaded'
-  | 'skipped'
-  | 'not-available'
-  | 'error'
-
-export interface UpdateState {
-  status: UpdateStatus
-  version?: string
-  percent?: number
-  error?: string
-}
+import { updateMetadata, type UpdateState } from './update-state'
 
 export interface UpdatePrefs {
   /** Deprecated. Kept in the bridge shape for compatibility with older renderer builds. */
@@ -127,18 +111,38 @@ function wireUpdaterEvents() {
   autoUpdater.autoDownload = false
   autoUpdater.autoInstallOnAppQuit = false
 
-  autoUpdater.on('checking-for-update', () => setState({ status: 'checking', error: undefined }))
+  autoUpdater.on('checking-for-update', () => {
+    setState({
+      status: 'checking',
+      version: undefined,
+      releaseName: undefined,
+      releaseDate: undefined,
+      releaseNotes: undefined,
+      percent: undefined,
+      error: undefined,
+    })
+  })
   autoUpdater.on('update-available', (info) => {
-    const version = info.version
+    const metadata = updateMetadata(info)
+    const version = metadata.version
     if (version === prefs.skippedVersion) {
-      setState({ status: 'skipped', version })
+      setState({ status: 'skipped', ...metadata, percent: undefined, error: undefined })
     } else {
-      setState({ status: 'available', version })
+      setState({ status: 'available', ...metadata, percent: undefined, error: undefined })
     }
   })
-  autoUpdater.on('update-not-available', () => setState({ status: 'not-available' }))
+  autoUpdater.on('update-not-available', () => {
+    setState({
+      status: 'not-available',
+      version: undefined,
+      releaseName: undefined,
+      releaseDate: undefined,
+      releaseNotes: undefined,
+      percent: undefined,
+    })
+  })
   autoUpdater.on('download-progress', (p) => setState({ status: 'downloading', percent: Math.round(p.percent) }))
-  autoUpdater.on('update-downloaded', (info) => setState({ status: 'downloaded', version: info.version }))
+  autoUpdater.on('update-downloaded', (info) => setState({ status: 'downloaded', ...updateMetadata(info), percent: undefined }))
   autoUpdater.on('error', (err) => setState({ status: 'error', error: err?.message ?? String(err) }))
 }
 
@@ -160,11 +164,26 @@ export function setupUpdater(window: BrowserWindow) {
 
   ipcMain.handle('errata:update:check', async () => {
     if (!app.isPackaged) {
-      setState({ status: 'not-available' })
+      setState({
+        status: 'not-available',
+        version: undefined,
+        releaseName: undefined,
+        releaseDate: undefined,
+        releaseNotes: undefined,
+        percent: undefined,
+      })
       return state
     }
     try {
-      setState({ status: 'checking', error: undefined })
+      setState({
+        status: 'checking',
+        version: undefined,
+        releaseName: undefined,
+        releaseDate: undefined,
+        releaseNotes: undefined,
+        percent: undefined,
+        error: undefined,
+      })
       await autoUpdater.checkForUpdates()
     } catch (err) {
       setState({ status: 'error', error: err instanceof Error ? err.message : String(err) })
