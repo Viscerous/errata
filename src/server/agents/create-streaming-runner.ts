@@ -17,6 +17,7 @@ import { createFragmentTools } from '../llm/tools'
 import { reportUsage } from '../llm/token-tracker'
 import { createLogger } from '../logging'
 import { createEventStream } from './create-event-stream'
+import { holdLibrarianAnalysis } from '../librarian/scheduler'
 import { compileAgentContext, type CompiledAgentContext } from './compile-agent-context'
 import { withBranch } from '../fragments/branches'
 
@@ -195,9 +196,14 @@ export function createStreamingRunner<TOpts extends object, TValidated = Record<
         ? config.messages({ compiled, opts })
         : userMessage ? [{ role: 'user' as const, content: userMessage.content }] : []
 
-      // 11. Stream
+      // 11. Stream. Hold analysis for write-enabled runs so multi-step prose edits
+      // analyze once on the final state, not per edit (see holdLibrarianAnalysis).
       const result = await agent.stream({ messages })
+      const releaseAnalysis = config.readOnly === false
+        ? holdLibrarianAnalysis(storyId)
+        : () => {}
       const streamResult = createEventStream(result.fullStream)
+      void streamResult.completion.then(releaseAnalysis, releaseAnalysis)
 
       // 12. Track token usage after stream completes
       streamResult.completion.then(async () => {

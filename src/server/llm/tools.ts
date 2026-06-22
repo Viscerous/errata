@@ -16,6 +16,7 @@ import { createLogger } from '../logging'
 import type { Fragment } from '../fragments/schema'
 import { generateFragmentId } from '@/lib/fragment-ids'
 import { checkFragmentWrite, isFragmentLocked } from '../fragments/protection'
+import { reanalyzeAfterProseChange } from '../librarian/scheduler'
 import { capitalize, pluralize } from './agents'
 
 const logger = createLogger('llm-tools')
@@ -313,6 +314,7 @@ export function createFragmentTools(
         if (!updated) {
           return { error: `Fragment not found: ${fragmentId}` }
         }
+        reanalyzeAfterProseChange(dataDir, storyId, fragment, updated)
         return { ok: true, id: fragmentId }
       }),
     })
@@ -346,6 +348,7 @@ export function createFragmentTools(
         if (!updated) {
           return { error: `Fragment not found: ${fragmentId}` }
         }
+        reanalyzeAfterProseChange(dataDir, storyId, fragment, updated)
         return { ok: true, id: fragmentId }
       }),
     })
@@ -403,6 +406,7 @@ export function createFragmentTools(
               updatedAt: new Date().toISOString(),
             }
             await updateFragment(dataDir, storyId, updated)
+            reanalyzeAfterProseChange(dataDir, storyId, f, updated)
             edited.push(f.id)
           }
         }

@@ -22,22 +22,12 @@ import {
 } from '../fragments/associations'
 import { generateFragmentId } from '@/lib/fragment-ids'
 import { registry } from '../fragments/registry'
-import { triggerLibrarian } from '../librarian/scheduler'
-import { clearAnalysisIndexEntry } from '../librarian/storage'
-import { createLogger } from '../logging'
+import { reanalyzeAfterProseChange } from '../librarian/scheduler'
 import { installFragmentBundle } from '../erratanet/pack-install'
 import type { Fragment } from '../fragments/schema'
 import type { FragmentBundleData } from '@/lib/fragment-clipboard'
 
-function hasMaterialProseChange(before: Fragment, after: Fragment): boolean {
-  return before.name !== after.name
-    || before.description !== after.description
-    || before.content !== after.content
-}
-
 export function fragmentRoutes(dataDir: string) {
-  const logger = createLogger('api:fragments', { dataDir })
-
   return new Elysia({ detail: { tags: ['Fragments'] } })
     .post('/stories/:storyId/fragments', async ({ params, body, set }) => {
       const story = await getStory(dataDir, params.storyId)
@@ -141,7 +131,6 @@ export function fragmentRoutes(dataDir: string) {
     }, { detail: { summary: 'Get a fragment by ID' } })
 
     .put('/stories/:storyId/fragments/:fragmentId', async ({ params, body, set }) => {
-      const requestLogger = logger.child({ storyId: params.storyId, extra: { fragmentId: params.fragmentId } })
       const existing = await getFragment(
         dataDir,
         params.storyId,
@@ -176,14 +165,7 @@ export function fragmentRoutes(dataDir: string) {
       }
       await updateFragment(dataDir, params.storyId, updated)
 
-      if (existing.type === 'prose' && hasMaterialProseChange(existing, updated)) {
-        clearAnalysisIndexEntry(dataDir, params.storyId, updated.id).catch(() => {})
-        Promise.resolve(triggerLibrarian(dataDir, params.storyId, updated)).catch((err) => {
-          requestLogger.error('triggerLibrarian failed after prose update', {
-            error: err instanceof Error ? err.message : String(err),
-          })
-        })
-      }
+      reanalyzeAfterProseChange(dataDir, params.storyId, existing, updated)
 
       return updated
     }, {
@@ -200,7 +182,6 @@ export function fragmentRoutes(dataDir: string) {
     })
 
     .patch('/stories/:storyId/fragments/:fragmentId', async ({ params, body, set }) => {
-      const requestLogger = logger.child({ storyId: params.storyId, extra: { fragmentId: params.fragmentId } })
       const existing = await getFragment(
         dataDir,
         params.storyId,
@@ -223,14 +204,7 @@ export function fragmentRoutes(dataDir: string) {
         return { error: 'Fragment not found' }
       }
 
-      if (existing.type === 'prose' && hasMaterialProseChange(existing, updated)) {
-        clearAnalysisIndexEntry(dataDir, params.storyId, updated.id).catch(() => {})
-        Promise.resolve(triggerLibrarian(dataDir, params.storyId, updated)).catch((err) => {
-          requestLogger.error('triggerLibrarian failed after prose edit', {
-            error: err instanceof Error ? err.message : String(err),
-          })
-        })
-      }
+      reanalyzeAfterProseChange(dataDir, params.storyId, existing, updated)
 
       return updated
     }, {
