@@ -33,6 +33,13 @@ vi.mock('ai', async () => {
   }
 })
 
+// Stub only the index's invokeAgent so the librarian run the scheduler now fires stays
+// in-flight; generation.ts imports its own from '../agents/runner', so it's unaffected.
+vi.mock('@/server/agents', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/server/agents')>()
+  return { ...actual, invokeAgent: vi.fn(() => new Promise(() => {})) }
+})
+
 import { createApp } from '@/server/api'
 
 function makeStory(settingsOverrides?: Partial<StoryMeta['settings']>): StoryMeta {
