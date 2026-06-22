@@ -7,13 +7,13 @@
     installs dependencies, and starts the dev server.
 .NOTES
     Run from any directory:
-      irm https://raw.githubusercontent.com/tealios/errata/master/scripts/setup.ps1 | iex
+      irm https://raw.githubusercontent.com/Viscerous/errata/main/scripts/setup.ps1 | iex
     Or locally:
       powershell -ExecutionPolicy Bypass -File scripts/setup.ps1
 #>
 
 $ErrorActionPreference = 'Stop'
-$RepoUrl = 'https://github.com/tealios/errata.git'
+$RepoUrl = 'https://github.com/Viscerous/errata.git'
 $RepoDir = 'errata'
 
 function Write-Step($msg) { Write-Host "`n>> $msg" -ForegroundColor Cyan }
