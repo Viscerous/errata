@@ -1,4 +1,4 @@
-appId: com.tealios.errata
+appId: com.viscerous.errata
 productName: Errata
 copyright: Copyright © Tealios
 
@@ -56,7 +56,7 @@ linux:
 
 publish:
   provider: github
-  owner: tealios
+  owner: Viscerous
   repo: errata
   # Upload to the already-published GitHub Release that triggers the workflow. The default
   # publishingType is "draft", which electron-builder refuses to apply to an existing
