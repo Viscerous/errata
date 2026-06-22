@@ -50,7 +50,7 @@ Switch from prose view to Character Chat to run in-world conversations with your
 ## Quick Start
 
 ```bash
-git clone https://github.com/tealios/errata.git
+git clone https://github.com/Viscerous/errata.git
 cd errata
 bun install
 bun run dev
@@ -69,12 +69,12 @@ powershell -ExecutionPolicy Bypass -File scripts/setup.ps1
 Or run it directly from the web without cloning first:
 
 ```powershell
-irm https://raw.githubusercontent.com/tealios/errata/master/scripts/setup.ps1 | iex
+irm https://raw.githubusercontent.com/Viscerous/errata/main/scripts/setup.ps1 | iex
 ```
 
 ## Download
 
-Pre-built binaries are available on the [Releases](https://github.com/tealios/errata/releases) page for Windows, Linux, and macOS. Extract the zip and run — no runtime dependencies required.
+Pre-built binaries are available on the [Releases](https://github.com/Viscerous/errata/releases) page for Windows, Linux, and macOS. Extract the zip and run — no runtime dependencies required.
 
 ```bash
 # Windows

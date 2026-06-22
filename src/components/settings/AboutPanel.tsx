@@ -7,10 +7,10 @@ import { ExternalLink } from 'lucide-react'
 import { SectionHeading, SettingsCard } from './primitives'
 
 const LINKS: { label: string; href: string }[] = [
-  { label: 'Documentation', href: 'https://github.com/tealios/errata/tree/master/docs' },
+  { label: 'Documentation', href: 'https://github.com/Viscerous/errata/tree/main/docs' },
   { label: 'Discord community', href: 'https://discord.gg/ywVFKvdH49' },
-  { label: 'GitHub repository', href: 'https://github.com/tealios/errata' },
-  { label: 'Releases and changelog', href: 'https://github.com/tealios/errata/releases' },
+  { label: 'GitHub repository', href: 'https://github.com/Viscerous/errata' },
+  { label: 'Releases and changelog', href: 'https://github.com/Viscerous/errata/releases' },
 ]
 
 export function AboutSection() {
