@@ -38,6 +38,7 @@ import { ProviderList, ProviderPanel } from '@/components/settings/ProviderManag
 import { AboutSection } from '@/components/settings/AboutPanel'
 import { DesktopUpdatesControls } from '@/components/settings/DesktopUpdatesPanel'
 import { SectionHeading } from '@/components/settings/primitives'
+import { useConfirm } from '@/components/ui/confirm-dialog'
 
 const THEME_OPTIONS = [
   { value: 'light' as const, label: 'Light', Icon: Sun },
@@ -49,6 +50,7 @@ export const Route = createFileRoute('/')({ component: StoryListPage })
 
 function StoryListPage() {
   const queryClient = useQueryClient()
+  const confirm = useConfirm()
   const navigate = useNavigate()
   const { theme, setTheme } = useTheme()
   const [open, setOpen] = useState(false)
@@ -661,8 +663,8 @@ function StoryListPage() {
               key={story.id}
               story={story}
               isRecent={i === 0 && sortedStories.length > 1}
-              onDelete={() => {
-                if (confirm(`Delete "${story.name}"?`)) {
+              onDelete={async () => {
+                if (await confirm({ title: `Delete "${story.name}"?`, description: 'This permanently deletes the story and all its fragments.', confirmText: 'Delete', destructive: true })) {
                   deleteMutation.mutate(story.id)
                 }
               }}
