@@ -170,6 +170,30 @@ export function createAnalysisTools(collector: AnalysisCollector, opts?: { dataD
       },
     }),
 
+    editFragment: tool({
+      description: 'Edit an existing character, knowledge, or guideline fragment by replacing a specific text span (oldText) with newText. Use this for precise corrections and edits to avoid rewriting the whole fragment.',
+      inputSchema: z.object({
+        fragmentId: z.string().describe('The ID of the fragment to edit (e.g. ch-abc, kn-xyz)'),
+        oldText: z.string().describe('The exact text span inside the fragment to find and replace'),
+        newText: z.string().describe('The replacement text'),
+      }),
+      execute: async ({ fragmentId, oldText, newText }) => {
+        if (!opts) return { error: 'editFragment not available in this context' }
+        const existing = await getFragment(opts.dataDir, opts.storyId, fragmentId)
+        if (!existing) return { error: `Fragment ${fragmentId} not found` }
+        if (existing.type === 'prose') return { error: 'Cannot edit prose fragments via this tool' }
+        if (!existing.content.includes(oldText)) {
+          return { error: `Text not found in fragment ${fragmentId}: "${oldText}"` }
+        }
+        const editedContent = existing.content.replace(oldText, newText)
+        const protection = checkFragmentWrite(existing, { content: editedContent })
+        if (!protection.allowed) return { error: protection.reason }
+        const updated = await updateFragmentVersioned(opts.dataDir, opts.storyId, fragmentId, { content: editedContent }, { reason: 'librarian-analysis' })
+        if (!updated) return { error: `Failed to edit fragment ${fragmentId}` }
+        return { ok: true, fragmentId: updated.id }
+      },
+    }),
+
     updateFragment: tool({
       description: 'Directly update an existing fragment by ID. Use this to correct or enrich character, knowledge, or guideline fragments based on new information from the prose.',
       inputSchema: z.object({
