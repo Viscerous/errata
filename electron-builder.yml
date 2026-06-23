@@ -58,6 +58,9 @@ publish:
   provider: github
   owner: Viscerous
   repo: errata
+  # Fork builds carry a -vis.N prerelease tag; pin the channel so they publish to
+  # latest.yml (the channel the updater reads) rather than a separate prerelease feed.
+  channel: latest
   # Upload to the already-published GitHub Release that triggers the workflow. The default
   # publishingType is "draft", which electron-builder refuses to apply to an existing
   # published release ("existing type not compatible"), silently skipping the upload.
