@@ -1,11 +1,24 @@
 import type { Fragment } from '../fragments/schema'
-import { invokeAgent } from '../agents'
 import { createLogger } from '../logging'
 import { getActiveBranchId, withBranch } from '../fragments/branches'
+import { clearAnalysisIndexEntry } from './storage'
 
-const pending = new Map<string, ReturnType<typeof setTimeout>>()
+interface QueuedRun {
+  dataDir: string
+  fragment: Fragment
+  branchId: string
+}
+
+interface SchedulerState {
+  running: boolean
+  /** Latest trigger that arrived while a run was in flight or held; supersedes earlier ones. */
+  queued: QueuedRun | null
+}
+
+const scheduler = new Map<string, SchedulerState>()
 const runtimeStatus = new Map<string, LibrarianRuntimeStatus>()
-const DEBOUNCE_MS = 2000
+/** Per-story count of active agent runs that defer analysis until they finish. */
+const holds = new Map<string, number>()
 const logger = createLogger('librarian')
 
 export type LibrarianRunStatus = 'idle' | 'scheduled' | 'running' | 'error'
@@ -37,6 +50,11 @@ function setRuntimeStatus(storyId: string, patch: Partial<LibrarianRuntimeStatus
   })
 }
 
+/**
+ * Schedule a librarian analysis for a story. Analysis is one of the longest steps, so a
+ * run starts immediately when the story is idle. Triggers arriving while a run is in
+ * flight or held are coalesced to the latest fragment and run once the story settles.
+ */
 export async function triggerLibrarian(
   dataDir: string,
   storyId: string,
@@ -44,83 +62,156 @@ export async function triggerLibrarian(
 ): Promise<void> {
   const requestLogger = logger.child({ storyId })
 
-  // Capture the active branch NOW, before the debounce delay
+  // Capture the active branch at trigger time, before any in-flight run can switch it.
   const branchId = await getActiveBranchId(dataDir, storyId)
 
-  // Clear any pending run for this story
-  const existing = pending.get(storyId)
-  if (existing) {
-    requestLogger.debug('Cancelling pending librarian run')
-    clearTimeout(existing)
+  const state = scheduler.get(storyId) ?? { running: false, queued: null }
+  scheduler.set(storyId, state)
+
+  const held = (holds.get(storyId) ?? 0) > 0
+  if (state.running || held) {
+    requestLogger.debug('Deferring re-analysis', { fragmentId: fragment.id, branchId, reason: held ? 'held' : 'running' })
+    state.queued = { dataDir, fragment, branchId }
+    setRuntimeStatus(storyId, {
+      runStatus: state.running ? 'running' : 'scheduled',
+      pendingFragmentId: fragment.id,
+    })
+    return
   }
 
-  // Schedule a new run
-  requestLogger.info('Scheduling librarian run', { fragmentId: fragment.id, branchId, debounceMs: DEBOUNCE_MS })
-  setRuntimeStatus(storyId, {
-    runStatus: 'scheduled',
-    pendingFragmentId: fragment.id,
-    runningFragmentId: null,
-    lastError: null,
-  })
-  pending.set(
-    storyId,
-    setTimeout(async () => {
-      pending.delete(storyId)
-      setRuntimeStatus(storyId, {
-        runStatus: 'running',
-        pendingFragmentId: null,
-        runningFragmentId: fragment.id,
-      })
-      try {
-        requestLogger.info('Starting librarian analysis...', { fragmentId: fragment.id, branchId })
-        const startTime = Date.now()
-        await withBranch(dataDir, storyId, () => invokeAgent({
-          dataDir,
-          storyId,
-          agentName: 'librarian.analyze',
-          input: { fragmentId: fragment.id },
-        }), branchId)
-        const durationMs = Date.now() - startTime
-        requestLogger.info('Librarian analysis completed', { fragmentId: fragment.id, durationMs })
-        setRuntimeStatus(storyId, {
-          runStatus: 'idle',
-          pendingFragmentId: null,
-          runningFragmentId: null,
-          lastError: null,
-        })
-      } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : String(err)
-        requestLogger.error('Librarian analysis failed', {
-          fragmentId: fragment.id,
-          error: errorMessage,
-        })
-        setRuntimeStatus(storyId, {
-          runStatus: 'error',
-          pendingFragmentId: null,
-          runningFragmentId: null,
-          lastError: errorMessage,
-        })
-      }
-    }, DEBOUNCE_MS),
-  )
+  state.running = true
+  void runAnalysis(dataDir, storyId, fragment, branchId)
 }
 
-/** Clear all pending timers (useful for tests) */
+async function runAnalysis(
+  dataDir: string,
+  storyId: string,
+  fragment: Fragment,
+  branchId: string,
+): Promise<void> {
+  const requestLogger = logger.child({ storyId })
+  setRuntimeStatus(storyId, {
+    runStatus: 'running',
+    pendingFragmentId: null,
+    runningFragmentId: fragment.id,
+    lastError: null,
+  })
+
+  let lastError: string | null = null
+  try {
+    requestLogger.info('Starting librarian analysis...', { fragmentId: fragment.id, branchId })
+    const startTime = Date.now()
+    // Imported lazily: the agents runtime cycles back through the llm tools, and
+    // it's only needed here at run time.
+    const { invokeAgent } = await import('../agents')
+    await withBranch(dataDir, storyId, () => invokeAgent({
+      dataDir,
+      storyId,
+      agentName: 'librarian.analyze',
+      input: { fragmentId: fragment.id },
+    }), branchId)
+    requestLogger.info('Librarian analysis completed', { fragmentId: fragment.id, durationMs: Date.now() - startTime })
+  } catch (err) {
+    lastError = err instanceof Error ? err.message : String(err)
+    requestLogger.error('Librarian analysis failed', { fragmentId: fragment.id, error: lastError })
+  }
+
+  // Drain the latest queued trigger (no idle flicker between coalesced runs, so the UI's
+  // running → idle/error edge fires once). A held trigger waits for its release to flush.
+  const state = scheduler.get(storyId)
+  const held = (holds.get(storyId) ?? 0) > 0
+  if (state?.queued && !held) {
+    const next = state.queued
+    state.queued = null
+    void runAnalysis(next.dataDir, storyId, next.fragment, next.branchId)
+    return
+  }
+  if (state) state.running = false
+  setRuntimeStatus(storyId, {
+    runStatus: lastError ? 'error' : state?.queued ? 'scheduled' : 'idle',
+    pendingFragmentId: state?.queued?.fragment.id ?? null,
+    runningFragmentId: null,
+    lastError,
+  })
+}
+
+/**
+ * Suspend librarian analysis for a story while an agent run edits it, returning a release
+ * function. Otherwise a run editing prose across several tool steps kicks off (and then
+ * supersedes) a full analysis per step; deferring to run end collapses that to a single
+ * analysis of the final state. Refcounted for concurrent runs.
+ */
+export function holdLibrarianAnalysis(storyId: string): () => void {
+  holds.set(storyId, (holds.get(storyId) ?? 0) + 1)
+  let released = false
+  return () => {
+    if (released) return
+    released = true
+    const remaining = (holds.get(storyId) ?? 1) - 1
+    if (remaining > 0) {
+      holds.set(storyId, remaining)
+      return
+    }
+    holds.delete(storyId)
+    const state = scheduler.get(storyId)
+    if (state && !state.running && state.queued) {
+      const next = state.queued
+      state.queued = null
+      state.running = true
+      void runAnalysis(next.dataDir, storyId, next.fragment, next.branchId)
+    }
+  }
+}
+
+function hasMaterialProseChange(before: Fragment, after: Fragment): boolean {
+  return before.name !== after.name
+    || before.description !== after.description
+    || before.content !== after.content
+}
+
+/**
+ * Schedule librarian re-analysis after a prose fragment changes, from any code path
+ * (HTTP route or librarian tool). No-ops for non-prose or immaterial changes; marks the
+ * analysis stale for the UI indicator and schedules the run.
+ */
+export function reanalyzeAfterProseChange(
+  dataDir: string,
+  storyId: string,
+  before: Fragment,
+  after: Fragment,
+): void {
+  if (after.type !== 'prose' || !hasMaterialProseChange(before, after)) return
+  clearAnalysisIndexEntry(dataDir, storyId, after.id).catch(() => {})
+  Promise.resolve(triggerLibrarian(dataDir, storyId, after)).catch((err) => {
+    logger.child({ storyId }).error('triggerLibrarian failed after prose change', {
+      fragmentId: after.id,
+      error: err instanceof Error ? err.message : String(err),
+    })
+  })
+}
+
+/** Reset all scheduler bookkeeping (useful for tests). Does not abort an in-flight run. */
 export function clearPending(): void {
-  for (const [storyId, timer] of pending.entries()) {
-    clearTimeout(timer)
+  for (const [storyId, state] of scheduler.entries()) {
+    state.queued = null
+    state.running = false
     setRuntimeStatus(storyId, {
       runStatus: 'idle',
       pendingFragmentId: null,
       runningFragmentId: null,
     })
   }
-  pending.clear()
+  scheduler.clear()
+  holds.clear()
 }
 
-/** Get the number of pending runs (useful for tests) */
+/** Number of stories with a running or queued analysis (useful for tests). */
 export function getPendingCount(): number {
-  return pending.size
+  let count = 0
+  for (const state of scheduler.values()) {
+    if (state.running || state.queued) count++
+  }
+  return count
 }
 
 export function getLibrarianRuntimeStatus(storyId: string): LibrarianRuntimeStatus {

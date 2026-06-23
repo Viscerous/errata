@@ -8,6 +8,7 @@ import { pluginRegistry } from '../plugins/registry'
 import { collectPluginTools } from '../plugins/tools'
 import { createLogger } from '../logging'
 import { createEventStream } from '../agents/create-event-stream'
+import { holdLibrarianAnalysis } from './scheduler'
 import { compileAgentContext } from '../agents/compile-agent-context'
 import { createAgentInstance } from '../agents/agent-instance'
 import { getFragmentsByTag } from '../fragments/associations'
@@ -195,10 +196,13 @@ async function librarianChatInner(
     })),
   ]
 
-  // Stream with write tools
+  // Stream with write tools. Hold analysis so multi-step prose edits analyze once on the
+  // final state, not per edit (see holdLibrarianAnalysis).
   const result = await chatAgent.stream({
     messages: aiMessages,
   })
-
-  return createEventStream(result.fullStream)
+  const releaseAnalysis = holdLibrarianAnalysis(storyId)
+  const stream = createEventStream(result.fullStream)
+  void stream.completion.then(releaseAnalysis, releaseAnalysis)
+  return stream
 }
