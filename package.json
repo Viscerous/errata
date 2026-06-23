@@ -1,6 +1,6 @@
 {
   "name": "errata",
-  "version": "1.9.7",
+  "version": "1.9.7-vis.1",
   "private": true,
   "license": "GPL-2.0",
   "type": "module",
