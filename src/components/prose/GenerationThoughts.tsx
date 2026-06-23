@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react'
 import {
   ChainOfThought,
   ChainOfThoughtContent,
@@ -5,6 +6,23 @@ import {
 } from '@/components/ui/chain-of-thought'
 import { Loader2, Brain, Wrench, CheckCircle2, PenLine, FileText } from 'lucide-react'
 import { type ThoughtStep } from './InlineGenerationInput'
+
+// Streaming text box that follows the bottom while active, unless the user scrolled up
+function StreamingText({ text, active, className }: { text: string; active: boolean; className?: string }) {
+  const ref = useRef<HTMLDivElement>(null)
+  const stick = useRef(true)
+
+  const onScroll = () => {
+    const el = ref.current
+    if (el) stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24
+  }
+
+  useEffect(() => {
+    if (active && stick.current && ref.current) ref.current.scrollTop = ref.current.scrollHeight
+  }, [text, active])
+
+  return <div ref={ref} onScroll={onScroll} className={className}>{text}</div>
+}
 
 function formatToolName(name: string): string {
   return name
@@ -54,9 +72,11 @@ export function GenerationThoughts({
                   label="Thinking"
                   status={isThinking && i === steps.length - 1 ? 'active' : 'complete'}
                 >
-                  <div className="text-[0.625rem] text-muted-foreground italic font-mono whitespace-pre-wrap leading-relaxed max-h-[200px] overflow-y-auto">
-                    {step.text}
-                  </div>
+                  <StreamingText
+                    text={step.text}
+                    active={isThinking && i === steps.length - 1}
+                    className="text-[0.625rem] text-muted-foreground italic font-mono whitespace-pre-wrap leading-relaxed max-h-[200px] overflow-y-auto"
+                  />
                 </ChainOfThoughtStep>
               )
             }
@@ -69,9 +89,11 @@ export function GenerationThoughts({
                   label="Writing Brief"
                   status={isActive ? 'active' : 'complete'}
                 >
-                  <div className="text-[0.625rem] text-muted-foreground font-mono whitespace-pre-wrap leading-relaxed max-h-[200px] overflow-y-auto">
-                    {step.text}
-                  </div>
+                  <StreamingText
+                    text={step.text}
+                    active={isActive}
+                    className="text-[0.625rem] text-muted-foreground font-mono whitespace-pre-wrap leading-relaxed max-h-[200px] overflow-y-auto"
+                  />
                 </ChainOfThoughtStep>
               )
             }
