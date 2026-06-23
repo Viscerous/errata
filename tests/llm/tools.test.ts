@@ -339,6 +339,48 @@ describe('LLM tools', () => {
     })
   })
 
+  describe('editProse (write)', () => {
+    it('replaces text across active prose, versioning each edit and preserving meta', async () => {
+      const frag = makeFragment({
+        id: 'pr-0001',
+        content: 'The ipsum sat on the mat.',
+        refs: ['ch-0001'],
+        meta: { _librarian: { summary: 'prior analysis', analysisId: 'la-1' } },
+      })
+      await createFragment(dataDir, storyId, frag)
+
+      const tools = createFragmentTools(dataDir, storyId, { readOnly: false })
+      const result = await tools.editProse.execute!(
+        { oldText: 'ipsum', newText: 'cat' },
+        { toolCallId: 'tc-1', messages: [] },
+      )
+
+      expect(result.ok).toBe(true)
+      expect(result.editedFragments).toContain('pr-0001')
+
+      const updated = await getFragment(dataDir, storyId, 'pr-0001')
+      expect(updated!.content).toBe('The cat sat on the mat.')
+      // Merge-patch must not clobber fields outside the patch (e.g. a concurrent
+      // librarian meta write).
+      expect(updated!.refs).toEqual(['ch-0001'])
+      expect((updated!.meta._librarian as { analysisId: string }).analysisId).toBe('la-1')
+      // Edits are versioned like the updateFragment/editFragment tools.
+      expect(updated!.version).toBe(2)
+      expect(updated!.versions).toHaveLength(1)
+      expect(updated!.versions?.[0].content).toBe('The ipsum sat on the mat.')
+    })
+
+    it('returns an error when no active prose contains the text', async () => {
+      await createFragment(dataDir, storyId, makeFragment({ id: 'pr-0001', content: 'nothing here' }))
+      const tools = createFragmentTools(dataDir, storyId, { readOnly: false })
+      const result = await tools.editProse.execute!(
+        { oldText: 'absent', newText: 'x' },
+        { toolCallId: 'tc-1', messages: [] },
+      )
+      expect(result.error).toBeDefined()
+    })
+  })
+
   describe('deleteFragment (write)', () => {
     it('deletes a fragment from storage', async () => {
       const frag = makeFragment({ id: 'pr-0001' })

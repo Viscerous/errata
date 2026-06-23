@@ -6,7 +6,6 @@ import {
   getStory,
   updateStory,
   listFragments,
-  updateFragment,
   updateFragmentVersioned,
   deleteFragment,
 } from '../fragments/storage'
@@ -397,12 +396,16 @@ export function createFragmentTools(
               skipped.push(f.id)
               continue
             }
-            const updated: Fragment = {
-              ...f,
-              content: newContent,
-              updatedAt: new Date().toISOString(),
-            }
-            await updateFragment(dataDir, storyId, updated)
+            // Merge-patch content (re-reads on write) so a concurrent librarian meta
+            // write isn't clobbered, and version the edit like the other write tools.
+            const updated = await updateFragmentVersioned(
+              dataDir,
+              storyId,
+              f.id,
+              { content: newContent },
+              { reason: 'llm-editProse' },
+            )
+            if (!updated) continue
             edited.push(f.id)
           }
         }
