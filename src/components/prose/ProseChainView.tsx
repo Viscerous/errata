@@ -91,6 +91,10 @@ function StreamingSection({
   const [fragmentCountBeforeGeneration, setFragmentCountBeforeGeneration] = useState<number | null>(null)
   const isNearBottomRef = useRef(true)
   const queryClient = useQueryClient()
+  const { data: story } = useQuery({
+    queryKey: ['story', storyId],
+    queryFn: () => api.stories.get(storyId),
+  })
 
   // Track whether user is near the bottom of the scroll area
   useEffect(() => {
@@ -148,6 +152,7 @@ function StreamingSection({
                 steps={thoughtSteps}
                 streaming={isGenerating}
                 hasText={!!streamedText}
+                defaultExpanded={story?.settings.expandThoughtsByDefault ?? true}
               />
             )}
             <StreamMarkdown content={streamedText} streaming={isGenerating} variant="prose" />

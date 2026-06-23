@@ -121,6 +121,10 @@ export const ProseBlock = memo(function ProseBlock({
   void isLast
   const queryClient = useQueryClient()
   const confirm = useConfirm()
+  const { data: story } = useQuery({
+    queryKey: ['story', storyId],
+    queryFn: () => api.stories.get(storyId),
+  })
   const [actionMode, setActionMode] = useState<'regenerate' | null>(null)
   const [showUndo, setShowUndo] = useState(false)
   const [isStreamingAction, setIsStreamingAction] = useState(false)
@@ -569,6 +573,7 @@ export const ProseBlock = memo(function ProseBlock({
             steps={actionThoughtSteps}
             streaming={isStreamingAction}
             hasText={!!streamedActionText}
+            defaultExpanded={story?.settings.expandThoughtsByDefault ?? true}
           />
         )}
         <StreamMarkdown
