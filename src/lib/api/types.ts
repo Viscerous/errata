@@ -452,6 +452,7 @@ export type ChatEvent =
   | { type: 'text'; text: string }
   | { type: 'reasoning'; text: string }
   | { type: 'prewriter-text'; text: string }
+  | { type: 'prewriter-reset' }
   | { type: 'tool-call'; id: string; toolName: string; args: Record<string, unknown> }
   | { type: 'tool-result'; id: string; toolName: string; result: unknown }
   | { type: 'phase'; phase: string }

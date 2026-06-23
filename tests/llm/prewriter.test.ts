@@ -139,6 +139,45 @@ function createMockPrewriterToolLoopResult(firstText: string, secondText: string
   }
 }
 
+/**
+ * Prewriter stream where the model writes the brief in one step, then re-emits
+ * it in a second step before calling suggestDirections (a common multi-step
+ * pattern). Uses finish-step boundaries like a real AI SDK v6 stream.
+ */
+function createMockPrewriterDuplicateBriefAcrossSteps(brief: string) {
+  async function* generateFullStream() {
+    // Step 1: writes the brief, no terminal tool yet.
+    yield { type: 'text-delta' as const, text: brief }
+    yield { type: 'finish-step' as const }
+    // Step 2: re-writes the same brief, then calls suggestDirections.
+    yield { type: 'text-delta' as const, text: brief }
+    yield {
+      type: 'tool-call' as const,
+      toolCallId: 'call-directions',
+      toolName: 'suggestDirections',
+      input: {
+        directions: [
+          { pacing: 'linger', title: 'Linger', description: 'Stay.', instruction: 'Stay.' },
+          { pacing: 'continue', title: 'Continue', description: 'Go.', instruction: 'Go.' },
+          { pacing: 'end', title: 'End', description: 'Close.', instruction: 'Close.' },
+        ],
+      },
+    }
+    yield {
+      type: 'tool-result' as const,
+      toolCallId: 'call-directions',
+      toolName: 'suggestDirections',
+      output: { ok: true },
+    }
+    yield { type: 'finish-step' as const }
+    yield { type: 'finish' as const, finishReason: 'tool-calls' }
+  }
+  return {
+    fullStream: generateFullStream(),
+    totalUsage: Promise.resolve({ inputTokens: 10, outputTokens: 20 }),
+  }
+}
+
 /** Parse NDJSON response body into an array of events */
 async function parseNDJSON(res: Response): Promise<Array<Record<string, unknown>>> {
   const text = await res.text()
@@ -433,6 +472,36 @@ describe('prewriter', () => {
 
       expect(writerText).toContain('First brief.')
       expect(writerText).not.toContain('Second repeated brief.')
+    })
+
+    it('does not duplicate the brief when the model re-writes it across steps', async () => {
+      await createStory(dataDir, makeStory({ generationMode: 'prewriter' }))
+
+      let callCount = 0
+      mockAgentStream.mockImplementation(() => {
+        callCount++
+        if (callCount === 1) {
+          return createMockPrewriterDuplicateBriefAcrossSteps('Focus on the gathering storm.') as any
+        }
+        return createMockStreamResult('The storm broke.') as any
+      })
+
+      const res = await apiCall(`/stories/${storyId}/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ input: 'Continue', saveResult: false }),
+      })
+      expect(res.status).toBe(200)
+      await res.text()
+
+      const writerArgs = mockAgentStream.mock.calls[1][0] as any
+      const writerText = writerArgs.messages!
+        .map((m: any) => typeof m.content === 'string' ? m.content : m.content?.map((p: any) => p.text).join('') ?? '')
+        .join('\n')
+
+      // The brief must appear exactly once in the writer's context.
+      const occurrences = writerText.split('Focus on the gathering storm.').length - 1
+      expect(occurrences).toBe(1)
     })
 
     it('prewriter mode saves prewriter metadata in generation log', async () => {

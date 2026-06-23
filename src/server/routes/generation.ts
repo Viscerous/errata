@@ -315,6 +315,10 @@ export function generationRoutes(dataDir: string) {
                   onEvent: (event) => {
                     if (event.type === 'text') {
                       emit({ type: 'prewriter-text', text: event.text })
+                    } else if (event.type === 'reset') {
+                      // The prewriter re-wrote the brief in a new step; tell the
+                      // client to discard the brief streamed so far.
+                      emit({ type: 'prewriter-reset' })
                     } else if (event.type === 'questions') {
                       // Canonical clarify-questions is emitted from the result below.
                     } else {
