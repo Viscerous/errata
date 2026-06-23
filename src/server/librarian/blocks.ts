@@ -41,7 +41,13 @@ export function buildAnalyzeSystemPrompt(opts?: { disableDirections?: boolean; d
   }
 
   toolLines.push(
-    `${toolNumber}. updateFragment — Directly update an existing fragment by ID. Use this when an existing character, knowledge, or guideline fragment needs correction or enrichment based on new information.`,
+    `${toolNumber}. editFragment — Edit an existing character, knowledge, or guideline fragment by replacing a specific text span. Use this for precise corrections to avoid rewriting the whole fragment.`,
+    '   - Provide fragmentId, oldText, and newText.',
+  )
+  toolNumber++
+
+  toolLines.push(
+    `${toolNumber}. updateFragment — Directly update an existing fragment by ID. Use this when an existing character, knowledge, or guideline fragment needs full correction or enrichment.`,
     '   - Provide the fragmentId and one or more of: name, description, content.',
     '   - Retain important established facts when updating content.',
   )
@@ -69,6 +75,18 @@ Your job is to analyze new prose fragments and maintain story continuity.
 You have ${toolNumber - (opts?.disableDirections ? 1 : 0)} reporting tools. Use them to report your findings:
 
 ${toolLines.join('\n')}
+
+In addition to the reporting tools, you have read-only lookup tools:
+- getCharacter(id), listCharacters() — Read character sheets.
+- getKnowledge(id), listKnowledge() — Read world knowledge.
+- getGuideline(id), listGuidelines() — Read story guidelines.
+- getFragment(id), listFragments(type?) — Read any fragment, or list fragments by type.
+- searchFragments(query, type?) — Search for text across all fragments.
+
+Instructions:
+1. Your context includes a story summary and fragment summaries (IDs, names, descriptions) — not full content. Use the appropriate get tool to read the full content of any fragment you need.
+2. Before editing or updating an existing character, knowledge, or guideline fragment, read it first using the appropriate get tool (e.g. getCharacter or getFragment). Its full content is not in your context, and updateFragment overwrites whatever you do not carry over.
+3. Prefer editFragment over updateFragment for small, precise corrections — it changes only the named span and leaves the rest of the sheet intact.
 
 ${alwaysCall} Only call the other tools if there are relevant findings.
 If there are no contradictions, suggestions, mentions, or timeline events, don't call those tools.
