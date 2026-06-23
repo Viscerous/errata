@@ -89,33 +89,40 @@ function StreamingSection({
   const [streamedText, setStreamedText] = useState('')
   const [thoughtSteps, setThoughtSteps] = useState<ThoughtStep[]>([])
   const [fragmentCountBeforeGeneration, setFragmentCountBeforeGeneration] = useState<number | null>(null)
-  const isNearBottomRef = useRef(true)
+  const followRef = useRef(true)
+  const lastTopRef = useRef(0)
   const queryClient = useQueryClient()
 
-  // Track whether user is near the bottom of the scroll area
+  // Auto-follow the bottom while generating. Any user scroll-up disengages it; returning to the
+  // bottom re-engages. The pin only ever moves scrollTop toward the bottom, so a decrease is the user.
   useEffect(() => {
-    const scrollContainer = scrollAreaRef.current?.querySelector('[data-radix-scroll-area-viewport]')
-    if (!scrollContainer) return
-    const handleScroll = () => {
-      const threshold = 80
-      isNearBottomRef.current = scrollContainer.scrollHeight - scrollContainer.scrollTop - scrollContainer.clientHeight < threshold
+    const viewport = scrollAreaRef.current?.querySelector('[data-radix-scroll-area-viewport]')
+    if (!viewport) return
+    const onScroll = () => {
+      if (viewport.scrollTop < lastTopRef.current - 2) followRef.current = false
+      else if (viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 24) followRef.current = true
+      lastTopRef.current = viewport.scrollTop
     }
-    scrollContainer.addEventListener('scroll', handleScroll, { passive: true })
-    return () => scrollContainer.removeEventListener('scroll', handleScroll)
+    viewport.addEventListener('scroll', onScroll, { passive: true })
+    return () => viewport.removeEventListener('scroll', onScroll)
   }, [scrollAreaRef])
 
-  // Auto-scroll during generation only when user is near bottom
+  // Re-engage auto-follow at the start of each generation
+  useEffect(() => {
+    if (isGenerating) followRef.current = true
+  }, [isGenerating])
+
   const scrollRafRef = useRef(0)
   useEffect(() => {
-    if (isNearBottomRef.current && isGenerating && (streamedText || thoughtSteps.length > 0) && scrollAreaRef.current) {
-      cancelAnimationFrame(scrollRafRef.current)
-      scrollRafRef.current = requestAnimationFrame(() => {
-        const scrollContainer = scrollAreaRef.current?.querySelector('[data-radix-scroll-area-viewport]')
-        if (scrollContainer) {
-          scrollContainer.scrollTop = scrollContainer.scrollHeight
-        }
-      })
-    }
+    if (!isGenerating || (!streamedText && thoughtSteps.length === 0)) return
+    cancelAnimationFrame(scrollRafRef.current)
+    scrollRafRef.current = requestAnimationFrame(() => {
+      const viewport = scrollAreaRef.current?.querySelector('[data-radix-scroll-area-viewport]')
+      if (viewport && followRef.current) {
+        viewport.scrollTop = viewport.scrollHeight
+        lastTopRef.current = viewport.scrollTop
+      }
+    })
   }, [streamedText, thoughtSteps, isGenerating, scrollAreaRef])
 
   useEffect(() => {
