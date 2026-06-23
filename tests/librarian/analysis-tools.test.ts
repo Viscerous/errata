@@ -32,6 +32,7 @@ describe('analysis-tools', () => {
         'reportMentions',
         'reportContradictions',
         'reportTimeline',
+        'editFragment',
         'updateFragment',
         'suggestFragment',
         'suggestDirections',
@@ -292,6 +293,141 @@ describe('analysis-tools', () => {
 
       expect(collector.fragmentSuggestions).toHaveLength(1)
       expect(result).toEqual({ ok: true })
+    })
+
+    it('editFragment replaces only the named span and preserves the rest of the body', async () => {
+      const { getFragment, updateFragmentVersioned } = await import('@/server/fragments/storage')
+      vi.mocked(getFragment).mockResolvedValueOnce({
+        id: 'ch-001',
+        type: 'character',
+        name: 'Alice',
+        description: 'A warrior',
+        content: 'Alice is a brave warrior with blue eyes. Currently twenty years old, captain of the city guard.',
+        tags: [],
+        refs: [],
+        sticky: false,
+        placement: 'user',
+        createdAt: '',
+        updatedAt: '',
+        order: 0,
+        meta: {},
+        version: 1,
+        versions: [],
+      })
+      vi.mocked(updateFragmentVersioned).mockResolvedValueOnce({ id: 'ch-001' } as any)
+
+      const collector = createEmptyCollector()
+      const tools = createAnalysisTools(collector, { dataDir: '/tmp', storyId: 'test-story' })
+      const result = await tools.editFragment.execute!({
+        fragmentId: 'ch-001',
+        oldText: 'twenty years old',
+        newText: 'twenty-one years old',
+      }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
+
+      expect(result).toEqual({ ok: true, fragmentId: 'ch-001' })
+      // The whole body is rewritten with only the span changed; the rest is preserved,
+      // and the analysis provenance stamp is retained.
+      expect(updateFragmentVersioned).toHaveBeenCalledWith(
+        '/tmp',
+        'test-story',
+        'ch-001',
+        { content: 'Alice is a brave warrior with blue eyes. Currently twenty-one years old, captain of the city guard.' },
+        { reason: 'librarian-analysis' },
+      )
+    })
+
+    it('editFragment returns an error when oldText is not present', async () => {
+      const { getFragment } = await import('@/server/fragments/storage')
+      vi.mocked(getFragment).mockResolvedValueOnce({
+        id: 'ch-001',
+        type: 'character',
+        name: 'Alice',
+        description: 'A warrior',
+        content: 'Alice is a brave warrior with blue eyes.',
+        tags: [],
+        refs: [],
+        sticky: false,
+        placement: 'user',
+        createdAt: '',
+        updatedAt: '',
+        order: 0,
+        meta: {},
+        version: 1,
+        versions: [],
+      })
+
+      const collector = createEmptyCollector()
+      const tools = createAnalysisTools(collector, { dataDir: '/tmp', storyId: 'test-story' })
+      const result = await tools.editFragment.execute!({
+        fragmentId: 'ch-001',
+        oldText: 'green eyes',
+        newText: 'hazel eyes',
+      }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
+
+      expect(result).toHaveProperty('error')
+      expect((result as any).error).toContain('Text not found')
+    })
+
+    it('editFragment refuses to edit prose fragments', async () => {
+      const { getFragment } = await import('@/server/fragments/storage')
+      vi.mocked(getFragment).mockResolvedValueOnce({
+        id: 'pr-001',
+        type: 'prose',
+        name: 'Chapter 1',
+        description: '',
+        content: 'Once upon a time.',
+        tags: [],
+        refs: [],
+        sticky: false,
+        placement: 'user',
+        createdAt: '',
+        updatedAt: '',
+        order: 0,
+        meta: {},
+        version: 1,
+        versions: [],
+      })
+
+      const collector = createEmptyCollector()
+      const tools = createAnalysisTools(collector, { dataDir: '/tmp', storyId: 'test-story' })
+      const result = await tools.editFragment.execute!({
+        fragmentId: 'pr-001',
+        oldText: 'Once',
+        newText: 'Twice',
+      }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
+
+      expect((result as any).error).toContain('Cannot edit prose')
+    })
+
+    it('editFragment refuses to edit a locked fragment', async () => {
+      const { getFragment } = await import('@/server/fragments/storage')
+      vi.mocked(getFragment).mockResolvedValueOnce({
+        id: 'ch-locked',
+        type: 'character',
+        name: 'Locked Char',
+        description: '',
+        content: 'Original content with a name inside.',
+        tags: [],
+        refs: [],
+        sticky: false,
+        placement: 'user',
+        createdAt: '',
+        updatedAt: '',
+        order: 0,
+        meta: { locked: true },
+        version: 1,
+        versions: [],
+      })
+
+      const collector = createEmptyCollector()
+      const tools = createAnalysisTools(collector, { dataDir: '/tmp', storyId: 'test-story' })
+      const result = await tools.editFragment.execute!({
+        fragmentId: 'ch-locked',
+        oldText: 'a name',
+        newText: 'another name',
+      }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
+
+      expect(result).toHaveProperty('error')
     })
   })
 })
