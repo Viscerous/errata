@@ -582,7 +582,13 @@ function CharactersStep({
   // As the cast streams in, progressively append parsed rows.
   useEffect(() => {
     if (!castGen.text) return
-    const parsed = parseCastList(castGen.text)
+    // The last line is usually still streaming, so parse only up to the last newline
+    // (fully-terminated rows); once the stream ends, parse everything.
+    const source = castGen.isStreaming
+      ? castGen.text.slice(0, castGen.text.lastIndexOf('\n') + 1)
+      : castGen.text
+    if (!source) return
+    const parsed = parseCastList(source)
     if (parsed.length === 0) return
 
     const seen = seenStreamedNamesRef.current
@@ -616,7 +622,7 @@ function CharactersStep({
         queryClient.invalidateQueries({ queryKey: ['fragments', storyId] })
       }).catch(() => { /* best effort */ })
     }
-  }, [castGen.text]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [castGen.text, castGen.isStreaming]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSummon = () => {
     seenStreamedNamesRef.current = new Set(characters.map(c => c.name.toLowerCase()))
