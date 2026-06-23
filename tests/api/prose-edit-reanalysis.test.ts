@@ -1,21 +1,16 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { createTempDir } from '../setup'
 
-vi.mock('@/server/librarian/scheduler', () => ({
-  triggerLibrarian: vi.fn().mockResolvedValue(undefined),
-  getLibrarianRuntimeStatus: vi.fn(() => ({
-    runStatus: 'idle',
-    pendingFragmentId: null,
-    runningFragmentId: null,
-    lastError: null,
-    updatedAt: new Date().toISOString(),
-  })),
+// Analysis ultimately fires through invokeAgent; stub it so the real gating runs without an LLM
+vi.mock('@/server/agents', () => ({
+  invokeAgent: vi.fn().mockResolvedValue(undefined),
 }))
 
-import { triggerLibrarian } from '@/server/librarian/scheduler'
+import { invokeAgent } from '@/server/agents'
+import { clearPending } from '@/server/librarian/scheduler'
 import { createApp } from '@/server/api'
 
-const mockedTriggerLibrarian = vi.mocked(triggerLibrarian)
+const mockedInvokeAgent = vi.mocked(invokeAgent)
 
 let dataDir: string
 let cleanup: () => Promise<void>
@@ -26,10 +21,12 @@ beforeEach(async () => {
   dataDir = tmp.path
   cleanup = tmp.cleanup
   app = createApp(dataDir)
-  mockedTriggerLibrarian.mockClear()
+  clearPending()
+  mockedInvokeAgent.mockClear()
 })
 
 afterEach(async () => {
+  clearPending()
   await cleanup()
 })
 
@@ -71,12 +68,13 @@ describe('prose edit reanalysis trigger', () => {
     }, 'PUT')
 
     expect(res.status).toBe(200)
-    expect(mockedTriggerLibrarian).toHaveBeenCalledTimes(1)
-    expect(mockedTriggerLibrarian).toHaveBeenCalledWith(
+    await vi.waitFor(() => expect(mockedInvokeAgent).toHaveBeenCalledTimes(1))
+    expect(mockedInvokeAgent).toHaveBeenCalledWith({
       dataDir,
       storyId,
-      expect.objectContaining({ id: fragmentId, type: 'prose' }),
-    )
+      agentName: 'librarian.analyze',
+      input: { fragmentId },
+    })
   })
 
   it('does not trigger librarian on prose PUT when only sticky changes', async () => {
@@ -90,7 +88,7 @@ describe('prose edit reanalysis trigger', () => {
     }, 'PUT')
 
     expect(res.status).toBe(200)
-    expect(mockedTriggerLibrarian).not.toHaveBeenCalled()
+    expect(mockedInvokeAgent).not.toHaveBeenCalled()
   })
 
   it('triggers librarian on prose PATCH when text replacement changes content', async () => {
@@ -102,12 +100,13 @@ describe('prose edit reanalysis trigger', () => {
     }, 'PATCH')
 
     expect(res.status).toBe(200)
-    expect(mockedTriggerLibrarian).toHaveBeenCalledTimes(1)
-    expect(mockedTriggerLibrarian).toHaveBeenCalledWith(
+    await vi.waitFor(() => expect(mockedInvokeAgent).toHaveBeenCalledTimes(1))
+    expect(mockedInvokeAgent).toHaveBeenCalledWith({
       dataDir,
       storyId,
-      expect.objectContaining({ id: fragmentId, type: 'prose' }),
-    )
+      agentName: 'librarian.analyze',
+      input: { fragmentId },
+    })
   })
 
   it('does not trigger librarian on prose PATCH when replacement is a no-op', async () => {
@@ -119,7 +118,7 @@ describe('prose edit reanalysis trigger', () => {
     }, 'PATCH')
 
     expect(res.status).toBe(200)
-    expect(mockedTriggerLibrarian).not.toHaveBeenCalled()
+    expect(mockedInvokeAgent).not.toHaveBeenCalled()
   })
 
   it('does not trigger librarian on non-prose PUT updates', async () => {
@@ -138,6 +137,6 @@ describe('prose edit reanalysis trigger', () => {
     }, 'PUT')
 
     expect(res.status).toBe(200)
-    expect(mockedTriggerLibrarian).not.toHaveBeenCalled()
+    expect(mockedInvokeAgent).not.toHaveBeenCalled()
   })
 })
