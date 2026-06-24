@@ -182,10 +182,10 @@ export function createAnalysisTools(collector: AnalysisCollector, opts?: { dataD
     }),
 
     editFragment: tool({
-      description: 'Preferred edit tool. Replace a specific text span (oldText) with newText in an existing character, knowledge, or guideline fragment. Use this for any targeted change — recording a death, a status change, a correction — because it leaves the rest of the sheet intact. oldText must match the fragment exactly, so edit against the full sheet (e.g. the one returned by reportMentions).',
+      description: 'Preferred edit tool. Replace a specific text span (oldText) with newText anywhere in an existing character, knowledge, or guideline fragment — its name, description, or content. Use this for any targeted change (a death, a status change, a correction): it leaves the rest of the sheet intact. oldText must match exactly, so edit against the full sheet (e.g. the one returned by reportMentions).',
       inputSchema: z.object({
         fragmentId: z.string().describe('The ID of the fragment to edit (e.g. ch-abc, kn-xyz)'),
-        oldText: z.string().describe('The exact text span inside the fragment to find and replace'),
+        oldText: z.string().describe('The exact text span to find and replace, from the name, description, or content'),
         newText: z.string().describe('The replacement text'),
       }),
       execute: async ({ fragmentId, oldText, newText }) => {
@@ -193,20 +193,23 @@ export function createAnalysisTools(collector: AnalysisCollector, opts?: { dataD
         const existing = await getFragment(opts.dataDir, opts.storyId, fragmentId)
         if (!existing) return { error: `Fragment ${fragmentId} not found` }
         if (existing.type === 'prose') return { error: 'Cannot edit prose fragments via this tool' }
-        if (!existing.content.includes(oldText)) {
-          return { error: `Text not found in fragment ${fragmentId}: "${oldText}"` }
+        // Locate oldText across the editable fields, in priority order.
+        const field = (['content', 'description', 'name'] as const).find(f => existing[f].includes(oldText))
+        if (!field) {
+          return { error: `Text not found in the name, description, or content of ${fragmentId}: "${oldText}". Match it exactly against the current sheet.` }
         }
-        const editedContent = existing.content.replace(oldText, newText)
-        const protection = checkFragmentWrite(existing, { content: editedContent })
+        const newValue = existing[field].replace(oldText, newText)
+        // Frozen-section protection only applies to content; locked applies to all.
+        const protection = checkFragmentWrite(existing, field === 'content' ? { content: newValue } : {})
         if (!protection.allowed) return { error: protection.reason }
-        const updated = await updateFragmentVersioned(opts.dataDir, opts.storyId, fragmentId, { content: editedContent }, { reason: 'librarian-analysis' })
+        const updated = await updateFragmentVersioned(opts.dataDir, opts.storyId, fragmentId, { [field]: newValue }, { reason: 'librarian-analysis' })
         if (!updated) return { error: `Failed to edit fragment ${fragmentId}` }
-        return { ok: true, fragmentId: updated.id }
+        return { ok: true, fragmentId: updated.id, field }
       },
     }),
 
     updateFragment: tool({
-      description: 'Replace whole fields on an existing fragment by ID. WARNING: content overwrites the ENTIRE body — anything you omit is lost. Only use this for a deliberate wholesale rewrite, and only with the full current sheet in hand (e.g. from reportMentions). For a targeted change, prefer editFragment.',
+      description: 'Replace whole fields on an existing fragment by ID. Each field you pass is replaced independently; fields you omit are untouched — so setting only name or description is a safe, targeted change. WARNING: setting content replaces the ENTIRE body, so only do that for a deliberate wholesale rewrite, built from the full current sheet (e.g. from reportMentions). For a small change to the body, prefer editFragment.',
       inputSchema: z.object({
         fragmentId: z.string().describe('The ID of the fragment to update (e.g. ch-abc, kn-xyz)'),
         name: z.string().optional().describe('New name for the fragment'),
