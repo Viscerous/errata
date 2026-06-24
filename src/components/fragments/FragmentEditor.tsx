@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, type Fragment, type FragmentVersion } from '@/lib/api'
 import { componentId, fragmentComponentId } from '@/lib/dom-ids'
+import { cn } from '@/lib/utils'
 import { parseVisualRefs, readImageUrl, type BoundaryBox } from '@/lib/fragment-visuals'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -870,13 +871,24 @@ export function FragmentEditor({
                     <span className="text-[0.625rem] text-muted-foreground">Current v{fragment.version ?? 1}</span>
                   </div>
                   {versions.length === 0 ? (
-                    <Hint>No previous versions yet.</Hint>
+                    <Hint>No version history yet.</Hint>
                   ) : (
                     <div className="space-y-1.5 max-h-36 overflow-auto pr-1">
-                      {versions.map((v: FragmentVersion) => (
-                        <div key={v.version} className="flex items-center justify-between rounded-md border border-border/40 px-2 py-1.5">
+                      {versions.map((v: FragmentVersion) => {
+                        const isCurrent = v.version === (fragment.version ?? 1)
+                        return (
+                        <div
+                          key={v.version}
+                          className={cn(
+                            'flex items-center justify-between rounded-md border px-2 py-1.5',
+                            isCurrent ? 'border-primary/40 bg-primary/5' : 'border-border/40',
+                          )}
+                        >
                           <div className="min-w-0">
-                            <p className="text-xs font-medium">v{v.version}</p>
+                            <p className="text-xs font-medium flex items-center gap-1.5">
+                              v{v.version}
+                              {isCurrent && <span className="text-[0.5625rem] uppercase tracking-wide text-primary/80">current</span>}
+                            </p>
                             <p className="text-[0.625rem] text-muted-foreground truncate">{new Date(v.createdAt).toLocaleString()}</p>
                           </div>
                           <div className="flex items-center gap-1">
@@ -895,9 +907,9 @@ export function FragmentEditor({
                               variant="ghost"
                               className="h-6 text-xs"
                               onClick={() => revertVersionMutation.mutate(v.version)}
-                              disabled={revertVersionMutation.isPending}
+                              disabled={revertVersionMutation.isPending || isCurrent}
                             >
-                              Restore
+                              Switch
                             </Button>
                             <Button
                               type="button"
@@ -905,14 +917,15 @@ export function FragmentEditor({
                               variant="ghost"
                               className="size-6 text-muted-foreground hover:text-destructive"
                               onClick={() => deleteVersionMutation.mutate(v.version)}
-                              disabled={deleteVersionMutation.isPending}
-                              title="Delete this version"
+                              disabled={deleteVersionMutation.isPending || isCurrent}
+                              title={isCurrent ? 'Switch to another version before deleting this one' : 'Delete this version'}
                             >
                               <Trash2 className="size-3" />
                             </Button>
                           </div>
                         </div>
-                      ))}
+                        )
+                      })}
                     </div>
                   )}
                   {previewVersion && (
@@ -930,8 +943,24 @@ export function FragmentEditor({
                         </Button>
                       </div>
                       <p className="text-[0.625rem] text-muted-foreground">`-` current content, `+` selected version</p>
-                      <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words rounded border border-border/30 bg-background/50 p-2 text-[0.6875rem] leading-4">
-                        {versionDiffLines.join('\n') || 'No content differences.'}
+                      <pre className="max-h-40 overflow-auto rounded border border-border/30 bg-background/50 p-2 text-[0.6875rem] leading-4">
+                        {versionDiffLines.length === 0 ? (
+                          'No content differences.'
+                        ) : (
+                          versionDiffLines.map((line, i) => (
+                            <div
+                              key={i}
+                              className={cn(
+                                'whitespace-pre-wrap break-words',
+                                line.startsWith('- ') && 'text-red-400 bg-red-500/10',
+                                line.startsWith('+ ') && 'text-emerald-400 bg-emerald-500/10',
+                                line.startsWith('  ') && 'text-muted-foreground',
+                              )}
+                            >
+                              {line}
+                            </div>
+                          ))
+                        )}
                       </pre>
                     </div>
                   )}

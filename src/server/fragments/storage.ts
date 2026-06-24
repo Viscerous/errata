@@ -46,22 +46,29 @@ async function writeJson(path: string, data: unknown): Promise<void> {
 
 function normalizeFragment(fragment: Fragment | null): Fragment | null {
   if (!fragment) return null
+  const version = fragment.version ?? 1
+  const rawVersions = Array.isArray(fragment.versions) ? fragment.versions : []
+  // Invariant: the live content is always represented as a version, so switching
+  // between versions is a pointer move (no new snapshot). Legacy fragments stored
+  // history as past-only with the current content outside the array — fold the
+  // current content in as its own version here, idempotently.
+  const versions = rawVersions.some((v) => v.version === version)
+    ? rawVersions
+    : [
+        ...rawVersions,
+        {
+          version,
+          name: fragment.name,
+          description: fragment.description,
+          content: fragment.content,
+          createdAt: fragment.updatedAt ?? fragment.createdAt ?? new Date().toISOString(),
+        },
+      ]
   return {
     ...fragment,
     archived: fragment.archived ?? false,
-    version: fragment.version ?? 1,
-    versions: Array.isArray(fragment.versions) ? fragment.versions : [],
-  }
-}
-
-function makeVersionSnapshot(fragment: Fragment, reason?: string): FragmentVersion {
-  return {
-    version: fragment.version ?? 1,
-    name: fragment.name,
-    description: fragment.description,
-    content: fragment.content,
-    createdAt: new Date().toISOString(),
-    ...(reason ? { reason } : {}),
+    version,
+    versions,
   }
 }
 
@@ -231,6 +238,11 @@ export async function updateFragmentVersioned(
     nextContent !== existing.content
 
   const now = new Date().toISOString()
+  // existing.versions already contains the current version (normalizeFragment).
+  // An edit appends the new content as a fresh version and points at it; numbering
+  // is max+1 so it never collides even when editing after switching to an older one.
+  const maxVersion = (existing.versions ?? []).reduce((m, v) => Math.max(m, v.version), 0)
+  const newVersion = maxVersion + 1
   const updated: Fragment = hasVersionedChange
     ? {
         ...existing,
@@ -238,8 +250,18 @@ export async function updateFragmentVersioned(
         description: nextDescription,
         content: nextContent,
         updatedAt: now,
-        version: (existing.version ?? 1) + 1,
-        versions: [...(existing.versions ?? []), makeVersionSnapshot(existing, opts?.reason)],
+        version: newVersion,
+        versions: [
+          ...(existing.versions ?? []),
+          {
+            version: newVersion,
+            name: nextName,
+            description: nextDescription,
+            content: nextContent,
+            createdAt: now,
+            ...(opts?.reason ? { reason: opts.reason } : {}),
+          },
+        ],
       }
     : {
         ...existing,
@@ -263,6 +285,12 @@ export async function listFragmentVersions(
   return [...(fragment.versions ?? [])]
 }
 
+/**
+ * Make a stored version current. This is a pointer move: the version history is
+ * unchanged, only which version is active. With no targetVersion it steps back to
+ * the previous version (the highest number below the current) — the "undo" path.
+ * Returns null if the fragment, the target, or (for undo) a previous version is absent.
+ */
 export async function revertFragmentToVersion(
   dataDir: string,
   storyId: string,
@@ -273,26 +301,24 @@ export async function revertFragmentToVersion(
   if (!fragment) return null
 
   const versions = fragment.versions ?? []
-  const snapshot = targetVersion === undefined
-    ? versions.at(-1)
-    : versions.find((v) => v.version === targetVersion)
+  const resolvedTarget = targetVersion === undefined
+    ? versions
+        .map((v) => v.version)
+        .filter((n) => n < (fragment.version ?? 1))
+        .reduce<number | null>((max, n) => (max === null || n > max ? n : max), null)
+    : targetVersion
+  if (resolvedTarget === null || resolvedTarget === undefined) return null
+
+  const snapshot = versions.find((v) => v.version === resolvedTarget)
   if (!snapshot) return null
 
-  const now = new Date().toISOString()
-  const nextVersion = (fragment.version ?? 1) + 1
   const updated: Fragment = {
     ...fragment,
     name: snapshot.name,
     description: snapshot.description,
     content: snapshot.content,
-    updatedAt: now,
-    version: nextVersion,
-    versions: [
-      ...versions,
-      makeVersionSnapshot(fragment, targetVersion === undefined
-        ? `revert-to-${snapshot.version}`
-        : `revert-to-${targetVersion}`),
-    ],
+    updatedAt: new Date().toISOString(),
+    version: resolvedTarget,
   }
 
   await updateFragment(dataDir, storyId, updated)
@@ -301,8 +327,8 @@ export async function revertFragmentToVersion(
 
 /**
  * Remove a single snapshot from a fragment's version history (for tidying up).
- * Does not change the fragment's current content or bump its version — it only
- * drops the stored snapshot. Returns null if the fragment or version is absent.
+ * The current version cannot be deleted — switch to another version first.
+ * Returns null if the fragment is absent, the version is missing, or it is current.
  */
 export async function deleteFragmentVersion(
   dataDir: string,
@@ -315,6 +341,7 @@ export async function deleteFragmentVersion(
 
   const versions = fragment.versions ?? []
   if (!versions.some((v) => v.version === targetVersion)) return null
+  if ((fragment.version ?? 1) === targetVersion) return null
 
   const updated: Fragment = {
     ...fragment,
