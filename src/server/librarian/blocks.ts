@@ -22,26 +22,39 @@ import {
 // ─── Librarian Analyze ───
 
 export function buildAnalyzeSystemPrompt(opts?: { disableDirections?: boolean; disableSuggestions?: boolean }): string {
+  // An explicit, ordered procedure: it keeps the step-by-step robustness of a
+  // checklist while leaving each tool's parameters to its schema (no catalog to
+  // drift). Steps for disabled tools are omitted and the rest renumber, so the
+  // prompt never names a tool the model wasn't given.
+  const steps: string[] = [
+    'Summarize what happened — call updateSummary.',
+    'Report every character who appears — call reportMentions with their IDs. It returns each one\'s full sheet, which you need to edit accurately.',
+    'Record contradictions with established facts (reportContradictions) and significant events (reportTimeline) when the prose has them.',
+    'Update a fragment when the prose changes it: to change a name or description, call updateFragment with just those fields (it leaves the body untouched); to change part of the body, call editFragment with the exact span from the sheet in step 2; to rewrite a body wholesale, call updateFragment with complete new content built from that sheet — never from the one-line summary.',
+  ]
+  if (!opts?.disableSuggestions) {
+    steps.push('Suggest genuinely new characters or knowledge with suggestFragment — only ones that do not exist yet.')
+  }
+  if (!opts?.disableDirections) {
+    steps.push('Suggest 3-5 possible next directions for the story with suggestDirections.')
+  }
+  const numbered = steps.map((s, i) => `${i + 1}. ${s}`).join('\n')
+
   const alwaysCall = opts?.disableDirections
     ? 'Always call updateSummary.'
     : 'Always call updateSummary and suggestDirections.'
 
-  // Tools reach the model via the SDK schema, so this prompt covers the job and
-  // policy by concept rather than enumerating a catalog that could drift.
   return `
 You are a librarian agent for a collaborative writing app.
-Your job is to analyze new prose fragments and maintain story continuity.
+Your job is to analyze a new prose fragment and maintain story continuity.
 
-Use your reporting tools to record what you find: a summary of what happened, character mentions, contradictions with established facts, timeline events${opts?.disableSuggestions ? '' : ', and suggested new character/knowledge fragments'}${opts?.disableDirections ? '' : ', and possible next directions for the story'}. Update existing character, knowledge, or guideline fragments when new information corrects or enriches them.
+Your context lists characters as one-line summaries (ID, name, description); knowledge is provided in full.
 
-Instructions:
-1. Your context lists characters as one-line summaries (ID, name, description), not full sheets. Knowledge is provided in full.
-2. Report a character's mention before editing it — reportMentions returns that character's full sheet. Edit against the returned sheet, never from the summary alone: updateFragment overwrites the entire body, so anything not carried over is lost.
-3. Prefer editFragment for precise changes (e.g. recording a death or status change) — it replaces only the named span and keeps the rest of the sheet. Reserve updateFragment for wholesale rewrites.
+Work through these steps in order:
+${numbered}
 
-${alwaysCall} Only call the other tools if there are relevant findings.
-If there are no contradictions, suggestions, mentions, or timeline events, don't call those tools.
-Only return 'Analysis complete' in your final output.
+${alwaysCall} Only call the other reporting tools when there are relevant findings.
+Return 'Analysis complete' as your only final output.
 `
 }
 
