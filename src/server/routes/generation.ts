@@ -223,6 +223,9 @@ export function generationRoutes(dataDir: string) {
       let fullText = ''
       let fullReasoning = ''
       const toolCalls: ToolCallLog[] = []
+      // Args arrive on tool-call, the result later on tool-result; stash by id
+      // to keep args in the persisted record.
+      const pendingToolArgs = new Map<string, Record<string, unknown>>()
       let lastFinishReason = 'unknown'
       let stepCount = 0
       let wasAborted = false
@@ -366,6 +369,7 @@ export function generationRoutes(dataDir: string) {
                 }
                 case 'tool-call': {
                   const input = (p.input ?? {}) as Record<string, unknown>
+                  pendingToolArgs.set(p.toolCallId as string, input)
                   event = {
                     type: 'tool-call',
                     id: p.toolCallId as string,
@@ -378,7 +382,7 @@ export function generationRoutes(dataDir: string) {
                   const toolName = (p.toolName as string) ?? ''
                   toolCalls.push({
                     toolName,
-                    args: {},
+                    args: pendingToolArgs.get(p.toolCallId as string) ?? {},
                     result: p.output,
                   })
                   event = {
