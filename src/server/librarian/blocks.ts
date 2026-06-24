@@ -22,27 +22,39 @@ import {
 // ─── Librarian Analyze ───
 
 export function buildAnalyzeSystemPrompt(opts?: { disableDirections?: boolean; disableSuggestions?: boolean }): string {
+  // An explicit, ordered procedure: it keeps the step-by-step robustness of a
+  // checklist while leaving each tool's parameters to its schema (no catalog to
+  // drift). Steps for disabled tools are omitted and the rest renumber, so the
+  // prompt never names a tool the model wasn't given.
+  const steps: string[] = [
+    'Report every character who appears — call reportMentions with their IDs. It returns each one\'s full sheet, which you need to edit accurately, so do this first.',
+    'Summarize what happened — call updateSummary.',
+    'Record contradictions with established facts (reportContradictions) and significant events (reportTimeline) when the prose has them.',
+    'Update a fragment when the prose changes a lasting fact about it — a death, an injury, a change in allegiance, title, location, or relationship. The character and knowledge sheets are the record of current state and are fed into later writing, so the change must land on the sheet itself; the summary and timeline log the event but do not keep the sheet current. To change a name or description, call updateFragment with just those fields (it leaves the body untouched); to change part of the body, call editFragment with the exact span from the sheet in step 1; to rewrite a body wholesale, call updateFragment with complete new content from that sheet — never from the one-line summary.',
+  ]
+  if (!opts?.disableSuggestions) {
+    steps.push('Suggest genuinely new characters or knowledge with suggestFragment — only ones that do not exist yet.')
+  }
+  if (!opts?.disableDirections) {
+    steps.push('Suggest 3-5 possible next directions for the story with suggestDirections.')
+  }
+  const numbered = steps.map((s, i) => `${i + 1}. ${s}`).join('\n')
+
   const alwaysCall = opts?.disableDirections
     ? 'Always call updateSummary.'
     : 'Always call updateSummary and suggestDirections.'
 
-  // Tools reach the model via the SDK schema, so this prompt covers the job and
-  // policy by concept rather than enumerating a catalog that could drift.
   return `
 You are a librarian agent for a collaborative writing app.
-Your job is to analyze new prose fragments and maintain story continuity.
+Your job is to analyze a new prose fragment and maintain story continuity.
 
-Use your reporting tools to record what you find: a summary of what happened, character mentions, contradictions with established facts, timeline events${opts?.disableSuggestions ? '' : ', and suggested new character/knowledge fragments'}${opts?.disableDirections ? '' : ', and possible next directions for the story'}. Update existing character, knowledge, or guideline fragments when new information corrects or enriches them.
-You also have read-only lookup tools to read full fragment content and search across fragments. Each tool's parameters and usage are described in its definition.
+Your context lists characters as one-line summaries (ID, name, description); knowledge is provided in full.
 
-Instructions:
-1. Your context includes a story summary and fragment summaries (IDs, names, descriptions) — not full content. Use the appropriate get tool to read the full content of any fragment you need.
-2. Before editing or updating an existing character, knowledge, or guideline fragment, read it first using the appropriate get tool (e.g. getCharacter or getFragment). Its full content is not in your context, and updateFragment overwrites whatever you do not carry over.
-3. Prefer editFragment over updateFragment for small, precise corrections — it changes only the named span and leaves the rest of the sheet intact.
+Work through these steps in order:
+${numbered}
 
-${alwaysCall} Only call the other tools if there are relevant findings.
-If there are no contradictions, suggestions, mentions, or timeline events, don't call those tools.
-Only return 'Analysis complete' in your final output.
+${alwaysCall} Only call the other reporting tools when there are relevant findings.
+Return 'Analysis complete' as your only final output.
 `
 }
 
@@ -69,7 +81,19 @@ export function createLibrarianAnalyzeBlocks(ctx: AgentBlockContext): ContextBlo
   }
 
   if (ctx.allKnowledge && ctx.allKnowledge.length > 0) {
-    blocks.push(fragmentSummaryBlock({ id: 'knowledge-shortlist', heading: 'Knowledge', items: ctx.allKnowledge, order: 300, editable: true }))
+    // Knowledge is delivered in full (bounded, read-mostly — analyze checks
+    // contradictions against it). Characters stay summaries; their bodies arrive
+    // via reportMentions.
+    blocks.push({
+      id: 'knowledge',
+      role: 'user',
+      content: [
+        '## Knowledge',
+        ...ctx.allKnowledge.map(k => `### ${k.id}: ${k.name}\n${k.content}`),
+      ].join('\n\n'),
+      order: 300,
+      source: 'builtin',
+    })
   }
 
   if (ctx.newProse) {

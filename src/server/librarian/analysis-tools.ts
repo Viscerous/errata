@@ -2,7 +2,6 @@ import { tool, type ToolSet } from 'ai'
 import { z } from 'zod/v4'
 import { getFragment, updateFragmentVersioned } from '../fragments/storage'
 import { checkFragmentWrite } from '../fragments/protection'
-import { createFragmentTools } from '../llm/tools'
 
 // --- Collector ---
 
@@ -124,7 +123,7 @@ export function createAnalysisTools(collector: AnalysisCollector, opts?: { dataD
     }),
 
     reportMentions: tool({
-      description: 'Report character mentions found in the new prose. Call once with all mentions. Each character should appear only once — use the primary name.',
+      description: 'Report character mentions found in the new prose. Call once with all mentions. Each character should appear only once — use the primary name. Returns each mentioned character\'s full sheet so you can edit it accurately.',
       inputSchema: z.object({
         mentions: z.array(z.object({
           characterId: z.string().describe('The character fragment ID (e.g. ch-abc)'),
@@ -139,7 +138,18 @@ export function createAnalysisTools(collector: AnalysisCollector, opts?: { dataD
           seen.add(m.characterId)
           collector.mentions.push(m)
         }
-        return { ok: true }
+        // Return the full sheets of the mentioned characters. The model only had
+        // summaries in context, so this delivers the bodies it needs to edit
+        // accurately — right before any updateFragment/editFragment call.
+        if (!opts) return { ok: true }
+        const characters: Array<{ id: string; name: string; description: string; content: string }> = []
+        for (const id of new Set(mentions.map(m => m.characterId))) {
+          const frag = await getFragment(opts.dataDir, opts.storyId, id)
+          if (frag) {
+            characters.push({ id: frag.id, name: frag.name, description: frag.description, content: frag.content })
+          }
+        }
+        return { ok: true, characters }
       },
     }),
 
@@ -172,10 +182,10 @@ export function createAnalysisTools(collector: AnalysisCollector, opts?: { dataD
     }),
 
     editFragment: tool({
-      description: 'Edit an existing character, knowledge, or guideline fragment by replacing a specific text span (oldText) with newText. Use this for precise corrections and edits to avoid rewriting the whole fragment.',
+      description: 'Replace an exact text span (oldText) with newText in a character, knowledge, or guideline fragment. Searches the name, description, and content, and changes only the matched span. oldText must match the current text exactly.',
       inputSchema: z.object({
         fragmentId: z.string().describe('The ID of the fragment to edit (e.g. ch-abc, kn-xyz)'),
-        oldText: z.string().describe('The exact text span inside the fragment to find and replace'),
+        oldText: z.string().describe('The exact text span to find and replace, from the name, description, or content'),
         newText: z.string().describe('The replacement text'),
       }),
       execute: async ({ fragmentId, oldText, newText }) => {
@@ -183,25 +193,28 @@ export function createAnalysisTools(collector: AnalysisCollector, opts?: { dataD
         const existing = await getFragment(opts.dataDir, opts.storyId, fragmentId)
         if (!existing) return { error: `Fragment ${fragmentId} not found` }
         if (existing.type === 'prose') return { error: 'Cannot edit prose fragments via this tool' }
-        if (!existing.content.includes(oldText)) {
-          return { error: `Text not found in fragment ${fragmentId}: "${oldText}"` }
+        // Locate oldText across the editable fields, in priority order.
+        const field = (['content', 'description', 'name'] as const).find(f => existing[f].includes(oldText))
+        if (!field) {
+          return { error: `Text not found in the name, description, or content of ${fragmentId}: "${oldText}". Match it exactly against the current sheet.` }
         }
-        const editedContent = existing.content.replace(oldText, newText)
-        const protection = checkFragmentWrite(existing, { content: editedContent })
+        const newValue = existing[field].replace(oldText, newText)
+        // Frozen-section protection only applies to content; locked applies to all.
+        const protection = checkFragmentWrite(existing, field === 'content' ? { content: newValue } : {})
         if (!protection.allowed) return { error: protection.reason }
-        const updated = await updateFragmentVersioned(opts.dataDir, opts.storyId, fragmentId, { content: editedContent }, { reason: 'librarian-analysis' })
+        const updated = await updateFragmentVersioned(opts.dataDir, opts.storyId, fragmentId, { [field]: newValue }, { reason: 'librarian-analysis' })
         if (!updated) return { error: `Failed to edit fragment ${fragmentId}` }
-        return { ok: true, fragmentId: updated.id }
+        return { ok: true, fragmentId: updated.id, field }
       },
     }),
 
     updateFragment: tool({
-      description: 'Directly update an existing fragment by ID. Use this to correct or enrich character, knowledge, or guideline fragments based on new information from the prose.',
+      description: 'Replace whole fields on a fragment by ID. Only the fields you pass change; the rest are left untouched. Setting content replaces the entire body, so provide complete new text built from the fragment\'s current sheet.',
       inputSchema: z.object({
         fragmentId: z.string().describe('The ID of the fragment to update (e.g. ch-abc, kn-xyz)'),
         name: z.string().optional().describe('New name for the fragment'),
         description: z.string().max(250).optional().describe('New description (max 250 chars)'),
-        content: z.string().optional().describe('New content. Retain important established facts.'),
+        content: z.string().optional().describe('The complete new body; it replaces the existing content in full. Build it from the fragment\'s current text, not from the one-line summary.'),
       }),
       execute: async ({ fragmentId, name, description, content }) => {
         if (!opts) return { error: 'updateFragment not available in this context' }
@@ -292,19 +305,18 @@ export function createAnalysisTools(collector: AnalysisCollector, opts?: { dataD
 }
 
 /**
- * The full analyze toolset: reporting tools plus read-only lookup tools so the
- * pass can read fragments before editing. Single source for the runtime handler
- * and the agent's available-tools list, so the toggle path and the model stay
- * in sync.
+ * The analyze toolset. Single source for the runtime handler and the agent's
+ * available-tools list, so the toggle path and the model stay in sync.
+ *
+ * No read/lookup tools: characters arrive in full via reportMentions and
+ * knowledge sits in context in full, so the pass never needs to fetch — which
+ * also spares this high-frequency background agent the extra round-trips.
  */
 export function createLibrarianAnalyzeTools(
   collector: AnalysisCollector,
   opts: { dataDir: string; storyId: string; disableDirections?: boolean; disableSuggestions?: boolean },
 ): ToolSet {
-  return {
-    ...createAnalysisTools(collector, opts),
-    ...createFragmentTools(opts.dataDir, opts.storyId, { readOnly: true }),
-  }
+  return createAnalysisTools(collector, opts)
 }
 
 /** Tool names the analyze agent exposes — drives the toggle list with no drift. */
