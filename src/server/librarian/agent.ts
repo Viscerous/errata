@@ -25,8 +25,7 @@ import { applyFragmentSuggestion } from './suggestions'
 import { reportUsage } from '../llm/token-tracker'
 import { createLogger } from '../logging'
 import { compileAgentContext } from '../agents/compile-agent-context'
-import { createEmptyCollector, createAnalysisTools } from './analysis-tools'
-import { createFragmentTools } from '../llm/tools'
+import { createEmptyCollector, createLibrarianAnalyzeTools } from './analysis-tools'
 import { buildAnalyzeSystemPrompt } from './blocks'
 import {
   createAnalysisBuffer,
@@ -130,10 +129,7 @@ async function runLibrarianInner(
   const disableDirections = story.settings?.disableLibrarianDirections === true
   const disableSuggestions = story.settings?.disableLibrarianSuggestions === true
   const collector = createEmptyCollector()
-  const analysisTools = {
-    ...createAnalysisTools(collector, { dataDir, storyId, disableDirections, disableSuggestions }),
-    ...createFragmentTools(dataDir, storyId, { readOnly: true }),
-  }
+  const analysisTools = createLibrarianAnalyzeTools(collector, { dataDir, storyId, disableDirections, disableSuggestions })
 
   // Compile context via block system
   const compiled = await compileAgentContext(dataDir, storyId, 'librarian.analyze', blockContext, analysisTools)

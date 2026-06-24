@@ -1,7 +1,8 @@
-import { tool } from 'ai'
+import { tool, type ToolSet } from 'ai'
 import { z } from 'zod/v4'
 import { getFragment, updateFragmentVersioned } from '../fragments/storage'
 import { checkFragmentWrite } from '../fragments/protection'
+import { createFragmentTools } from '../llm/tools'
 
 // --- Collector ---
 
@@ -288,4 +289,25 @@ export function createAnalysisTools(collector: AnalysisCollector, opts?: { dataD
   }
 
   return tools
+}
+
+/**
+ * The full analyze toolset: reporting tools plus read-only lookup tools so the
+ * pass can read fragments before editing. Single source for the runtime handler
+ * and the agent's available-tools list, so the toggle path and the model stay
+ * in sync.
+ */
+export function createLibrarianAnalyzeTools(
+  collector: AnalysisCollector,
+  opts: { dataDir: string; storyId: string; disableDirections?: boolean; disableSuggestions?: boolean },
+): ToolSet {
+  return {
+    ...createAnalysisTools(collector, opts),
+    ...createFragmentTools(opts.dataDir, opts.storyId, { readOnly: true }),
+  }
+}
+
+/** Tool names the analyze agent exposes — drives the toggle list with no drift. */
+export function listLibrarianAnalyzeToolNames(): string[] {
+  return Object.keys(createLibrarianAnalyzeTools(createEmptyCollector(), { dataDir: '', storyId: '' }))
 }
