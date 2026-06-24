@@ -58,30 +58,34 @@ can pin it before touching the renderer / `runLibrarian`.
   the rest of the sheet, the right primitive for "record a death." Reserve
   `updateFragment` for wholesale rewrites.
 
-## Cross-agent reuse
+## Scope: analyze-only (decided)
 
-- **Writer:** it already loads the recent prose window (last *N*, default
-  `proseLimit: 10`), and each of those fragments carries `meta.annotations`
-  (resolved mentions) from prior analysis. Reuse those as the relevance set, with
-  no extra fetch. Render the mentioned + sticky characters **full**; the rest stay
-  summaries (with `getFragment` available). The mention-bodies mechanic is
-  therefore **analyze-only**; the writer gets fullness straight from the window
-  annotations.
-- **Directions:** already inlines the full cast; under the unified model it is
-  simply "budget high, window = whole story."
-- **Unifying concept:** *relevance = resolved mentions*, sourced from a live
-  `reportMentions` (analyze) or stored window annotations (writer).
+The mention-delivers-bodies mechanic is **analyze-only**. We deliberately do
+**not** give the writer full character bodies via mention-relevance for now,
+because it would be **asymmetric**: characters have a relevance signal (resolved
+mentions) but knowledge does not, so characters would silently gain depth while
+knowledge stayed shallow, with nothing explaining the difference. Uniform context
+beats lopsided context.
+
+- **Writer:** keep summaries + `getFragment` for **both** characters and
+  knowledge, off the shortlist — symmetric, even though it leans on the
+  discretionary-fetch path. Sticky fragments remain full as today. Revisit only
+  once knowledge has a relevance signal to match characters.
+- **Analyze:** symmetric by construction — knowledge sits in context in full;
+  character bodies arrive via `reportMentions`. This is where the mechanic earns
+  its keep (the editor, where blind overwrite happens).
+- **Directions:** already inlines the full cast; unchanged.
 
 ## Budget — none for now (decided)
 
 We adopt the **Directions precedent: no budget on full bodies.** Directions
 already inlines the entire cast in full (only prose is capped), and it works in
-practice. So for now, analyze and the writer also inline the relevant full
-sheets unbounded — analyze is naturally limited by what gets mentioned, and the
-writer by the mention set in its prose window.
+practice. So for now, analyze inlines knowledge in full and delivers mentioned
+character sheets unbounded — naturally limited by what the prose actually
+mentions.
 
-This is knowingly not sensible at large scale (a huge cast all mentioned in a
-window, or lore-heavy full knowledge, will bloat context). When that bites, the
+This is knowingly not sensible at large scale (lore-heavy full knowledge, or a
+scene that mentions a huge cast, will bloat context). When that bites, the
 fallback is already specced: reuse the existing `chars/4` estimate and the
 `ContextCompactOption` precedent to cap full bodies and spill the overflow to
 summaries + `getFragment`. We build that knob only when a real story needs it.
@@ -95,8 +99,9 @@ summaries + `getFragment`. We build that knob only when a real story needs it.
 
 ## Decisions (settled)
 
-1. **Mention-bodies mechanic is analyze-only.** The writer gets fullness from the
-   resolved mentions already stored on its recent prose window, so it doesn't
-   need `reportMentions`-returns-bodies.
+1. **Mention-bodies mechanic is analyze-only.** The writer keeps summaries +
+   `getFragment` for both characters and knowledge — symmetric. Giving the writer
+   mention-relevant character bodies is deferred until knowledge has a matching
+   relevance signal (otherwise characters gain depth and knowledge doesn't).
 2. **No budget for now** — adopt the Directions precedent (unbounded full bodies).
    Add a `chars/4` + `ContextCompact` cap later, only when a real story needs it.
