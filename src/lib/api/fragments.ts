@@ -50,6 +50,8 @@ export const fragments = {
     apiFetch<{ versions: FragmentVersion[] }>(`/stories/${storyId}/fragments/${fragmentId}/versions`),
   revertToVersion: (storyId: string, fragmentId: string, version: number) =>
     apiFetch<Fragment>(`/stories/${storyId}/fragments/${fragmentId}/versions/${version}/revert`, { method: 'POST' }),
+  deleteVersion: (storyId: string, fragmentId: string, version: number) =>
+    apiFetch<Fragment>(`/stories/${storyId}/fragments/${fragmentId}/versions/${version}`, { method: 'DELETE' }),
   // Reorder (bulk)
   reorder: (storyId: string, items: Array<{ id: string; order: number }>) =>
     apiFetch<{ ok: boolean }>(`/stories/${storyId}/fragments/reorder`, {

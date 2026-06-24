@@ -299,6 +299,32 @@ export async function revertFragmentToVersion(
   return updated
 }
 
+/**
+ * Remove a single snapshot from a fragment's version history (for tidying up).
+ * Does not change the fragment's current content or bump its version — it only
+ * drops the stored snapshot. Returns null if the fragment or version is absent.
+ */
+export async function deleteFragmentVersion(
+  dataDir: string,
+  storyId: string,
+  fragmentId: string,
+  targetVersion: number
+): Promise<Fragment | null> {
+  const fragment = await getFragment(dataDir, storyId, fragmentId)
+  if (!fragment) return null
+
+  const versions = fragment.versions ?? []
+  if (!versions.some((v) => v.version === targetVersion)) return null
+
+  const updated: Fragment = {
+    ...fragment,
+    versions: versions.filter((v) => v.version !== targetVersion),
+  }
+
+  await updateFragment(dataDir, storyId, updated)
+  return updated
+}
+
 export async function deleteFragment(
   dataDir: string,
   storyId: string,
