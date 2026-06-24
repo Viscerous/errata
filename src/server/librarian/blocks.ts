@@ -25,9 +25,8 @@ export function buildAnalyzeSystemPrompt(opts?: { disableDirections?: boolean; d
     ? 'Always call updateSummary.'
     : 'Always call updateSummary and suggestDirections.'
 
-  // Tool names, parameters, and per-tool guidance are delivered to the model via
-  // the SDK tool schema, so this prompt describes the job and policy by concept
-  // rather than enumerating a catalog that could drift from the enabled tools.
+  // Tools reach the model via the SDK schema, so this prompt covers the job and
+  // policy by concept rather than enumerating a catalog that could drift.
   return `
 You are a librarian agent for a collaborative writing app.
 Your job is to analyze new prose fragments and maintain story continuity.
@@ -157,8 +156,8 @@ Fragment ID prefixes: pr- (prose), ch- (character), gl- (guideline), kn- (knowle
 export function createLibrarianChatBlocks(ctx: AgentBlockContext): ContextBlock[] {
   const blocks: ContextBlock[] = []
 
-  // Plugin tools (like all tools) reach the model via the SDK schema and are
-  // filtered by the agent's disabledTools, so we don't enumerate them here.
+  // Plugin tools reach the model via the SDK schema and honor disabledTools, so
+  // they aren't enumerated here.
   blocks.push({
     id: 'instructions',
     role: 'system',

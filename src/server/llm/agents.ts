@@ -3,6 +3,7 @@ import { instructionRegistry } from '../instructions'
 import type { AgentBlockContext } from '../agents/agent-block-context'
 import { registry } from '../fragments/registry'
 import { createDefaultBlocks, buildContextState, type ContextBuildState, type ContextBlock } from './context-builder'
+import { createFragmentTools } from './tools'
 import { createPrewriterBlocks, buildPrewriterPreviewContext, createWriterBriefBlocks, PREWRITER_INSTRUCTIONS } from './prewriter'
 import {
   GENERATION_SYSTEM_PROMPT,
@@ -89,6 +90,7 @@ export function registerGenerationBlocks(): void {
     displayName: 'Writer',
     description: 'Prose continuation and generation',
     availableTools: getAvailableTools(),
+    resolveTools: ({ dataDir, storyId }) => createFragmentTools(dataDir, storyId, { readOnly: true }),
     createDefaultBlocks: createGenerationBlocks,
     buildPreviewContext: buildGenerationPreviewContext,
   })
@@ -98,6 +100,7 @@ export function registerGenerationBlocks(): void {
     displayName: 'Prewriter',
     description: 'Creates a focused writing brief from full story context.',
     availableTools: getAvailableTools(),
+    resolveTools: ({ dataDir, storyId }) => createFragmentTools(dataDir, storyId, { readOnly: true }),
     createDefaultBlocks: createPrewriterBlocks,
     buildPreviewContext: buildPrewriterPreviewContext,
   })
