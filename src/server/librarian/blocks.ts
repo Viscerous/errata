@@ -30,7 +30,7 @@ export function buildAnalyzeSystemPrompt(opts?: { disableDirections?: boolean; d
     'Summarize what happened — call updateSummary.',
     'Report every character who appears — call reportMentions with their IDs. It returns each one\'s full sheet, which you need to edit accurately.',
     'Record contradictions with established facts (reportContradictions) and significant events (reportTimeline) when the prose has them.',
-    'Update a fragment when the prose changes it: to change a name or description, call updateFragment with just those fields (it leaves the body untouched); to change part of the body, call editFragment with the exact span from the sheet in step 2; to rewrite a body wholesale, call updateFragment with complete new content built from that sheet — never from the one-line summary.',
+    'Update a fragment when the prose changes a lasting fact about it — a death, an injury, a change in allegiance, title, location, or relationship. The character and knowledge sheets are the record of current state and are fed into later writing, so the change must land on the sheet itself; the summary and timeline log the event but do not keep the sheet current. To change a name or description, call updateFragment with just those fields (it leaves the body untouched); to change part of the body, call editFragment with the exact span from the sheet in step 2; to rewrite a body wholesale, call updateFragment with complete new content from that sheet — never from the one-line summary.',
   ]
   if (!opts?.disableSuggestions) {
     steps.push('Suggest genuinely new characters or knowledge with suggestFragment — only ones that do not exist yet.')
