@@ -157,13 +157,15 @@ export function agentBlockRoutes(dataDir: string) {
       if (def.resolveTools) {
         const resolved = await def.resolveTools({ dataDir, storyId: params.storyId })
         const disabled = new Set(config.disabledTools ?? [])
+        // Preserve the toolset's declaration order — it reflects the agent's
+        // workflow (e.g. report tools, then edit tools, then suggest tools) —
+        // rather than re-sorting alphabetically.
         tools = Object.entries(resolved)
           .map(([name, t]) => ({
             name,
             description: (t as { description?: string }).description ?? '',
             enabled: !disabled.has(name),
           }))
-          .sort((a, b) => a.name.localeCompare(b.name))
       }
 
       return { messages, blocks: blocksMeta, blockCount: blocks.length, tools }
