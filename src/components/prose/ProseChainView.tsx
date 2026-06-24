@@ -211,6 +211,17 @@ export function ProseChainView({
   const [mentionsEnabled] = useCharacterMentions()
   const queryClient = useQueryClient()
 
+  // While the librarian is analyzing, poll its status so we can refresh prose as
+  // soon as it writes mention annotations (it persists them at the start of the
+  // run). Only relevant when mention highlights are on.
+  const { data: librarianStatus } = useQuery({
+    queryKey: ['librarian-status', storyId],
+    queryFn: () => api.librarian.getStatus(storyId),
+    enabled: mentionsEnabled,
+    refetchInterval: mentionsEnabled ? 2_000 : false,
+  })
+  const isAnalyzing = librarianStatus?.runStatus === 'running'
+
   // Co-locate both queries so they settle in the same component — prevents
   // desync after regeneration where the chain points to a fragment the stale
   // prop hadn't included yet.
@@ -222,6 +233,8 @@ export function ProseChainView({
   const { data: fragments = [] } = useQuery({
     queryKey: ['fragments', storyId, 'prose'],
     queryFn: () => api.fragments.list(storyId, 'prose'),
+    // Pick up mention annotations mid-run; idle = no extra polling.
+    refetchInterval: mentionsEnabled && isAnalyzing ? 2_000 : false,
   })
 
   const { data: markerFragments = [] } = useQuery({
