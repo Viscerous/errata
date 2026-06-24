@@ -401,6 +401,47 @@ function renderFragment(f: Fragment): string {
 }
 
 /**
+ * Renders a list of fragments as one-line summaries under a consistent heading,
+ * with a single line telling the model how to expand them. Shared by every
+ * agent so the whole context chain reads the same way.
+ */
+export function fragmentSummaryList(
+  heading: string,
+  items: Array<{ id: string; name: string; description: string }>,
+  opts: { editable?: boolean } = {},
+): string {
+  const expand = opts.editable
+    ? 'Read one in full with getFragment(id) before you edit it.'
+    : 'Call getFragment(id) to read one in full.'
+  return [
+    `## ${heading}`,
+    `Each entry is a one-line summary. ${expand}`,
+    ...items.map(f => `- ${f.id}: ${f.name} — ${f.description}`),
+  ].join('\n')
+}
+
+/**
+ * Builds a complete summary-list block. Centralizing id, display name, heading,
+ * and content here keeps every agent's fragment lists labelled and worded the
+ * same way in both the context and the preview.
+ */
+export function fragmentSummaryBlock(args: {
+  id: string
+  heading: string
+  items: Array<{ id: string; name: string; description: string }>
+  order: number
+  editable?: boolean
+}): ContextBlock {
+  return {
+    id: args.id,
+    role: 'user',
+    content: fragmentSummaryList(args.heading, args.items, { editable: args.editable }),
+    order: args.order,
+    source: 'builtin',
+  }
+}
+
+/**
  * Renders sticky fragments grouped by type into content parts.
  */
 function renderTypeGrouped(fragments: Fragment[], label: string): string[] {
@@ -574,42 +615,15 @@ export function createDefaultBlocks(state: ContextBuildState): ContextBlock[] {
   }
 
   if (guidelineShortlist.length > 0) {
-    blocks.push({
-      id: 'shortlist-guidelines',
-      role: 'user',
-      content: [
-        '## Available Guidelines use getFragment(gl-xxxxxx) tool to retrieve full content',
-        ...guidelineShortlist.map(g => `- ${g.id}: ${g.name} — ${g.description}`),
-      ].join('\n'),
-      order: 300,
-      source: 'builtin',
-    })
+    blocks.push(fragmentSummaryBlock({ id: 'guidelines', heading: 'Guidelines', items: guidelineShortlist, order: 300 }))
   }
 
   if (knowledgeShortlist.length > 0) {
-    blocks.push({
-      id: 'shortlist-knowledge',
-      role: 'user',
-      content: [
-        '## Available Knowledge use getFragment(kn-xxxxxx) tool to retrieve full content',
-        ...knowledgeShortlist.map(k => `- ${k.id}: ${k.name} — ${k.description}`),
-      ].join('\n'),
-      order: 310,
-      source: 'builtin',
-    })
+    blocks.push(fragmentSummaryBlock({ id: 'knowledge', heading: 'Knowledge', items: knowledgeShortlist, order: 310 }))
   }
 
   if (characterShortlist.length > 0) {
-    blocks.push({
-      id: 'shortlist-characters',
-      role: 'user',
-      content: [
-        '## Available Characters  use getFragment(ch-xxxxxx) tool to retrieve full content',
-        ...characterShortlist.map(c => `- ${c.id}: ${c.name} — ${c.description}`),
-      ].join('\n'),
-      order: 320,
-      source: 'builtin',
-    })
+    blocks.push(fragmentSummaryBlock({ id: 'characters', heading: 'Characters', items: characterShortlist, order: 320 }))
   }
 
   if (proseFragments.length > 0) {
@@ -639,13 +653,18 @@ export function createDefaultBlocks(state: ContextBuildState): ContextBlock[] {
     })
   }
 
-  blocks.push({
-    id: 'author-input',
-    role: 'user',
-    content: `The author wants the following to happen next: ${authorInput}`,
-    order: 600,
-    source: 'builtin',
-  })
+  // Only frame an explicit direction when the author gave one; a bare "continue"
+  // (empty input) leaves the model to continue from the prose without a dangling
+  // instruction label.
+  if (authorInput.trim()) {
+    blocks.push({
+      id: 'author-input',
+      role: 'user',
+      content: `Author's direction for what happens next:\n${authorInput}`,
+      order: 600,
+      source: 'builtin',
+    })
+  }
 
   return blocks
 }

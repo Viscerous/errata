@@ -1,4 +1,5 @@
 import type { ContextBlock } from '../llm/context-builder'
+import { fragmentSummaryBlock } from '../llm/context-builder'
 import type { AgentBlockContext } from '../agents/agent-block-context'
 import { getStory, listFragments, getFragment } from '../fragments/storage'
 import { getFragmentsByTag } from '../fragments/associations'
@@ -64,29 +65,11 @@ export function createLibrarianAnalyzeBlocks(ctx: AgentBlockContext): ContextBlo
   })
 
   if (ctx.allCharacters && ctx.allCharacters.length > 0) {
-    blocks.push({
-      id: 'characters',
-      role: 'user',
-      content: [
-        '## Known Characters',
-        ...ctx.allCharacters.map(c => `- ${c.id}: ${c.name} — ${c.description}`),
-      ].join('\n'),
-      order: 200,
-      source: 'builtin',
-    })
+    blocks.push(fragmentSummaryBlock({ id: 'characters', heading: 'Characters', items: ctx.allCharacters, order: 200, editable: true }))
   }
 
   if (ctx.allKnowledge && ctx.allKnowledge.length > 0) {
-    blocks.push({
-      id: 'knowledge',
-      role: 'user',
-      content: [
-        '## Knowledge Base',
-        ...ctx.allKnowledge.map(k => `- ${k.id}: ${k.name} — ${k.content}`),
-      ].join('\n'),
-      order: 300,
-      source: 'builtin',
-    })
+    blocks.push(fragmentSummaryBlock({ id: 'knowledge', heading: 'Knowledge', items: ctx.allKnowledge, order: 300, editable: true }))
   }
 
   if (ctx.newProse) {

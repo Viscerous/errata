@@ -8,7 +8,7 @@
 import type { ContextBlock } from '../llm/context-builder'
 import type { AgentBlockContext } from './agent-block-context'
 import type { Fragment } from '../fragments/schema'
-import { buildContextState } from '../llm/context-builder'
+import { buildContextState, fragmentSummaryBlock } from '../llm/context-builder'
 import { instructionRegistry } from '../instructions'
 
 // ─── Block helpers ───
@@ -59,16 +59,7 @@ export function stickyFragmentsBlock(ctx: AgentBlockContext): ContextBlock | nul
     ...ctx.stickyCharacters,
   ]
   if (all.length === 0) return null
-  return {
-    id: 'sticky-fragments',
-    role: 'user',
-    content: [
-      '## Active Context Fragments',
-      ...all.map(f => `- ${f.id}: ${f.name} — ${f.description}`),
-    ].join('\n'),
-    order: 300,
-    source: 'builtin',
-  }
+  return fragmentSummaryBlock({ id: 'sticky-fragments', heading: 'Active Context', items: all, order: 300 })
 }
 
 /** Full content of recent prose fragments. */
@@ -133,16 +124,7 @@ export function targetFragmentBlock(
 /** All characters list for cross-reference. */
 export function allCharactersBlock(ctx: AgentBlockContext): ContextBlock | null {
   if (!ctx.allCharacters || ctx.allCharacters.length === 0) return null
-  return {
-    id: 'all-characters',
-    role: 'user',
-    content: [
-      '## All Characters',
-      ...ctx.allCharacters.map(c => `- ${c.id}: ${c.name} — ${c.description}`),
-    ].join('\n'),
-    order: 350,
-    source: 'builtin',
-  }
+  return fragmentSummaryBlock({ id: 'characters', heading: 'Characters', items: ctx.allCharacters, order: 350 })
 }
 
 /** Shortlist fragments (guidelines, knowledge, characters not in sticky). */
@@ -153,16 +135,7 @@ export function shortlistBlock(ctx: AgentBlockContext): ContextBlock | null {
     ...ctx.characterShortlist,
   ]
   if (all.length === 0) return null
-  return {
-    id: 'shortlist',
-    role: 'user',
-    content: [
-      '## Other Available Fragments',
-      ...all.map(f => `- ${f.id}: ${f.name} — ${f.description}`),
-    ].join('\n'),
-    order: 400,
-    source: 'builtin',
-  }
+  return fragmentSummaryBlock({ id: 'shortlist', heading: 'Other Available Fragments', items: all, order: 400 })
 }
 
 // ─── Utilities ───
