@@ -48,11 +48,13 @@ can pin it before touching the renderer / `runLibrarian`.
   editing it — you'll receive its full sheet to edit against."* This is behavioral
   policy, not a tool listing, so it coexists with reconcile's policy-only prompt.
   It keeps the cheap common path happening.
-- **`updateFragment` read-gate (backstop):** if asked to overwrite a character's
-  `content` whose sheet was neither returned by `reportMentions` nor read via
-  `getFragment` this run, return an error telling it to read first. The common
-  path never hits it; it only catches out-of-order or unmentioned edits, so
-  correctness no longer *depends* on the ordering.
+- **`updateFragment` read-gate — deferred (not building yet).** Idea: refuse to
+  overwrite a character's `content` whose sheet wasn't delivered by
+  `reportMentions` or read via `getFragment` this run, so a blind overwrite is
+  impossible rather than merely unlikely. We are **not** implementing it for now:
+  the mechanic + ordering line is the real fix, and the gate needs run-scoped
+  read-tracking state we'd rather not add until a failure is actually observed.
+  Build it only if the kill test still slips.
 - **Prefer `editFragment`:** usable now that the full sheet is present (it needs
   an exact `oldText`). Non-destructive — replaces only the named span and keeps
   the rest of the sheet, the right primitive for "record a death." Reserve
