@@ -366,10 +366,12 @@ describe('LLM tools', () => {
       // librarian meta write).
       expect(updated!.refs).toEqual(['ch-0001'])
       expect((updated!.meta._librarian as { analysisId: string }).analysisId).toBe('la-1')
-      // Edits are versioned like the updateFragment/editFragment tools.
+      // Edits are versioned like the updateFragment/editFragment tools: the new
+      // content is appended as a version alongside the retained original.
       expect(updated!.version).toBe(2)
-      expect(updated!.versions).toHaveLength(1)
+      expect(updated!.versions).toHaveLength(2)
       expect(updated!.versions?.[0].content).toBe('The ipsum sat on the mat.')
+      expect(updated!.versions?.[1].content).toBe('The cat sat on the mat.')
     })
 
     it('returns an error when no active prose contains the text', async () => {
