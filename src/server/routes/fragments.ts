@@ -11,6 +11,7 @@ import {
   restoreFragment,
   listFragmentVersions,
   revertFragmentToVersion,
+  deleteFragmentVersion,
 } from '../fragments/storage'
 import {
   addTag,
@@ -288,6 +289,20 @@ export function fragmentRoutes(dataDir: string) {
       }
       return updated
     }, { detail: { summary: 'Revert to a specific version' } })
+
+    .delete('/stories/:storyId/fragments/:fragmentId/versions/:version', async ({ params, set }) => {
+      const targetVersion = Number.parseInt(params.version, 10)
+      if (Number.isNaN(targetVersion) || targetVersion < 1) {
+        set.status = 422
+        return { error: 'Invalid version' }
+      }
+      const updated = await deleteFragmentVersion(dataDir, params.storyId, params.fragmentId, targetVersion)
+      if (!updated) {
+        set.status = 404
+        return { error: `Fragment or version ${targetVersion} not found` }
+      }
+      return updated
+    }, { detail: { summary: 'Delete a single version snapshot' } })
 
     // --- Archive / Restore ---
     .post('/stories/:storyId/fragments/:fragmentId/archive', async ({ params, set }) => {
