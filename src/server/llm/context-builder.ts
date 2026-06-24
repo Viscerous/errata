@@ -426,6 +426,28 @@ export function fragmentSummaryList(
 }
 
 /**
+ * Builds a complete summary-list block. Centralizing id, display name, heading,
+ * and content here keeps every agent's fragment lists labelled and worded the
+ * same way in both the context and the preview.
+ */
+export function fragmentSummaryBlock(args: {
+  id: string
+  heading: string
+  items: Array<{ id: string; name: string; description: string }>
+  order: number
+  editable?: boolean
+}): ContextBlock {
+  return {
+    id: args.id,
+    name: args.heading,
+    role: 'user',
+    content: fragmentSummaryList(args.heading, args.items, { editable: args.editable }),
+    order: args.order,
+    source: 'builtin',
+  }
+}
+
+/**
  * Renders sticky fragments grouped by type into content parts.
  */
 function renderTypeGrouped(fragments: Fragment[], label: string): string[] {
@@ -619,33 +641,15 @@ export function createDefaultBlocks(state: ContextBuildState, opts: AssembleOpti
   }
 
   if (guidelineShortlist.length > 0) {
-    blocks.push({
-      id: 'shortlist-guidelines',
-      role: 'user',
-      content: fragmentSummaryList('Guidelines', guidelineShortlist),
-      order: 300,
-      source: 'builtin',
-    })
+    blocks.push(fragmentSummaryBlock({ id: 'shortlist-guidelines', heading: 'Guidelines', items: guidelineShortlist, order: 300 }))
   }
 
   if (knowledgeShortlist.length > 0) {
-    blocks.push({
-      id: 'shortlist-knowledge',
-      role: 'user',
-      content: fragmentSummaryList('Knowledge', knowledgeShortlist),
-      order: 310,
-      source: 'builtin',
-    })
+    blocks.push(fragmentSummaryBlock({ id: 'shortlist-knowledge', heading: 'Knowledge', items: knowledgeShortlist, order: 310 }))
   }
 
   if (characterShortlist.length > 0) {
-    blocks.push({
-      id: 'shortlist-characters',
-      role: 'user',
-      content: fragmentSummaryList('Characters', characterShortlist),
-      order: 320,
-      source: 'builtin',
-    })
+    blocks.push(fragmentSummaryBlock({ id: 'shortlist-characters', heading: 'Characters', items: characterShortlist, order: 320 }))
   }
 
   if (proseFragments.length > 0) {
