@@ -143,7 +143,7 @@ export function createAnalysisTools(collector: AnalysisCollector, opts?: { dataD
     }),
 
     reportContradictions: tool({
-      description: 'Report contradictions between the new prose and established facts. Only flag clear contradictions.',
+      description: 'Report contradictions between the new prose and established facts in the summary, character descriptions, or knowledge. Only flag clear contradictions, not ambiguities.',
       inputSchema: z.object({
         contradictions: z.array(z.object({
           description: z.string().describe('What the contradiction is'),

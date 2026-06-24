@@ -165,14 +165,8 @@ export function generationRoutes(dataDir: string) {
 
       // Merge fragment tools + plugin tools, then filter by agent block config
       const fragmentTools = createFragmentTools(dataDir, params.storyId, { readOnly: true })
-      const { tools: pluginTools, origins: pluginToolOrigins } = collectPluginToolsWithOrigin(enabledPlugins, dataDir, params.storyId)
+      const { tools: pluginTools } = collectPluginToolsWithOrigin(enabledPlugins, dataDir, params.storyId)
       const allTools = { ...fragmentTools, ...pluginTools }
-      // Extract plugin tool descriptions for context (fragment tools are listed from registry)
-      const extraTools = Object.entries(pluginTools).map(([name, t]) => ({
-        name,
-        description: (t as { description?: string }).description ?? '',
-        pluginName: pluginToolOrigins[name],
-      }))
 
       const agentConfig = await getAgentBlockConfig(dataDir, params.storyId, 'generation.writer')
       const disabledTools = new Set(agentConfig.disabledTools ?? [])
@@ -183,7 +177,7 @@ export function generationRoutes(dataDir: string) {
       requestLogger.info('Tools prepared', { toolCount: Object.keys(tools).length })
 
       const scriptContext = { ...ctxState, ...createScriptHelpers(dataDir, params.storyId) }
-      let blocks = createDefaultBlocks(ctxState, extraTools.length > 0 ? { extraTools } : undefined)
+      let blocks = createDefaultBlocks(ctxState)
       blocks = await applyBlockConfig(blocks, agentConfig, scriptContext)
       blocks = await runBeforeBlocks(enabledPlugins, blocks)
 
@@ -225,23 +219,6 @@ export function generationRoutes(dataDir: string) {
 
       requestLogger.info('Starting LLM stream...')
       const abortController = new AbortController()
-
-      // Build tool description lines for reuse (same logic as context-builder createDefaultBlocks)
-      const toolLinesList: string[] = []
-      {
-        const types = (await import('../fragments/registry')).registry.listTypes()
-        for (const t of types) {
-          if (t.llmTools === false) continue
-          const cap = t.type.charAt(0).toUpperCase() + t.type.slice(1)
-          const plural = ['prose', 'knowledge'].includes(t.type) ? cap : cap + 's'
-          toolLinesList.push(`- get${cap}(id): Get full content of a ${t.type} fragment`)
-          toolLinesList.push(`- list${plural}(): List all ${t.type} fragments`)
-        }
-        toolLinesList.push('- listFragmentTypes(): List all available fragment types')
-        for (const t of extraTools) {
-          toolLinesList.push(`- ${t.name}: ${t.description}`)
-        }
-      }
 
       let fullText = ''
       let fullReasoning = ''
@@ -338,7 +315,7 @@ export function generationRoutes(dataDir: string) {
                 // Build stripped writer context with only prose + brief + custom blocks,
                 // then apply the writer's agent block config so overrides (e.g. disabled
                 // blocks like writing-brief) are respected.
-                const writerBlocks = createWriterBriefBlocks(ctxState.proseFragments, prewriterResult.brief, toolLinesList, resolvedModelId)
+                const writerBlocks = createWriterBriefBlocks(ctxState.proseFragments, prewriterResult.brief, resolvedModelId)
                 const finalWriterBlocks = await applyBlockConfig(writerBlocks, agentConfig, scriptContext)
                 let writerCompiled = compileBlocks(finalWriterBlocks)
                 writerCompiled = await expandMessagesFragmentTags(writerCompiled, dataDir, params.storyId)
