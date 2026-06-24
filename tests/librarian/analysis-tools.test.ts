@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { createEmptyCollector, createAnalysisTools, updateSummaryInputSchema } from '@/server/librarian/analysis-tools'
+import { getFragment } from '@/server/fragments/storage'
 
 vi.mock('@/server/fragments/storage', () => ({
   getFragment: vi.fn().mockResolvedValue(null),
@@ -105,6 +106,26 @@ describe('analysis-tools', () => {
         mentions: [{ characterId: 'ch-003', text: 'Carol' }],
       }, { toolCallId: 'c', messages: [], abortSignal: undefined as unknown as AbortSignal })
       expect(collector.mentions).toHaveLength(3)
+    })
+
+    it('reportMentions returns the full sheets of mentioned characters', async () => {
+      vi.mocked(getFragment).mockImplementation(async (_d, _s, id) =>
+        id === 'ch-001'
+          ? { id: 'ch-001', type: 'character', name: 'Alice', description: 'A knight', content: 'Full sheet for Alice.' } as never
+          : null,
+      )
+      const collector = createEmptyCollector()
+      const tools = createAnalysisTools(collector, { dataDir: '/d', storyId: 's' })
+
+      const result = await tools.reportMentions.execute!({
+        mentions: [{ characterId: 'ch-001', text: 'Alice' }],
+      }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal }) as { ok: boolean; characters: Array<{ id: string; content: string }> }
+
+      expect(result.ok).toBe(true)
+      expect(result.characters).toEqual([
+        { id: 'ch-001', name: 'Alice', description: 'A knight', content: 'Full sheet for Alice.' },
+      ])
+      vi.mocked(getFragment).mockResolvedValue(null)
     })
 
     it('reportContradictions accumulates contradictions', async () => {

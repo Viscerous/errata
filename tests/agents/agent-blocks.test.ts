@@ -149,9 +149,11 @@ describe('Librarian Analyze Blocks', () => {
     const blocks = def.createDefaultBlocks(makeBaseContext({
       allKnowledge: [makeFragment({ id: 'kn-magic1', type: 'knowledge', name: 'Magic System', content: 'Elemental magic.' })],
     }))
-    const knBlock = blocks.find(b => b.id === 'knowledge-shortlist')
+    const knBlock = blocks.find(b => b.id === 'knowledge')
     expect(knBlock).toBeDefined()
     expect(knBlock!.content).toContain('Magic System')
+    // Knowledge is delivered in full to analyze, not as a summary.
+    expect(knBlock!.content).toContain('Elemental magic.')
   })
 
   it('includes new-prose block when newProse provided', () => {
@@ -186,7 +188,7 @@ describe('Librarian Analyze Blocks', () => {
     const userBlocks = blocks.filter(b => b.role === 'user')
     const summaryOrder = userBlocks.find(b => b.id === 'story-summary')!.order
     const charsOrder = userBlocks.find(b => b.id === 'characters-shortlist')!.order
-    const knowledgeOrder = userBlocks.find(b => b.id === 'knowledge-shortlist')!.order
+    const knowledgeOrder = userBlocks.find(b => b.id === 'knowledge')!.order
     const proseOrder = userBlocks.find(b => b.id === 'new-prose')!.order
     expect(summaryOrder).toBeLessThan(charsOrder)
     expect(charsOrder).toBeLessThan(knowledgeOrder)

@@ -33,12 +33,11 @@ You are a librarian agent for a collaborative writing app.
 Your job is to analyze new prose fragments and maintain story continuity.
 
 Use your reporting tools to record what you find: a summary of what happened, character mentions, contradictions with established facts, timeline events${opts?.disableSuggestions ? '' : ', and suggested new character/knowledge fragments'}${opts?.disableDirections ? '' : ', and possible next directions for the story'}. Update existing character, knowledge, or guideline fragments when new information corrects or enriches them.
-You also have read-only lookup tools to read full fragment content and search across fragments. Each tool's parameters and usage are described in its definition.
 
 Instructions:
-1. Your context includes a story summary and fragment summaries (IDs, names, descriptions) — not full content. Use the appropriate get tool to read the full content of any fragment you need.
-2. Before editing or updating an existing character, knowledge, or guideline fragment, read it first using the appropriate get tool (e.g. getCharacter or getFragment). Its full content is not in your context, and updateFragment overwrites whatever you do not carry over.
-3. Prefer editFragment over updateFragment for small, precise corrections — it changes only the named span and leaves the rest of the sheet intact.
+1. Your context lists characters as one-line summaries (ID, name, description), not full sheets. Knowledge is provided in full.
+2. Report a character's mention before editing it — reportMentions returns that character's full sheet. Edit against the returned sheet, never from the summary alone: updateFragment overwrites the entire body, so anything not carried over is lost.
+3. Prefer editFragment for precise changes (e.g. recording a death or status change) — it replaces only the named span and keeps the rest of the sheet. Reserve updateFragment for wholesale rewrites.
 
 ${alwaysCall} Only call the other tools if there are relevant findings.
 If there are no contradictions, suggestions, mentions, or timeline events, don't call those tools.
@@ -69,7 +68,19 @@ export function createLibrarianAnalyzeBlocks(ctx: AgentBlockContext): ContextBlo
   }
 
   if (ctx.allKnowledge && ctx.allKnowledge.length > 0) {
-    blocks.push(fragmentSummaryBlock({ id: 'knowledge-shortlist', heading: 'Knowledge', items: ctx.allKnowledge, order: 300, editable: true }))
+    // Knowledge is delivered in full (bounded, read-mostly — analyze checks
+    // contradictions against it). Characters stay summaries; their bodies arrive
+    // via reportMentions.
+    blocks.push({
+      id: 'knowledge',
+      role: 'user',
+      content: [
+        '## Knowledge',
+        ...ctx.allKnowledge.map(k => `### ${k.id}: ${k.name}\n${k.content}`),
+      ].join('\n\n'),
+      order: 300,
+      source: 'builtin',
+    })
   }
 
   if (ctx.newProse) {
