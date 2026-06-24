@@ -4,6 +4,7 @@ import { agentBlockRegistry } from '../agents/agent-block-registry'
 import { modelRoleRegistry } from '../agents/model-role-registry'
 import { instructionRegistry } from '../instructions'
 import type { AgentDefinition } from '../agents/types'
+import { listLibrarianAnalyzeToolNames } from './analysis-tools'
 import { runLibrarian } from './agent'
 import { librarianChat } from './chat'
 import { refineFragment } from './refine'
@@ -146,7 +147,7 @@ export function registerLibrarianAgents(): void {
     displayName: 'Librarian Analyze',
     description: 'Analyzes prose fragments for continuity signals and summary updates.',
     createDefaultBlocks: createLibrarianAnalyzeBlocks,
-    availableTools: ['updateSummary', 'reportMentions', 'reportContradictions', 'suggestFragment', 'updateFragment', 'reportTimeline', 'suggestDirections'],
+    availableTools: listLibrarianAnalyzeToolNames(),
     buildPreviewContext: buildAnalyzePreviewContext,
   })
 
