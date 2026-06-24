@@ -372,9 +372,12 @@ describe('Fragment API routes', () => {
     const versionsRes = await api(`/stories/${storyId}/fragments/${created.id}/versions`)
     expect(versionsRes.status).toBe(200)
     const body = await versionsRes.json()
-    expect(body.versions).toHaveLength(1)
+    // History includes the current version (v2) alongside the prior v1.
+    expect(body.versions).toHaveLength(2)
     expect(body.versions[0].version).toBe(1)
     expect(body.versions[0].content).toBe('v1 content')
+    expect(body.versions[1].version).toBe(2)
+    expect(body.versions[1].content).toBe('v2 content')
   })
 
   it('POST /api/stories/:sid/fragments/:fid/versions/:version/revert restores the selected version', async () => {
@@ -414,7 +417,8 @@ describe('Fragment API routes', () => {
     const reverted = await revertRes.json()
     expect(reverted.id).toBe(created.id)
     expect(reverted.content).toBe('v1 content')
-    expect(reverted.version).toBe(4)
+    // Switching to v1 is a pointer move — the version becomes 1, not a new number.
+    expect(reverted.version).toBe(1)
   })
 })
 
