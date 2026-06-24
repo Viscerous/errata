@@ -25,7 +25,7 @@ import { applyFragmentSuggestion } from './suggestions'
 import { reportUsage } from '../llm/token-tracker'
 import { createLogger } from '../logging'
 import { compileAgentContext } from '../agents/compile-agent-context'
-import { createEmptyCollector, createLibrarianAnalyzeTools, toMentionAnnotations } from './analysis-tools'
+import { createEmptyCollector, createLibrarianAnalyzeTools, toMentionAnnotations, analyzeActiveTools, ANALYZE_EDIT_TOOLS } from './analysis-tools'
 import { buildAnalyzeSystemPrompt } from './blocks'
 import {
   createAnalysisBuffer,
@@ -155,6 +155,16 @@ async function runLibrarianInner(
   }
 
   const providerOptions = buildProviderOptions(story.settings.disableThinking ?? false)
+
+  // Hold back the fragment-edit tools until reportMentions has run in a prior
+  // step. reportMentions returns each mentioned character's full sheet, but only
+  // as a tool result — so an edit batched into the same step would be authored
+  // before the sheet arrives and would overwrite the body from the summary. By
+  // gating the edit tools, the model cannot edit a character until its sheet is
+  // already in context. Only gate when there are characters to wait on.
+  const toolNames = Object.keys(compiled.tools)
+  const gateEdits = characters.length > 0 && toolNames.some(t => (ANALYZE_EDIT_TOOLS as readonly string[]).includes(t))
+
   const agent = new ToolLoopAgent({
     model,
     instructions: systemMessage?.content || 'You are a helpful assistant.',
@@ -163,6 +173,14 @@ async function runLibrarianInner(
     stopWhen: stepCountIs(6),
     temperature,
     providerOptions,
+    ...(gateEdits
+      ? {
+          prepareStep: ({ steps }) => {
+            const mentionsReported = steps.some(s => s.toolCalls.some(tc => tc.toolName === 'reportMentions'))
+            return { activeTools: analyzeActiveTools(toolNames, mentionsReported) }
+          },
+        }
+      : {}),
   })
 
   let fullText = ''
