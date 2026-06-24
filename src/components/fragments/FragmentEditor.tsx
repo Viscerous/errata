@@ -363,6 +363,16 @@ export function FragmentEditor({
     },
   })
 
+  const deleteVersionMutation = useMutation({
+    mutationFn: (version: number) => api.fragments.deleteVersion(storyId, fragment!.id, version),
+    onSuccess: (_data, version) => {
+      if (previewVersion?.version === version) setPreviewVersion(null)
+      if (fragment?.id) {
+        queryClient.invalidateQueries({ queryKey: ['fragment-versions', storyId, fragment.id] })
+      }
+    },
+  })
+
   const versions = (versionData?.versions ?? []).slice().sort((a, b) => b.version - a.version)
 
   const versionDiffLines = useMemo(() => {
@@ -893,6 +903,17 @@ export function FragmentEditor({
                               disabled={revertVersionMutation.isPending}
                             >
                               Restore
+                            </Button>
+                            <Button
+                              type="button"
+                              size="icon"
+                              variant="ghost"
+                              className="size-6 text-muted-foreground hover:text-destructive"
+                              onClick={() => deleteVersionMutation.mutate(v.version)}
+                              disabled={deleteVersionMutation.isPending}
+                              title="Delete this version"
+                            >
+                              <Trash2 className="size-3" />
                             </Button>
                           </div>
                         </div>

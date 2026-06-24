@@ -16,6 +16,7 @@ import {
   restoreFragment,
   listFragmentVersions,
   revertFragmentToVersion,
+  deleteFragmentVersion,
 } from '@/server/fragments/storage'
 import type { Fragment, StoryMeta } from '@/server/fragments/schema'
 
@@ -211,6 +212,36 @@ describe('Fragment CRUD', () => {
     expect(reverted!.description).toBe('v1 desc')
     expect(reverted!.version).toBe(4)
     expect(reverted!.versions).toHaveLength(3)
+  })
+
+  it('deletes a single version snapshot without changing current content', async () => {
+    const fragment = makeFragment({
+      id: 'gl-2100',
+      type: 'guideline',
+      name: 'Tone',
+      description: 'v1 desc',
+      content: 'v1 content',
+    })
+    await createFragment(dataDir, storyId, fragment)
+    await updateFragmentVersioned(dataDir, storyId, 'gl-2100', { content: 'v2 content' })
+    await updateFragmentVersioned(dataDir, storyId, 'gl-2100', { content: 'v3 content' })
+
+    const updated = await deleteFragmentVersion(dataDir, storyId, 'gl-2100', 1)
+    expect(updated).not.toBeNull()
+    // The v1 snapshot is gone; the v2 snapshot remains; current content untouched.
+    expect(updated!.versions!.map(v => v.version)).toEqual([2])
+    expect(updated!.content).toBe('v3 content')
+    expect(updated!.version).toBe(3)
+
+    const versions = await listFragmentVersions(dataDir, storyId, 'gl-2100')
+    expect(versions).toHaveLength(1)
+  })
+
+  it('returns null when deleting a missing version', async () => {
+    const fragment = makeFragment({ id: 'gl-2101', type: 'guideline' })
+    await createFragment(dataDir, storyId, fragment)
+    const result = await deleteFragmentVersion(dataDir, storyId, 'gl-2101', 99)
+    expect(result).toBeNull()
   })
 
   it('deletes a fragment', async () => {
