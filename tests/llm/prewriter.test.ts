@@ -215,9 +215,9 @@ describe('prewriter', () => {
       expect(ids).not.toContain('story-info')
       expect(ids).not.toContain('summary')
       expect(ids).not.toContain('user-fragments')
-      expect(ids).not.toContain('guidelines')
-      expect(ids).not.toContain('knowledge')
-      expect(ids).not.toContain('characters')
+      expect(ids).not.toContain('guidelines-shortlist')
+      expect(ids).not.toContain('knowledge-shortlist')
+      expect(ids).not.toContain('characters-shortlist')
       expect(ids).not.toContain('author-input')
       expect(ids).not.toContain('system-fragments')
 

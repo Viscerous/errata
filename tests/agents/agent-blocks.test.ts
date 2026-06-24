@@ -139,7 +139,7 @@ describe('Librarian Analyze Blocks', () => {
     const blocks = def.createDefaultBlocks(makeBaseContext({
       allCharacters: [makeFragment({ id: 'ch-hero01', name: 'Hero', description: 'A brave hero' })],
     }))
-    const chBlock = blocks.find(b => b.id === 'characters')
+    const chBlock = blocks.find(b => b.id === 'characters-shortlist')
     expect(chBlock).toBeDefined()
     expect(chBlock!.content).toContain('Hero')
   })
@@ -149,7 +149,7 @@ describe('Librarian Analyze Blocks', () => {
     const blocks = def.createDefaultBlocks(makeBaseContext({
       allKnowledge: [makeFragment({ id: 'kn-magic1', type: 'knowledge', name: 'Magic System', content: 'Elemental magic.' })],
     }))
-    const knBlock = blocks.find(b => b.id === 'knowledge')
+    const knBlock = blocks.find(b => b.id === 'knowledge-shortlist')
     expect(knBlock).toBeDefined()
     expect(knBlock!.content).toContain('Magic System')
   })
@@ -185,8 +185,8 @@ describe('Librarian Analyze Blocks', () => {
     // User blocks should be ordered: story-summary (100) < characters (200) < knowledge (300) < new-prose (400)
     const userBlocks = blocks.filter(b => b.role === 'user')
     const summaryOrder = userBlocks.find(b => b.id === 'story-summary')!.order
-    const charsOrder = userBlocks.find(b => b.id === 'characters')!.order
-    const knowledgeOrder = userBlocks.find(b => b.id === 'knowledge')!.order
+    const charsOrder = userBlocks.find(b => b.id === 'characters-shortlist')!.order
+    const knowledgeOrder = userBlocks.find(b => b.id === 'knowledge-shortlist')!.order
     const proseOrder = userBlocks.find(b => b.id === 'new-prose')!.order
     expect(summaryOrder).toBeLessThan(charsOrder)
     expect(charsOrder).toBeLessThan(knowledgeOrder)
