@@ -15,6 +15,9 @@ export function createEventStream(fullStream: AsyncIterable<unknown>): AgentStre
   let fullText = ''
   let fullReasoning = ''
   const toolCalls: Array<{ toolName: string; args: Record<string, unknown>; result: unknown }> = []
+  // Args arrive on tool-call, the result later on tool-result; stash by id to
+  // keep args in the persisted record.
+  const pendingArgs = new Map<string, Record<string, unknown>>()
   let lastFinishReason = 'unknown'
   let stepCount = 0
 
@@ -41,6 +44,7 @@ export function createEventStream(fullStream: AsyncIterable<unknown>): AgentStre
             }
             case 'tool-call': {
               const input = (p.input ?? {}) as Record<string, unknown>
+              pendingArgs.set(p.toolCallId as string, input)
               event = {
                 type: 'tool-call',
                 id: p.toolCallId as string,
@@ -52,7 +56,7 @@ export function createEventStream(fullStream: AsyncIterable<unknown>): AgentStre
             case 'tool-result': {
               const toolCallId = p.toolCallId as string
               const toolName = (p.toolName as string) ?? ''
-              toolCalls.push({ toolName, args: {}, result: p.output })
+              toolCalls.push({ toolName, args: pendingArgs.get(toolCallId) ?? {}, result: p.output })
               event = {
                 type: 'tool-result',
                 id: toolCallId,
