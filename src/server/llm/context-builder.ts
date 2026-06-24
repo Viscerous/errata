@@ -406,6 +406,26 @@ function renderFragment(f: Fragment): string {
 }
 
 /**
+ * Renders a list of fragments as one-line summaries under a consistent heading,
+ * with a single line telling the model how to expand them. Shared by every
+ * agent so the whole context chain reads the same way.
+ */
+export function fragmentSummaryList(
+  heading: string,
+  items: Array<{ id: string; name: string; description: string }>,
+  opts: { editable?: boolean } = {},
+): string {
+  const expand = opts.editable
+    ? 'Read one in full with getFragment(id) before you edit it.'
+    : 'Call getFragment(id) to read one in full.'
+  return [
+    `## ${heading}`,
+    `Each entry is a one-line summary. ${expand}`,
+    ...items.map(f => `- ${f.id}: ${f.name} — ${f.description}`),
+  ].join('\n')
+}
+
+/**
  * Renders sticky fragments grouped by type into content parts.
  */
 function renderTypeGrouped(fragments: Fragment[], label: string): string[] {
@@ -602,10 +622,7 @@ export function createDefaultBlocks(state: ContextBuildState, opts: AssembleOpti
     blocks.push({
       id: 'shortlist-guidelines',
       role: 'user',
-      content: [
-        '## Available Guidelines use getFragment(gl-xxxxxx) tool to retrieve full content',
-        ...guidelineShortlist.map(g => `- ${g.id}: ${g.name} — ${g.description}`),
-      ].join('\n'),
+      content: fragmentSummaryList('Guidelines', guidelineShortlist),
       order: 300,
       source: 'builtin',
     })
@@ -615,10 +632,7 @@ export function createDefaultBlocks(state: ContextBuildState, opts: AssembleOpti
     blocks.push({
       id: 'shortlist-knowledge',
       role: 'user',
-      content: [
-        '## Available Knowledge use getFragment(kn-xxxxxx) tool to retrieve full content',
-        ...knowledgeShortlist.map(k => `- ${k.id}: ${k.name} — ${k.description}`),
-      ].join('\n'),
+      content: fragmentSummaryList('Knowledge', knowledgeShortlist),
       order: 310,
       source: 'builtin',
     })
@@ -628,10 +642,7 @@ export function createDefaultBlocks(state: ContextBuildState, opts: AssembleOpti
     blocks.push({
       id: 'shortlist-characters',
       role: 'user',
-      content: [
-        '## Available Characters  use getFragment(ch-xxxxxx) tool to retrieve full content',
-        ...characterShortlist.map(c => `- ${c.id}: ${c.name} — ${c.description}`),
-      ].join('\n'),
+      content: fragmentSummaryList('Characters', characterShortlist),
       order: 320,
       source: 'builtin',
     })

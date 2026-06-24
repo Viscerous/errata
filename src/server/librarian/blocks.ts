@@ -1,4 +1,5 @@
 import type { ContextBlock } from '../llm/context-builder'
+import { fragmentSummaryList } from '../llm/context-builder'
 import type { AgentBlockContext } from '../agents/agent-block-context'
 import { getStory, listFragments, getFragment } from '../fragments/storage'
 import { getFragmentsByTag } from '../fragments/associations'
@@ -98,10 +99,7 @@ export function createLibrarianAnalyzeBlocks(ctx: AgentBlockContext): ContextBlo
     blocks.push({
       id: 'characters',
       role: 'user',
-      content: [
-        '## Known Characters',
-        ...ctx.allCharacters.map(c => `- ${c.id}: ${c.name} — ${c.description}`),
-      ].join('\n'),
+      content: fragmentSummaryList('Characters', ctx.allCharacters, { editable: true }),
       order: 200,
       source: 'builtin',
     })
@@ -112,7 +110,7 @@ export function createLibrarianAnalyzeBlocks(ctx: AgentBlockContext): ContextBlo
       id: 'knowledge',
       role: 'user',
       content: [
-        '## Knowledge Base',
+        '## Knowledge',
         ...ctx.allKnowledge.map(k => `- ${k.id}: ${k.name} — ${k.content}`),
       ].join('\n'),
       order: 300,
