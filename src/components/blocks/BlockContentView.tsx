@@ -8,8 +8,12 @@ import { EmptyHint } from '@/components/ui/prose-text'
 interface BlockContentViewProps {
   messages: Array<{ role: string; content: string }>
   blocks?: Array<{ id: string; name: string; role: string }>
+  /** Tools sent to the model via the SDK schema (shown as a dedicated section). */
+  tools?: Array<{ name: string; description: string; enabled: boolean }>
   className?: string
 }
+
+const TOOLS_BLOCK_ID = '__tools__'
 
 /**
  * Parse compiled messages into per-block segments using [@block=...] markers.
@@ -39,11 +43,13 @@ function parseBlockSegments(messages: Array<{ role: string; content: string }>) 
   return segments
 }
 
-export function BlockContentView({ messages, blocks, className }: BlockContentViewProps) {
+export function BlockContentView({ messages, blocks, tools, className }: BlockContentViewProps) {
   const [activeBlockId, setActiveBlockId] = useState<string | null>(null)
   const contentRef = useRef<HTMLDivElement>(null)
 
   const segments = useMemo(() => parseBlockSegments(messages), [messages])
+  const hasTools = (tools?.length ?? 0) > 0
+  const enabledToolCount = useMemo(() => tools?.filter((t) => t.enabled).length ?? 0, [tools])
 
   // Build nav groups from explicit blocks list, or fall back to segments
   const navGroups = useMemo(() => {
@@ -57,8 +63,11 @@ export function BlockContentView({ messages, blocks, className }: BlockContentVi
       }
       groups[groups.length - 1].blocks.push({ id: block.id, name: block.name })
     }
+    if (hasTools) {
+      groups.push({ role: 'tools', blocks: [{ id: TOOLS_BLOCK_ID, name: `Tools · ${enabledToolCount}/${tools!.length}` }] })
+    }
     return groups
-  }, [blocks, segments])
+  }, [blocks, segments, hasTools, enabledToolCount, tools])
 
   const scrollToBlock = useCallback((blockId: string) => {
     setActiveBlockId(blockId)
@@ -68,7 +77,7 @@ export function BlockContentView({ messages, blocks, className }: BlockContentVi
     }
   }, [])
 
-  if (segments.length === 0) {
+  if (segments.length === 0 && !hasTools) {
     return (
       <div className={cn('flex items-center justify-center py-16', className)}>
         <EmptyHint>No blocks in context</EmptyHint>
@@ -147,6 +156,49 @@ export function BlockContentView({ messages, blocks, className }: BlockContentVi
               </pre>
             </div>
           ))}
+
+          {hasTools && (
+            <div
+              data-block-id={TOOLS_BLOCK_ID}
+              className={cn(
+                'rounded-lg border border-border/20 overflow-hidden transition-colors duration-200',
+                activeBlockId === TOOLS_BLOCK_ID && 'border-border/40 bg-accent/10',
+              )}
+            >
+              <div className="flex items-center gap-2 px-3 py-1.5 bg-muted/10 border-b border-border/10">
+                <span className="text-[0.625rem] font-medium text-muted-foreground">Tools</span>
+                <span className="text-[0.5625rem] text-muted-foreground/70">
+                  sent to the model via the API tool schema
+                </span>
+                <span className="text-[0.5625rem] text-muted-foreground tabular-nums ml-auto shrink-0">
+                  {enabledToolCount}/{tools!.length} enabled
+                </span>
+              </div>
+
+              <div className="p-3 space-y-2">
+                {tools!.map((t) => (
+                  <div key={t.name} className={cn('flex flex-col gap-0.5', !t.enabled && 'opacity-45')}>
+                    <div className="flex items-center gap-2">
+                      <code className={cn('text-[0.6875rem] font-mono text-foreground/90', !t.enabled && 'line-through')}>
+                        {t.name}
+                      </code>
+                      {!t.enabled && (
+                        <Badge
+                          variant="outline"
+                          className="text-[0.5rem] h-3.5 px-1 font-normal border-transparent text-muted-foreground bg-muted/30 shrink-0 uppercase tracking-wide"
+                        >
+                          disabled
+                        </Badge>
+                      )}
+                    </div>
+                    {t.description && (
+                      <p className="text-[0.625rem] text-muted-foreground leading-relaxed">{t.description}</p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </ScrollArea>
     </div>

@@ -483,9 +483,8 @@ export function createDefaultBlocks(state: ContextBuildState): ContextBlock[] {
     source: 'builtin',
   })
 
-  // Tool definitions (names + descriptions) are sent to the model via the SDK
-  // tool schema, so this block carries only usage policy — never a catalog that
-  // could drift from the agent's actually-enabled tools.
+  // Tools reach the model via the SDK schema, so this block holds usage policy
+  // only — never a catalog that could drift from the enabled tools.
   blocks.push({
     id: 'tools',
     role: 'system',

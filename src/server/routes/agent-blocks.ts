@@ -151,7 +151,22 @@ export function agentBlockRoutes(dataDir: string) {
         })
         .map(b => ({ id: b.id, name: b.name ?? b.id, role: b.role }))
 
-      return { messages, blocks: blocksMeta, blockCount: blocks.length }
+      // The actual tools sent to the model (with disabledTools applied), built
+      // from the same factories the handler uses so the preview can't drift.
+      let tools: Array<{ name: string; description: string; enabled: boolean }> = []
+      if (def.resolveTools) {
+        const resolved = await def.resolveTools({ dataDir, storyId: params.storyId })
+        const disabled = new Set(config.disabledTools ?? [])
+        tools = Object.entries(resolved)
+          .map(([name, t]) => ({
+            name,
+            description: (t as { description?: string }).description ?? '',
+            enabled: !disabled.has(name),
+          }))
+          .sort((a, b) => a.name.localeCompare(b.name))
+      }
+
+      return { messages, blocks: blocksMeta, blockCount: blocks.length, tools }
     }), { detail: { summary: 'Preview compiled agent context' } })
 
     // Create custom block
