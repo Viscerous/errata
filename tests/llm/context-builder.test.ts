@@ -641,8 +641,8 @@ describe('context blocks', () => {
       const state = await buildContextState(dataDir, story.id, 'Continue')
       const blocks = createDefaultBlocks(state)
 
-      expect(findBlock(blocks, 'shortlist-guidelines')).toBeDefined()
-      expect(findBlock(blocks, 'shortlist-knowledge')).toBeDefined()
+      expect(findBlock(blocks, 'guidelines')).toBeDefined()
+      expect(findBlock(blocks, 'knowledge')).toBeDefined()
     })
 
     it('omits shortlist blocks when no non-sticky fragments of that type', async () => {
@@ -652,9 +652,9 @@ describe('context blocks', () => {
       const state = await buildContextState(dataDir, story.id, 'Continue')
       const blocks = createDefaultBlocks(state)
 
-      expect(findBlock(blocks, 'shortlist-guidelines')).toBeUndefined()
-      expect(findBlock(blocks, 'shortlist-knowledge')).toBeUndefined()
-      expect(findBlock(blocks, 'shortlist-characters')).toBeUndefined()
+      expect(findBlock(blocks, 'guidelines')).toBeUndefined()
+      expect(findBlock(blocks, 'knowledge')).toBeUndefined()
+      expect(findBlock(blocks, 'characters')).toBeUndefined()
     })
 
     it('all blocks have source "builtin"', async () => {

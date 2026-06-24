@@ -439,7 +439,6 @@ export function fragmentSummaryBlock(args: {
 }): ContextBlock {
   return {
     id: args.id,
-    name: args.heading,
     role: 'user',
     content: fragmentSummaryList(args.heading, args.items, { editable: args.editable }),
     order: args.order,
@@ -641,15 +640,15 @@ export function createDefaultBlocks(state: ContextBuildState, opts: AssembleOpti
   }
 
   if (guidelineShortlist.length > 0) {
-    blocks.push(fragmentSummaryBlock({ id: 'shortlist-guidelines', heading: 'Guidelines', items: guidelineShortlist, order: 300 }))
+    blocks.push(fragmentSummaryBlock({ id: 'guidelines', heading: 'Guidelines', items: guidelineShortlist, order: 300 }))
   }
 
   if (knowledgeShortlist.length > 0) {
-    blocks.push(fragmentSummaryBlock({ id: 'shortlist-knowledge', heading: 'Knowledge', items: knowledgeShortlist, order: 310 }))
+    blocks.push(fragmentSummaryBlock({ id: 'knowledge', heading: 'Knowledge', items: knowledgeShortlist, order: 310 }))
   }
 
   if (characterShortlist.length > 0) {
-    blocks.push(fragmentSummaryBlock({ id: 'shortlist-characters', heading: 'Characters', items: characterShortlist, order: 320 }))
+    blocks.push(fragmentSummaryBlock({ id: 'characters', heading: 'Characters', items: characterShortlist, order: 320 }))
   }
 
   if (proseFragments.length > 0) {
