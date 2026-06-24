@@ -34,9 +34,6 @@ can pin it before touching the renderer / `runLibrarian`.
   the edit step — single pass, no extra round-trip, and self-budgeting (only
   mentioned characters, only when mentions are reported).
 
-This replaces the earlier (discarded) idea of a separate gated phase-1 mention
-call — unnecessary, since `reportMentions` already runs before edits.
-
 ## Content strategy (per type)
 
 - **Knowledge:** full in context (bounded, read-mostly; analyze checks
@@ -65,11 +62,11 @@ call — unnecessary, since `reportMentions` already runs before edits.
 
 - **Writer:** it already loads the recent prose window (last *N*, default
   `proseLimit: 10`), and each of those fragments carries `meta.annotations`
-  (resolved mentions) from prior analysis. Reuse those as the relevance set — no
-  phase-1, no extra fetch. Render the mentioned + sticky characters **full**; the
-  rest stay summaries (with `getFragment` available). The mention-bodies mechanic
-  is therefore **analyze-only**; the writer gets fullness straight from the
-  window annotations.
+  (resolved mentions) from prior analysis. Reuse those as the relevance set, with
+  no extra fetch. Render the mentioned + sticky characters **full**; the rest stay
+  summaries (with `getFragment` available). The mention-bodies mechanic is
+  therefore **analyze-only**; the writer gets fullness straight from the window
+  annotations.
 - **Directions:** already inlines the full cast; under the unified model it is
   simply "budget high, window = whole story."
 - **Unifying concept:** *relevance = resolved mentions*, sourced from a live
