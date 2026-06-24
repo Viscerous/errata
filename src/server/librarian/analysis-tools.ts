@@ -124,7 +124,7 @@ export function createAnalysisTools(collector: AnalysisCollector, opts?: { dataD
     }),
 
     reportMentions: tool({
-      description: 'Report character mentions found in the new prose. Call once with all mentions. Each character should appear only once — use the primary name.',
+      description: 'Report character mentions found in the new prose. Call once with all mentions. Each character should appear only once — use the primary name. Returns each mentioned character\'s full sheet so you can edit it accurately.',
       inputSchema: z.object({
         mentions: z.array(z.object({
           characterId: z.string().describe('The character fragment ID (e.g. ch-abc)'),
@@ -139,7 +139,18 @@ export function createAnalysisTools(collector: AnalysisCollector, opts?: { dataD
           seen.add(m.characterId)
           collector.mentions.push(m)
         }
-        return { ok: true }
+        // Return the full sheets of the mentioned characters. The model only had
+        // summaries in context, so this delivers the bodies it needs to edit
+        // accurately — right before any updateFragment/editFragment call.
+        if (!opts) return { ok: true }
+        const characters: Array<{ id: string; name: string; description: string; content: string }> = []
+        for (const id of new Set(mentions.map(m => m.characterId))) {
+          const frag = await getFragment(opts.dataDir, opts.storyId, id)
+          if (frag) {
+            characters.push({ id: frag.id, name: frag.name, description: frag.description, content: frag.content })
+          }
+        }
+        return { ok: true, characters }
       },
     }),
 
@@ -172,7 +183,7 @@ export function createAnalysisTools(collector: AnalysisCollector, opts?: { dataD
     }),
 
     editFragment: tool({
-      description: 'Edit an existing character, knowledge, or guideline fragment by replacing a specific text span (oldText) with newText. Use this for precise corrections and edits to avoid rewriting the whole fragment.',
+      description: 'Preferred edit tool. Replace a specific text span (oldText) with newText in an existing character, knowledge, or guideline fragment. Use this for any targeted change — recording a death, a status change, a correction — because it leaves the rest of the sheet intact. oldText must match the fragment exactly, so edit against the full sheet (e.g. the one returned by reportMentions).',
       inputSchema: z.object({
         fragmentId: z.string().describe('The ID of the fragment to edit (e.g. ch-abc, kn-xyz)'),
         oldText: z.string().describe('The exact text span inside the fragment to find and replace'),
@@ -196,12 +207,12 @@ export function createAnalysisTools(collector: AnalysisCollector, opts?: { dataD
     }),
 
     updateFragment: tool({
-      description: 'Directly update an existing fragment by ID. Use this to correct or enrich character, knowledge, or guideline fragments based on new information from the prose.',
+      description: 'Replace whole fields on an existing fragment by ID. WARNING: content overwrites the ENTIRE body — anything you omit is lost. Only use this for a deliberate wholesale rewrite, and only with the full current sheet in hand (e.g. from reportMentions). For a targeted change, prefer editFragment.',
       inputSchema: z.object({
         fragmentId: z.string().describe('The ID of the fragment to update (e.g. ch-abc, kn-xyz)'),
         name: z.string().optional().describe('New name for the fragment'),
         description: z.string().max(250).optional().describe('New description (max 250 chars)'),
-        content: z.string().optional().describe('New content. Retain important established facts.'),
+        content: z.string().optional().describe('The COMPLETE new body — this replaces everything. Build it from the full current sheet; never from the summary alone.'),
       }),
       execute: async ({ fragmentId, name, description, content }) => {
         if (!opts) return { error: 'updateFragment not available in this context' }
