@@ -65,11 +65,11 @@ export function createLibrarianAnalyzeBlocks(ctx: AgentBlockContext): ContextBlo
   })
 
   if (ctx.allCharacters && ctx.allCharacters.length > 0) {
-    blocks.push(fragmentSummaryBlock({ id: 'characters', heading: 'Characters', items: ctx.allCharacters, order: 200, editable: true }))
+    blocks.push(fragmentSummaryBlock({ id: 'characters-shortlist', heading: 'Characters', items: ctx.allCharacters, order: 200, editable: true }))
   }
 
   if (ctx.allKnowledge && ctx.allKnowledge.length > 0) {
-    blocks.push(fragmentSummaryBlock({ id: 'knowledge', heading: 'Knowledge', items: ctx.allKnowledge, order: 300, editable: true }))
+    blocks.push(fragmentSummaryBlock({ id: 'knowledge-shortlist', heading: 'Knowledge', items: ctx.allKnowledge, order: 300, editable: true }))
   }
 
   if (ctx.newProse) {
