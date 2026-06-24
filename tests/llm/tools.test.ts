@@ -286,8 +286,9 @@ describe('LLM tools', () => {
       expect(updated!.content).toBe('New content')
       expect(updated!.description).toBe('New desc')
       expect(updated!.version).toBe(2)
-      expect(updated!.versions).toHaveLength(1)
+      expect(updated!.versions).toHaveLength(2)
       expect(updated!.versions?.[0].content).toBe('Old content')
+      expect(updated!.versions?.[1].content).toBe('New content')
     })
   })
 
@@ -314,8 +315,9 @@ describe('LLM tools', () => {
       const updated = await getFragment(dataDir, storyId, 'pr-0001')
       expect(updated!.content).toBe('The dog sat on the mat.')
       expect(updated!.version).toBe(2)
-      expect(updated!.versions).toHaveLength(1)
+      expect(updated!.versions).toHaveLength(2)
       expect(updated!.versions?.[0].content).toBe('The cat sat on the mat.')
+      expect(updated!.versions?.[1].content).toBe('The dog sat on the mat.')
     })
 
     it('returns error when oldText not found', async () => {
