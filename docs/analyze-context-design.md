@@ -1,7 +1,9 @@
 # Librarian Analyze — Context & Edit-Safety Design
 
-**Status: proposed, not yet implemented.** Captures the agreed architecture so we
-can pin it before touching the renderer / `runLibrarian`.
+**Status: implemented** (branch `fix/analyze-mention-bodies`). Verified against the
+kill test: a character's death lands on the durable sheet (body preserved) across
+runs, with the model free to vary how (name/description update, surgical edit, or
+clean full rewrite).
 
 ## Problem
 
@@ -44,21 +46,21 @@ can pin it before touching the renderer / `runLibrarian`.
 
 ## Edit safety
 
-- **Ordering policy (keep one line):** *"Report a character's mention before
-  editing it — you'll receive its full sheet to edit against."* This is behavioral
-  policy, not a tool listing, so it coexists with reconcile's policy-only prompt.
-  It keeps the cheap common path happening.
-- **`updateFragment` read-gate — deferred (not building yet).** Idea: refuse to
-  overwrite a character's `content` whose sheet wasn't delivered by
-  `reportMentions` or read via `getFragment` this run, so a blind overwrite is
-  impossible rather than merely unlikely. We are **not** implementing it for now:
-  the mechanic + ordering line is the real fix, and the gate needs run-scoped
-  read-tracking state we'd rather not add until a failure is actually observed.
-  Build it only if the kill test still slips.
-- **Prefer `editFragment`:** usable now that the full sheet is present (it needs
-  an exact `oldText`). Non-destructive — replaces only the named span and keeps
-  the rest of the sheet, the right primitive for "record a death." Reserve
-  `updateFragment` for wholesale rewrites.
+- **Ordering — `reportMentions` is step 1 (shipped).** The procedure leads with
+  it, so the sheets are in hand before any later step. Testing showed the soft
+  ordering matters: when the model batched `reportMentions` and an edit in one
+  step, the edit ran before the sheet returned and overwrote the body from the
+  summary. Leading with `reportMentions` made that the model's opening move and
+  the truncation stopped recurring.
+- **Deterministic shrink-guard — deferred (in reserve).** A guard on
+  `updateFragment` that refuses a content overwrite far shorter than the current
+  body (the truncation-to-summary signature) was prototyped and reverted in
+  favour of the step-1 reorder. It makes the catastrophe impossible rather than
+  unlikely; build it only if the reorder ever proves insufficient.
+- **`editFragment` (shipped):** edits an exact span in any field (name,
+  description, content) and leaves the rest intact — the precise tool for a
+  status change. `updateFragment` is per-field; only its `content` field is a
+  whole-body replace.
 
 ## Scope: analyze-only (decided)
 
