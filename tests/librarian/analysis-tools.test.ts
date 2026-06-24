@@ -345,7 +345,7 @@ describe('analysis-tools', () => {
         newText: 'twenty-one years old',
       }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
 
-      expect(result).toEqual({ ok: true, fragmentId: 'ch-001' })
+      expect(result).toEqual({ ok: true, fragmentId: 'ch-001', field: 'content' })
       // The whole body is rewritten with only the span changed; the rest is preserved,
       // and the analysis provenance stamp is retained.
       expect(updateFragmentVersioned).toHaveBeenCalledWith(
@@ -353,6 +353,45 @@ describe('analysis-tools', () => {
         'test-story',
         'ch-001',
         { content: 'Alice is a brave warrior with blue eyes. Currently twenty-one years old, captain of the city guard.' },
+        { reason: 'librarian-analysis' },
+      )
+    })
+
+    it('editFragment edits the description field when the span lives there', async () => {
+      const { getFragment, updateFragmentVersioned } = await import('@/server/fragments/storage')
+      vi.mocked(getFragment).mockResolvedValueOnce({
+        id: 'ch-001',
+        type: 'character',
+        name: 'Alice',
+        description: 'A warrior, captain of the guard.',
+        content: 'Alice is brave.',
+        tags: [],
+        refs: [],
+        sticky: false,
+        placement: 'user',
+        createdAt: '',
+        updatedAt: '',
+        order: 0,
+        meta: {},
+        version: 1,
+        versions: [],
+      } as never)
+      vi.mocked(updateFragmentVersioned).mockResolvedValueOnce({ id: 'ch-001' } as never)
+
+      const collector = createEmptyCollector()
+      const tools = createAnalysisTools(collector, { dataDir: '/tmp', storyId: 'test-story' })
+      const result = await tools.editFragment.execute!({
+        fragmentId: 'ch-001',
+        oldText: 'captain of the guard.',
+        newText: 'former captain of the guard. Deceased.',
+      }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
+
+      expect(result).toEqual({ ok: true, fragmentId: 'ch-001', field: 'description' })
+      expect(updateFragmentVersioned).toHaveBeenCalledWith(
+        '/tmp',
+        'test-story',
+        'ch-001',
+        { description: 'A warrior, former captain of the guard. Deceased.' },
         { reason: 'librarian-analysis' },
       )
     })
