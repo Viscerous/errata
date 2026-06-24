@@ -124,7 +124,7 @@ export function targetFragmentBlock(
 /** All characters list for cross-reference. */
 export function allCharactersBlock(ctx: AgentBlockContext): ContextBlock | null {
   if (!ctx.allCharacters || ctx.allCharacters.length === 0) return null
-  return fragmentSummaryBlock({ id: 'characters', heading: 'Characters', items: ctx.allCharacters, order: 350 })
+  return fragmentSummaryBlock({ id: 'characters-shortlist', heading: 'Characters', items: ctx.allCharacters, order: 350 })
 }
 
 /** Shortlist fragments (guidelines, knowledge, characters not in sticky). */
