@@ -395,11 +395,6 @@ export async function buildContextState(
   return state
 }
 
-export interface AssembleOptions {
-  /** Extra tool descriptions to include in the context (e.g. plugin tools) */
-  extraTools?: Array<{ name: string; description: string; pluginName?: string }>
-}
-
 /** Renders a single fragment with a source marker */
 function renderFragment(f: Fragment): string {
   return `[@fragment=${f.id}]\n${registry.renderContext(f)}`
@@ -454,7 +449,7 @@ function renderAdvancedOrder(fragments: Fragment[], fragmentOrder: string[]): st
  * Each section of the LLM prompt becomes a discrete, addressable block.
  * Blocks can be manipulated (find, replace, remove, insert, reorder) before compilation.
  */
-export function createDefaultBlocks(state: ContextBuildState, opts: AssembleOptions = {}): ContextBlock[] {
+export function createDefaultBlocks(state: ContextBuildState): ContextBlock[] {
   const {
     story,
     proseFragments,
@@ -476,23 +471,6 @@ export function createDefaultBlocks(state: ContextBuildState, opts: AssembleOpti
   const systemPlaced = allSticky.filter(f => (f.placement ?? 'user') === 'system')
   const userPlaced = allSticky.filter(f => (f.placement ?? 'user') === 'user')
 
-  // Build tool lines (only for types with llmTools enabled)
-  const toolLines: string[] = []
-  const types = registry.listTypes()
-  for (const t of types) {
-    if (t.llmTools === false) continue
-    const cap = t.type.charAt(0).toUpperCase() + t.type.slice(1)
-    const plural = ['prose', 'knowledge'].includes(t.type) ? cap : cap + 's'
-    toolLines.push(`- get${cap}(id): Get full content of a ${t.type} fragment`)
-    toolLines.push(`- list${plural}(): List all ${t.type} fragments`)
-  }
-  toolLines.push('- listFragmentTypes(): List all available fragment types')
-  if (opts.extraTools) {
-    for (const t of opts.extraTools) {
-      toolLines.push(`[@plugin=${t.pluginName ?? t.name}]\n- ${t.name}: ${t.description}`)
-    }
-  }
-
   const blocks: ContextBlock[] = []
 
   // --- System blocks ---
@@ -505,15 +483,12 @@ export function createDefaultBlocks(state: ContextBuildState, opts: AssembleOpti
     source: 'builtin',
   })
 
+  // Tools reach the model via the SDK schema, so this block holds usage policy
+  // only — never a catalog that could drift from the enabled tools.
   blocks.push({
     id: 'tools',
     role: 'system',
-    content: [
-      '## Available Tools',
-      'You have access to the following tools:',
-      toolLines.join('\n'),
-      '\n' + instructionRegistry.resolve('generation.tools-suffix', state.modelId),
-    ].join('\n'),
+    content: instructionRegistry.resolve('generation.tools-suffix', state.modelId),
     order: 200,
     source: 'builtin',
   })
@@ -715,11 +690,11 @@ export function compileBlocks(blocks: ContextBlock[]): ContextMessage[] {
  * Assembles the final LLM message array from the context state.
  * Thin wrapper over createDefaultBlocks + compileBlocks.
  */
-export function assembleMessages(state: ContextBuildState, opts: AssembleOptions = {}): ContextMessage[] {
+export function assembleMessages(state: ContextBuildState): ContextMessage[] {
   const requestLogger = logger.child({ storyId: state.story.id })
   requestLogger.info('Assembling messages...')
 
-  const blocks = createDefaultBlocks(state, opts)
+  const blocks = createDefaultBlocks(state)
   const messages = compileBlocks(blocks)
 
   requestLogger.info('Messages assembled', {

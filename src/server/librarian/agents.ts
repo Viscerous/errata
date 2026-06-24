@@ -4,8 +4,10 @@ import { agentBlockRegistry } from '../agents/agent-block-registry'
 import { modelRoleRegistry } from '../agents/model-role-registry'
 import { instructionRegistry } from '../instructions'
 import type { AgentDefinition } from '../agents/types'
+import { createFragmentTools } from '../llm/tools'
+import { createAnalysisTools, createEmptyCollector } from './analysis-tools'
 import { runLibrarian } from './agent'
-import { librarianChat } from './chat'
+import { librarianChat, createLibrarianChatBespokeTools } from './chat'
 import { refineFragment } from './refine'
 import { optimizeCharacter } from './optimize-character'
 import { transformProseSelection } from './prose-transform'
@@ -147,6 +149,7 @@ export function registerLibrarianAgents(): void {
     description: 'Analyzes prose fragments for continuity signals and summary updates.',
     createDefaultBlocks: createLibrarianAnalyzeBlocks,
     availableTools: ['updateSummary', 'reportMentions', 'reportContradictions', 'suggestFragment', 'updateFragment', 'reportTimeline', 'suggestDirections'],
+    resolveTools: ({ dataDir, storyId }) => createAnalysisTools(createEmptyCollector(), { dataDir, storyId }),
     buildPreviewContext: buildAnalyzePreviewContext,
   })
 
@@ -160,6 +163,10 @@ export function registerLibrarianAgents(): void {
       'createFragment', 'updateFragment', 'editFragment', 'deleteFragment',
       'editProse', 'getStorySummary', 'updateStorySummary', 'reanalyzeFragment', 'optimizeCharacter',
     ],
+    resolveTools: ({ dataDir, storyId }) => ({
+      ...createFragmentTools(dataDir, storyId, { readOnly: false }),
+      ...createLibrarianChatBespokeTools(dataDir, storyId),
+    }),
     buildPreviewContext: buildChatPreviewContext,
   })
 
@@ -173,6 +180,7 @@ export function registerLibrarianAgents(): void {
       'createFragment', 'updateFragment', 'editFragment', 'deleteFragment',
       'editProse', 'getStorySummary', 'updateStorySummary',
     ],
+    resolveTools: ({ dataDir, storyId }) => createFragmentTools(dataDir, storyId, { readOnly: false }),
     buildPreviewContext: buildRefinePreviewContext,
   })
 
@@ -186,6 +194,7 @@ export function registerLibrarianAgents(): void {
       'createFragment', 'updateFragment', 'editFragment', 'deleteFragment',
       'editProse', 'getStorySummary', 'updateStorySummary',
     ],
+    resolveTools: ({ dataDir, storyId }) => createFragmentTools(dataDir, storyId, { readOnly: false }),
     buildPreviewContext: buildOptimizeCharacterPreviewContext,
   })
 

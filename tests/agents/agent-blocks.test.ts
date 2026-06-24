@@ -207,14 +207,14 @@ describe('Librarian Chat Blocks', () => {
     expect(ids).toContain('story-info')
   })
 
-  it('includes plugin tool descriptions in instructions', () => {
+  it('does not enumerate plugin tools in instructions (they reach the model via the SDK schema)', () => {
     const def = agentBlockRegistry.get('librarian.chat')!
     const blocks = def.createDefaultBlocks(makeBaseContext({
       pluginToolDescriptions: [{ name: 'myTool', description: 'Does something useful' }],
     }))
     const inst = blocks.find(b => b.id === 'instructions')!
-    expect(inst.content).toContain('myTool')
-    expect(inst.content).toContain('Does something useful')
+    expect(inst.content).not.toContain('myTool')
+    expect(inst.content).not.toContain('Does something useful')
   })
 
   it('includes prose-summaries when prose fragments provided', () => {

@@ -198,18 +198,19 @@ describe('prewriter', () => {
         makeFragment({ id: 'pr-0002', content: 'She opened the door.' }),
       ]
       const brief = 'Write a continuation focusing on character dialogue.'
-      const toolLines = [
-        '- getCharacter(id): Get full content of a character fragment',
-        '- listCharacters(): List all character fragments',
-      ]
 
-      const blocks = createWriterBriefBlocks(proseFragments, brief, toolLines)
+      const blocks = createWriterBriefBlocks(proseFragments, brief)
 
       const ids = blocks.map((b) => b.id)
       expect(ids).toContain('instructions')
       expect(ids).toContain('tools')
       expect(ids).toContain('prose')
       expect(ids).toContain('writing-brief')
+
+      // The tools block carries usage policy only — no enumerated catalog.
+      const tools = blocks.find((b) => b.id === 'tools')!
+      expect(tools.content).not.toContain('getCharacter')
+      expect(tools.content).not.toContain('## Available Tools')
 
       // Should NOT contain any of the full context blocks
       expect(ids).not.toContain('story-info')
@@ -236,21 +237,22 @@ describe('prewriter', () => {
     })
 
     it('does not duplicate a leading writing brief heading from the prewriter', () => {
-      const blocks = createWriterBriefBlocks([], '## Writing Brief\n\nFocus on dialogue.', [])
+      const blocks = createWriterBriefBlocks([], '## Writing Brief\n\nFocus on dialogue.')
       const writingBrief = blocks.find((b) => b.id === 'writing-brief')!
 
       expect(writingBrief.content.match(/## Writing Brief/g)).toHaveLength(1)
       expect(writingBrief.content).toBe('## Writing Brief\n\nFocus on dialogue.')
     })
 
-    it('omits tools block when no tool lines provided', () => {
-      const blocks = createWriterBriefBlocks([], 'A brief.', [])
-      const ids = blocks.map((b) => b.id)
-      expect(ids).not.toContain('tools')
+    it('always includes a policy-only tools block', () => {
+      const blocks = createWriterBriefBlocks([], 'A brief.')
+      const tools = blocks.find((b) => b.id === 'tools')!
+      expect(tools).toBeDefined()
+      expect(tools.content).not.toContain('## Available Tools')
     })
 
     it('omits prose block when no prose fragments provided', () => {
-      const blocks = createWriterBriefBlocks([], 'A brief.', ['- someTool(): Do something'])
+      const blocks = createWriterBriefBlocks([], 'A brief.')
       const ids = blocks.map((b) => b.id)
       expect(ids).not.toContain('prose')
     })

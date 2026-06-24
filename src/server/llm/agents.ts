@@ -3,6 +3,7 @@ import { instructionRegistry } from '../instructions'
 import type { AgentBlockContext } from '../agents/agent-block-context'
 import { registry } from '../fragments/registry'
 import { createDefaultBlocks, buildContextState, type ContextBuildState, type ContextBlock } from './context-builder'
+import { createFragmentTools } from './tools'
 import { createPrewriterBlocks, buildPrewriterPreviewContext, createWriterBriefBlocks, PREWRITER_INSTRUCTIONS } from './prewriter'
 import {
   GENERATION_SYSTEM_PROMPT,
@@ -34,27 +35,10 @@ function getAvailableTools(): string[] {
   return tools
 }
 
-function buildToolLines(pluginToolDescriptions?: Array<{ name: string; description: string }>): string[] {
-  const lines: string[] = []
-  for (const t of registry.listTypes()) {
-    if (t.llmTools === false) continue
-    const cap = capitalize(t.type)
-    const plural = capitalize(pluralize(t.type))
-    lines.push(`- get${cap}(id): Get full content of a ${t.type} fragment`)
-    lines.push(`- list${plural}(): List all ${t.type} fragments`)
-  }
-  lines.push('- listFragmentTypes(): List all available fragment types')
-  for (const t of pluginToolDescriptions ?? []) {
-    lines.push(`- ${t.name}: ${t.description}`)
-  }
-  return lines
-}
-
 function createGenerationBlocks(ctx: AgentBlockContext): ContextBlock[] {
   if (ctx.story.settings.generationMode === 'prewriter') {
-    const toolLines = buildToolLines(ctx.pluginToolDescriptions)
     const placeholderBrief = '(The prewriter will generate a brief at generation time.)'
-    return createWriterBriefBlocks(ctx.proseFragments, placeholderBrief, toolLines, ctx.modelId)
+    return createWriterBriefBlocks(ctx.proseFragments, placeholderBrief, ctx.modelId)
   }
 
   const state: ContextBuildState = {
@@ -69,11 +53,7 @@ function createGenerationBlocks(ctx: AgentBlockContext): ContextBlock[] {
     characterShortlist: ctx.characterShortlist,
     authorInput: '(preview)',
   }
-  const extraTools = ctx.pluginToolDescriptions?.map(t => ({
-    name: t.name,
-    description: t.description,
-  }))
-  return createDefaultBlocks(state, extraTools?.length ? { extraTools } : undefined)
+  return createDefaultBlocks(state)
 }
 
 async function buildGenerationPreviewContext(dataDir: string, storyId: string): Promise<AgentBlockContext> {
@@ -110,6 +90,7 @@ export function registerGenerationBlocks(): void {
     displayName: 'Writer',
     description: 'Prose continuation and generation',
     availableTools: getAvailableTools(),
+    resolveTools: ({ dataDir, storyId }) => createFragmentTools(dataDir, storyId, { readOnly: true }),
     createDefaultBlocks: createGenerationBlocks,
     buildPreviewContext: buildGenerationPreviewContext,
   })
@@ -119,6 +100,7 @@ export function registerGenerationBlocks(): void {
     displayName: 'Prewriter',
     description: 'Creates a focused writing brief from full story context.',
     availableTools: getAvailableTools(),
+    resolveTools: ({ dataDir, storyId }) => createFragmentTools(dataDir, storyId, { readOnly: true }),
     createDefaultBlocks: createPrewriterBlocks,
     buildPreviewContext: buildPrewriterPreviewContext,
   })

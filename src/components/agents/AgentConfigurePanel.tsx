@@ -1039,7 +1039,7 @@ function AgentBlockEditor({ storyId, agentName, agents, onBack }: AgentBlockEdit
             <div className="flex items-center justify-center py-20">
               <Spinner label="Compiling context" />
             </div>
-          ) : previewData?.messages.length === 0 ? (
+          ) : previewData && previewData.messages.length === 0 && previewData.tools.length === 0 ? (
             <div className="flex items-center justify-center py-20">
               <EmptyState title="No messages in context" />
             </div>
@@ -1047,6 +1047,7 @@ function AgentBlockEditor({ storyId, agentName, agents, onBack }: AgentBlockEdit
             <BlockContentView
               messages={previewData.messages}
               blocks={previewData.blocks}
+              tools={previewData.tools}
               className="border-t border-border/30"
             />
           ) : null}
