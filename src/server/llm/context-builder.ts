@@ -678,13 +678,18 @@ export function createDefaultBlocks(state: ContextBuildState, opts: AssembleOpti
     })
   }
 
-  blocks.push({
-    id: 'author-input',
-    role: 'user',
-    content: `The author wants the following to happen next: ${authorInput}`,
-    order: 600,
-    source: 'builtin',
-  })
+  // Only frame an explicit direction when the author gave one; a bare "continue"
+  // (empty input) leaves the model to continue from the prose without a dangling
+  // instruction label.
+  if (authorInput.trim()) {
+    blocks.push({
+      id: 'author-input',
+      role: 'user',
+      content: `Author's direction for what happens next:\n${authorInput}`,
+      order: 600,
+      source: 'builtin',
+    })
+  }
 
   return blocks
 }

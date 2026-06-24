@@ -50,6 +50,9 @@ function buildToolLines(pluginToolDescriptions?: Array<{ name: string; descripti
   return lines
 }
 
+/** Placeholder author direction shown in the generation context preview. */
+const GENERATION_PREVIEW_INPUT = '(your direction for the next passage will appear here)'
+
 function createGenerationBlocks(ctx: AgentBlockContext): ContextBlock[] {
   if (ctx.story.settings.generationMode === 'prewriter') {
     const toolLines = buildToolLines(ctx.pluginToolDescriptions)
@@ -67,7 +70,7 @@ function createGenerationBlocks(ctx: AgentBlockContext): ContextBlock[] {
     guidelineShortlist: ctx.guidelineShortlist,
     knowledgeShortlist: ctx.knowledgeShortlist,
     characterShortlist: ctx.characterShortlist,
-    authorInput: '(preview)',
+    authorInput: GENERATION_PREVIEW_INPUT,
   }
   const extraTools = ctx.pluginToolDescriptions?.map(t => ({
     name: t.name,
@@ -77,9 +80,9 @@ function createGenerationBlocks(ctx: AgentBlockContext): ContextBlock[] {
 }
 
 async function buildGenerationPreviewContext(dataDir: string, storyId: string): Promise<AgentBlockContext> {
-  // Note: generation uses '(preview)' as authorInput, so we call buildContextState directly
-  // rather than using buildBasePreviewContext (which passes empty string)
-  const state = await buildContextState(dataDir, storyId, '(preview)')
+  // Generation needs a non-empty authorInput so the author-input block renders in
+  // the preview; we use a self-explanatory placeholder rather than a bare token.
+  const state = await buildContextState(dataDir, storyId, GENERATION_PREVIEW_INPUT)
   return {
     story: state.story,
     proseFragments: state.proseFragments,
