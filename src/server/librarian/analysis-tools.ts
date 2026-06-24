@@ -182,7 +182,7 @@ export function createAnalysisTools(collector: AnalysisCollector, opts?: { dataD
     }),
 
     editFragment: tool({
-      description: 'Preferred edit tool. Replace a specific text span (oldText) with newText anywhere in an existing character, knowledge, or guideline fragment — its name, description, or content. Use this for any targeted change (a death, a status change, a correction): it leaves the rest of the sheet intact. oldText must match exactly, so edit against the full sheet (e.g. the one returned by reportMentions).',
+      description: 'Replace an exact text span (oldText) with newText in a character, knowledge, or guideline fragment. Searches the name, description, and content, and changes only the matched span. oldText must match the current text exactly.',
       inputSchema: z.object({
         fragmentId: z.string().describe('The ID of the fragment to edit (e.g. ch-abc, kn-xyz)'),
         oldText: z.string().describe('The exact text span to find and replace, from the name, description, or content'),
@@ -209,12 +209,12 @@ export function createAnalysisTools(collector: AnalysisCollector, opts?: { dataD
     }),
 
     updateFragment: tool({
-      description: 'Replace whole fields on an existing fragment by ID. Each field you pass is replaced independently; fields you omit are untouched — so setting only name or description is a safe, targeted change. WARNING: setting content replaces the ENTIRE body, so only do that for a deliberate wholesale rewrite, built from the full current sheet (e.g. from reportMentions). For a small change to the body, prefer editFragment.',
+      description: 'Replace whole fields on a fragment by ID. Only the fields you pass change; the rest are left untouched. Setting content replaces the entire body, so provide complete new text built from the fragment\'s current sheet.',
       inputSchema: z.object({
         fragmentId: z.string().describe('The ID of the fragment to update (e.g. ch-abc, kn-xyz)'),
         name: z.string().optional().describe('New name for the fragment'),
         description: z.string().max(250).optional().describe('New description (max 250 chars)'),
-        content: z.string().optional().describe('The COMPLETE new body — this replaces everything. Build it from the full current sheet; never from the summary alone.'),
+        content: z.string().optional().describe('The complete new body; it replaces the existing content in full. Build it from the fragment\'s current text, not from the one-line summary.'),
       }),
       execute: async ({ fragmentId, name, description, content }) => {
         if (!opts) return { error: 'updateFragment not available in this context' }
