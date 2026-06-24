@@ -1,7 +1,31 @@
 import { tool, type ToolSet } from 'ai'
 import { z } from 'zod/v4'
-import { getFragment, updateFragmentVersioned } from '../fragments/storage'
+import { getFragment, updateFragment, updateFragmentVersioned } from '../fragments/storage'
 import { checkFragmentWrite } from '../fragments/protection'
+
+/** Map collected mentions to the prose annotation shape used for highlighting. */
+export function toMentionAnnotations(mentions: Array<{ characterId: string; text: string }>) {
+  return mentions.map(m => ({ type: 'mention' as const, fragmentId: m.characterId, text: m.text }))
+}
+
+/**
+ * Write mention annotations onto the prose fragment immediately (meta-only, so it
+ * creates no version). Called from reportMentions so highlights appear as soon as
+ * mentions resolve, rather than waiting for the whole analysis run to finish.
+ */
+async function persistMentionAnnotations(
+  dataDir: string,
+  storyId: string,
+  proseFragmentId: string,
+  mentions: Array<{ characterId: string; text: string }>,
+): Promise<void> {
+  const prose = await getFragment(dataDir, storyId, proseFragmentId)
+  if (!prose) return
+  await updateFragment(dataDir, storyId, {
+    ...prose,
+    meta: { ...prose.meta, annotations: toMentionAnnotations(mentions) },
+  })
+}
 
 // --- Collector ---
 
@@ -100,7 +124,7 @@ export const updateSummaryInputSchema = z.object({
 
 // --- Tools ---
 
-export function createAnalysisTools(collector: AnalysisCollector, opts?: { dataDir: string; storyId: string; disableDirections?: boolean; disableSuggestions?: boolean }) {
+export function createAnalysisTools(collector: AnalysisCollector, opts?: { dataDir: string; storyId: string; proseFragmentId?: string; disableDirections?: boolean; disableSuggestions?: boolean }) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const tools: Record<string, any> = {
     updateSummary: tool({
@@ -137,6 +161,11 @@ export function createAnalysisTools(collector: AnalysisCollector, opts?: { dataD
           if (seen.has(m.characterId)) continue
           seen.add(m.characterId)
           collector.mentions.push(m)
+        }
+        // Persist annotations now so the prose highlights appear as soon as
+        // mentions resolve (this tool runs first), not at the end of the run.
+        if (opts?.proseFragmentId && collector.mentions.length > 0) {
+          await persistMentionAnnotations(opts.dataDir, opts.storyId, opts.proseFragmentId, collector.mentions)
         }
         // Return the full sheets of the mentioned characters. The model only had
         // summaries in context, so this delivers the bodies it needs to edit
@@ -314,7 +343,7 @@ export function createAnalysisTools(collector: AnalysisCollector, opts?: { dataD
  */
 export function createLibrarianAnalyzeTools(
   collector: AnalysisCollector,
-  opts: { dataDir: string; storyId: string; disableDirections?: boolean; disableSuggestions?: boolean },
+  opts: { dataDir: string; storyId: string; proseFragmentId?: string; disableDirections?: boolean; disableSuggestions?: boolean },
 ): ToolSet {
   return createAnalysisTools(collector, opts)
 }

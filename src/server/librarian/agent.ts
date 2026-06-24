@@ -25,7 +25,7 @@ import { applyFragmentSuggestion } from './suggestions'
 import { reportUsage } from '../llm/token-tracker'
 import { createLogger } from '../logging'
 import { compileAgentContext } from '../agents/compile-agent-context'
-import { createEmptyCollector, createLibrarianAnalyzeTools } from './analysis-tools'
+import { createEmptyCollector, createLibrarianAnalyzeTools, toMentionAnnotations } from './analysis-tools'
 import { buildAnalyzeSystemPrompt } from './blocks'
 import {
   createAnalysisBuffer,
@@ -129,7 +129,7 @@ async function runLibrarianInner(
   const disableDirections = story.settings?.disableLibrarianDirections === true
   const disableSuggestions = story.settings?.disableLibrarianSuggestions === true
   const collector = createEmptyCollector()
-  const analysisTools = createLibrarianAnalyzeTools(collector, { dataDir, storyId, disableDirections, disableSuggestions })
+  const analysisTools = createLibrarianAnalyzeTools(collector, { dataDir, storyId, proseFragmentId: fragmentId, disableDirections, disableSuggestions })
 
   // Compile context via block system
   const compiled = await compileAgentContext(dataDir, storyId, 'librarian.analyze', blockContext, analysisTools)
@@ -330,11 +330,7 @@ async function runLibrarianInner(
       }
 
       if (hasMentions) {
-        updatedMeta.annotations = collector.mentions.map(m => ({
-          type: 'mention' as const,
-          fragmentId: m.characterId,
-          text: m.text,
-        }))
+        updatedMeta.annotations = toMentionAnnotations(collector.mentions)
       }
 
       await updateFragment(dataDir, storyId, {
