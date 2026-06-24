@@ -480,7 +480,6 @@ export async function buildPrewriterPreviewContext(dataDir: string, storyId: str
 export function createWriterBriefBlocks(
   proseFragments: Fragment[],
   brief: string,
-  toolLines: string[],
   modelId?: string,
 ): ContextBlock[] {
   const blocks: ContextBlock[] = []
@@ -497,20 +496,14 @@ export function createWriterBriefBlocks(
     source: 'builtin',
   })
 
-  if (toolLines.length > 0) {
-    blocks.push({
-      id: 'tools',
-      role: 'system' as const,
-      content: [
-        '## Available Tools',
-        'You have access to the following tools for optional lookups:',
-        toolLines.join('\n'),
-        '\n' + instructionRegistry.resolve('generation.writer-brief.tools-suffix', modelId),
-      ].join('\n'),
-      order: 200,
-      source: 'builtin',
-    })
-  }
+  // Tools reach the model via the SDK schema; this block holds usage policy only.
+  blocks.push({
+    id: 'tools',
+    role: 'system' as const,
+    content: instructionRegistry.resolve('generation.writer-brief.tools-suffix', modelId),
+    order: 200,
+    source: 'builtin',
+  })
 
   if (proseFragments.length > 0) {
     blocks.push({

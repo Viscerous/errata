@@ -52,10 +52,7 @@ export async function compileGenerationWriterContext(args: {
     if (!disabledTools.has(name)) tools[name] = tool
   }
 
-  let blocks = createDefaultBlocks(
-    ctxState,
-    pluginToolDescriptions.length > 0 ? { extraTools: pluginToolDescriptions } : undefined,
-  )
+  let blocks = createDefaultBlocks(ctxState)
   blocks = await applyBlockConfig(blocks, agentConfig, {
     ...ctxState,
     ...createScriptHelpers(dataDir, storyId),

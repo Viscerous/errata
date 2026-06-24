@@ -21,54 +21,24 @@ import {
 // ─── Librarian Analyze ───
 
 export function buildAnalyzeSystemPrompt(opts?: { disableDirections?: boolean; disableSuggestions?: boolean }): string {
-  const toolLines: string[] = [
-    '1. updateSummary — Provide a concise summary of what happened in the new prose.',
-    '   - Also provide structured fields when possible: events[], stateChanges[], openThreads[].',
-    '   - If summary text is blank, structured fields are required.',
-    '2. reportMentions — Report each character reference by name, nickname, or title (not pronouns). Include the character ID and the exact text used.',
-    '3. reportContradictions — Flag when the new prose contradicts established facts in the summary, character descriptions, or knowledge. Only flag clear contradictions, not ambiguities.',
-  ]
-
-  let toolNumber = 4
-
-  if (!opts?.disableSuggestions) {
-    toolLines.push(
-      `${toolNumber}. suggestFragment — Suggest creating new character/knowledge fragments based on new information.`,
-      '   - Only use this for truly new fragments that don\'t exist yet. Omit targetFragmentId.',
-      '   - Set type to "character" for characters or "knowledge" for world-building details, locations, items, or facts.',
-    )
-    toolNumber++
-  }
-
-  toolLines.push(
-    `${toolNumber}. updateFragment — Directly update an existing fragment by ID. Use this when an existing character, knowledge, or guideline fragment needs correction or enrichment based on new information.`,
-    '   - Provide the fragmentId and one or more of: name, description, content.',
-    '   - Retain important established facts when updating content.',
-  )
-  toolNumber++
-
-  toolLines.push(
-    `${toolNumber}. reportTimeline — Note significant events. "position" is relative to the previous prose: "before" for flashback, "during" for concurrent, "after" for sequential.`,
-  )
-  toolNumber++
-
-  if (!opts?.disableDirections) {
-    toolLines.push(
-      `${toolNumber}. suggestDirections — Suggest 3-5 possible directions the story could go next. Each direction needs a short title, a description of what would happen, and an instruction the writer could follow. Offer a mix: continue the current scene, introduce a twist, explore a character's inner thoughts, shift to a new setting, etc.`,
-    )
-  }
-
   const alwaysCall = opts?.disableDirections
     ? 'Always call updateSummary.'
     : 'Always call updateSummary and suggestDirections.'
 
+  // Tool names, parameters, and per-tool guidance are delivered to the model via
+  // the SDK tool schema, so this prompt describes the job and policy by concept
+  // rather than enumerating a catalog that could drift from the enabled tools.
   return `
 You are a librarian agent for a collaborative writing app.
 Your job is to analyze new prose fragments and maintain story continuity.
 
-You have ${toolNumber - (opts?.disableDirections ? 1 : 0)} reporting tools. Use them to report your findings:
+Use your reporting tools to record what you find: a summary of what happened, character mentions, contradictions with established facts, timeline events${opts?.disableSuggestions ? '' : ', and suggested new character/knowledge fragments'}${opts?.disableDirections ? '' : ', and possible next directions for the story'}. Update existing character, knowledge, or guideline fragments when new information corrects or enriches them.
+You also have read-only lookup tools to read full fragment content and search across fragments. Each tool's parameters and usage are described in its definition.
 
-${toolLines.join('\n')}
+Instructions:
+1. Your context includes a story summary and fragment summaries (IDs, names, descriptions) — not full content. Use the appropriate get tool to read the full content of any fragment you need.
+2. Before editing or updating an existing character, knowledge, or guideline fragment, read it first using the appropriate get tool (e.g. getCharacter or getFragment). Its full content is not in your context, and updateFragment overwrites whatever you do not carry over.
+3. Prefer editFragment over updateFragment for small, precise corrections — it changes only the named span and leaves the rest of the sheet intact.
 
 ${alwaysCall} Only call the other tools if there are relevant findings.
 If there are no contradictions, suggestions, mentions, or timeline events, don't call those tools.
@@ -167,20 +137,7 @@ export const CHAT_SYSTEM_PROMPT = `
 You are a conversational librarian assistant for a collaborative writing app. Your job is to help the author maintain story continuity by answering questions and performing fragment edits through tools.
 Important: Follow the agent configuration.
 
-Your tools:
-- getFragment(id) — Read any fragment's full content. Use this to read prose before editing.
-- editProse(oldText, newText) — Search and replace across active prose in the story chain. You must read the prose with getFragment first to know the exact text.
-- editFragment(fragmentId, oldText, newText) — Search and replace within a specific non-prose fragment.
-- updateFragment(fragmentId, newContent, newDescription) — Overwrite a fragment's entire content.
-- createFragment(type, name, description, content) — Create a brand-new fragment.
-- listFragments(type?) — List fragments, optionally by type.
-- searchFragments(query, type?) — Search for text across all fragments.
-- deleteFragment(fragmentId) — Delete a fragment.
-- getStorySummary() — Read the current rolling story summary.
-- updateStorySummary(summary) — Replace the story's rolling summary with a new version. Use this to rewrite, condense, or correct the summary based on all available prose.
-- reanalyzeFragment(fragmentId) — Re-run librarian analysis on a prose fragment. Updates the fragment's summary, detects mentions, flags contradictions, and suggests knowledge. Use when the author asks to re-examine or reanalyze a specific prose section.
-- optimizeCharacter(fragmentId, instructions?) — Optimize a character sheet using depth-focused writing methodology. Rewrites with causality, Egri dimensions, friction, and contrast.
-- inspectGeneration(fragmentId, aspect?) — Inspect the debug details behind a generated prose fragment: the model, the prompt/context it saw, the tools it called, token usage, reasoning, and the prewriter brief. aspect is one of summary (default), prompt, tools, prewriter, reasoning. Use to explain or diagnose why a passage was written the way it was.
+Your tools' names, parameters, and usage are described in their definitions; only the tools listed there are available to you. Reach for read tools (getFragment, listFragments, searchFragments) to gather context, and the edit/create/delete tools to change fragments.
 
 Instructions:
 1. Your context includes a story summary and fragment summaries (IDs, names, descriptions) — not full content. Use getFragment(id) to read the full content of any fragment you need.
@@ -200,16 +157,12 @@ Fragment ID prefixes: pr- (prose), ch- (character), gl- (guideline), kn- (knowle
 export function createLibrarianChatBlocks(ctx: AgentBlockContext): ContextBlock[] {
   const blocks: ContextBlock[] = []
 
-  let chatSystemPrompt = instructionRegistry.resolve('librarian.chat.system', ctx.modelId)
-  if (ctx.pluginToolDescriptions && ctx.pluginToolDescriptions.length > 0) {
-    const pluginToolLines = ctx.pluginToolDescriptions.map(t => `- ${t.name} — ${t.description}`)
-    chatSystemPrompt += `\n\nAdditional enabled plugin tools:\n${pluginToolLines.join('\n')}`
-  }
-
+  // Plugin tools (like all tools) reach the model via the SDK schema and are
+  // filtered by the agent's disabledTools, so we don't enumerate them here.
   blocks.push({
     id: 'instructions',
     role: 'system',
-    content: chatSystemPrompt,
+    content: instructionRegistry.resolve('librarian.chat.system', ctx.modelId),
     order: 100,
     source: 'builtin',
   })
