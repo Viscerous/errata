@@ -323,17 +323,20 @@ describe('context-builder', () => {
     expect(msg!.content).not.toContain('The dark lord rules with an iron fist.')
   })
 
-  it('includes fragment tool availability in system message', async () => {
+  it('carries tool usage policy without enumerating a tool catalog', async () => {
     const story = makeStory()
     await createStory(dataDir, story)
 
     const messages = await buildContext(dataDir, story.id, 'Continue')
     const sysMsg = messages.find((m) => m.role === 'system')!
 
-    // System message should list available tools (built-in types have llmTools: false)
+    // Tool names/descriptions are delivered via the SDK schema, so the system
+    // message holds only usage policy — never a catalog that could drift from
+    // the agent's actually-enabled tools.
     expect(sysMsg.content).not.toContain('getCharacter')
     expect(sysMsg.content).not.toContain('listCharacters')
-    expect(sysMsg.content).toContain('listFragmentTypes')
+    expect(sysMsg.content).not.toContain('listFragmentTypes')
+    expect(sysMsg.content).toContain('lookup tools')
     expect(sysMsg.content).toContain('creative writing assistant')
   })
 

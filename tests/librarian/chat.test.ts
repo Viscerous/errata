@@ -334,8 +334,8 @@ describe('librarian chat endpoint', () => {
 
     expect(mockAgentCtor).toHaveBeenCalled()
     const config = mockAgentCtor.mock.calls[0][0]
+    // The tool is provided via the SDK schema (not enumerated in the prompt).
     expect(config.tools.reanalyzeFragment).toBeDefined()
-    expect(config.instructions).toContain('reanalyzeFragment')
   })
 
   it('includes conversation history in messages', async () => {

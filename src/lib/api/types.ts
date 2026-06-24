@@ -361,6 +361,8 @@ export interface BlockPreviewResponse {
   messages: Array<{ role: string; content: string }>
   blocks: Array<{ id: string; name: string; role: string }>
   blockCount: number
+  /** Tools sent to the model via the SDK schema, with disabledTools applied. */
+  tools: Array<{ name: string; description: string; enabled: boolean }>
 }
 
 // Agent Block types
