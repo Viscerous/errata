@@ -63,22 +63,31 @@ call — unnecessary, since `reportMentions` already runs before edits.
 
 ## Cross-agent reuse
 
-- **Writer:** the recent prose window is already analyzed, so reuse
-  `meta.annotations[].fragmentId` (resolved mentions) as the relevance set — no
-  phase-1 needed. Inline full bodies for mentioned + sticky characters up to a
-  token budget; summaries + `getFragment` for the overflow.
+- **Writer:** it already loads the recent prose window (last *N*, default
+  `proseLimit: 10`), and each of those fragments carries `meta.annotations`
+  (resolved mentions) from prior analysis. Reuse those as the relevance set — no
+  phase-1, no extra fetch. Render the mentioned + sticky characters **full**; the
+  rest stay summaries (with `getFragment` available). The mention-bodies mechanic
+  is therefore **analyze-only**; the writer gets fullness straight from the
+  window annotations.
 - **Directions:** already inlines the full cast; under the unified model it is
   simply "budget high, window = whole story."
 - **Unifying concept:** *relevance = resolved mentions*, sourced from a live
   `reportMentions` (analyze) or stored window annotations (writer).
 
-## Budget
+## Budget — none for now (decided)
 
-- Reuse the existing `chars/4` token estimate and the `ContextCompactOption`
-  precedent (`context-builder.ts`) rather than inventing a new primitive.
-- Per-agent defaults (starting points): analyze is naturally bounded by
-  mention-injection; writer ≈ 2–3k tokens of full bodies on top of sticky;
-  Directions ≈ 8k (effectively "all, capped for runaway casts").
+We adopt the **Directions precedent: no budget on full bodies.** Directions
+already inlines the entire cast in full (only prose is capped), and it works in
+practice. So for now, analyze and the writer also inline the relevant full
+sheets unbounded — analyze is naturally limited by what gets mentioned, and the
+writer by the mention set in its prose window.
+
+This is knowingly not sensible at large scale (a huge cast all mentioned in a
+window, or lore-heavy full knowledge, will bloat context). When that bites, the
+fallback is already specced: reuse the existing `chars/4` estimate and the
+`ContextCompactOption` precedent to cap full bodies and spill the overflow to
+summaries + `getFragment`. We build that knob only when a real story needs it.
 
 ## Cleanups noted along the way
 
@@ -87,8 +96,10 @@ call — unnecessary, since `reportMentions` already runs before edits.
   ever." Trim to a recent window, or drop it in favor of the per-fragment
   `meta.annotations`.
 
-## Decisions still open
+## Decisions (settled)
 
-1. Should `reportMentions`-returns-bodies apply to the writer path too, or
-   analyze-only? (Writer already has window annotations; it may not need it.)
-2. Budget knob: per-agent constants baked in, or a story-level setting?
+1. **Mention-bodies mechanic is analyze-only.** The writer gets fullness from the
+   resolved mentions already stored on its recent prose window, so it doesn't
+   need `reportMentions`-returns-bodies.
+2. **No budget for now** — adopt the Directions precedent (unbounded full bodies).
+   Add a `chars/4` + `ContextCompact` cap later, only when a real story needs it.
