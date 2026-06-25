@@ -147,7 +147,7 @@ export function createAnalysisTools(collector: AnalysisCollector, opts?: { dataD
     }),
 
     reportMentions: tool({
-      description: 'Report character mentions found in the new prose. Call once with all mentions. Each character should appear only once — use the primary name. Returns each mentioned character\'s full sheet so you can edit it accurately.',
+      description: 'Report the characters who appear in the new prose so their names are highlighted. Call once with all of them; list each character once, using the name used in the prose.',
       inputSchema: z.object({
         mentions: z.array(z.object({
           characterId: z.string().describe('The character fragment ID (e.g. ch-abc)'),
@@ -163,22 +163,25 @@ export function createAnalysisTools(collector: AnalysisCollector, opts?: { dataD
           collector.mentions.push(m)
         }
         // Persist annotations now so the prose highlights appear as soon as
-        // mentions resolve (this tool runs first), not at the end of the run.
+        // mentions resolve, not at the end of the run. Character sheets are
+        // preloaded into context, so this tool no longer fetches them.
         if (opts?.proseFragmentId && collector.mentions.length > 0) {
           await persistMentionAnnotations(opts.dataDir, opts.storyId, opts.proseFragmentId, collector.mentions)
         }
-        // Return the full sheets of the mentioned characters. The model only had
-        // summaries in context, so this delivers the bodies it needs to edit
-        // accurately — right before any updateFragment/editFragment call.
-        if (!opts) return { ok: true }
-        const characters: Array<{ id: string; name: string; description: string; content: string }> = []
-        for (const id of new Set(mentions.map(m => m.characterId))) {
-          const frag = await getFragment(opts.dataDir, opts.storyId, id)
-          if (frag) {
-            characters.push({ id: frag.id, name: frag.name, description: frag.description, content: frag.content })
-          }
-        }
-        return { ok: true, characters }
+        return { ok: true }
+      },
+    }),
+
+    getFragment: tool({
+      description: 'Read a character, knowledge, or guideline fragment in full by ID. The characters in the recent prose are already shown in full; use this only to read another fragment before editing it.',
+      inputSchema: z.object({
+        fragmentId: z.string().describe('The fragment ID to read (e.g. ch-abc, kn-xyz)'),
+      }),
+      execute: async ({ fragmentId }) => {
+        if (!opts) return { error: 'getFragment not available in this context' }
+        const frag = await getFragment(opts.dataDir, opts.storyId, fragmentId)
+        if (!frag) return { error: `Fragment ${fragmentId} not found` }
+        return { id: frag.id, name: frag.name, description: frag.description, content: frag.content, type: frag.type }
       },
     }),
 
@@ -337,9 +340,10 @@ export function createAnalysisTools(collector: AnalysisCollector, opts?: { dataD
  * The analyze toolset. Single source for the runtime handler and the agent's
  * available-tools list, so the toggle path and the model stay in sync.
  *
- * No read/lookup tools: characters arrive in full via reportMentions and
- * knowledge sits in context in full, so the pass never needs to fetch — which
- * also spares this high-frequency background agent the extra round-trips.
+ * The characters in the recent prose are preloaded into context in full, and
+ * knowledge sits in context in full, so the pass edits directly against the
+ * sheets it already holds. getFragment is the fallback for reading any other
+ * fragment before editing it.
  */
 export function createLibrarianAnalyzeTools(
   collector: AnalysisCollector,
@@ -351,18 +355,4 @@ export function createLibrarianAnalyzeTools(
 /** Tool names the analyze agent exposes — drives the toggle list with no drift. */
 export function listLibrarianAnalyzeToolNames(): string[] {
   return Object.keys(createLibrarianAnalyzeTools(createEmptyCollector(), { dataDir: '', storyId: '' }))
-}
-
-/** Direct fragment-edit tools, withheld until reportMentions has delivered sheets. */
-export const ANALYZE_EDIT_TOOLS = ['updateFragment', 'editFragment'] as const
-
-/**
- * Which tools to expose on a given analyze step. The edit tools are held back
- * until reportMentions has run, so the model cannot author an edit in the same
- * step it reports mentions (before the returned character sheet is in context).
- */
-export function analyzeActiveTools(toolNames: string[], mentionsReported: boolean): string[] {
-  if (mentionsReported) return toolNames
-  const edits = new Set<string>(ANALYZE_EDIT_TOOLS)
-  return toolNames.filter(t => !edits.has(t))
 }

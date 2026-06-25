@@ -25,7 +25,7 @@ import { applyFragmentSuggestion } from './suggestions'
 import { reportUsage } from '../llm/token-tracker'
 import { createLogger } from '../logging'
 import { compileAgentContext } from '../agents/compile-agent-context'
-import { createEmptyCollector, createLibrarianAnalyzeTools, toMentionAnnotations, analyzeActiveTools, ANALYZE_EDIT_TOOLS } from './analysis-tools'
+import { createEmptyCollector, createLibrarianAnalyzeTools, toMentionAnnotations } from './analysis-tools'
 import { buildAnalyzeSystemPrompt } from './blocks'
 import {
   createAnalysisBuffer,
@@ -91,6 +91,41 @@ async function runLibrarianInner(
     knowledgeCount: knowledge.length,
   })
 
+  // Preload the writer's character working set in full, so edits land on current
+  // state rather than a one-line summary. Prefer the set the writer actually
+  // worked from (forwarded on the prose meta — its full-context cast plus anything
+  // it looked up), so analyze audits against the same sheets. Fall back to
+  // rebuilding the recent cast from prose annotations for prose not written
+  // through the writer (re-analysis, older fragments). Knowledge IDs may ride in
+  // the forwarded set but are ignored here — knowledge is already rendered in full.
+  const forwardedIds = Array.isArray(fragment.meta?.writerContextIds)
+    ? (fragment.meta.writerContextIds as string[])
+    : []
+  let recentCharacters: Fragment[]
+  if (forwardedIds.length > 0) {
+    const idSet = new Set(forwardedIds)
+    recentCharacters = characters.filter((c) => idSet.has(c.id))
+  } else {
+    const RECENT_CAST_PROSE_WINDOW = 10
+    const activeProseIds = await getActiveProseIds(dataDir, storyId)
+    const recentProseFragments: Fragment[] = []
+    for (const pid of activeProseIds.slice(-RECENT_CAST_PROSE_WINDOW)) {
+      const p = await getFragment(dataDir, storyId, pid)
+      if (p) recentProseFragments.push(p)
+    }
+    const recentCastIds = new Set<string>()
+    for (const p of recentProseFragments) {
+      const annotations = Array.isArray(p.meta?.annotations)
+        ? (p.meta.annotations as Array<{ type?: string; fragmentId?: string }>)
+        : []
+      for (const a of annotations) {
+        if (a.type === 'mention' && a.fragmentId) recentCastIds.add(a.fragmentId)
+      }
+    }
+    recentCharacters = characters.filter((c) => recentCastIds.has(c.id))
+  }
+  requestLogger.debug('Recent cast resolved', { recentCharacters: recentCharacters.length, forwarded: forwardedIds.length > 0 })
+
   // Load current librarian state for context
   const state = await getState(dataDir, storyId)
 
@@ -120,6 +155,7 @@ async function runLibrarianInner(
     characterShortlist: [],
     systemPromptFragments,
     allCharacters: characters,
+    recentCharacters,
     allKnowledge: knowledge,
     newProse: { id: fragment.id, content: fragment.content },
     modelId,
@@ -156,15 +192,8 @@ async function runLibrarianInner(
 
   const providerOptions = buildProviderOptions(story.settings.disableThinking ?? false)
 
-  // Hold back the fragment-edit tools until reportMentions has run in a prior
-  // step. reportMentions returns each mentioned character's full sheet, but only
-  // as a tool result — so an edit batched into the same step would be authored
-  // before the sheet arrives and would overwrite the body from the summary. By
-  // gating the edit tools, the model cannot edit a character until its sheet is
-  // already in context. Only gate when there are characters to wait on.
-  const toolNames = Object.keys(compiled.tools)
-  const gateEdits = characters.length > 0 && toolNames.some(t => (ANALYZE_EDIT_TOOLS as readonly string[]).includes(t))
-
+  // The recent cast's sheets are preloaded in context, so the model edits against
+  // what it already holds — no need to gate edits behind a mid-loop sheet fetch.
   const agent = new ToolLoopAgent({
     model,
     instructions: systemMessage?.content || 'You are a helpful assistant.',
@@ -173,14 +202,6 @@ async function runLibrarianInner(
     stopWhen: stepCountIs(6),
     temperature,
     providerOptions,
-    ...(gateEdits
-      ? {
-          prepareStep: ({ steps }) => {
-            const mentionsReported = steps.some(s => s.toolCalls.some(tc => tc.toolName === 'reportMentions'))
-            return { activeTools: analyzeActiveTools(toolNames, mentionsReported) }
-          },
-        }
-      : {}),
   })
 
   let fullText = ''
