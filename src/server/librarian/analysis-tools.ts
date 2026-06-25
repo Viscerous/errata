@@ -147,7 +147,7 @@ export function createAnalysisTools(collector: AnalysisCollector, opts?: { dataD
     }),
 
     reportMentions: tool({
-      description: 'Report character mentions found in the new prose. Call once with all mentions. Each character should appear only once — use the primary name.',
+      description: 'Report character mentions in the new prose — references by name, nickname, or title, not pronouns. Call once with all mentions; each character appears only once, by primary name.',
       inputSchema: z.object({
         mentions: z.array(z.object({
           characterId: z.string().describe('The character fragment ID (e.g. ch-abc)'),
