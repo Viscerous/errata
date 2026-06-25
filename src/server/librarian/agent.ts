@@ -26,7 +26,7 @@ import { reportUsage } from '../llm/token-tracker'
 import { createLogger } from '../logging'
 import { compileAgentContext } from '../agents/compile-agent-context'
 import { createEmptyCollector, createLibrarianAnalyzeTools, toMentionAnnotations } from './analysis-tools'
-import { buildAnalyzeSystemPrompt } from './blocks'
+import { buildAnalyzeSystemPrompt, recentCastFromFragment } from './blocks'
 import {
   createAnalysisBuffer,
   pushEvent,
@@ -94,12 +94,8 @@ async function runLibrarianInner(
   // Preload the characters the writer worked from in full, so edits land on their
   // current sheet rather than a one-line summary. The writer forwards this set on
   // the prose meta — its full-context cast plus anything it looked up — and it
-  // rides along on re-analysis since it persists with the fragment. Knowledge IDs
-  // may be in the set but are ignored here, as knowledge is already rendered full.
-  const writerContextIds = new Set(
-    Array.isArray(fragment.meta?.writerContextIds) ? (fragment.meta.writerContextIds as string[]) : [],
-  )
-  const recentCharacters = characters.filter((c) => writerContextIds.has(c.id))
+  // rides along on re-analysis since it persists with the fragment.
+  const recentCharacters = recentCastFromFragment(characters, fragment)
   requestLogger.debug('Writer cast resolved', { recentCharacters: recentCharacters.length })
 
   // Load current librarian state for context
