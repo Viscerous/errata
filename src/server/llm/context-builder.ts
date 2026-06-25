@@ -17,6 +17,7 @@ export interface ContextBuildState {
   stickyGuidelines: Fragment[]
   stickyKnowledge: Fragment[]
   stickyCharacters: Fragment[]
+  recentCharacters: Fragment[]
   guidelineShortlist: Fragment[]
   knowledgeShortlist: Fragment[]
   characterShortlist: Fragment[]
@@ -369,6 +370,22 @@ export async function buildContextState(
   const stickyCharacters = allCharacters.filter((f) => f.sticky).sort(sortByOrder)
   const nonStickyCharacters = allCharacters.filter((f) => !f.sticky)
 
+  // Characters the librarian recorded as appearing in the recent prose ride along
+  // in full, so the writer continues them from their current sheet rather than a
+  // one-line summary. Everyone else stays in the summary shortlist; sticky
+  // characters are already full, so only non-sticky ones are promoted here.
+  const recentlyMentionedIds = new Set<string>()
+  for (const p of recentProse) {
+    const annotations = Array.isArray(p.meta?.annotations)
+      ? (p.meta.annotations as Array<{ type?: string; fragmentId?: string }>)
+      : []
+    for (const a of annotations) {
+      if (a.type === 'mention' && a.fragmentId) recentlyMentionedIds.add(a.fragmentId)
+    }
+  }
+  const recentCharacters = nonStickyCharacters.filter((f) => recentlyMentionedIds.has(f.id)).sort(sortByOrder)
+  const characterShortlist = nonStickyCharacters.filter((f) => !recentlyMentionedIds.has(f.id))
+
   const state = {
     story: { ...story, summary: effectiveSummary },
     proseFragments: recentProse,
@@ -376,9 +393,10 @@ export async function buildContextState(
     stickyGuidelines,
     stickyKnowledge,
     stickyCharacters,
+    recentCharacters,
     guidelineShortlist: nonStickyGuidelines,
     knowledgeShortlist: nonStickyKnowledge,
-    characterShortlist: nonStickyCharacters,
+    characterShortlist,
     authorInput,
   }
 
@@ -387,9 +405,10 @@ export async function buildContextState(
     stickyGuidelines: stickyGuidelines.length,
     stickyKnowledge: stickyKnowledge.length,
     stickyCharacters: stickyCharacters.length,
+    recentCharacters: recentCharacters.length,
     guidelineShortlist: nonStickyGuidelines.length,
     knowledgeShortlist: nonStickyKnowledge.length,
-    characterShortlist: nonStickyCharacters.length,
+    characterShortlist: characterShortlist.length,
   })
 
   return state
@@ -498,6 +517,7 @@ export function createDefaultBlocks(state: ContextBuildState): ContextBlock[] {
     stickyGuidelines,
     stickyKnowledge,
     stickyCharacters,
+    recentCharacters,
     guidelineShortlist,
     knowledgeShortlist,
     characterShortlist,
@@ -620,6 +640,21 @@ export function createDefaultBlocks(state: ContextBuildState): ContextBlock[] {
 
   if (knowledgeShortlist.length > 0) {
     blocks.push(fragmentSummaryBlock({ id: 'knowledge-shortlist', heading: 'Knowledge', items: knowledgeShortlist, order: 310 }))
+  }
+
+  // Full sheets for characters active in the recent prose — the writer continues
+  // them from current state. The shortlist below carries everyone else as summaries.
+  if (recentCharacters.length > 0) {
+    blocks.push({
+      id: 'characters-recent',
+      role: 'user',
+      content: [
+        '## Characters in Recent Prose',
+        ...recentCharacters.map(renderFragment),
+      ].join('\n'),
+      order: 315,
+      source: 'builtin',
+    })
   }
 
   if (characterShortlist.length > 0) {

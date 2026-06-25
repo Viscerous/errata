@@ -17,6 +17,8 @@ export interface AgentBlockContext {
   stickyGuidelines: Fragment[]
   stickyKnowledge: Fragment[]
   stickyCharacters: Fragment[]
+  /** Non-sticky characters appearing in the recent prose, carried full. */
+  recentCharacters?: Fragment[]
   guidelineShortlist: Fragment[]
   knowledgeShortlist: Fragment[]
   characterShortlist: Fragment[]
