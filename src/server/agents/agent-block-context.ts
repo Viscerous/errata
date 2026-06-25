@@ -1,4 +1,5 @@
 import type { Fragment, StoryMeta } from '../fragments/schema'
+import type { ContextBuildState } from '../llm/context-builder'
 
 /**
  * Shared context type that all agent block builders receive.
@@ -49,4 +50,11 @@ export interface AgentBlockContext {
 
   // Plugin tools
   pluginToolDescriptions?: Array<{ name: string; description: string }>
+
+  /**
+   * The writer's full build state, carried by its preview so the block builder
+   * renders it directly instead of reconstructing a ContextBuildState from the
+   * flat fields above (which would silently drop any field not copied across).
+   */
+  generationState?: ContextBuildState
 }
