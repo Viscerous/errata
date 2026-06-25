@@ -8,6 +8,7 @@ import {
   updateStory,
 } from '@/server/fragments/storage'
 import { saveAgentBlockConfig } from '@/server/agents/agent-block-storage'
+import { listAgentRuns, clearAgentRuns } from '@/server/agents/traces'
 import { clearPending, getPendingCount } from '@/server/librarian/scheduler'
 import type { StoryMeta, Fragment } from '@/server/fragments/schema'
 
@@ -193,6 +194,22 @@ describe('generation endpoint', () => {
     const userText = extractText(msg!.content)
     expect(userText).toContain('Dark gothic style.')
     expect(userText).toContain('Continue the story')
+  })
+
+  it('records the writer run in the agent activity history', async () => {
+    clearAgentRuns(storyId)
+    mockAgentStream.mockResolvedValue(createMockStreamResult('A line.') as any)
+
+    const res = await api(`/stories/${storyId}/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ input: 'Continue the story', saveResult: false }),
+    })
+    expect(res.status).toBe(200)
+    await res.text()
+
+    const runs = listAgentRuns(storyId)
+    expect(runs.some(r => r.agentName === 'generation.writer' && r.status === 'success')).toBe(true)
   })
 
   it('POST /stories/:storyId/generate applies writer instruction replacement from agent config', async () => {

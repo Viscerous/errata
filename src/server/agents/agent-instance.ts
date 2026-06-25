@@ -1,9 +1,8 @@
 import { createLogger } from '../logging'
 import { agentRegistry } from './registry'
 import { ensureCoreAgentsRegistered } from './register-core'
-import { recordAgentRun } from './traces'
-import { registerActiveAgent, unregisterActiveAgent } from './active-registry'
-import type { AgentInvocationContext, AgentTraceEntry } from './types'
+import { beginAgentRun, type AgentRunHandle } from './agent-run'
+import type { AgentInvocationContext } from './types'
 import type { AgentStreamResult, AgentStreamCompletion } from './stream-types'
 
 /**
@@ -21,10 +20,6 @@ export interface AgentInstance<K extends string = string> {
   execute(input: AgentInput<K>): Promise<AgentStreamResult>
   /** Record failure if the runner threw before producing a stream. Idempotent. */
   fail(error: unknown): void
-}
-
-function makeRunId(): string {
-  return `ai-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
 }
 
 function safeSerialize(value: unknown): Record<string, unknown> | undefined {
@@ -48,89 +43,49 @@ export function createAgentInstance<K extends string>(
   }
 
   let settled = false
-  let activityId: string | undefined
-  let startedAt: string | undefined
-  let startMs: number | undefined
-  let serializedInput: Record<string, unknown> | undefined
-  const runId = makeRunId()
+  let handle: AgentRunHandle | undefined
   const logger = createLogger(agentName).child({ storyId: context.storyId })
 
+  // Translate the agent's completion/error into the shared run handle. The handle
+  // owns the active marker and the activity-history record; this just serializes
+  // the agent-specific output.
   function finish(status: 'success' | 'error', resultOrError: unknown): void {
-    if (settled) return
+    if (settled || !handle) return
     settled = true
-
-    if (activityId) {
-      unregisterActiveAgent(activityId)
-    }
-
-    const finishedAt = new Date().toISOString()
-    const durationMs = startMs ? Date.now() - startMs : 0
-
-    let serializedOutput: Record<string, unknown> | undefined
-    let errorMessage: string | undefined
 
     if (status === 'success') {
       const completion = resultOrError as AgentStreamCompletion
-      serializedOutput = safeSerialize({
-        text: completion.text,
-        reasoning: completion.reasoning,
-        toolCalls: completion.toolCalls,
-        stepCount: completion.stepCount,
-        finishReason: completion.finishReason,
+      handle.finish('success', {
+        output: safeSerialize({
+          text: completion.text,
+          reasoning: completion.reasoning,
+          toolCalls: completion.toolCalls,
+          stepCount: completion.stepCount,
+          finishReason: completion.finishReason,
+        }),
       })
     } else {
-      errorMessage = resultOrError instanceof Error
-        ? resultOrError.message
-        : String(resultOrError)
+      handle.finish('error', {
+        error: resultOrError instanceof Error ? resultOrError.message : String(resultOrError),
+      })
     }
-
-    const traceEntry: AgentTraceEntry = {
-      runId,
-      parentRunId: null,
-      rootRunId: runId,
-      agentName,
-      startedAt: startedAt ?? finishedAt,
-      finishedAt,
-      durationMs,
-      status,
-      ...(status === 'error' ? { error: errorMessage } : {}),
-      ...(serializedOutput ? { output: serializedOutput } : {}),
-    }
-
-    recordAgentRun(context.storyId, {
-      rootRunId: runId,
-      runId,
-      storyId: context.storyId,
-      agentName,
-      status,
-      startedAt: startedAt ?? finishedAt,
-      finishedAt,
-      durationMs,
-      ...(errorMessage ? { error: errorMessage } : {}),
-      input: serializedInput,
-      output: serializedOutput,
-      trace: [traceEntry],
-    })
   }
 
   return {
     agentName,
 
     async execute(input: AgentInput<K>): Promise<AgentStreamResult> {
+      // Begin the run before parsing so a validation error is still recorded.
+      handle = beginAgentRun(context.storyId, agentName, safeSerialize(input))
       const parsedInput = definition.inputSchema.parse(input)
-      serializedInput = safeSerialize(parsedInput)
-
-      startedAt = new Date().toISOString()
-      startMs = Date.now()
-      activityId = registerActiveAgent(context.storyId, agentName)
 
       const invocationContext: AgentInvocationContext = {
         dataDir: context.dataDir,
         storyId: context.storyId,
         logger,
-        runId,
+        runId: handle.runId,
         parentRunId: null,
-        rootRunId: runId,
+        rootRunId: handle.runId,
         depth: 0,
         invokeAgent: async () => {
           throw new Error('Nested agent calls not supported via createAgentInstance')
