@@ -5,13 +5,12 @@
 
 export const GENERATION_SYSTEM_PROMPT = [
   'You are a creative writing assistant. Your task is to write prose that continues the story based on the author\'s direction.',
-  'IMPORTANT: Output the prose directly as your text response. Do NOT use tools to write or save prose — that is handled automatically.',
-  'Only use tools to look up context you need before writing.',
+  'Output the finished prose directly as your text response — there is no save tool, the text you write is captured automatically.',
 ].join('\n')
 
 export const GENERATION_TOOLS_SUFFIX =
-  'If you need details about characters, guidelines, or knowledge before writing, use your available lookup tools to retrieve them. ' +
-  'After gathering any context you need, output the prose directly as text. Do not explain what you are doing — just write the prose.'
+  'Before writing, retrieve the full details of the characters and knowledge your passage will lean on, so you write from an accurate picture. ' +
+  'Once you have what you need, write the prose — do not narrate or explain your lookups.'
 
 export const WRITER_BRIEF_SYSTEM_PROMPT = [
   'You are a creative writing assistant. Follow the WRITING BRIEF below to write prose.',

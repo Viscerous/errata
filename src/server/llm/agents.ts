@@ -2,7 +2,7 @@ import { agentBlockRegistry } from '../agents/agent-block-registry'
 import { instructionRegistry } from '../instructions'
 import type { AgentBlockContext } from '../agents/agent-block-context'
 import { registry } from '../fragments/registry'
-import { createDefaultBlocks, buildContextState, type ContextBuildState, type ContextBlock } from './context-builder'
+import { createDefaultBlocks, buildContextState, type ContextBlock } from './context-builder'
 import { createFragmentTools } from './tools'
 import { createPrewriterBlocks, buildPrewriterPreviewContext, createWriterBriefBlocks, PREWRITER_INSTRUCTIONS } from './prewriter'
 import {
@@ -43,37 +43,16 @@ function createGenerationBlocks(ctx: AgentBlockContext): ContextBlock[] {
     const placeholderBrief = '(The prewriter will generate a brief at generation time.)'
     return createWriterBriefBlocks(ctx.proseFragments, placeholderBrief, ctx.modelId)
   }
-
-  const state: ContextBuildState = {
-    story: ctx.story,
-    proseFragments: ctx.proseFragments,
-    chapterSummaries: [],
-    stickyGuidelines: ctx.stickyGuidelines,
-    stickyKnowledge: ctx.stickyKnowledge,
-    stickyCharacters: ctx.stickyCharacters,
-    guidelineShortlist: ctx.guidelineShortlist,
-    knowledgeShortlist: ctx.knowledgeShortlist,
-    characterShortlist: ctx.characterShortlist,
-    authorInput: GENERATION_PREVIEW_INPUT,
-  }
-  return createDefaultBlocks(state)
+  // The context is already a ContextBuildState (AgentBlockContext extends it), so
+  // render it directly — no reconstruction, nothing to drop.
+  return createDefaultBlocks(ctx)
 }
 
 async function buildGenerationPreviewContext(dataDir: string, storyId: string): Promise<AgentBlockContext> {
   // Generation needs a non-empty authorInput so the author-input block renders in
   // the preview; we use a self-explanatory placeholder rather than a bare token.
   const state = await buildContextState(dataDir, storyId, GENERATION_PREVIEW_INPUT)
-  return {
-    story: state.story,
-    proseFragments: state.proseFragments,
-    stickyGuidelines: state.stickyGuidelines,
-    stickyKnowledge: state.stickyKnowledge,
-    stickyCharacters: state.stickyCharacters,
-    guidelineShortlist: state.guidelineShortlist,
-    knowledgeShortlist: state.knowledgeShortlist,
-    characterShortlist: state.characterShortlist,
-    systemPromptFragments: [],
-  }
+  return { ...state, systemPromptFragments: [] }
 }
 
 let registered = false

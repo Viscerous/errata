@@ -1,7 +1,9 @@
 import type { ContextBlock } from '../llm/context-builder'
 import { fragmentSummaryBlock } from '../llm/context-builder'
 import type { AgentBlockContext } from '../agents/agent-block-context'
+import type { Fragment, StoryMeta } from '../fragments/schema'
 import { getStory, listFragments, getFragment } from '../fragments/storage'
+import { getActiveProseIds } from '../fragments/prose-chain'
 import { getFragmentsByTag } from '../fragments/associations'
 import { instructionRegistry } from '../instructions'
 import {
@@ -27,16 +29,16 @@ export function buildAnalyzeSystemPrompt(opts?: { disableDirections?: boolean; d
   // drift). Steps for disabled tools are omitted and the rest renumber, so the
   // prompt never names a tool the model wasn't given.
   const steps: string[] = [
-    'Report every character who appears — call reportMentions with their IDs. It returns each one\'s full sheet to edit against.',
+    'Report every character who appears — call reportMentions with their IDs, so their names are highlighted in the prose.',
     'Summarize what happened — call updateSummary.',
     'Record contradictions with established facts (reportContradictions) and significant events (reportTimeline) when the prose has them.',
-    'Update a fragment when the prose changes a lasting fact about it — a death, an injury, a change in allegiance, title, location, or relationship. The character and knowledge sheets are the record of current state and are fed into later writing, so the change must land on the sheet itself; the summary and timeline log the event but do not keep the sheet current. To change a name or description, call updateFragment with just those fields (it leaves the body untouched); to change part of the body, call editFragment with an exact span from the returned sheet; to rewrite a body wholesale, call updateFragment with complete new content from that sheet — never from the one-line summary.',
+    'Update a fragment when the prose changes a lasting fact about it — its state, allegiance, title, location, or relationships. The sheet is the record of current state and feeds later writing, so the change must land on the sheet, not only the summary or timeline. Use editFragment to replace an exact span from its full sheet, or updateFragment to set a whole field (the others stay untouched); build any new content from the full sheet, never from the one-line summary.',
   ]
   if (!opts?.disableSuggestions) {
     steps.push('Suggest genuinely new characters or knowledge with suggestFragment — only ones that do not exist yet.')
   }
   if (!opts?.disableDirections) {
-    steps.push('Suggest 3-5 possible next directions for the story with suggestDirections.')
+    steps.push('Suggest 3-5 varied next directions for the story with suggestDirections.')
   }
   const numbered = steps.map((s, i) => `${i + 1}. ${s}`).join('\n')
 
@@ -48,8 +50,6 @@ export function buildAnalyzeSystemPrompt(opts?: { disableDirections?: boolean; d
 You are a librarian agent for a collaborative writing app.
 Your job is to analyze a new prose fragment and maintain story continuity.
 
-Your context lists characters as one-line summaries (ID, name, description); knowledge is provided in full.
-
 Work through these steps in order:
 ${numbered}
 
@@ -59,6 +59,50 @@ Return 'Analysis complete' as your only final output.
 }
 
 export const ANALYZE_SYSTEM_PROMPT = buildAnalyzeSystemPrompt()
+
+/**
+ * The characters the writer worked from on a prose fragment, resolved to full
+ * fragments from its forwarded `writerContextIds`. Shared by the analyze run and
+ * its context preview so both populate the characters-recent block the same way.
+ */
+export function recentCastFromFragment(allCharacters: Fragment[], fragment: Fragment | null | undefined): Fragment[] {
+  const ids = new Set(
+    Array.isArray(fragment?.meta?.writerContextIds) ? (fragment.meta.writerContextIds as string[]) : [],
+  )
+  return allCharacters.filter((c) => ids.has(c.id))
+}
+
+/**
+ * Build the analyze agent's block context. Single source for both a real run and
+ * the context preview, so neither can drift from the other — the only difference
+ * is the input: the run passes the prose being analyzed, the preview passes the
+ * latest prose (for the recent cast) with a placeholder new-prose block.
+ */
+export async function buildAnalyzeContext(
+  dataDir: string,
+  storyId: string,
+  story: StoryMeta,
+  input: { proseFragment: Fragment | null; newProse: { id: string; content: string } },
+): Promise<AgentBlockContext> {
+  const allCharacters = await listFragments(dataDir, storyId, 'character')
+  const allKnowledge = await listFragments(dataDir, storyId, 'knowledge')
+  const systemPromptFragments = await loadSystemPromptFragments(dataDir, storyId, getFragmentsByTag, getFragment)
+  return {
+    story,
+    proseFragments: [],
+    stickyGuidelines: [],
+    stickyKnowledge: [],
+    stickyCharacters: [],
+    guidelineShortlist: [],
+    knowledgeShortlist: [],
+    characterShortlist: [],
+    systemPromptFragments,
+    allCharacters,
+    recentCharacters: recentCastFromFragment(allCharacters, input.proseFragment),
+    allKnowledge,
+    newProse: input.newProse,
+  }
+}
 
 export function createLibrarianAnalyzeBlocks(ctx: AgentBlockContext): ContextBlock[] {
   const blocks: ContextBlock[] = []
@@ -76,14 +120,29 @@ export function createLibrarianAnalyzeBlocks(ctx: AgentBlockContext): ContextBlo
     source: 'builtin',
   })
 
-  if (ctx.allCharacters && ctx.allCharacters.length > 0) {
-    blocks.push(fragmentSummaryBlock({ id: 'characters-shortlist', heading: 'Characters', items: ctx.allCharacters, order: 200, editable: true }))
+  // Characters in the recent prose are preloaded in full so edits land on their
+  // current sheet; the rest stay one-line summaries (getFragment reads any in full).
+  const recentIds = new Set((ctx.recentCharacters ?? []).map((c) => c.id))
+  if (ctx.recentCharacters && ctx.recentCharacters.length > 0) {
+    blocks.push({
+      id: 'characters-recent',
+      role: 'user',
+      content: [
+        '## Characters in Recent Prose',
+        ...ctx.recentCharacters.map((c) => `### ${c.id}: ${c.name}\n${c.description}\n\n${c.content}`),
+      ].join('\n\n'),
+      order: 200,
+      source: 'builtin',
+    })
+  }
+  const shortlistCharacters = (ctx.allCharacters ?? []).filter((c) => !recentIds.has(c.id))
+  if (shortlistCharacters.length > 0) {
+    blocks.push(fragmentSummaryBlock({ id: 'characters-shortlist', heading: 'Characters', items: shortlistCharacters, order: 210, editable: true }))
   }
 
   if (ctx.allKnowledge && ctx.allKnowledge.length > 0) {
     // Knowledge is delivered in full (bounded, read-mostly — analyze checks
-    // contradictions against it). Characters stay summaries; their bodies arrive
-    // via reportMentions.
+    // contradictions against it).
     blocks.push({
       id: 'knowledge',
       role: 'user',
@@ -98,7 +157,7 @@ export function createLibrarianAnalyzeBlocks(ctx: AgentBlockContext): ContextBlo
 
   if (ctx.newProse) {
     blocks.push({
-      id: 'new-prose',
+      id: 'prose-new',
       role: 'user',
       content: [
         '## New Prose Fragment',
@@ -117,24 +176,16 @@ export async function buildAnalyzePreviewContext(dataDir: string, storyId: strin
   const story = await getStory(dataDir, storyId)
   if (!story) throw new Error(`Story ${storyId} not found`)
 
-  const allCharacters = await listFragments(dataDir, storyId, 'character')
-  const allKnowledge = await listFragments(dataDir, storyId, 'knowledge')
-  const systemPromptFragments = await loadSystemPromptFragments(dataDir, storyId, getFragmentsByTag, getFragment)
+  // Resolve the recent cast from the latest prose's forwarded writer context, the
+  // same input a run uses; the new-prose block is a placeholder until a run fills it.
+  const activeProseIds = await getActiveProseIds(dataDir, storyId)
+  const latestProseId = activeProseIds.at(-1)
+  const latestProse = latestProseId ? await getFragment(dataDir, storyId, latestProseId) : null
 
-  return {
-    story,
-    proseFragments: [],
-    stickyGuidelines: [],
-    stickyKnowledge: [],
-    stickyCharacters: [],
-    guidelineShortlist: [],
-    knowledgeShortlist: [],
-    characterShortlist: [],
-    systemPromptFragments,
-    allCharacters,
-    allKnowledge,
-    newProse: { id: 'pr-preview', content: '(Preview — actual prose will appear here during analysis)' },
-  }
+  return buildAnalyzeContext(dataDir, storyId, story, {
+    proseFragment: latestProse,
+    newProse: { id: '(the new fragment\'s ID)', content: '(the new prose passage will appear here)' },
+  })
 }
 
 // ─── Librarian Chat ───
@@ -241,7 +292,7 @@ export async function buildRefinePreviewContext(dataDir: string, storyId: string
   return {
     ...base,
     targetFragment: undefined,
-    instructions: '(Preview — actual instructions will appear during refinement)',
+    instructions: '(your refinement instructions will appear here)',
   }
 }
 
@@ -335,8 +386,8 @@ export async function buildProseTransformPreviewContext(dataDir: string, storyId
     systemPromptFragments: [],
     operation: 'rewrite',
     guidance: 'Rewrite the selected span for clarity and flow while preserving the original meaning and voice.',
-    selectedText: '(Preview — actual selection will appear during transform)',
-    sourceContent: '(Preview — actual fragment content will appear during transform)',
+    selectedText: '(the selected span will appear here)',
+    sourceContent: '(the surrounding fragment content will appear here)',
     contextBefore: '',
     contextAfter: '',
   }
@@ -397,6 +448,6 @@ export async function buildOptimizeCharacterPreviewContext(dataDir: string, stor
     ...base,
     allCharacters,
     targetFragment: undefined,
-    instructions: '(Preview — actual instructions will appear during optimization)',
+    instructions: '(your optimization instructions will appear here)',
   }
 }

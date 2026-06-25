@@ -28,6 +28,7 @@ function makeState(overrides: Partial<ContextBuildState> = {}): ContextBuildStat
     stickyGuidelines: [],
     stickyKnowledge: [],
     stickyCharacters: [],
+    recentCharacters: [],
     guidelineShortlist: [],
     knowledgeShortlist: [],
     characterShortlist: [],

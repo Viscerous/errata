@@ -204,7 +204,7 @@ describe('prewriter', () => {
       const ids = blocks.map((b) => b.id)
       expect(ids).toContain('instructions')
       expect(ids).toContain('tools')
-      expect(ids).toContain('prose')
+      expect(ids).toContain('prose-recent')
       expect(ids).toContain('writing-brief')
 
       // The tools block carries usage policy only — no enumerated catalog.
@@ -227,7 +227,7 @@ describe('prewriter', () => {
       expect(instructions.content).toContain('WRITING BRIEF')
 
       // Prose should contain the fragment content
-      const prose = blocks.find((b) => b.id === 'prose')!
+      const prose = blocks.find((b) => b.id === 'prose-recent')!
       expect(prose.content).toContain('The rain fell softly.')
       expect(prose.content).toContain('She opened the door.')
 
@@ -254,7 +254,7 @@ describe('prewriter', () => {
     it('omits prose block when no prose fragments provided', () => {
       const blocks = createWriterBriefBlocks([], 'A brief.')
       const ids = blocks.map((b) => b.id)
-      expect(ids).not.toContain('prose')
+      expect(ids).not.toContain('prose-recent')
     })
   })
 

@@ -25,16 +25,14 @@ import { applyFragmentSuggestion } from './suggestions'
 import { reportUsage } from '../llm/token-tracker'
 import { createLogger } from '../logging'
 import { compileAgentContext } from '../agents/compile-agent-context'
-import { createEmptyCollector, createLibrarianAnalyzeTools, toMentionAnnotations, analyzeActiveTools, ANALYZE_EDIT_TOOLS } from './analysis-tools'
-import { buildAnalyzeSystemPrompt } from './blocks'
+import { createEmptyCollector, createLibrarianAnalyzeTools, toMentionAnnotations } from './analysis-tools'
+import { buildAnalyzeSystemPrompt, buildAnalyzeContext } from './blocks'
 import {
   createAnalysisBuffer,
   pushEvent,
   finishBuffer,
   clearBuffer,
 } from './analysis-stream'
-import { getFragmentsByTag } from '../fragments/associations'
-import type { AgentBlockContext } from '../agents/agent-block-context'
 
 const logger = createLogger('librarian-agent')
 
@@ -82,48 +80,20 @@ async function runLibrarianInner(
     throw new Error(`Fragment ${fragmentId} not found`)
   }
 
-  // Load characters and knowledge
-  requestLogger.debug('Loading characters and knowledge...')
-  const characters = await listFragments(dataDir, storyId, 'character')
-  const knowledge = await listFragments(dataDir, storyId, 'knowledge')
-  requestLogger.debug('Data loaded', {
-    characterCount: characters.length,
-    knowledgeCount: knowledge.length,
-  })
-
   // Load current librarian state for context
   const state = await getState(dataDir, storyId)
-
-  // Load system prompt fragments
-  const sysFragIds = await getFragmentsByTag(dataDir, storyId, 'pass-to-librarian-system-prompt')
-  const systemPromptFragments = []
-  for (const id of sysFragIds) {
-    const frag = await getFragment(dataDir, storyId, id)
-    if (frag) {
-      requestLogger.debug('Adding system prompt fragment to context', { fragmentId: frag.id, name: frag.name })
-      systemPromptFragments.push(frag)
-    }
-  }
 
   // Resolve model early so modelId is available for instruction resolution
   const { model, modelId, providerId, config, temperature } = await getModel(dataDir, storyId, { role: 'librarian.analyze' })
 
-  // Build agent block context
-  const blockContext: AgentBlockContext = {
-    story,
-    proseFragments: [],
-    stickyGuidelines: [],
-    stickyKnowledge: [],
-    stickyCharacters: [],
-    guidelineShortlist: [],
-    knowledgeShortlist: [],
-    characterShortlist: [],
-    systemPromptFragments,
-    allCharacters: characters,
-    allKnowledge: knowledge,
+  // Build agent block context (the run and the preview share this builder, so the
+  // context preview can't drift from what a run actually sees).
+  const blockContext = await buildAnalyzeContext(dataDir, storyId, story, {
+    proseFragment: fragment,
     newProse: { id: fragment.id, content: fragment.content },
-    modelId,
-  }
+  })
+  blockContext.modelId = modelId
+  requestLogger.debug('Analyze context built', { recentCharacters: blockContext.recentCharacters?.length ?? 0 })
 
   // Create collector and analysis tools
   const disableDirections = story.settings?.disableLibrarianDirections === true
@@ -156,15 +126,6 @@ async function runLibrarianInner(
 
   const providerOptions = buildProviderOptions(story.settings.disableThinking ?? false)
 
-  // Hold back the fragment-edit tools until reportMentions has run in a prior
-  // step. reportMentions returns each mentioned character's full sheet, but only
-  // as a tool result — so an edit batched into the same step would be authored
-  // before the sheet arrives and would overwrite the body from the summary. By
-  // gating the edit tools, the model cannot edit a character until its sheet is
-  // already in context. Only gate when there are characters to wait on.
-  const toolNames = Object.keys(compiled.tools)
-  const gateEdits = characters.length > 0 && toolNames.some(t => (ANALYZE_EDIT_TOOLS as readonly string[]).includes(t))
-
   const agent = new ToolLoopAgent({
     model,
     instructions: systemMessage?.content || 'You are a helpful assistant.',
@@ -173,14 +134,6 @@ async function runLibrarianInner(
     stopWhen: stepCountIs(6),
     temperature,
     providerOptions,
-    ...(gateEdits
-      ? {
-          prepareStep: ({ steps }) => {
-            const mentionsReported = steps.some(s => s.toolCalls.some(tc => tc.toolName === 'reportMentions'))
-            return { activeTools: analyzeActiveTools(toolNames, mentionsReported) }
-          },
-        }
-      : {}),
   })
 
   let fullText = ''

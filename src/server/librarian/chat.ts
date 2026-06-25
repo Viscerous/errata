@@ -16,7 +16,8 @@ import { inspectGenerationForFragment, type InspectAspect } from './inspect-gene
 import { runLibrarian } from './agent'
 import { withBranch } from '../fragments/branches'
 import type { ChatStreamEvent, ChatResult } from '../agents/stream-types'
-import type { AgentBlockContext } from '../agents/agent-block-context'
+import { type AgentBlockContext, baseBlockContext } from '../agents/agent-block-context'
+import { loadSystemPromptFragments } from '../agents/block-helpers'
 
 export type { ChatStreamEvent, ChatResult }
 
@@ -131,15 +132,7 @@ async function librarianChatInner(
   const ctxState = await buildContextState(dataDir, storyId, '')
 
   // Load system prompt fragments
-  const sysFragIds = await getFragmentsByTag(dataDir, storyId, 'pass-to-librarian-system-prompt')
-  const systemPromptFragments = []
-  for (const id of sysFragIds) {
-    const frag = await getFragment(dataDir, storyId, id)
-    if (frag) {
-      requestLogger.debug('Adding system prompt fragment to context', { fragmentId: frag.id, name: frag.name })
-      systemPromptFragments.push(frag)
-    }
-  }
+  const systemPromptFragments = await loadSystemPromptFragments(dataDir, storyId, getFragmentsByTag, getFragment)
 
   // Resolve model early so modelId is available for instruction resolution
   const { model, modelId, temperature } = await getModel(dataDir, storyId, { role: 'librarian.chat' })
@@ -162,14 +155,7 @@ async function librarianChatInner(
 
   // Build agent block context
   const blockContext: AgentBlockContext = {
-    story: ctxState.story,
-    proseFragments: ctxState.proseFragments,
-    stickyGuidelines: ctxState.stickyGuidelines,
-    stickyKnowledge: ctxState.stickyKnowledge,
-    stickyCharacters: ctxState.stickyCharacters,
-    guidelineShortlist: ctxState.guidelineShortlist,
-    knowledgeShortlist: ctxState.knowledgeShortlist,
-    characterShortlist: ctxState.characterShortlist,
+    ...baseBlockContext(ctxState, ctxState.story),
     systemPromptFragments,
     pluginToolDescriptions,
     modelId,
