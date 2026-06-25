@@ -231,15 +231,22 @@ export function erratanetRoutes(dataDir: string) {
     // The hub response keeps the latest version in distTags/manifest/versions,
     // not a top-level field; normalize a `version` so the client (and the
     // publish dialog's version bump) can read the current latest directly.
-    .get('/erratanet/packs/:id', async ({ params, set }) => {
+    .get('/erratanet/packs/:id', async ({ params, query, set }) => {
       try {
-        const pack = await hubGetPack(dataDir, decodeURIComponent(params.id))
-        return normalizePackDetail(pack as Record<string, unknown>)
+        const pack = await hubGetPack(dataDir, decodeURIComponent(params.id), query.version)
+        const detail = normalizePackDetail(pack as Record<string, unknown>)
+        // A pinned request stays pinned: normalize reads the latest from
+        // distTags, which would silently swap the version the caller asked for.
+        if (query.version) detail.version = query.version
+        return detail
       } catch (e) {
         set.status = 502
         return { error: errorMessage(e) }
       }
-    }, { detail: { summary: 'Get a pack by id (@handle/slug, url-encoded)' } })
+    }, {
+      detail: { summary: 'Get a pack by id (@handle/slug, url-encoded)' },
+      query: t.Object({ version: t.Optional(t.String()) }),
+    })
 
     // Build a pack from a fragment bundle or a story, then publish a new version.
     // MVP packs carry fragments + assets only; the builders refuse blockConfig /

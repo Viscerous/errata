@@ -237,8 +237,9 @@ export function librarianRoutes(dataDir: string) {
         return { error: 'Cannot refine prose fragments. Use the generation refine mode instead.' }
       }
 
+      let agent: ReturnType<typeof createAgentInstance> | undefined
       try {
-        const agent = createAgentInstance('librarian.refine', { dataDir, storyId: params.storyId })
+        agent = createAgentInstance('librarian.refine', { dataDir, storyId: params.storyId })
         const { eventStream, completion } = await agent.execute({
           fragmentId: body.fragmentId,
           instructions: body.instructions,
@@ -260,6 +261,9 @@ export function librarianRoutes(dataDir: string) {
           headers: { 'Content-Type': 'application/x-ndjson; charset=utf-8' },
         })
       } catch (err) {
+        // Runner threw before producing a stream — record the failure and free
+        // the active-agent registration instead of leaking it.
+        agent?.fail(err)
         requestLogger.error('Refinement failed', { error: err instanceof Error ? err.message : String(err) })
         set.status = 500
         return { error: err instanceof Error ? err.message : 'Refinement failed' }
@@ -297,8 +301,9 @@ export function librarianRoutes(dataDir: string) {
         return { error: 'Only prose fragments support selection transforms.' }
       }
 
+      let agent: ReturnType<typeof createAgentInstance> | undefined
       try {
-        const agent = createAgentInstance('librarian.prose-transform', { dataDir, storyId: params.storyId })
+        agent = createAgentInstance('librarian.prose-transform', { dataDir, storyId: params.storyId })
         const { eventStream, completion } = await agent.execute({
           fragmentId: body.fragmentId,
           selectedText: body.selectedText,
@@ -328,6 +333,7 @@ export function librarianRoutes(dataDir: string) {
           headers: { 'Content-Type': 'application/x-ndjson; charset=utf-8' },
         })
       } catch (err) {
+        agent?.fail(err)
         requestLogger.error('Prose transform failed', { error: err instanceof Error ? err.message : String(err) })
         set.status = 500
         return { error: err instanceof Error ? err.message : 'Prose transform failed' }
@@ -370,8 +376,9 @@ export function librarianRoutes(dataDir: string) {
         return { error: 'At least one message is required' }
       }
 
+      let agent: ReturnType<typeof createAgentInstance> | undefined
       try {
-        const agent = createAgentInstance('librarian.chat', { dataDir, storyId: params.storyId })
+        agent = createAgentInstance('librarian.chat', { dataDir, storyId: params.storyId })
         const { eventStream, completion } = await agent.execute({
           messages: body.messages,
           maxSteps: story.settings.maxSteps ?? 10,
@@ -401,6 +408,7 @@ export function librarianRoutes(dataDir: string) {
           headers: { 'Content-Type': 'application/x-ndjson; charset=utf-8' },
         })
       } catch (err) {
+        agent?.fail(err)
         requestLogger.error('Librarian chat failed', { error: err instanceof Error ? err.message : String(err) })
         set.status = 500
         return { error: err instanceof Error ? err.message : 'Chat failed' }
@@ -445,8 +453,9 @@ export function librarianRoutes(dataDir: string) {
       if (!story) { set.status = 404; return { error: 'Story not found' } }
       if (!body.messages.length) { set.status = 422; return { error: 'At least one message is required' } }
 
+      let agent: ReturnType<typeof createAgentInstance> | undefined
       try {
-        const agent = createAgentInstance('librarian.chat', { dataDir, storyId: params.storyId })
+        agent = createAgentInstance('librarian.chat', { dataDir, storyId: params.storyId })
         const { eventStream, completion } = await agent.execute({
           messages: body.messages,
           maxSteps: story.settings.maxSteps ?? 10,
@@ -475,6 +484,7 @@ export function librarianRoutes(dataDir: string) {
           headers: { 'Content-Type': 'application/x-ndjson; charset=utf-8' },
         })
       } catch (err) {
+        agent?.fail(err)
         requestLogger.error('Conversation chat failed', { error: err instanceof Error ? err.message : String(err) })
         set.status = 500
         return { error: err instanceof Error ? err.message : 'Chat failed' }

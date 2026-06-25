@@ -589,3 +589,20 @@ code {
 [data-slot="scroll-area-viewport"] > div {
   display: block !important;
 }
+
+/* ── Touch reveal ─────────────────────────────────────────
+   Row actions (delete, edit, drag handles, copy, branch…) rest at
+   `opacity-0` and fade in on `group-hover`. Touch devices have no hover,
+   so those affordances would be permanently invisible and unreachable.
+   On non-hover pointers, reveal them by default. Scoped to elements that
+   pair a `group-hover` reveal with an opacity target, so it only touches
+   the intended fade-in affordances — not unrelated `opacity-0` states. */
+@media (hover: none) {
+  [class*="group-hover"][class*=":opacity-100"],
+  [class*="group-hover"][class*=":opacity-70"],
+  [class*="group-hover"][class*=":opacity-60"],
+  [class*="group-hover"][class*=":opacity-50"],
+  [class*="group-hover"][class*=":opacity-40"] {
+    opacity: 1 !important;
+  }
+}

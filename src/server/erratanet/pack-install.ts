@@ -223,8 +223,19 @@ function inlineBundleFromStrings(
   return { ...bundle, fragments }
 }
 
-/** Trust gate: refuse any pack that declares capabilities. */
+/**
+ * Trust gate for the fragment/story install path. Agent-config packs are valid
+ * but handled by a dedicated pipeline (`unwrapAgentConfigPack` + the
+ * agent-config routes) — name that instead of a misleading capability refusal.
+ * Anything else declaring capabilities is refused (defence in depth alongside
+ * the manifest-level `isManifestSafeForMvp`).
+ */
 function assertSafeManifest(manifest: ErratapackManifest): void {
+  if (manifest.contentKind === 'agent-config') {
+    throw new Error(
+      'This is an agent configuration pack; use the agent-config import flow, not install.',
+    )
+  }
   if (manifest.capabilities.length > 0) {
     throw new Error('Refusing pack: declares capabilities (unsupported in MVP)')
   }
@@ -306,7 +317,7 @@ export async function installFragmentBundle(
           provenance,
           sourceLocalId: undefined,
         })
-        await createFragment(dataDir, storyId, mediaFragment)
+        await createFragment(dataDir, storyId, mediaFragment, { overwrite: true })
         created.push(mediaFragment)
         visualRefs.push({
           fragmentId: mediaId,
@@ -371,7 +382,7 @@ export async function installFragmentBundle(
       order: entry.order ?? 0,
       meta,
     }
-    await createFragment(dataDir, storyId, fragment)
+    await createFragment(dataDir, storyId, fragment, { overwrite: true })
     created.push(fragment)
   }
 

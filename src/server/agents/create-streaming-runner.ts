@@ -15,6 +15,7 @@ import { getStory } from '../fragments/storage'
 import { buildContextState } from '../llm/context-builder'
 import { createFragmentTools } from '../llm/tools'
 import { reportUsage } from '../llm/token-tracker'
+import { normalizeTokenUsage } from '../llm/usage-normalizer'
 import { createLogger } from '../logging'
 import { createEventStream } from './create-event-stream'
 import { holdLibrarianAnalysis } from '../librarian/scheduler'
@@ -190,23 +191,23 @@ export function createStreamingRunner<TOpts extends object, TValidated = Record<
         : userMessage ? [{ role: 'user' as const, content: userMessage.content }] : []
 
       // 11. Stream. Hold analysis for write-enabled runs so multi-step prose edits
-      // analyze once on the final state, not per edit (see holdLibrarianAnalysis).
-      const result = await agent.stream({ messages })
+      // analyze once on the final state (see holdLibrarianAnalysis); abort the LLM
+      // call if the consumer disconnects.
+      const abortController = new AbortController()
+      const result = await agent.stream({ messages, abortSignal: abortController.signal })
       const releaseAnalysis = config.readOnly === false
         ? holdLibrarianAnalysis(storyId)
         : () => {}
-      const streamResult = createEventStream(result.fullStream)
+      const streamResult = createEventStream(result.fullStream, () => abortController.abort())
       void streamResult.completion.then(releaseAnalysis, releaseAnalysis)
 
       // 12. Track token usage after stream completes
       streamResult.completion.then(async () => {
         try {
           const rawUsage = await result.totalUsage
-          if (rawUsage && typeof rawUsage.inputTokens === 'number') {
-            reportUsage(dataDir, storyId, config.name, {
-              inputTokens: rawUsage.inputTokens,
-              outputTokens: rawUsage.outputTokens ?? 0,
-            }, modelId)
+          const usage = normalizeTokenUsage(rawUsage)
+          if (usage) {
+            reportUsage(dataDir, storyId, config.name, usage, modelId)
           }
         } catch {
           // Some providers may not report usage

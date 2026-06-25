@@ -716,8 +716,9 @@ export const ProseBlock = memo(function ProseBlock({
               </div>
               {/* Divider */}
               <div className="h-px bg-border/15" />
-              {/* Bottom tier — primary actions */}
-              <div className="flex items-center gap-px px-1 py-0.5">
+              {/* Bottom tier — primary actions. Wraps so the last action
+                  (Read aloud) isn't clipped on narrow / mobile widths. */}
+              <div className="flex flex-wrap items-center gap-px px-1 py-0.5">
                 <button
                   className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[0.6875rem] text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-all disabled:opacity-25"
                   onClick={() => { if (onEdit) { onEdit(fragment.id, window.getSelection()?.toString() || undefined); setShowActions(false) } }}

@@ -261,6 +261,16 @@ export function createFragmentTools(
         content: z.string().describe('Full fragment content'),
       }),
       execute: withToolLogging('createFragment', storyId, async ({ type, name, description, content }) => {
+        // Reject unregistered types so the LLM can't mint fragments with a type
+        // that has no registry entry (breaks IDs, visuals, tools, rendering).
+        if (!registry.getType(type)) {
+          const story = await getStory(dataDir, storyId)
+          const isCustom = story?.settings.customFragmentTypes?.some((t) => t.type === type) ?? false
+          if (!isCustom) {
+            const known = registry.listTypes().map((t) => t.type).join(', ')
+            return { error: `Unknown fragment type "${type}". Known types: ${known}` }
+          }
+        }
         const id = generateFragmentId(type)
         const now = new Date().toISOString()
         const fragment: Fragment = {

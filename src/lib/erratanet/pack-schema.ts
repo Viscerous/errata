@@ -20,9 +20,55 @@ export const GLOBAL_PACK_ID_REGEX = /^@[a-z0-9-]+\/[a-z0-9-]+$/
 export const SEMVER_REGEX =
   /^\d+\.\d+\.\d+(?:-[0-9A-Za-z-.]+)?(?:\+[0-9A-Za-z-.]+)?$/
 
-/** What a pack carries. A `fragment-pack` is loose fragments; `story` is a full story archive. */
-export const ContentKindSchema = z.enum(['fragment-pack', 'story'])
+/**
+ * What a pack carries. A `fragment-pack` is loose fragments; `story` is a full
+ * story archive; `agent-config` is a shareable agent/context configuration
+ * (agent blocks, provider shape, model-role assignments).
+ */
+export const ContentKindSchema = z.enum(['fragment-pack', 'story', 'agent-config'])
 export type ContentKind = z.infer<typeof ContentKindSchema>
+
+/**
+ * Config surfaces an agent-config pack may bundle. `agent-blocks` covers every
+ * per-agent block config (including the generation writer, which is itself an
+ * agent — there is no separate generation-wide "context blocks" surface).
+ */
+export const AGENT_CONFIG_INCLUDES = [
+  'agent-blocks',
+  'provider-shape',
+  'model-roles',
+] as const
+export type AgentConfigInclude = (typeof AGENT_CONFIG_INCLUDES)[number]
+
+/**
+ * Discovery summary for an `agent-config` pack. Lets a hub or installing client
+ * render and filter the pack without reading the payload. `fragmentTypes` /
+ * `fragmentCount` carry no meaning for this kind (both `[]` / `0`); this is the
+ * shape that matters instead.
+ */
+export const AgentConfigSummarySchema = z.object({
+  /** Names whose block configs are bundled, e.g. `['context', 'librarian']`. */
+  agents: z.array(z.string()).default([]),
+  /** Total custom blocks across every bundled config (context + per-agent). */
+  blockCount: z.int().default(0),
+  /**
+   * True when any bundled block is a `script` block (executable). This is what
+   * flags the pack "runs code" everywhere it appears and gates {@link manifestRequiresConsent}.
+   */
+  hasScripts: z.boolean().default(false),
+  /** Which config surfaces the pack carries. */
+  includes: z.array(z.enum(AGENT_CONFIG_INCLUDES)).default([]),
+})
+export type AgentConfigSummary = z.infer<typeof AgentConfigSummarySchema>
+
+/**
+ * Capabilities the current format understands. A pack declaring anything outside
+ * this set is refused (forward-incompatible). `agent-config` marks the
+ * agent-config payload shape; `scripts` marks that the payload carries executable
+ * `script` blocks and therefore requires explicit user consent on install.
+ */
+export const KNOWN_CAPABILITIES = ['agent-config', 'scripts'] as const
+export type KnownCapability = (typeof KNOWN_CAPABILITIES)[number]
 
 /** A declared dependency on another pack by id + version range/string. */
 export const PackDependencySchema = z.object({
@@ -67,6 +113,11 @@ export const ErratapackManifestSchema = z.object({
     .array(z.object({ title: z.string().max(200), order: z.int().optional() }))
     .max(2000)
     .optional(),
+  /**
+   * Summary for `agent-config` packs. Absent for fragment/story packs. Lets the
+   * hub render and filter the pack without reading the payload.
+   */
+  agentConfig: AgentConfigSummarySchema.optional(),
   /** Asset uri or external url for a cover/preview image. Optional. */
   thumbnail: z.string().optional(),
   /** Reserved for forward compat. MVP install refuses any non-empty value. */
@@ -135,12 +186,27 @@ export function packPageUrl(hubUrl: string | null | undefined, id: string): stri
 }
 
 /**
- * MVP trust gate. A pack is safe to install only when it declares no
- * capabilities and carries no scripts. blockConfig / agentBlockConfig and any
- * executable surface are rejected upstream; this guards the manifest side.
+ * Manifest trust gate. "Safe" here means the format is understood, NOT that the
+ * pack runs nothing — see {@link manifestRequiresConsent} for the executable side.
+ *
+ * Rules:
+ *  - Fragment/story packs must declare NO capabilities (unchanged from the MVP).
+ *  - Only `agent-config` packs may declare capabilities, and every one must be in
+ *    {@link KNOWN_CAPABILITIES}. An unknown capability is refused as
+ *    forward-incompatible.
  */
 export function isManifestSafeForMvp(manifest: ErratapackManifest): boolean {
-  if (manifest.capabilities.length > 0) return false
-  if (manifest.capabilities.some((cap) => cap.toLowerCase().includes('script'))) return false
-  return true
+  if (manifest.capabilities.length === 0) return true
+  if (manifest.contentKind !== 'agent-config') return false
+  const known = KNOWN_CAPABILITIES as readonly string[]
+  return manifest.capabilities.every((cap) => known.includes(cap))
+}
+
+/**
+ * True when installing this pack will introduce executable `script` blocks. The
+ * install flow MUST obtain explicit user consent (and should show the script
+ * source) before applying such a pack. Driven by the `scripts` capability.
+ */
+export function manifestRequiresConsent(manifest: ErratapackManifest): boolean {
+  return manifest.capabilities.includes('scripts')
 }

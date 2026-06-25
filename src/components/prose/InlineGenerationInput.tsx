@@ -224,6 +224,14 @@ export function InlineGenerationInput({
             thoughtSteps.push({ type: 'prewriter-text', text: value.text })
           }
           thoughtsDirty = true
+        } else if (value.type === 'prewriter-reset') {
+          // Prewriter re-wrote the brief in a new step — clear the live block so
+          // it refills with the final version instead of showing it twice.
+          const last = thoughtSteps[thoughtSteps.length - 1]
+          if (last && last.type === 'prewriter-text') {
+            last.text = ''
+          }
+          thoughtsDirty = true
         } else if (value.type === 'prewriter-directions') {
           prewriterDirectionsRef.current = value.directions
         } else if (value.type === 'clarify-questions') {

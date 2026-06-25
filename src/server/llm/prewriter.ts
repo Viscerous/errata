@@ -10,6 +10,7 @@ import { type AgentBlockContext, baseBlockContext } from '../agents/agent-block-
 import type { Fragment } from '../fragments/schema'
 import type { TokenUsage } from './generation-logs'
 import { reportUsage } from './token-tracker'
+import { normalizeTokenUsage } from './usage-normalizer'
 import { createLogger } from '../logging'
 
 const logger = createLogger('prewriter')
@@ -151,6 +152,7 @@ export interface Clarification {
 export type PrewriterEvent =
   | { type: 'reasoning'; text: string }
   | { type: 'text'; text: string }
+  | { type: 'reset' }
   | { type: 'tool-call'; id: string; toolName: string; args: Record<string, unknown> }
   | { type: 'tool-result'; id: string; toolName: string; result: unknown }
   | { type: 'directions'; directions: PrewriterDirection[] }
@@ -341,7 +343,13 @@ export async function runPrewriter(args: RunPrewriterArgs): Promise<PrewriterRes
     providerOptions,
   })
 
-  let fullText = ''
+  // The brief is the text of the LATEST step that produced text. Capturing per
+  // step (and keeping the last non-empty one) avoids concatenating drafts when a
+  // model re-writes the brief across steps — e.g. writes it, looks a detail up,
+  // then re-emits it in the same turn it calls suggestDirections. Accumulating
+  // every text-delta would otherwise hand the writer the brief twice.
+  let briefText = ''
+  let currentStepText = ''
   let fullReasoning = ''
   let stepCount = 0
   let terminalToolReturned = false
@@ -350,12 +358,22 @@ export async function runPrewriter(args: RunPrewriterArgs): Promise<PrewriterRes
     abortSignal,
   })
 
+  const captureStepBrief = () => {
+    if (currentStepText.trim()) briefText = currentStepText
+    currentStepText = ''
+  }
+
   for await (const part of result.fullStream) {
     const p = part as Record<string, unknown>
     if (part.type === 'text-delta') {
       if (terminalToolReturned) continue
       const text = (p.text ?? '') as string
-      fullText += text
+      // A fresh step starting to (re)write the brief supersedes the prior draft —
+      // signal the client to clear the brief streamed so far.
+      if (currentStepText === '' && briefText !== '') {
+        onEvent?.({ type: 'reset' })
+      }
+      currentStepText += text
       onEvent?.({ type: 'text', text })
     } else if (part.type === 'reasoning-delta') {
       if (terminalToolReturned) continue
@@ -379,22 +397,23 @@ export async function runPrewriter(args: RunPrewriterArgs): Promise<PrewriterRes
         toolName: (p.toolName as string) ?? '',
         result: p.output,
       })
-    } else if (part.type === 'finish') {
+    } else if (part.type === 'finish-step') {
+      // One step per LLM round-trip. `finish` (singular) fires once for the
+      // whole run, so counting it would always yield 1.
       stepCount++
+      captureStepBrief()
     }
   }
+  // The final step may close with `finish` rather than `finish-step` (and some
+  // providers/mocks emit only `finish`) — keep its text.
+  captureStepBrief()
 
   const durationMs = Date.now() - startTime
 
   let usage: TokenUsage | undefined
   try {
     const rawUsage = await result.totalUsage
-    if (rawUsage && typeof rawUsage.inputTokens === 'number') {
-      usage = {
-        inputTokens: rawUsage.inputTokens,
-        outputTokens: rawUsage.outputTokens ?? 0,
-      }
-    }
+    usage = normalizeTokenUsage(rawUsage)
   } catch {
     // Some providers may not report usage
   }
@@ -403,7 +422,7 @@ export async function runPrewriter(args: RunPrewriterArgs): Promise<PrewriterRes
     reportUsage(dataDir, storyId, 'generation.prewriter', usage, modelId)
   }
 
-  requestLogger.info('Prewriter completed', { durationMs, briefLength: fullText.length })
+  requestLogger.info('Prewriter completed', { durationMs, briefLength: briefText.length })
 
   const serializedMessages = prewriterMessages.map(m => ({
     role: String(m.role),
@@ -415,7 +434,7 @@ export async function runPrewriter(args: RunPrewriterArgs): Promise<PrewriterRes
 
   requestLogger.info('Prewriter steps used', { stepCount })
 
-  return { brief: fullText, reasoning: fullReasoning, messages: serializedMessages, customBlocks, directions: capturedDirections, stepCount, durationMs, model: modelId, usage, questions: capturedQuestions ?? undefined }
+  return { brief: briefText, reasoning: fullReasoning, messages: serializedMessages, customBlocks, directions: capturedDirections, stepCount, durationMs, model: modelId, usage, questions: capturedQuestions ?? undefined }
 }
 
 /**

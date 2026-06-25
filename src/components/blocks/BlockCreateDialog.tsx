@@ -64,7 +64,7 @@ export function BlockCreateDialog({ open, onOpenChange, onSubmit }: BlockCreateD
           </div>
 
           {/* Role + Type selectors */}
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <h4 className="text-[0.5625rem] text-muted-foreground uppercase tracking-[0.15em] font-medium mb-2">
                 Role

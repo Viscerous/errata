@@ -3,6 +3,7 @@ import {
   getStory,
   createFragment,
   getFragment,
+  deleteFragment,
 } from '../fragments/storage'
 import {
   addProseSection,
@@ -15,7 +16,7 @@ import { applyBlockConfig } from '../blocks/apply'
 import { createScriptHelpers } from '../blocks/script-context'
 import { createFragmentTools } from '../llm/tools'
 import { getModel, buildProviderOptions } from '../llm/client'
-import { ToolLoopAgent, stepCountIs } from 'ai'
+import { ToolLoopAgent, stepCountIs, type ToolSet } from 'ai'
 import { runPrewriter, createWriterBriefBlocks } from '../llm/prewriter'
 import {
   saveGenerationLog,
@@ -166,8 +167,17 @@ export function generationRoutes(dataDir: string) {
 
       // Merge fragment tools + plugin tools, then filter by agent block config
       const fragmentTools = createFragmentTools(dataDir, params.storyId, { readOnly: true })
-      const { tools: pluginTools } = collectPluginToolsWithOrigin(enabledPlugins, dataDir, params.storyId)
-      const allTools = { ...fragmentTools, ...pluginTools }
+      const { tools: pluginTools, origins: pluginToolOrigins } = collectPluginToolsWithOrigin(enabledPlugins, dataDir, params.storyId)
+      // Core fragment tools take precedence: a plugin must not silently shadow
+      // getFragment/listFragments/etc. Colliding plugin tools are dropped + logged.
+      const allTools: ToolSet = { ...fragmentTools }
+      for (const [name, t] of Object.entries(pluginTools)) {
+        if (name in allTools) {
+          requestLogger.warn('Plugin tool name collides with a core tool; ignoring the plugin tool', { tool: name, plugin: pluginToolOrigins[name] })
+          continue
+        }
+        allTools[name] = t
+      }
 
       const agentConfig = await getAgentBlockConfig(dataDir, params.storyId, 'generation.writer')
       const disabledTools = new Set(agentConfig.disabledTools ?? [])
@@ -204,6 +214,10 @@ export function generationRoutes(dataDir: string) {
 
       let messages = compileBlocks(blocks)
       messages = await runBeforeGeneration(enabledPlugins, messages)
+      // Expand inline `<@fragment-id>` references so they don't leak literally
+      // into the prompt. The prewriter writer path expands its own context
+      // separately (createWriterBriefBlocks + expandMessagesFragmentTags).
+      messages = await expandMessagesFragmentTags(messages, dataDir, params.storyId)
       requestLogger.info('BeforeGeneration hooks completed', { messageCount: messages.length })
 
       // Prewriter phase: if enabled, run prewriter and replace messages with stripped context
@@ -224,19 +238,14 @@ export function generationRoutes(dataDir: string) {
       let fullText = ''
       let fullReasoning = ''
       const toolCalls: ToolCallLog[] = []
-      // Args arrive on tool-call, the result later on tool-result; stash by id
-      // to keep args in the persisted record.
-      const pendingToolArgs = new Map<string, Record<string, unknown>>()
+      // Correlate tool-result entries back to their tool-call args.
+      const toolCallArgsById = new Map<string, Record<string, unknown>>()
       let lastFinishReason = 'unknown'
       let stepCount = 0
       let wasAborted = false
+      // Set with the error message when the stream throws for a reason other than
+      // client abort, so the save path skips persisting a failed generation.
       let runError: string | null = null
-
-      // Completion promise resolved when the stream ends — used by save path
-      let completionResolve: ((val: void) => void) | null = null
-      if (body.saveResult) {
-        new Promise<void>((resolve) => { completionResolve = resolve })
-      }
 
       const writerRun = beginAgentRun(params.storyId, 'generation.writer')
 
@@ -288,6 +297,10 @@ export function generationRoutes(dataDir: string) {
                     }
                     if (event.type === 'text') {
                       emit({ type: 'prewriter-text', text: event.text })
+                    } else if (event.type === 'reset') {
+                      // The prewriter re-wrote the brief in a new step; tell the
+                      // client to discard the brief streamed so far.
+                      emit({ type: 'prewriter-reset' })
                     } else if (event.type === 'questions') {
                       // Canonical clarify-questions is emitted from the result below.
                     } else {
@@ -325,12 +338,21 @@ export function generationRoutes(dataDir: string) {
                 // Build stripped writer context with only prose + brief + custom blocks,
                 // then apply the writer's agent block config so overrides (e.g. disabled
                 // blocks like writing-brief) are respected.
-                const writerBlocks = createWriterBriefBlocks(ctxState.proseFragments, prewriterResult.brief, resolvedModelId)
-                const finalWriterBlocks = await applyBlockConfig(writerBlocks, agentConfig, scriptContext)
-                let writerCompiled = compileBlocks(finalWriterBlocks)
-                writerCompiled = await expandMessagesFragmentTags(writerCompiled, dataDir, params.storyId)
-                writerMessages = addCacheBreakpoints(writerCompiled)
-                logMessages = writerCompiled
+                //
+                // If the prewriter produced no usable brief, the stripped context
+                // would leave the writer with prose but NO characters/guidelines/
+                // knowledge AND no brief — strictly worse than the full context.
+                // Fall back to the full context (writerMessages already === modelMessages).
+                if (prewriterResult.brief.trim()) {
+                  const writerBlocks = createWriterBriefBlocks(ctxState.proseFragments, prewriterResult.brief, resolvedModelId)
+                  const finalWriterBlocks = await applyBlockConfig(writerBlocks, agentConfig, scriptContext)
+                  let writerCompiled = compileBlocks(finalWriterBlocks)
+                  writerCompiled = await expandMessagesFragmentTags(writerCompiled, dataDir, params.storyId)
+                  writerMessages = addCacheBreakpoints(writerCompiled)
+                  logMessages = writerCompiled
+                } else {
+                  requestLogger.warn('Prewriter produced an empty brief; falling back to full context for the writer')
+                }
               } finally {
                 prewriterRun.finish(prewriterOk ? 'success' : 'error', prewriterOk ? { output: { stepCount: prewriterStepCount } } : undefined)
               }
@@ -376,10 +398,11 @@ export function generationRoutes(dataDir: string) {
                 }
                 case 'tool-call': {
                   const input = (p.input ?? {}) as Record<string, unknown>
-                  pendingToolArgs.set(p.toolCallId as string, input)
+                  const toolCallId = p.toolCallId as string
+                  toolCallArgsById.set(toolCallId, input)
                   event = {
                     type: 'tool-call',
-                    id: p.toolCallId as string,
+                    id: toolCallId,
                     toolName: p.toolName as string,
                     args: input,
                   }
@@ -387,22 +410,26 @@ export function generationRoutes(dataDir: string) {
                 }
                 case 'tool-result': {
                   const toolName = (p.toolName as string) ?? ''
+                  const toolCallId = p.toolCallId as string
                   toolCalls.push({
                     toolName,
-                    args: pendingToolArgs.get(p.toolCallId as string) ?? {},
+                    args: toolCallArgsById.get(toolCallId) ?? {},
                     result: p.output,
                   })
                   event = {
                     type: 'tool-result',
-                    id: p.toolCallId as string,
+                    id: toolCallId,
                     toolName,
                     result: p.output,
                   }
                   break
                 }
+                // `finish-step` fires per LLM step; `finish` fires once at the end.
+                case 'finish-step':
+                  stepCount++
+                  break
                 case 'finish':
                   lastFinishReason = (p.finishReason as string) ?? 'unknown'
-                  stepCount++
                   break
               }
 
@@ -434,7 +461,10 @@ export function generationRoutes(dataDir: string) {
                 // Controller may already be closed
               }
             } else {
+              // Non-abort failure (provider/network/parse error). The client's
+              // stream is errored; do NOT persist a fragment from a failed run.
               runError = err instanceof Error ? err.message : String(err)
+              requestLogger.error('Generation stream failed', { error: runError, textLength: fullText.length })
               controller.error(err)
             }
           } finally {
@@ -444,8 +474,9 @@ export function generationRoutes(dataDir: string) {
             )
           }
 
-          // Run save operation after stream completes (skip if aborted with no text)
-          if (body.saveResult && !(wasAborted && !fullText.trim())) {
+          // Save only when the generation actually produced text and didn't fail.
+          // (Aborted-with-partial-text still saves what was generated.)
+          if (body.saveResult && !runError && fullText.trim()) {
             try {
               const durationMs = Date.now() - startTime
               requestLogger.info('LLM generation completed', { durationMs, textLength: fullText.length })
@@ -510,14 +541,22 @@ export function generationRoutes(dataDir: string) {
                 savedFragmentId = id
                 requestLogger.info('Fragment variation created', { fragmentId: savedFragmentId, mode, originalId: existingFragment.id })
 
-                // Add to prose chain as a variation
-                const sectionIndex = await findSectionIndex(dataDir, params.storyId, existingFragment.id)
-                if (sectionIndex !== -1) {
-                  await addProseVariation(dataDir, params.storyId, sectionIndex, id)
-                  requestLogger.info('Added as variation to prose chain', { sectionIndex })
-                } else {
-                  requestLogger.warn('Original fragment not found in prose chain, creating new section')
-                  await addProseSection(dataDir, params.storyId, id)
+                // Add to prose chain as a variation. Roll back the fragment if
+                // the chain write fails, so we don't leave an unreferenced orphan.
+                try {
+                  const sectionIndex = await findSectionIndex(dataDir, params.storyId, existingFragment.id)
+                  if (sectionIndex !== -1) {
+                    await addProseVariation(dataDir, params.storyId, sectionIndex, id)
+                    requestLogger.info('Added as variation to prose chain', { sectionIndex })
+                  } else {
+                    // Original isn't in the chain (e.g. it was removed): append as
+                    // a new section so the regenerated prose isn't lost.
+                    requestLogger.warn('Original fragment not found in prose chain, creating new section')
+                    await addProseSection(dataDir, params.storyId, id)
+                  }
+                } catch (chainErr) {
+                  await deleteFragment(dataDir, params.storyId, id).catch(() => {})
+                  throw chainErr
                 }
 
                 // Run afterSave hooks
@@ -556,8 +595,14 @@ export function generationRoutes(dataDir: string) {
                 savedFragmentId = id
                 requestLogger.info('New fragment created', { fragmentId: savedFragmentId })
 
-                // Add to prose chain as a new section
-                await addProseSection(dataDir, params.storyId, id)
+                // Add to prose chain as a new section. Roll back the fragment if
+                // the chain write fails, so we don't leave an unreferenced orphan.
+                try {
+                  await addProseSection(dataDir, params.storyId, id)
+                } catch (chainErr) {
+                  await deleteFragment(dataDir, params.storyId, id).catch(() => {})
+                  throw chainErr
+                }
                 requestLogger.info('Added as new section to prose chain')
 
                 // Run afterSave hooks
@@ -622,7 +667,6 @@ export function generationRoutes(dataDir: string) {
             } catch (err) {
               requestLogger.error('Error saving generation result', { error: err instanceof Error ? err.message : String(err) })
             }
-            completionResolve?.()
           }
         },
         cancel() {

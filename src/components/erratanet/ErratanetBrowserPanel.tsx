@@ -8,6 +8,8 @@ import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { EmptyHint } from '@/components/ui/prose-text'
+import { cn } from '@/lib/utils'
+import { AgentConfigImportView } from './AgentConfigImportView'
 import {
   X,
   ArrowLeft,
@@ -18,6 +20,8 @@ import {
   Download,
   ShieldAlert,
   Link2,
+  SlidersHorizontal,
+  Code2,
 } from 'lucide-react'
 
 interface ErratanetBrowserPanelProps {
@@ -27,6 +31,14 @@ interface ErratanetBrowserPanelProps {
 }
 
 type InstallTarget = 'this-story' | 'new-story'
+type KindFilter = 'all' | 'story' | 'fragment-pack' | 'agent-config'
+
+const KIND_FILTERS: { value: KindFilter; label: string }[] = [
+  { value: 'all', label: 'All' },
+  { value: 'story', label: 'Stories' },
+  { value: 'fragment-pack', label: 'Packs' },
+  { value: 'agent-config', label: 'Configs' },
+]
 
 /**
  * Parse a typed reference into a global pack id + optional version.
@@ -78,8 +90,10 @@ export function ErratanetBrowserPanel({ storyId, onClose }: ErratanetBrowserPane
   const [searchError, setSearchError] = useState<string | null>(null)
 
   const [selected, setSelected] = useState<ErratanetPackDetail | null>(null)
+  const [configRef, setConfigRef] = useState<{ id: string; version?: string } | null>(null)
   const [loadingPack, setLoadingPack] = useState(false)
   const [packError, setPackError] = useState<string | null>(null)
+  const [kindFilter, setKindFilter] = useState<KindFilter>('all')
 
   const [target, setTarget] = useState<InstallTarget>(storyId ? 'this-story' : 'new-story')
   const [installResult, setInstallResult] = useState<{ ok: boolean; message: string } | null>(null)
@@ -112,6 +126,14 @@ export function ErratanetBrowserPanel({ storyId, onClose }: ErratanetBrowserPane
       setInstallResult(null)
       try {
         const pack = await api.erratanet.getPack(id, version)
+        // Agent-config packs route to the dedicated import flow (preview +
+        // consent + apply/preset), not the fragment/story install path. A
+        // version the user pinned wins over the pack detail's (latest) version.
+        if (pack.contentKind === 'agent-config') {
+          setConfigRef({ id: pack.id, version: version ?? pack.version })
+          setSelected(null)
+          return
+        }
         setSelected(pack)
         // Story packs always install as a new story; loose packs default to the
         // current story when one is in scope.
@@ -171,16 +193,24 @@ export function ErratanetBrowserPanel({ storyId, onClose }: ErratanetBrowserPane
 
   const clearSelection = useCallback(() => {
     setSelected(null)
+    setConfigRef(null)
     setPackError(null)
     setInstallResult(null)
   }, [])
+
+  // Client-side kind filter over the mixed hub search results.
+  const visibleResults = useMemo(() => {
+    if (!results) return null
+    if (kindFilter === 'all') return results
+    return results.filter((r) => r.contentKind === kindFilter)
+  }, [results, kindFilter])
 
   return (
     <div className="flex flex-col h-full" data-component-id="erratanet-browser-root">
       {/* Header */}
       <div className="flex items-center justify-between px-6 py-4 border-b border-border/50">
         <div className="flex items-center gap-2">
-          {selected && (
+          {(selected || configRef) && (
             <Button
               size="icon"
               variant="ghost"
@@ -193,7 +223,7 @@ export function ErratanetBrowserPanel({ storyId, onClose }: ErratanetBrowserPane
           )}
           <h2 className="font-display text-lg">Browse and Install Packs</h2>
           <span className="text-[0.625rem] text-muted-foreground uppercase tracking-wider">
-            {selected ? 'Pack Detail' : 'ErrataNet'}
+            {configRef ? 'Import Config' : selected ? 'Pack Detail' : 'ErrataNet'}
           </span>
         </div>
         <Button
@@ -207,7 +237,9 @@ export function ErratanetBrowserPanel({ storyId, onClose }: ErratanetBrowserPane
         </Button>
       </div>
 
-      {selected ? (
+      {configRef ? (
+        <AgentConfigImportView id={configRef.id} version={configRef.version} storyId={storyId} />
+      ) : selected ? (
         <PackDetailView
           pack={selected}
           storyId={storyId}
@@ -230,7 +262,7 @@ export function ErratanetBrowserPanel({ storyId, onClose }: ErratanetBrowserPane
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
                     onKeyDown={(e) => { if (e.key === 'Enter') runSearch() }}
-                    placeholder="Find fragment packs and stories"
+                    placeholder="Find packs, stories, and agent configs"
                     className="pl-8"
                   />
                 </div>
@@ -271,16 +303,42 @@ export function ErratanetBrowserPanel({ storyId, onClose }: ErratanetBrowserPane
 
             {packError && <p className="text-xs text-destructive">{packError}</p>}
 
+            {/* Kind filter (over the mixed search results) */}
+            {results && results.length > 0 && (
+              <div className="flex w-fit gap-[3px] rounded-lg bg-muted/25 p-[3px]">
+                {KIND_FILTERS.map((k) => {
+                  const count =
+                    k.value === 'all' ? results.length : results.filter((r) => r.contentKind === k.value).length
+                  return (
+                    <button
+                      key={k.value}
+                      type="button"
+                      onClick={() => setKindFilter(k.value)}
+                      className={cn(
+                        'rounded-md px-2.5 py-[5px] text-[0.6875rem] font-medium transition-all duration-150',
+                        kindFilter === k.value ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
+                      )}
+                    >
+                      {k.label}
+                      <span className="ml-1 tabular-nums opacity-60">{count}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+
             {/* Results */}
             <div className="space-y-2">
-              {results === null ? (
+              {visibleResults === null ? (
                 <EmptyHint className="py-8 text-center block">
-                  Search the hub to discover fragment packs and shared stories.
+                  Search the hub to discover fragment packs, stories, and agent configs.
                 </EmptyHint>
-              ) : results.length === 0 ? (
-                <EmptyHint className="py-8 text-center block">No packs matched that search.</EmptyHint>
+              ) : visibleResults.length === 0 ? (
+                <EmptyHint className="py-8 text-center block">
+                  {results && results.length > 0 ? 'Nothing of this kind in the results.' : 'No packs matched that search.'}
+                </EmptyHint>
               ) : (
-                results.map((r) => (
+                visibleResults.map((r) => (
                   <ResultRow
                     key={`${r.id}@${r.version}`}
                     result={r}
@@ -307,6 +365,8 @@ function ResultRow({
   busy: boolean
 }) {
   const isStory = result.contentKind === 'story'
+  const isConfig = result.contentKind === 'agent-config'
+  const runsCode = result.agentConfig?.hasScripts ?? result.capabilities?.includes('scripts') ?? false
   const idParts = parseGlobalPackId(result.id)
   const handleLabel = result.publisher ?? (idParts ? `@${idParts.handle}` : result.id)
   return (
@@ -318,6 +378,8 @@ function ResultRow({
       <div className="size-12 shrink-0 rounded-md border border-border/30 bg-muted overflow-hidden flex items-center justify-center">
         {result.thumbnail ? (
           <img src={result.thumbnail} alt="" className="size-full object-cover" />
+        ) : isConfig ? (
+          <SlidersHorizontal className="size-5 text-muted-foreground" />
         ) : isStory ? (
           <BookOpen className="size-5 text-muted-foreground" />
         ) : (
@@ -327,7 +389,12 @@ function ResultRow({
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <span className="text-sm font-medium truncate">{result.title}</span>
-          <Badge variant="secondary" className="text-[0.5625rem] h-4 shrink-0">{isStory ? 'story' : 'pack'}</Badge>
+          <Badge variant="secondary" className="text-[0.5625rem] h-4 shrink-0">{isConfig ? 'config' : isStory ? 'story' : 'pack'}</Badge>
+          {runsCode && (
+            <span className="inline-flex items-center gap-0.5 rounded border border-amber-500/40 px-1 font-mono text-[0.5625rem] lowercase text-amber-600 dark:text-amber-400 shrink-0">
+              <Code2 className="size-2.5" /> code
+            </span>
+          )}
           {result.nsfw && (
             <Badge className="text-[0.5625rem] h-4 shrink-0 bg-destructive/15 text-destructive border-transparent">nsfw</Badge>
           )}
@@ -342,12 +409,23 @@ function ResultRow({
           <p className="text-[0.6875rem] text-muted-foreground line-clamp-2 mt-1">{result.description}</p>
         )}
         <div className="flex flex-wrap items-center gap-1 mt-1.5">
-          <span className="text-[0.5625rem] text-muted-foreground tabular-nums mr-0.5">
-            {result.fragmentCount ?? 0} {result.fragmentCount === 1 ? 'fragment' : 'fragments'}
-          </span>
-          {(result.fragmentTypes ?? []).slice(0, 4).map((t) => (
-            <Badge key={t} variant="outline" className="text-[0.5625rem] h-3.5 px-1">{t}</Badge>
-          ))}
+          {isConfig ? (
+            result.agentConfig ? (
+              <span className="text-[0.5625rem] text-muted-foreground tabular-nums mr-0.5">
+                {result.agentConfig.blockCount} {result.agentConfig.blockCount === 1 ? 'block' : 'blocks'}
+                {result.agentConfig.agents.length > 0 ? ` · tunes ${result.agentConfig.agents.length}` : ''}
+              </span>
+            ) : null
+          ) : (
+            <>
+              <span className="text-[0.5625rem] text-muted-foreground tabular-nums mr-0.5">
+                {result.fragmentCount ?? 0} {result.fragmentCount === 1 ? 'fragment' : 'fragments'}
+              </span>
+              {(result.fragmentTypes ?? []).slice(0, 4).map((t) => (
+                <Badge key={t} variant="outline" className="text-[0.5625rem] h-3.5 px-1">{t}</Badge>
+              ))}
+            </>
+          )}
           {(result.tags ?? []).slice(0, 3).map((tag) => (
             <span key={tag} className="text-[0.5625rem] text-muted-foreground/80 px-1 rounded bg-muted/60">#{tag}</span>
           ))}

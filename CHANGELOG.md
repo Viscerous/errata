@@ -3,6 +3,23 @@
 All notable changes to Errata are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are git tags.
 
+## [1.10.0] — 2026-06-26
+
+### Added
+- **Share agent configs as erratapacks.** A new `agent-config` erratapack kind
+  lets writers publish and install agent presets through erratanet, on a
+  scripts-with-consent trust model. Adds a share dialog, import view, config
+  selector, and `PackLink`; server-side bundle/pack builders, a preset store,
+  and config routes. The pack schema mirrors the erratanet contract verbatim.
+- **Prose image headers** with configurable aspect ratios and an edge fade.
+
+### Changed
+- **Hardened the generation pipeline** against data loss and races, tightened
+  token-usage tracking, and stopped the prewriter from handing the writer a
+  doubled brief.
+- Removed the superseded model-specific instruction-override layer (registry
+  defaults retained); per-agent blocks replace it.
+
 ## [1.9.0] — 2026-06-05
 
 ### Added

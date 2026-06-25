@@ -588,6 +588,25 @@ function StoryEditorPage() {
           <SidebarTrigger className="size-9 bg-background/80 backdrop-blur-sm border border-border/40 shadow-sm" />
         </div>
 
+        {/* Mobile view entry — jump to character chat (prose view only; the
+            chat surface has its own header with a control back to prose). The
+            desktop Prose/Chat toggle is hidden below md, so without this the
+            chat view is unreachable on touch. */}
+        {mainView === 'prose' && (
+          <div className="md:hidden absolute top-3 right-3 z-20">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-9 bg-background/80 backdrop-blur-sm border border-border/40 shadow-sm"
+              onClick={() => setMainView('character-chat')}
+              title="Character chat"
+              aria-label="Open character chat"
+            >
+              <MessageSquare className="size-4" />
+            </Button>
+          </div>
+        )}
+
         {/* Floating agent activity wisps */}
         <AgentActivityIndicator storyId={storyId} />
 
