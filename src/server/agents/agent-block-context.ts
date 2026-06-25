@@ -2,27 +2,14 @@ import type { Fragment, StoryMeta } from '../fragments/schema'
 import type { ContextBuildState } from '../llm/context-builder'
 
 /**
- * Shared context type that all agent block builders receive.
- * Superset of data — each agent uses the fields it needs.
+ * Context every agent's block builder receives. It is the writer's
+ * ContextBuildState (story context) plus the agent-specific fields below, so a
+ * built ContextBuildState is directly usable as an AgentBlockContext — there's
+ * one context shape, not two that must be mapped onto each other.
  */
-export interface AgentBlockContext {
+export interface AgentBlockContext extends ContextBuildState {
   /** Fetch any fragment by ID (async). Available in script blocks as ctx.getFragment(id). */
   getFragment?: (id: string) => Promise<Fragment | null>
-
-  /** Resolved model ID, used for model-aware instruction resolution. */
-  modelId?: string
-
-  // Common (from ContextBuildState)
-  story: StoryMeta
-  proseFragments: Fragment[]
-  stickyGuidelines: Fragment[]
-  stickyKnowledge: Fragment[]
-  stickyCharacters: Fragment[]
-  /** Non-sticky characters appearing in the recent prose, carried full. */
-  recentCharacters?: Fragment[]
-  guidelineShortlist: Fragment[]
-  knowledgeShortlist: Fragment[]
-  characterShortlist: Fragment[]
 
   // System prompt fragments (tagged pass-to-librarian-system-prompt)
   systemPromptFragments: Fragment[]
@@ -50,44 +37,22 @@ export interface AgentBlockContext {
 
   // Plugin tools
   pluginToolDescriptions?: Array<{ name: string; description: string }>
-
-  /**
-   * The writer's full build state, carried by its preview so the block builder
-   * renders it directly instead of reconstructing a ContextBuildState from the
-   * flat fields above (which would silently drop any field not copied across).
-   */
-  generationState?: ContextBuildState
 }
 
-/** The fields every agent's block context derives from a ContextBuildState. */
-type BaseBlockContext = Pick<
-  AgentBlockContext,
-  | 'story'
-  | 'proseFragments'
-  | 'stickyGuidelines'
-  | 'stickyKnowledge'
-  | 'stickyCharacters'
-  | 'recentCharacters'
-  | 'guidelineShortlist'
-  | 'knowledgeShortlist'
-  | 'characterShortlist'
->
-
 /**
- * Map a ContextBuildState into the story-context fields every agent's block
- * context shares (empties when no state was built). Single source so the runtime
- * runners and the context previews can't drift from each other field-by-field.
+ * The story-context an agent's block context builds on: the built ContextBuildState,
+ * or empties when none was built. Spread into an AgentBlockContext by the runners and
+ * previews — a spread of the whole state can't drop a field, so they can't drift.
  */
-export function baseBlockContext(ctxState: ContextBuildState | null | undefined, story: StoryMeta): BaseBlockContext {
-  return {
-    story: ctxState?.story ?? story,
-    proseFragments: ctxState?.proseFragments ?? [],
-    stickyGuidelines: ctxState?.stickyGuidelines ?? [],
-    stickyKnowledge: ctxState?.stickyKnowledge ?? [],
-    stickyCharacters: ctxState?.stickyCharacters ?? [],
-    recentCharacters: ctxState?.recentCharacters ?? [],
-    guidelineShortlist: ctxState?.guidelineShortlist ?? [],
-    knowledgeShortlist: ctxState?.knowledgeShortlist ?? [],
-    characterShortlist: ctxState?.characterShortlist ?? [],
+export function baseBlockContext(ctxState: ContextBuildState | null | undefined, story: StoryMeta): ContextBuildState {
+  return ctxState ?? {
+    story,
+    proseFragments: [],
+    stickyGuidelines: [],
+    stickyKnowledge: [],
+    stickyCharacters: [],
+    guidelineShortlist: [],
+    knowledgeShortlist: [],
+    characterShortlist: [],
   }
 }

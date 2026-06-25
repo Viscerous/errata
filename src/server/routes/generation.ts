@@ -464,7 +464,7 @@ export function generationRoutes(dataDir: string) {
                 .filter((x): x is string => typeof x === 'string')
               const writerContextIds = [...new Set([
                 ...ctxState.stickyCharacters.map((f) => f.id),
-                ...ctxState.recentCharacters.map((f) => f.id),
+                ...(ctxState.recentCharacters ?? []).map((f) => f.id),
                 ...ctxState.stickyKnowledge.map((f) => f.id),
                 ...lookedUpIds,
               ])]

@@ -349,7 +349,7 @@ describe('context-builder', () => {
     await createFragment(dataDir, story.id, prose)
 
     const state = await buildContextState(dataDir, story.id, 'Continue')
-    expect(state.recentCharacters.map((c) => c.id)).toContain('ch-0002')
+    expect((state.recentCharacters ?? []).map((c) => c.id)).toContain('ch-0002')
     expect(state.characterShortlist.map((c) => c.id)).not.toContain('ch-0002')
 
     const blocks = createDefaultBlocks(state)

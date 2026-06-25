@@ -1,6 +1,6 @@
 import { agentBlockRegistry } from '../agents/agent-block-registry'
 import { instructionRegistry } from '../instructions'
-import { type AgentBlockContext, baseBlockContext } from '../agents/agent-block-context'
+import type { AgentBlockContext } from '../agents/agent-block-context'
 import { registry } from '../fragments/registry'
 import { createDefaultBlocks, buildContextState, type ContextBlock } from './context-builder'
 import { createFragmentTools } from './tools'
@@ -43,26 +43,16 @@ function createGenerationBlocks(ctx: AgentBlockContext): ContextBlock[] {
     const placeholderBrief = '(The prewriter will generate a brief at generation time.)'
     return createWriterBriefBlocks(ctx.proseFragments, placeholderBrief, ctx.modelId)
   }
-
-  // Preview-only path: render the build state the preview already produced rather
-  // than reconstructing one from the flat ctx fields (which dropped chapterSummaries).
-  // modelId is set on ctx after the context is built, so thread it through.
-  const state = ctx.generationState
-  if (!state) throw new Error('generation.writer preview context is missing generationState')
-  return createDefaultBlocks(ctx.modelId ? { ...state, modelId: ctx.modelId } : state)
+  // The context is already a ContextBuildState (AgentBlockContext extends it), so
+  // render it directly — no reconstruction, nothing to drop.
+  return createDefaultBlocks(ctx)
 }
 
 async function buildGenerationPreviewContext(dataDir: string, storyId: string): Promise<AgentBlockContext> {
   // Generation needs a non-empty authorInput so the author-input block renders in
   // the preview; we use a self-explanatory placeholder rather than a bare token.
   const state = await buildContextState(dataDir, storyId, GENERATION_PREVIEW_INPUT)
-  return {
-    ...baseBlockContext(state, state.story),
-    systemPromptFragments: [],
-    // The flat fields above feed custom script blocks; the block builder renders
-    // from this full state so nothing is dropped in a state→ctx→state round-trip.
-    generationState: state,
-  }
+  return { ...state, systemPromptFragments: [] }
 }
 
 let registered = false

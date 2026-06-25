@@ -47,7 +47,7 @@ export interface ContextBuildState {
   guidelineShortlist: Fragment[]
   knowledgeShortlist: Fragment[]
   characterShortlist: Fragment[]
-  authorInput: string
+  authorInput?: string
   modelId?: string
 }
 
