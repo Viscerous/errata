@@ -6,6 +6,7 @@ import {
   type ChatEvent,
   type LibrarianState,
 } from '@/lib/api'
+import type { ActiveAgent } from '@/lib/api/agents'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { EmptyState } from '@/components/ui/async-view'
@@ -30,12 +31,22 @@ export function AgentActivityPanel({ storyId }: AgentActivityPanelProps) {
     refetchInterval: 5000,
   })
 
+  // Currently-running agents from the active registry — every agent (writer,
+  // librarian, refine, …) surfaces here, so the panel shows live activity rather
+  // than only the librarian's analyze status.
+  const { data: activeAgents } = useQuery({
+    queryKey: ['active-agents', storyId],
+    queryFn: () => api.agents.listActive(storyId),
+    refetchInterval: 2000,
+  })
+
   const runStatus = status?.runStatus ?? 'idle'
+  const active = activeAgents ?? []
 
   return (
     <div className="h-full flex flex-col">
       {/* Status strip */}
-      <StatusStrip status={status} runStatus={runStatus} />
+      <StatusStrip status={status} runStatus={runStatus} active={active} />
 
       {/* Live analysis trace */}
       {runStatus === 'running' && (
@@ -44,7 +55,7 @@ export function AgentActivityPanel({ storyId }: AgentActivityPanelProps) {
 
       {/* Agent runs */}
       <div className="flex-1 min-h-0">
-        <ActivityContent storyId={storyId} />
+        <ActivityContent storyId={storyId} active={active} />
       </div>
     </div>
   )
@@ -55,33 +66,44 @@ export function AgentActivityPanel({ storyId }: AgentActivityPanelProps) {
 interface StatusStripProps {
   status: LibrarianState | undefined
   runStatus: string
+  active: ActiveAgent[]
 }
 
-function StatusStrip({ status, runStatus }: StatusStripProps) {
-  const isActive = runStatus === 'running' || runStatus === 'scheduled'
+function StatusStrip({ status, runStatus, active }: StatusStripProps) {
   const isError = runStatus === 'error'
+  // The librarian's own state is carried by runStatus; any other running agent
+  // (the writer, refine, …) makes the panel read "Working" rather than "Idle".
+  const otherActive = active.some(a => a.agentName !== 'librarian.analyze')
+  const showWorking = runStatus !== 'running' && runStatus !== 'scheduled' && !isError && otherActive
+  const isActive = runStatus === 'running' || runStatus === 'scheduled' || showWorking
 
   const dotColor = runStatus === 'running'
     ? 'bg-blue-400'
     : runStatus === 'scheduled'
       ? 'bg-amber-400'
-      : isError
-        ? 'bg-red-400'
-        : 'bg-emerald-500/50'
+      : showWorking
+        ? 'bg-blue-400'
+        : isError
+          ? 'bg-red-400'
+          : 'bg-emerald-500/50'
 
   const label = runStatus === 'running'
     ? 'Analyzing'
     : runStatus === 'scheduled'
       ? 'Queued'
-      : isError
-        ? 'Error'
-        : 'Idle'
+      : showWorking
+        ? 'Working'
+        : isError
+          ? 'Error'
+          : 'Idle'
 
   const fragmentId = runStatus === 'running'
     ? status?.runningFragmentId
     : runStatus === 'scheduled'
       ? status?.pendingFragmentId
-      : status?.lastAnalyzedFragmentId
+      : showWorking
+        ? null
+        : status?.lastAnalyzedFragmentId
 
   return (
     <div className="shrink-0 mx-4 mt-3 mb-1">
@@ -122,7 +144,7 @@ function StatusStrip({ status, runStatus }: StatusStripProps) {
 
 // ─── Activity Content ─────────────────────────────────────
 
-function ActivityContent({ storyId }: { storyId: string }) {
+function ActivityContent({ storyId, active }: { storyId: string; active: ActiveAgent[] }) {
   const [expandedRunId, setExpandedRunId] = useState<string | null>(null)
 
   const { data: agentRuns } = useQuery({
@@ -132,15 +154,22 @@ function ActivityContent({ storyId }: { storyId: string }) {
   })
 
   const hasRuns = agentRuns && agentRuns.length > 0
+  // The librarian's running state has its own status strip + live trace above, so
+  // surface every other running agent here instead of duplicating it.
+  const running = active.filter(a => a.agentName !== 'librarian.analyze')
+  const hasAny = running.length > 0 || hasRuns
 
   return (
     <ScrollArea className="h-full">
       <div className="px-4 py-3 space-y-1">
         <section>
           <SectionLabel icon={<GitBranch className="size-3" />}>Agent Runs</SectionLabel>
-          {hasRuns ? (
+          {hasAny ? (
             <div className="space-y-1 mt-1.5">
-              {agentRuns.slice(0, 12).map((run) => {
+              {running.map((agent) => (
+                <ActiveRunRow key={agent.id} agent={agent} />
+              ))}
+              {agentRuns?.slice(0, 12).map((run) => {
                 const expanded = expandedRunId === run.rootRunId
                 const runTime = new Date(run.startedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
                 const isError = run.status === 'error'
@@ -196,6 +225,20 @@ function SectionLabel({ children, icon }: { children: React.ReactNode; icon?: Re
 function formatDuration(ms: number): string {
   if (ms < 1000) return `${ms}ms`
   return `${(ms / 1000).toFixed(1)}s`
+}
+
+// A currently-running agent (from the active registry), shown above completed runs.
+function ActiveRunRow({ agent }: { agent: ActiveAgent }) {
+  return (
+    <div className="rounded-md border border-blue-400/30 bg-blue-400/[0.04] flex items-center gap-1.5 px-2.5 py-2 text-[0.6875rem]">
+      <span className="relative flex size-1.5 shrink-0">
+        <span className="absolute inset-0 rounded-full bg-blue-400 animate-ping" style={{ animationDuration: '2s' }} />
+        <span className="relative inline-flex size-1.5 rounded-full bg-blue-400" />
+      </span>
+      <span className="font-mono text-foreground/70 truncate">{agent.agentName}</span>
+      <span className="ml-auto text-[0.5625rem] font-mono text-blue-400/80 shrink-0">running</span>
+    </div>
+  )
 }
 
 function TraceTree({ run }: { run: AgentRunTraceRecord }) {
