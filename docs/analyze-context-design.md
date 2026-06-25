@@ -45,10 +45,16 @@ the original plan was written.
 
 ## How analyze applies it (shipped)
 
-- Characters in `writerContextIds` render as **full sheets** (`characters-recent`);
-  the rest are one-line summaries (`characters-shortlist`). The sheets are in
-  context **before** any edit — no mid-loop delivery, no ordering constraint, no
-  gate.
+- Characters split into three blocks, each character in exactly one: **pinned**
+  (`characters-sticky`, full — always, even when the pin is also in the scene), the
+  rest of the **recent cast** from `writerContextIds` (`characters-recent`, full),
+  and everyone else (`characters-shortlist`, one-line summaries). The full sheets
+  are in context **before** any edit — no mid-loop delivery, no ordering constraint,
+  no gate.
+- Pins are loaded from `sticky` directly, **independent of the forward**, so
+  re-analysis of older prose, the context preview, and prose not written by the
+  writer still get author-pinned sheets in full (matching the writer's
+  `full = pinned ∪ recent cast` relevance model).
 - `reportMentions` is **annotation-only** (records who appears, for prose
   highlighting); it no longer returns bodies.
 - `getFragment` is the **backstop** for an appearing character not in the
