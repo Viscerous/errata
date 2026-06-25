@@ -1,6 +1,6 @@
 import type { ContextBlock } from '../llm/context-builder'
 import { fragmentSummaryBlock } from '../llm/context-builder'
-import type { AgentBlockContext } from '../agents/agent-block-context'
+import { baseBlockContext, type AgentBlockContext } from '../agents/agent-block-context'
 import type { Fragment, StoryMeta } from '../fragments/schema'
 import { getStory, listFragments, getFragment } from '../fragments/storage'
 import { getActiveProseIds } from '../fragments/prose-chain'
@@ -88,19 +88,16 @@ export async function buildAnalyzeContext(
   const allKnowledge = await listFragments(dataDir, storyId, 'knowledge')
   const systemPromptFragments = await loadSystemPromptFragments(dataDir, storyId, getFragmentsByTag, getFragment)
   return {
-    story,
-    proseFragments: [],
-    stickyGuidelines: [],
-    stickyKnowledge: [],
-    stickyCharacters: [],
-    guidelineShortlist: [],
-    knowledgeShortlist: [],
-    characterShortlist: [],
+    // Start from the empty defaults so analyze states only the fields it uses
+    ...baseBlockContext(null, story),
     systemPromptFragments,
     allCharacters,
-    recentCharacters: recentCastFromFragment(allCharacters, input.proseFragment),
     allKnowledge,
     newProse: input.newProse,
+    // Author-pinned characters are always-relevant, so analyze loads them in full
+    // independent of what the prose forwarded (writerContextIds).
+    stickyCharacters: allCharacters.filter((c) => c.sticky),
+    recentCharacters: recentCastFromFragment(allCharacters, input.proseFragment),
   }
 }
 
@@ -120,22 +117,40 @@ export function createLibrarianAnalyzeBlocks(ctx: AgentBlockContext): ContextBlo
     source: 'builtin',
   })
 
-  // Characters in the recent prose are preloaded in full so edits land on their
-  // current sheet; the rest stay one-line summaries (getFragment reads any in full).
-  const recentIds = new Set((ctx.recentCharacters ?? []).map((c) => c.id))
-  if (ctx.recentCharacters && ctx.recentCharacters.length > 0) {
+  // Pinned and recent characters are preloaded in full so edits land on the
+  // current sheet; everyone else stays a one-line summary (getFragment reads any
+  // in full). Each character lands in exactly one block: pinned takes precedence,
+  // then recent, then the shortlist.
+  const renderSheet = (c: Fragment) => `### ${c.id}: ${c.name}\n${c.description}\n\n${c.content}`
+  const sticky = ctx.stickyCharacters ?? []
+  const stickyIds = new Set(sticky.map((c) => c.id))
+  const recent = ctx.recentCharacters ?? []
+  const recentIds = new Set(recent.map((c) => c.id))
+
+  // Author-pinned, always-relevant — full and in their own block whether or not
+  // they also appear in the recent prose, so a pin reliably shows up here.
+  if (sticky.length > 0) {
+    blocks.push({
+      id: 'characters-sticky',
+      role: 'user',
+      content: ['## Pinned Characters', ...sticky.map(renderSheet)].join('\n\n'),
+      order: 195,
+      source: 'builtin',
+    })
+  }
+
+  const recentNonPinned = recent.filter((c) => !stickyIds.has(c.id))
+  if (recentNonPinned.length > 0) {
     blocks.push({
       id: 'characters-recent',
       role: 'user',
-      content: [
-        '## Characters in Recent Prose',
-        ...ctx.recentCharacters.map((c) => `### ${c.id}: ${c.name}\n${c.description}\n\n${c.content}`),
-      ].join('\n\n'),
+      content: ['## Characters in Recent Prose', ...recentNonPinned.map(renderSheet)].join('\n\n'),
       order: 200,
       source: 'builtin',
     })
   }
-  const shortlistCharacters = (ctx.allCharacters ?? []).filter((c) => !recentIds.has(c.id))
+
+  const shortlistCharacters = (ctx.allCharacters ?? []).filter((c) => !stickyIds.has(c.id) && !recentIds.has(c.id))
   if (shortlistCharacters.length > 0) {
     blocks.push(fragmentSummaryBlock({ id: 'characters-shortlist', heading: 'Characters', items: shortlistCharacters, order: 210, editable: true }))
   }

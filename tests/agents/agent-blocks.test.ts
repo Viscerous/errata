@@ -175,6 +175,39 @@ describe('Librarian Analyze Blocks', () => {
     expect(shortlist!.content).not.toContain('ch-hero01')
   })
 
+  it('analyze preloads pinned characters in full in a dedicated block, even when not in the recent cast', () => {
+    const def = agentBlockRegistry.get('librarian.analyze')!
+    const pinned = makeFragment({ id: 'ch-pin01', name: 'Mentor', description: 'A wise mentor', content: 'Mentor full sheet body.' })
+    const other = makeFragment({ id: 'ch-oth01', name: 'Extra', description: 'A bit player', content: 'Extra full sheet body.' })
+    const blocks = def.createDefaultBlocks(makeBaseContext({
+      allCharacters: [pinned, other],
+      recentCharacters: [], // pinned is NOT in the forwarded recent cast
+      stickyCharacters: [pinned],
+    }))
+
+    // Pinned char is rendered in full in its own block, not duplicated into the shortlist.
+    const sticky = blocks.find(b => b.id === 'characters-sticky')
+    expect(sticky).toBeDefined()
+    expect(sticky!.content).toContain('## Pinned Characters')
+    expect(sticky!.content).toContain('Mentor full sheet body.')
+    const shortlist = blocks.find(b => b.id === 'characters-shortlist')
+    expect(shortlist!.content).toContain('ch-oth01')
+    expect(shortlist!.content).not.toContain('ch-pin01')
+  })
+
+  it('analyze shows a pinned character once, in the pinned block, even when also in the recent cast', () => {
+    const def = agentBlockRegistry.get('librarian.analyze')!
+    const hero = makeFragment({ id: 'ch-hero01', name: 'Hero', description: 'A brave hero', content: 'Hero sheet.' })
+    const blocks = def.createDefaultBlocks(makeBaseContext({
+      allCharacters: [hero],
+      recentCharacters: [hero],
+      stickyCharacters: [hero], // pinned AND recent — pinned takes precedence
+    }))
+
+    expect(blocks.find(b => b.id === 'characters-sticky')!.content).toContain('Hero sheet.')
+    expect(blocks.find(b => b.id === 'characters-recent')).toBeUndefined()
+  })
+
   it('includes knowledge block when allKnowledge provided', () => {
     const def = agentBlockRegistry.get('librarian.analyze')!
     const blocks = def.createDefaultBlocks(makeBaseContext({
