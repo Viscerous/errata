@@ -292,7 +292,7 @@ export async function buildRefinePreviewContext(dataDir: string, storyId: string
   return {
     ...base,
     targetFragment: undefined,
-    instructions: '(Preview — actual instructions will appear during refinement)',
+    instructions: '(your refinement instructions will appear here)',
   }
 }
 
@@ -386,8 +386,8 @@ export async function buildProseTransformPreviewContext(dataDir: string, storyId
     systemPromptFragments: [],
     operation: 'rewrite',
     guidance: 'Rewrite the selected span for clarity and flow while preserving the original meaning and voice.',
-    selectedText: '(Preview — actual selection will appear during transform)',
-    sourceContent: '(Preview — actual fragment content will appear during transform)',
+    selectedText: '(the selected span will appear here)',
+    sourceContent: '(the surrounding fragment content will appear here)',
     contextBefore: '',
     contextAfter: '',
   }
@@ -448,6 +448,6 @@ export async function buildOptimizeCharacterPreviewContext(dataDir: string, stor
     ...base,
     allCharacters,
     targetFragment: undefined,
-    instructions: '(Preview — actual instructions will appear during optimization)',
+    instructions: '(your optimization instructions will appear here)',
   }
 }
