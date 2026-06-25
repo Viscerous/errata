@@ -50,8 +50,6 @@ export function buildAnalyzeSystemPrompt(opts?: { disableDirections?: boolean; d
 You are a librarian agent for a collaborative writing app.
 Your job is to analyze a new prose fragment and maintain story continuity.
 
-The characters in the recent prose are provided in full below, alongside knowledge; any other characters are one-line summaries — read one in full with getFragment before editing it.
-
 Work through these steps in order:
 ${numbered}
 
