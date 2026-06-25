@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { createEmptyCollector, createAnalysisTools, updateSummaryInputSchema } from '@/server/librarian/analysis-tools'
+import { createEmptyCollector, createAnalysisTools, updateSummaryInputSchema, analyzeActiveTools } from '@/server/librarian/analysis-tools'
 import { getFragment } from '@/server/fragments/storage'
 
 vi.mock('@/server/fragments/storage', () => ({
@@ -38,6 +38,20 @@ describe('analysis-tools', () => {
         'suggestFragment',
         'suggestDirections',
       ])
+    })
+
+    it('analyzeActiveTools withholds edit tools until reportMentions has run', () => {
+      const all = Object.keys(createAnalysisTools(createEmptyCollector()))
+
+      const before = analyzeActiveTools(all, false)
+      expect(before).not.toContain('updateFragment')
+      expect(before).not.toContain('editFragment')
+      // Non-edit tools (including reportMentions) stay available.
+      expect(before).toContain('reportMentions')
+      expect(before).toContain('updateSummary')
+
+      const after = analyzeActiveTools(all, true)
+      expect(after).toEqual(all)
     })
 
     it('updateSummary sets summary (last call wins)', async () => {
