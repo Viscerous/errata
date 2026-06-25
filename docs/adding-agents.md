@@ -101,7 +101,7 @@ This is equivalent to ~40 lines of manual block construction. Available helpers:
 | `instructionsBlock(key, ctx)` | `instructions` | system | 100 | Resolved from instruction registry |
 | `systemFragmentsBlock(ctx)` | `system-fragments` | system | 200 | Fragments tagged for system prompt |
 | `storyInfoBlock(ctx)` | `story-info` | user | 100 | Story name, description, summary |
-| `recentProseBlock(ctx)` | `prose` | user | 200 | Full content of recent prose |
+| `recentProseBlock(ctx)` | `prose-recent` | user | 200 | Full content of recent prose |
 | `proseSummariesBlock(ctx, header)` | `prose-summaries` | user | 200 | Truncated/summarized prose (for chat) |
 | `stickyFragmentsBlock(ctx)` | `sticky-fragments` | user | 300 | Sticky guidelines, knowledge, characters |
 | `allCharactersBlock(ctx)` | `all-characters` | user | 350 | All character IDs + names + descriptions |

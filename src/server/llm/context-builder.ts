@@ -663,7 +663,7 @@ export function createDefaultBlocks(state: ContextBuildState): ContextBlock[] {
 
   if (proseFragments.length > 0) {
     blocks.push({
-      id: 'prose',
+      id: 'prose-recent',
       role: 'user',
       content: [
         '## Recent Prose',

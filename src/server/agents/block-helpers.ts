@@ -66,7 +66,7 @@ export function stickyFragmentsBlock(ctx: AgentBlockContext): ContextBlock | nul
 export function recentProseBlock(ctx: AgentBlockContext): ContextBlock | null {
   if (ctx.proseFragments.length === 0) return null
   return {
-    id: 'prose',
+    id: 'prose-recent',
     role: 'user',
     content: [
       '## Recent Prose',

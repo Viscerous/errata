@@ -71,10 +71,11 @@ Other marker types used within block content:
 | `story-info` | user | 100 | Story name + description |
 | `summary` | user | 200 | Story summary (omitted if empty) |
 | `user-fragments` | user | 300 | User-placed sticky fragments |
-| `shortlist-guidelines` | user | 400 | Non-sticky guideline shortlist |
-| `shortlist-knowledge` | user | 410 | Non-sticky knowledge shortlist |
-| `shortlist-characters` | user | 420 | Non-sticky character shortlist |
-| `prose` | user | 500 | Recent prose chain |
+| `guidelines-shortlist` | user | 300 | Non-sticky guideline shortlist |
+| `knowledge-shortlist` | user | 310 | Non-sticky knowledge shortlist |
+| `characters-recent` | user | 315 | Full sheets for non-sticky characters appearing in the recent prose |
+| `characters-shortlist` | user | 320 | Remaining non-sticky character shortlist |
+| `prose-recent` | user | 500 | Recent prose chain |
 | `author-input` | user | 600 | Author's direction |
 
 Order gaps of 100 leave room for inserting custom blocks between existing ones.
