@@ -9,19 +9,20 @@ import type { ModelMessage } from 'ai'
 export interface ContextBuildState {
   story: StoryMeta
   proseFragments: Fragment[]
-  chapterSummaries: Array<{
+  stickyGuidelines: Fragment[]
+  stickyKnowledge: Fragment[]
+  stickyCharacters: Fragment[]
+  guidelineShortlist: Fragment[]
+  knowledgeShortlist: Fragment[]
+  characterShortlist: Fragment[]
+  // Writer-specific; other agents (which extend this via AgentBlockContext) omit them.
+  chapterSummaries?: Array<{
     markerId: string
     name: string
     summary: string
   }>
-  stickyGuidelines: Fragment[]
-  stickyKnowledge: Fragment[]
-  stickyCharacters: Fragment[]
-  recentCharacters: Fragment[]
-  guidelineShortlist: Fragment[]
-  knowledgeShortlist: Fragment[]
-  characterShortlist: Fragment[]
-  authorInput: string
+  recentCharacters?: Fragment[]
+  authorInput?: string
   modelId?: string
 }
 
@@ -513,15 +514,15 @@ export function createDefaultBlocks(state: ContextBuildState): ContextBlock[] {
   const {
     story,
     proseFragments,
-    chapterSummaries,
+    chapterSummaries = [],
     stickyGuidelines,
     stickyKnowledge,
     stickyCharacters,
-    recentCharacters,
+    recentCharacters = [],
     guidelineShortlist,
     knowledgeShortlist,
     characterShortlist,
-    authorInput,
+    authorInput = '',
   } = state
 
   const contextOrderMode = story.settings.contextOrderMode ?? 'simple'
