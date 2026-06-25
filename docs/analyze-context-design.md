@@ -1,111 +1,105 @@
-# Librarian Analyze — Context & Edit-Safety Design
+# Context Strategy — Tiering & Analyze Edit-Safety
 
-**Status: implemented** (branch `fix/analyze-mention-bodies`). Verified against the
-kill test: a character's death lands on the durable sheet (body preserved) across
-runs, with the model free to vary how (name/description update, surgical edit, or
-clean full rewrite).
+**Status: implemented.** Analyze preloads the writer's character working set in
+full and edits against it; the kill test passes (a character's death lands on the
+durable sheet, body preserved, across both first-analysis and re-analysis). This
+**supersedes** the original "deliver bodies through `reportMentions`" plan — see
+*History* at the end.
 
-## Problem
+## The problem this solves
 
-- Analyze sees character **summaries only** (`id: name — description`), not bodies.
-- `updateFragment` overwrites the whole `content` field. With only a description
-  in context, the model writes a short body from what it has → the sheet is
-  **truncated** (blind overwrite). Kill-test: killing a character replaces its
-  body with a one-liner.
-- The read tools (`getFragment`, `getCharacter`) we added were rarely called.
+`updateFragment` replaces the whole `content` field. If analyze has only a
+character's one-line **summary** in context, the model writes a short body from
+what it has → the sheet is **truncated** (blind overwrite). Kill test: killing a
+character replaces its full body with a one-liner.
 
-## Root cause: the prompt enumeration drives tool use *and* order
+## The relevance signal: `writerContextIds`
 
-- The numbered tool list in `buildAnalyzeSystemPrompt` (`1. updateSummary … 5.
-  updateFragment …`) is what makes the model call tools in that order —
-  `reportMentions` (#2) reliably precedes `updateFragment` (#5). It is the prose
-  numbering doing this, not the SDK schema order.
-- Tools **not** in the numbered list (e.g. `getFragment`, which sat in an
-  un-numbered "lookup tools" paragraph) get ignored. That is the whole reason
-  fetching was inconsistent.
-- The reconcile branch removes this enumeration (policy-only prompt, already in
-  `main`). So the ordering is incidental today and disappears once reconcile
-  lands. We must make the ordering **intentional** (a policy line) and stop
-  depending on a tool catalog.
+The piece everything else hangs on. At generation time the writer records
+**`writerContextIds`** on the new prose fragment's `meta` — the fragments it
+actually worked from: sticky characters + the recent cast + sticky knowledge +
+anything it looked up via `getFragment`. It is deliberately **type-agnostic**
+(characters *and* knowledge) and persists with the fragment, so re-analysis sees
+the same set.
 
-## Mechanic: deliver bodies through `reportMentions`
+This is what lets context tier on *relevance* instead of inlining everything.
 
-- Change `reportMentions.execute` to **return the full sheets** of the characters
-  it just resolved (today it returns `{ ok: true }`).
-- The tool result is fed back into the loop, so the bodies arrive **just before**
-  the edit step — single pass, no extra round-trip, and self-budgeting (only
-  mentioned characters, only when mentions are reported).
+## Content tiering (the principle)
 
-## Content strategy (per type)
+One rule, applied per fragment type:
 
-- **Knowledge:** full in context (bounded, read-mostly; analyze checks
-  contradictions against it). Add a budget only if a story gets lore-heavy.
-- **Characters:** summaries in context; full sheet delivered on demand via the
-  `reportMentions` return. **Sticky** characters are always full.
-- `getFragment` = overflow / backstop, not the primary path.
+| Tier | Rule |
+|---|---|
+| **Sticky** | full (author-pinned, always relevant) |
+| **In the relevance set** (`writerContextIds`) | full |
+| **Otherwise** | one-line summary (shortlist: `id: name — description`) |
+| **Not in context** | fetched via `getFragment` on demand |
 
-## Edit safety
+Characters have a *richer* relevance source than knowledge — prose mention
+annotations feed the recent cast, whereas knowledge only enters the set via sticky
+or explicit lookup — so in practice more characters are full than knowledge. But
+both flow through the **same** signal, so the depth difference is earned by signal
+density, not an unexplained lopsidedness. This is what retired the earlier
+*asymmetry* blocker (below): knowledge now has a relevance signal; it didn't when
+the original plan was written.
 
-- **Ordering — `reportMentions` is step 1 (shipped).** The procedure leads with
-  it, so the sheets are in hand before any later step. Testing showed the soft
-  ordering matters: when the model batched `reportMentions` and an edit in one
-  step, the edit ran before the sheet returned and overwrote the body from the
-  summary. Leading with `reportMentions` made that the model's opening move and
-  the truncation stopped recurring.
-- **Deterministic shrink-guard — deferred (in reserve).** A guard on
-  `updateFragment` that refuses a content overwrite far shorter than the current
-  body (the truncation-to-summary signature) was prototyped and reverted in
-  favour of the step-1 reorder. It makes the catastrophe impossible rather than
-  unlikely; build it only if the reorder ever proves insufficient.
-- **`editFragment` (shipped):** edits an exact span in any field (name,
-  description, content) and leaves the rest intact — the precise tool for a
-  status change. `updateFragment` is per-field; only its `content` field is a
-  whole-body replace.
+## How analyze applies it (shipped)
 
-## Scope: analyze-only (decided)
+- Characters in `writerContextIds` render as **full sheets** (`characters-recent`);
+  the rest are one-line summaries (`characters-shortlist`). The sheets are in
+  context **before** any edit — no mid-loop delivery, no ordering constraint, no
+  gate.
+- `reportMentions` is **annotation-only** (records who appears, for prose
+  highlighting); it no longer returns bodies.
+- `getFragment` is the **backstop** for an appearing character not in the
+  forwarded set.
 
-The mention-delivers-bodies mechanic is **analyze-only**. We deliberately do
-**not** give the writer full character bodies via mention-relevance for now,
-because it would be **asymmetric**: characters have a relevance signal (resolved
-mentions) but knowledge does not, so characters would silently gain depth while
-knowledge stayed shallow, with nothing explaining the difference. Uniform context
-beats lopsided context.
+### Edit safety
 
-- **Writer:** keep summaries + `getFragment` for **both** characters and
-  knowledge, off the shortlist — symmetric, even though it leans on the
-  discretionary-fetch path. Sticky fragments remain full as today. Revisit only
-  once knowledge has a relevance signal to match characters.
-- **Analyze:** symmetric by construction — knowledge sits in context in full;
-  character bodies arrive via `reportMentions`. This is where the mechanic earns
-  its keep (the editor, where blind overwrite happens).
-- **Directions:** already inlines the full cast; unchanged.
+- `editFragment` replaces an exact span in any field (name/description/content),
+  leaving the rest intact — the precise tool for a status change (e.g. "alive" →
+  "deceased").
+- `updateFragment` is per-field; only its `content` field is a whole-body replace.
+- The blind-overwrite catastrophe is prevented **structurally**: the full sheet is
+  in context before any edit, so the model edits against the real body, never the
+  summary.
 
-## Budget — none for now (decided)
+## Current state vs the principle (open questions, not decisions)
 
-We adopt the **Directions precedent: no budget on full bodies.** Directions
-already inlines the entire cast in full (only prose is capped), and it works in
-practice. So for now, analyze inlines knowledge in full and delivers mentioned
-character sheets unbounded — naturally limited by what the prose actually
-mentions.
+Two agents predate the relevance signal and still inline full bodies. Whether to
+tier them is **undecided** — recorded here so the choice is explicit:
 
-This is knowingly not sensible at large scale (lore-heavy full knowledge, or a
-scene that mentions a huge cast, will bloat context). When that bites, the
-fallback is already specced: reuse the existing `chars/4` estimate and the
-`ContextCompactOption` precedent to cap full bodies and spill the overflow to
-summaries + `getFragment`. We build that knob only when a real story needs it.
+- **Analyze inlines *all* knowledge in full** every run. Good for contradiction
+  detection (it checks the prose against established facts), but it scales poorly
+  for lore-heavy stories. `writerContextIds` already carries knowledge, so analyze
+  *could* tier it (forwarded-full + summary + `getFragment`) — trading some
+  contradiction recall for tokens. Not done.
+- **Directions inlines the entire cast in full** (sticky *and* shortlist bodies).
+  Could tier to sticky/relevant-full + summary. Not done.
+- **Writer** already tiers characters (recent cast full + shortlist summary).
+  Knowledge stays sticky-full + shortlist, since knowledge has no
+  recent-appearance signal of its own.
 
-## Cleanups noted along the way
+## Budget — deferred
 
-- `recentMentions` (librarian state) is push-only and never trimmed
-  (`agent.ts:359`) → it grows forever and its keys drift toward "every character
-  ever." Trim to a recent window, or drop it in favor of the per-fragment
-  `meta.annotations`.
+No cap on full bodies yet. When lore-heavy knowledge or a huge-cast scene bites,
+the specced fallback is to reuse the `chars/4` estimate + the `ContextCompactOption`
+precedent to cap full bodies and spill the overflow to summaries + `getFragment`.
+Build the knob only when a real story needs it.
 
-## Decisions (settled)
+## History (superseded plan)
 
-1. **Mention-bodies mechanic is analyze-only.** The writer keeps summaries +
-   `getFragment` for both characters and knowledge — symmetric. Giving the writer
-   mention-relevant character bodies is deferred until knowledge has a matching
-   relevance signal (otherwise characters gain depth and knowledge doesn't).
-2. **No budget for now** — adopt the Directions precedent (unbounded full bodies).
-   Add a `chars/4` + `ContextCompact` cap later, only when a real story needs it.
+The original design delivered character bodies by having `reportMentions`
+**return** the mentioned sheets mid-loop, with a `prepareStep` gate forcing
+`reportMentions` to run before any edit tool, and kept the mechanic
+**analyze-only** on the grounds that "knowledge has no relevance signal, so giving
+the writer character bodies would be asymmetric." That shipped briefly, then was
+replaced once `writerContextIds` gave both types a shared relevance signal: bodies
+are now **preloaded** from the forwarded set rather than returned by a tool, and
+the gate and the sheet-returning `reportMentions` are gone.
+
+## Cleanups noted
+
+- `recentMentions` (librarian state) is push-only and never trimmed → it grows
+  forever and its keys drift toward "every character ever." Trim to a recent
+  window, or drop it in favor of the per-fragment `meta.annotations`.
