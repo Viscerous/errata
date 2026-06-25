@@ -68,17 +68,10 @@ const AGENT_META: Record<string, AgentMeta> = {
   },
   'generation.writer': {
     label: 'Writer',
-    actions: ['Writing', 'Finding the next line', 'Setting the scene'],
+    actions: ['Writing', 'Finding the next line', 'Listening to the page', 'Setting the scene'],
     color: 'oklch(0.74 0.12 25)',
     glow: 'oklch(0.74 0.12 25 / 35%)',
     icon: Sparkles,
-  },
-  'generation.prewriter': {
-    label: 'Prewriter',
-    actions: ['Planning', 'Outlining the scene', 'Shaping the brief'],
-    color: 'oklch(0.72 0.11 320)',
-    glow: 'oklch(0.72 0.11 320 / 35%)',
-    icon: Compass,
   },
 }
 
