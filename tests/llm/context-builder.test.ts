@@ -323,6 +323,41 @@ describe('context-builder', () => {
     expect(msg!.content).not.toContain('The dark lord rules with an iron fist.')
   })
 
+  it('carries non-sticky characters mentioned in recent prose as full sheets, not shortlist', async () => {
+    const story = makeStory()
+    await createStory(dataDir, story)
+
+    const character = makeFragment({
+      id: 'ch-0002',
+      type: 'character',
+      name: 'Villain',
+      description: 'The antagonist',
+      content: 'The dark lord rules with an iron fist.',
+      sticky: false,
+    })
+    await createFragment(dataDir, story.id, character)
+
+    // Prose the librarian annotated as mentioning the villain.
+    const prose = makeFragment({
+      id: 'pr-0002',
+      type: 'prose',
+      name: 'Ch1',
+      content: 'They marched on the keep.',
+      order: 1,
+      meta: { annotations: [{ type: 'mention', fragmentId: 'ch-0002', text: 'dark lord' }] },
+    })
+    await createFragment(dataDir, story.id, prose)
+
+    const state = await buildContextState(dataDir, story.id, 'Continue')
+    expect(state.recentCharacters.map((c) => c.id)).toContain('ch-0002')
+    expect(state.characterShortlist.map((c) => c.id)).not.toContain('ch-0002')
+
+    const blocks = createDefaultBlocks(state)
+    const recent = findBlock(blocks, 'characters-recent')
+    expect(recent).toBeDefined()
+    expect(recent!.content).toContain('The dark lord rules with an iron fist.')
+  })
+
   it('carries tool usage policy without enumerating a tool catalog', async () => {
     const story = makeStory()
     await createStory(dataDir, story)
@@ -336,7 +371,7 @@ describe('context-builder', () => {
     expect(sysMsg.content).not.toContain('getCharacter')
     expect(sysMsg.content).not.toContain('listCharacters')
     expect(sysMsg.content).not.toContain('listFragmentTypes')
-    expect(sysMsg.content).toContain('lookup tools')
+    expect(sysMsg.content).toContain('retrieve the full details')
     expect(sysMsg.content).toContain('creative writing assistant')
   })
 
