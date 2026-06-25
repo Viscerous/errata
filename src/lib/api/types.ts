@@ -64,6 +64,8 @@ export interface StoryMeta {
       publishedAs?: { pack: string; version: string }
       /** Fragment packs published from this story (e.g. a reusable "starter"). */
       fragmentPacks?: { pack: string; version: string; fragmentIds: string[] }[]
+      /** Agent-config packs shared from this story, re-syncable as new versions. */
+      agentConfigs?: { pack: string; version: string; includes: string[] }[]
     }
   }
 }
@@ -455,6 +457,7 @@ export type ChatEvent =
   | { type: 'text'; text: string }
   | { type: 'reasoning'; text: string }
   | { type: 'prewriter-text'; text: string }
+  | { type: 'prewriter-reset' }
   | { type: 'tool-call'; id: string; toolName: string; args: Record<string, unknown> }
   | { type: 'tool-result'; id: string; toolName: string; result: unknown }
   | { type: 'phase'; phase: string }
@@ -534,13 +537,24 @@ export interface ErratanetAccount {
   error?: string
 }
 
+/** Which config surfaces an agent-config pack bundles. */
+export type AgentConfigInclude = 'agent-blocks' | 'provider-shape' | 'model-roles'
+
+/** Manifest-level discovery summary for an agent-config pack. */
+export interface AgentConfigSummary {
+  agents: string[]
+  blockCount: number
+  hasScripts: boolean
+  includes: AgentConfigInclude[]
+}
+
 /** A pack as it appears in search results / listings. */
 export interface ErratanetPackSummary {
   id: string
   version: string
   title: string
   description: string
-  contentKind: 'fragment-pack' | 'story'
+  contentKind: 'fragment-pack' | 'story' | 'agent-config'
   fragmentTypes: string[]
   fragmentCount: number
   tags: string[]
@@ -548,6 +562,10 @@ export interface ErratanetPackSummary {
   thumbnail?: string
   publisher?: string
   createdAt: string
+  /** Present only for the `agent-config` kind. */
+  agentConfig?: AgentConfigSummary
+  /** Declared capabilities; `scripts` means the pack runs code. */
+  capabilities?: string[]
 }
 
 export interface ErratanetSearchResponse {
@@ -586,4 +604,111 @@ export interface ErratanetUpdateInfo {
 
 export interface ErratanetUpdatesResponse {
   updates: ErratanetUpdateInfo[]
+}
+
+// --- Agent-config sharing (the `agent-config` pack kind) ---
+
+export interface AgentConfigPreviewAgent {
+  name: string
+  displayName: string
+  blocks: { id: string; name: string; role: 'system' | 'user'; type: 'simple' | 'script'; enabled: boolean }[]
+  overrideCount: number
+  disabledTools: string[]
+}
+
+/**
+ * A precise pick of what to publish/apply, down to individual blocks. Each field
+ * is a whitelist; an absent/empty field excludes that surface. `agentBlocks` maps
+ * an agent name to the block ids to keep (the key's presence includes the agent).
+ */
+export interface AgentConfigSelection {
+  agentBlocks?: Record<string, string[]>
+  providerShapes?: string[]
+  modelRoles?: string[]
+}
+
+export interface AgentConfigProviderShape {
+  name: string
+  preset: string
+  baseURL: string
+  defaultModel: string
+  temperature?: number | null
+}
+
+export interface AgentConfigModelRole {
+  role: string
+  providerName?: string | null
+  model?: string | null
+  temperature?: number | null
+}
+
+/** Inspectable, side-effect-free view of a config (incl. verbatim script source). */
+export interface AgentConfigPreview {
+  agents: AgentConfigPreviewAgent[]
+  providerShapes: AgentConfigProviderShape[]
+  modelRoles: AgentConfigModelRole[]
+  scripts: { agent: string; blockId: string; blockName: string; content: string }[]
+  hasScripts: boolean
+}
+
+/** Snapshot of the current story's config, for the publish dialog. */
+export interface AgentConfigSnapshotResponse {
+  bundle: unknown
+  summary: AgentConfigSummary
+  preview: AgentConfigPreview
+  error?: string
+}
+
+/** Inspection of a remote pack before installing. */
+export interface AgentConfigInspectResponse {
+  manifest: {
+    id: string
+    version: string
+    title: string
+    description: string
+    license: string
+    tags: string[]
+    publisher?: string
+    createdAt: string
+    agentConfig?: AgentConfigSummary
+  }
+  summary: AgentConfigSummary
+  preview: AgentConfigPreview
+  requiresConsent: boolean
+  error?: string
+}
+
+/** What an apply actually changed in the target story. */
+export interface AgentConfigApplyResult {
+  agentsApplied: string[]
+  modelRolesApplied: string[]
+  modelRolesNeedingProvider: string[]
+  suggestedProviders: AgentConfigProviderShape[]
+}
+
+export interface AgentConfigApplyResponse {
+  applied?: AgentConfigApplyResult
+  presetId?: string
+  requiresConsent?: boolean
+  error?: string
+}
+
+/** A saved, story-independent preset (list view: no bundle). */
+export interface AgentPresetSummary {
+  id: string
+  name: string
+  createdAt: string
+  source?: { pack: string; version: string }
+  summary: AgentConfigSummary
+}
+
+export interface AgentPresetListResponse {
+  presets: AgentPresetSummary[]
+}
+
+export interface AgentPresetDetailResponse {
+  preset: AgentPresetSummary
+  preview: AgentConfigPreview
+  requiresConsent: boolean
+  error?: string
 }

@@ -130,12 +130,19 @@ export async function deleteStory(
 export async function createFragment(
   dataDir: string,
   storyId: string,
-  fragment: Fragment
+  fragment: Fragment,
+  opts?: { overwrite?: boolean }
 ): Promise<void> {
   const dir = await fragmentsDir(dataDir, storyId)
   await mkdir(dir, { recursive: true })
+  const path = await fragmentPath(dataDir, storyId, fragment.id)
+  // Guard against silently clobbering an existing fragment. Callers that
+  // intentionally replace by id (e.g. pack install) pass overwrite: true.
+  if (!opts?.overwrite && existsSync(path)) {
+    throw new Error(`Fragment ${fragment.id} already exists; use updateFragment to modify it`)
+  }
   const normalized = normalizeFragment(fragment)
-  await writeJson(await fragmentPath(dataDir, storyId, fragment.id), normalized)
+  await writeJson(path, normalized)
 }
 
 export async function getFragment(

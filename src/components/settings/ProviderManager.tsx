@@ -356,7 +356,7 @@ export function ProviderPanel({ onClose }: { onClose: () => void }) {
             )}
 
             {/* Two-column layout for name + base URL */}
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className={labelClass}>Name</label>
                 <input

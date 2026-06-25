@@ -173,6 +173,17 @@ export const StoryMetaSchema = z.object({
               }),
             )
             .optional(),
+          // Agent-config packs shared from this story. Each remembers which
+          // surfaces it bundled so it can be re-synced as a new version.
+          agentConfigs: z
+            .array(
+              z.object({
+                pack: z.string(),
+                version: z.string(),
+                includes: z.array(z.string()).default([]),
+              }),
+            )
+            .optional(),
         })
         .optional(),
     })

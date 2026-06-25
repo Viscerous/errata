@@ -24,7 +24,7 @@ export { sharing } from './sharing'
 export { erratanet } from './erratanet'
 
 // HTTP Client utilities (exported for advanced use cases)
-export { apiFetch, fetchStream, fetchEventStream } from './client'
+export { apiFetch, fetchStream, fetchEventStream, ApiError } from './client'
 
 // Combined API object for backward compatibility
 import { stories } from './stories'

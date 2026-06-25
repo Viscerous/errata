@@ -3,7 +3,6 @@ import { createPortal } from 'react-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api, type Fragment, type StoryMeta } from '@/lib/api'
 import type { ErratanetAccount, ErratanetConfigResponse } from '@/lib/api/types'
-import { packPageUrl } from '@/lib/erratanet/pack-schema'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -21,6 +20,8 @@ import {
 } from 'lucide-react'
 import { PublishPackDialog } from './PublishPackDialog'
 import { ErratanetBrowserPanel } from './ErratanetBrowserPanel'
+import { AgentConfigSection } from './AgentConfigSection'
+import { PackLink } from './PackLink'
 
 const DEFAULT_HUB = 'https://errata.tealios.com'
 
@@ -191,6 +192,14 @@ export function ErratanetPanel({ storyId, story, onExport }: ErratanetPanelProps
                   Publish a fragment pack instead
                 </Button>
               </section>
+
+              <Divider />
+              <AgentConfigSection
+                storyId={storyId}
+                storyName={story.name}
+                sharedConfigs={story.settings?.erratanet?.agentConfigs ?? []}
+                hubUrl={config?.hubUrl}
+              />
             </>
           )}
 
@@ -202,7 +211,7 @@ export function ErratanetPanel({ storyId, story, onExport }: ErratanetPanelProps
               Browse and Install Packs
             </Button>
             <p className="mt-2 text-[0.6875rem] leading-snug text-muted-foreground">
-              Find character cards, guideline packs, and stories to install. No account needed to browse.
+              Find character cards, guideline packs, stories, and agent configs. No account needed to browse.
             </p>
           </section>
         </div>
@@ -250,31 +259,6 @@ export function ErratanetPanel({ storyId, story, onExport }: ErratanetPanelProps
 
 function Divider() {
   return <div className="h-px bg-border/30" />
-}
-
-/**
- * A pack id rendered as a hotlink to its page on the hub, falling back to plain
- * mono text when no hub is configured (so the id is still shown).
- */
-function PackLink({ pack, hubUrl, className }: { pack: string; hubUrl: string | undefined; className?: string }) {
-  const url = packPageUrl(hubUrl, pack)
-  if (!url) {
-    return <p className={cn('truncate font-mono text-foreground', className)}>{pack}</p>
-  }
-  return (
-    <a
-      href={url}
-      target="_blank"
-      rel="noreferrer"
-      className={cn(
-        'group inline-flex max-w-full items-center gap-1 font-mono text-foreground underline-offset-2 hover:underline',
-        className,
-      )}
-    >
-      <span className="truncate">{pack}</span>
-      <ExternalLink className="size-3 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground" />
-    </a>
-  )
 }
 
 /** Account connection: log in with a password, fall back to a token, or sign out. */

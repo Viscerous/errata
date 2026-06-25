@@ -356,7 +356,7 @@ function TypographyStep({
         >
           Prose
         </p>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {FONT_CATALOGUE.prose.map((opt, i) => {
             const isActive = opt.name === activeProse
             return (
@@ -404,7 +404,7 @@ function TypographyStep({
           Headings
         </p>
         <div
-          className="grid grid-cols-3 gap-3 animate-onboarding-fade-up"
+          className="grid grid-cols-2 sm:grid-cols-3 gap-3 animate-onboarding-fade-up"
           style={{ animationDelay: '550ms' }}
         >
           {FONT_CATALOGUE.display.map((opt) => {
@@ -487,7 +487,7 @@ function WelcomeStep({
       </div>
 
       {/* Hero features: Librarian & Timelines */}
-      <div className="mt-10 grid grid-cols-2 gap-4">
+      <div className="mt-10 grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div
           className="text-left p-5 rounded-xl border border-primary/15 bg-primary/[0.03] animate-onboarding-fade-up"
           style={{ animationDelay: '200ms' }}

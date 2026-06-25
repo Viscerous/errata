@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api, type Fragment } from '@/lib/api'
 import type { ErratapackManifest } from '@/lib/erratanet/pack-schema'
 import { GLOBAL_PACK_ID_REGEX, packPageUrl } from '@/lib/erratanet/pack-schema'
+import { slugify, bumpVersion, type BumpKind } from '@/lib/erratanet/publish-utils'
 import { serializeBundle } from '@/lib/fragment-clipboard'
 import { parseVisualRefs } from '@/lib/fragment-visuals'
 import { cn } from '@/lib/utils'
@@ -52,8 +53,6 @@ const LICENSES = [
   { value: 'proprietary', label: 'Proprietary (all rights reserved)' },
 ] as const
 
-type BumpKind = 'patch' | 'minor' | 'major'
-
 type ContentRating = 'general' | 'mature' | 'r18'
 
 const CONTENT_RATINGS: { value: ContentRating; label: string; hint: string }[] = [
@@ -66,34 +65,6 @@ const README_MAX = 8000
 
 const sectionLabel =
   'text-[0.5625rem] text-muted-foreground uppercase tracking-[0.15em] font-medium mb-2'
-
-/** Increment a semver core (major.minor.patch). Falls back to 1.0.0 on garbage. */
-/** Derive a pack slug from a title: lowercase, dashes, trimmed. */
-function slugify(title: string): string {
-  return title
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 64)
-}
-
-function bumpVersion(latest: string | null | undefined, kind: BumpKind): string {
-  if (!latest) return '1.0.0'
-  const core = latest.split(/[-+]/)[0]
-  const parts = core.split('.').map((n) => Number.parseInt(n, 10))
-  let [major, minor, patch] = [parts[0] ?? 0, parts[1] ?? 0, parts[2] ?? 0]
-  if (kind === 'major') {
-    major += 1
-    minor = 0
-    patch = 0
-  } else if (kind === 'minor') {
-    minor += 1
-    patch = 0
-  } else {
-    patch += 1
-  }
-  return `${major}.${minor}.${patch}`
-}
 
 /** Browser SHA-256 over a UTF-8 string, formatted as `sha256:<hex>`. */
 async function sha256Hex(text: string): Promise<string> {

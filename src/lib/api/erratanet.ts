@@ -1,6 +1,14 @@
 import { apiFetch } from './client'
 import type { ErratapackManifest } from '../erratanet/pack-schema'
 import type {
+  AgentConfigApplyResponse,
+  AgentConfigInclude,
+  AgentConfigInspectResponse,
+  AgentConfigSelection,
+  AgentConfigSnapshotResponse,
+  AgentPresetDetailResponse,
+  AgentPresetListResponse,
+  AgentPresetSummary,
   ErratanetAccount,
   ErratanetConfigResponse,
   ErratanetInstallResponse,
@@ -50,4 +58,62 @@ export const erratanet = {
     apiFetch<ErratanetUpdatesResponse>(
       `/erratanet/updates?storyId=${encodeURIComponent(storyId)}`,
     ),
+
+  /** Agent-configuration sharing: snapshot, publish, inspect, apply, presets. */
+  agentConfig: {
+    snapshot: (storyId: string, includes?: AgentConfigInclude[]) =>
+      apiFetch<AgentConfigSnapshotResponse>('/erratanet/agent-config/snapshot', {
+        method: 'POST',
+        body: JSON.stringify({ storyId, ...(includes ? { includes } : {}) }),
+      }),
+    publish: (body: {
+      storyId: string
+      includes?: AgentConfigInclude[]
+      selection?: AgentConfigSelection
+      unlisted?: boolean
+      manifest: ErratapackManifest
+    }) =>
+      apiFetch<ErratanetPublishResponse>('/erratanet/agent-config/publish', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
+    inspect: (id: string, version?: string) =>
+      apiFetch<AgentConfigInspectResponse>('/erratanet/agent-config/inspect', {
+        method: 'POST',
+        body: JSON.stringify({ id, ...(version ? { version } : {}) }),
+      }),
+    apply: (body: {
+      id: string
+      version?: string
+      selection?: AgentConfigSelection
+      consentToScripts?: boolean
+      applyToStoryId?: string
+      savePreset?: { name: string }
+    }) =>
+      apiFetch<AgentConfigApplyResponse>('/erratanet/agent-config/apply', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
+  },
+
+  /** Saved, story-independent agent-config presets. */
+  presets: {
+    list: () => apiFetch<AgentPresetListResponse>('/erratanet/agent-presets'),
+    get: (id: string) =>
+      apiFetch<AgentPresetDetailResponse>(`/erratanet/agent-presets/${encodeURIComponent(id)}`),
+    save: (body: { name: string; fromStoryId?: string; includes?: AgentConfigInclude[] }) =>
+      apiFetch<{ id: string; name: string; summary: AgentPresetSummary['summary'] }>(
+        '/erratanet/agent-presets',
+        { method: 'POST', body: JSON.stringify(body) },
+      ),
+    remove: (id: string) =>
+      apiFetch<{ ok: boolean }>(`/erratanet/agent-presets/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+      }),
+    apply: (id: string, body: { storyId: string; consentToScripts?: boolean }) =>
+      apiFetch<AgentConfigApplyResponse>(
+        `/erratanet/agent-presets/${encodeURIComponent(id)}/apply`,
+        { method: 'POST', body: JSON.stringify(body) },
+      ),
+  },
 }
