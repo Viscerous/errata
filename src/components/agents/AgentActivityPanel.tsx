@@ -7,6 +7,7 @@ import {
   type LibrarianState,
 } from '@/lib/api'
 import type { ActiveAgent } from '@/lib/api/agents'
+import { getAgentMeta } from '@/components/agents/agent-meta'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { EmptyState } from '@/components/ui/async-view'
@@ -45,12 +46,14 @@ export function AgentActivityPanel({ storyId }: AgentActivityPanelProps) {
 
   return (
     <div className="h-full flex flex-col">
-      {/* Librarian scheduler status (states the active registry can't express) */}
-      <StatusStrip status={status} runStatus={runStatus} />
+      {/* Status indicator + the live trace for whatever is running, pinned at top */}
+      <StatusStrip status={status} runStatus={runStatus} active={active} />
+      {active.map((agent) => (
+        <ActivityTrace key={agent.id} storyId={storyId} agentName={agent.agentName} />
+      ))}
 
-      {/* Running agents (live) + completed runs */}
       <div className="flex-1 min-h-0">
-        <ActivityContent storyId={storyId} active={active} />
+        <ActivityContent storyId={storyId} />
       </div>
     </div>
   )
@@ -61,36 +64,44 @@ export function AgentActivityPanel({ storyId }: AgentActivityPanelProps) {
 interface StatusStripProps {
   status: LibrarianState | undefined
   runStatus: string
+  active: ActiveAgent[]
 }
 
-// The librarian's scheduler status — the one agent whose idle/queued/error and
-// last-analyzed state the active registry can't express. Running agents (including
-// the librarian) surface uniformly in the runs list below.
-function StatusStrip({ status, runStatus }: StatusStripProps) {
-  const isActive = runStatus === 'running' || runStatus === 'scheduled'
+// Headlines whichever agent is running (writer → "Writing", librarian →
+// "Analyzing", …). The librarian's scheduler-only states (queued/error and the
+// last-analyzed fragment) fill in when nothing is actively running.
+function StatusStrip({ status, runStatus, active }: StatusStripProps) {
+  const scheduled = runStatus === 'scheduled'
   const isError = runStatus === 'error'
+  // Headline the librarian while it analyzes (it carries the fragment detail),
+  // else the first running agent.
+  const leadName = runStatus === 'running' ? 'librarian.analyze' : active[0]?.agentName
+  const isActive = !!leadName || scheduled
 
-  const dotColor = runStatus === 'running'
+  const dotColor = leadName
     ? 'bg-blue-400'
-    : runStatus === 'scheduled'
+    : scheduled
       ? 'bg-amber-400'
       : isError
         ? 'bg-red-400'
         : 'bg-emerald-500/50'
 
-  const label = runStatus === 'running'
-    ? 'Analyzing'
-    : runStatus === 'scheduled'
+  const label = leadName
+    ? getAgentMeta(leadName).status
+    : scheduled
       ? 'Queued'
       : isError
         ? 'Error'
         : 'Idle'
 
+  // Fragment id is librarian-specific detail (the analyzed/queued/last fragment).
   const fragmentId = runStatus === 'running'
     ? status?.runningFragmentId
-    : runStatus === 'scheduled'
+    : scheduled
       ? status?.pendingFragmentId
-      : status?.lastAnalyzedFragmentId
+      : !leadName
+        ? status?.lastAnalyzedFragmentId
+        : null
 
   return (
     <div className="shrink-0 mx-4 mt-3 mb-1">
@@ -131,7 +142,7 @@ function StatusStrip({ status, runStatus }: StatusStripProps) {
 
 // ─── Activity Content ─────────────────────────────────────
 
-function ActivityContent({ storyId, active }: { storyId: string; active: ActiveAgent[] }) {
+function ActivityContent({ storyId }: { storyId: string }) {
   const [expandedRunId, setExpandedRunId] = useState<string | null>(null)
 
   const { data: agentRuns } = useQuery({
@@ -141,19 +152,15 @@ function ActivityContent({ storyId, active }: { storyId: string; active: ActiveA
   })
 
   const hasRuns = agentRuns && agentRuns.length > 0
-  const hasAny = active.length > 0 || hasRuns
 
   return (
     <ScrollArea className="h-full">
       <div className="px-4 py-3 space-y-1">
         <section>
           <SectionLabel icon={<GitBranch className="size-3" />}>Agent Runs</SectionLabel>
-          {hasAny ? (
+          {hasRuns ? (
             <div className="space-y-1 mt-1.5">
-              {active.map((agent) => (
-                <ActiveRunRow key={agent.id} agent={agent} storyId={storyId} />
-              ))}
-              {agentRuns?.slice(0, 12).map((run) => {
+              {agentRuns.slice(0, 12).map((run) => {
                 const expanded = expandedRunId === run.rootRunId
                 const runTime = new Date(run.startedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
                 const isError = run.status === 'error'
@@ -209,51 +216,6 @@ function SectionLabel({ children, icon }: { children: React.ReactNode; icon?: Re
 function formatDuration(ms: number): string {
   if (ms < 1000) return `${ms}ms`
   return `${(ms / 1000).toFixed(1)}s`
-}
-
-// A currently-running agent (from the active registry), shown above completed runs.
-// The librarian streams a live analyze trace, so its row expands to reveal it;
-// other agents have no live trace to surface here.
-function ActiveRunRow({ agent, storyId }: { agent: ActiveAgent; storyId: string }) {
-  const hasTrace = agent.agentName === 'librarian.analyze'
-  const [expanded, setExpanded] = useState(hasTrace)
-
-  const dot = (
-    <span className="relative flex size-1.5 shrink-0">
-      <span className="absolute inset-0 rounded-full bg-blue-400 animate-ping" style={{ animationDuration: '2s' }} />
-      <span className="relative inline-flex size-1.5 rounded-full bg-blue-400" />
-    </span>
-  )
-  const name = <span className="font-mono text-foreground/70 truncate">{agent.agentName}</span>
-  const status = <span className="ml-auto text-[0.5625rem] font-mono text-blue-400/80 shrink-0">running</span>
-
-  if (!hasTrace) {
-    return (
-      <div className="rounded-md border border-blue-400/30 bg-blue-400/[0.04] flex items-center gap-1.5 px-2.5 py-2 text-[0.6875rem]">
-        {dot}{name}{status}
-      </div>
-    )
-  }
-
-  return (
-    <div className="rounded-md border border-blue-400/30 bg-blue-400/[0.04] overflow-hidden">
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center gap-1.5 px-2.5 py-2 text-[0.6875rem] hover:bg-blue-400/[0.07] transition-colors"
-      >
-        {expanded
-          ? <ChevronDown className="size-3 text-muted-foreground shrink-0" />
-          : <ChevronRight className="size-3 text-muted-foreground shrink-0" />
-        }
-        {dot}{name}{status}
-      </button>
-      {expanded && (
-        <div className="border-t border-blue-400/15 px-2 py-1.5 bg-muted/15">
-          <LiveAnalysisTrace storyId={storyId} embedded />
-        </div>
-      )}
-    </div>
-  )
 }
 
 function TraceTree({ run }: { run: AgentRunTraceRecord }) {
@@ -423,43 +385,54 @@ type CollapsedTraceItem =
   | { kind: 'tool-call'; toolName: string; args: Record<string, unknown> }
   | { kind: 'tool-result'; toolName: string; result: unknown }
 
-function LiveAnalysisTrace({ storyId, embedded }: { storyId: string; embedded?: boolean }) {
+// The live reasoning/tool trace for a running agent, streamed from its activity
+// buffer and pinned beneath the status strip while the agent runs.
+function ActivityTrace({ storyId, agentName }: { storyId: string; agentName: string }) {
   const [events, setEvents] = useState<ChatEvent[]>([])
-  const [connected, setConnected] = useState(false)
   const readerRef = useRef<ReadableStreamDefaultReader<ChatEvent> | null>(null)
 
   useEffect(() => {
     let cancelled = false
 
-    async function connect() {
-      try {
-        const stream = await api.librarian.getAnalysisStream(storyId)
+    async function run() {
+      // The buffer exists as soon as the agent is active, but retry the initial
+      // connect as a guard against any transient gap (a 404 throws). The stream
+      // replays from the start, and we stop once connected so it isn't re-read.
+      while (!cancelled) {
+        let stream: ReadableStream<ChatEvent> | null = null
+        try {
+          stream = await api.agents.streamActivity(storyId, agentName)
+        } catch {
+          // No buffer yet — wait and retry.
+        }
         if (cancelled) return
-        setConnected(true)
+        if (!stream) {
+          await new Promise((resolve) => setTimeout(resolve, 500))
+          continue
+        }
+
         const reader = stream.getReader()
         readerRef.current = reader
-
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done || cancelled) break
-          setEvents((prev) => [...prev, value])
+        try {
+          while (!cancelled) {
+            const { done, value } = await reader.read()
+            if (done) break
+            setEvents((prev) => [...prev, value])
+          }
+        } catch {
+          // Stream ended or error.
         }
-      } catch {
-        // Stream ended or error
-      } finally {
-        if (!cancelled) {
-          setConnected(false)
-        }
+        return
       }
     }
 
-    connect()
+    run()
 
     return () => {
       cancelled = true
       readerRef.current?.cancel().catch(() => {})
     }
-  }, [storyId])
+  }, [storyId, agentName])
 
   const items = useMemo(() => {
     const collapsed: CollapsedTraceItem[] = []
@@ -488,31 +461,15 @@ function LiveAnalysisTrace({ storyId, embedded }: { storyId: string; embedded?: 
     return collapsed
   }, [events])
 
-  // Embedded inside the librarian's running row: just the trace items, no chrome.
-  if (embedded) {
-    if (items.length === 0) {
-      return <p className="text-[0.5625rem] text-muted-foreground px-1">Connecting to live trace…</p>
-    }
-    return (
-      <div className="space-y-0.5 max-h-32 overflow-y-auto">
-        {items.map((item, i) => (
-          <LiveTraceItem key={`${item.kind}-${i}`} item={item} />
-        ))}
-      </div>
-    )
-  }
-
-  if (!connected && events.length === 0) return null
-
+  // Nothing to show yet — render nothing until the first event arrives.
+  if (items.length === 0) return null
   return (
     <div className="shrink-0 mx-4 mb-1">
       <div className="rounded-md border border-border/20 bg-muted/20 p-2 space-y-1">
         <div className="flex items-center gap-1.5">
           <span className="relative flex size-1.5">
-            {connected && (
-              <span className="absolute inset-0 rounded-full bg-blue-400 animate-ping" style={{ animationDuration: '2s' }} />
-            )}
-            <span className={`relative inline-flex size-1.5 rounded-full ${connected ? 'bg-blue-400' : 'bg-muted-foreground/30'}`} />
+            <span className="absolute inset-0 rounded-full bg-blue-400 animate-ping" style={{ animationDuration: '2s' }} />
+            <span className="relative inline-flex size-1.5 rounded-full bg-blue-400" />
           </span>
           <span className="text-[0.5625rem] text-muted-foreground uppercase tracking-wider">Live Trace</span>
         </div>

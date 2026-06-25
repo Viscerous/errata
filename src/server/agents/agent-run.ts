@@ -1,5 +1,6 @@
 import { recordAgentRun } from './traces'
 import { registerActiveAgent, unregisterActiveAgent } from './active-registry'
+import { getActivityBuffer, pushActivityEvent, type ActivityStreamEvent } from './activity-stream'
 import type { AgentTraceEntry } from './types'
 
 export interface AgentRunDetail {
@@ -10,6 +11,8 @@ export interface AgentRunDetail {
 
 export interface AgentRunHandle {
   readonly runId: string
+  /** Push a reasoning/text/tool event onto the run's live activity trace. */
+  pushEvent(event: ActivityStreamEvent): void
   /**
    * Record the run's outcome and clear its active-agent marker. Idempotent —
    * safe to call from a finally and an explicit branch; only the first wins.
@@ -33,14 +36,19 @@ export function beginAgentRun(storyId: string, agentName: string, input?: Record
   const startedAt = new Date().toISOString()
   const startMs = Date.now()
   const activityId = registerActiveAgent(storyId, agentName)
+  // Buffer is owned by the active registry (created above); we just hold the ref to push into.
+  const buffer = getActivityBuffer(storyId, agentName)
   let settled = false
 
   return {
     runId,
+    pushEvent(event) {
+      if (buffer) pushActivityEvent(buffer, event)
+    },
     finish(status, detail) {
       if (settled) return
       settled = true
-      unregisterActiveAgent(activityId)
+      unregisterActiveAgent(activityId) // finishes + clears the live buffer
 
       const finishedAt = new Date().toISOString()
       const durationMs = Date.now() - startMs

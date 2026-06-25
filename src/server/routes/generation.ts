@@ -35,6 +35,7 @@ import { triggerLibrarian } from '../librarian/scheduler'
 import { getAgentBlockConfig } from '../agents/agent-block-storage'
 import { invokeAgent } from '../agents/runner'
 import { beginAgentRun } from '../agents/agent-run'
+import type { ActivityStreamEvent } from '../agents/activity-stream'
 import { reportUsage } from '../llm/token-tracker'
 import { normalizeTokenUsage } from '../llm/usage-normalizer'
 import { createLogger } from '../logging'
@@ -282,6 +283,9 @@ export function generationRoutes(dataDir: string) {
                   round: clarifyRound,
                   reasoning: prewriterReasoningLevel,
                   onEvent: (event) => {
+                    if (event.type === 'reasoning' || event.type === 'text' || event.type === 'tool-call' || event.type === 'tool-result') {
+                      prewriterRun.pushEvent(event)
+                    }
                     if (event.type === 'text') {
                       emit({ type: 'prewriter-text', text: event.text })
                     } else if (event.type === 'questions') {
@@ -404,15 +408,14 @@ export function generationRoutes(dataDir: string) {
 
               if (event) {
                 controller.enqueue(encoder.encode(JSON.stringify(event) + '\n'))
+                writerRun.pushEvent(event as ActivityStreamEvent)
               }
             }
 
             // Emit a final finish event
-            controller.enqueue(encoder.encode(JSON.stringify({
-              type: 'finish',
-              finishReason: lastFinishReason,
-              stepCount,
-            }) + '\n'))
+            const finishEvent = { type: 'finish' as const, finishReason: lastFinishReason, stepCount }
+            controller.enqueue(encoder.encode(JSON.stringify(finishEvent) + '\n'))
+            writerRun.pushEvent(finishEvent)
             controller.close()
           } catch (err) {
             wasAborted = abortController.signal.aborted

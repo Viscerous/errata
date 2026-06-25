@@ -27,12 +27,7 @@ import { createLogger } from '../logging'
 import { compileAgentContext } from '../agents/compile-agent-context'
 import { createEmptyCollector, createLibrarianAnalyzeTools, toMentionAnnotations } from './analysis-tools'
 import { buildAnalyzeSystemPrompt, buildAnalyzeContext } from './blocks'
-import {
-  createAnalysisBuffer,
-  pushEvent,
-  finishBuffer,
-  clearBuffer,
-} from './analysis-stream'
+import { getActivityBuffer, pushActivityEvent, type ActivityStreamEvent } from '../agents/activity-stream'
 
 const logger = createLogger('librarian-agent')
 
@@ -104,8 +99,14 @@ async function runLibrarianInner(
   // Compile context via block system
   const compiled = await compileAgentContext(dataDir, storyId, 'librarian.analyze', blockContext, analysisTools)
 
-  // Create event buffer for live streaming
-  const buffer = createAnalysisBuffer(storyId)
+  // The active registry owns the live buffer; collect the trace locally for the
+  // persisted analysis and mirror it onto that buffer when one exists.
+  const liveBuffer = getActivityBuffer(storyId, 'librarian.analyze')
+  const traceEvents: ActivityStreamEvent[] = []
+  const emit = (event: ActivityStreamEvent) => {
+    traceEvents.push(event)
+    if (liveBuffer) pushActivityEvent(liveBuffer, event)
+  }
 
   // Call the LLM with tool-based analysis
   requestLogger.info('Calling LLM for analysis...')
@@ -145,7 +146,6 @@ async function runLibrarianInner(
       prompt: userMessage?.content ?? '',
     })
 
-    // Iterate fullStream, mapping events to buffer
     for await (const part of result.fullStream) {
       const p = part as Record<string, unknown>
 
@@ -153,17 +153,17 @@ async function runLibrarianInner(
         case 'text-delta': {
           const text = (p.text ?? '') as string
           fullText += text
-          pushEvent(buffer, { type: 'text', text })
+          emit({ type: 'text', text })
           break
         }
         case 'reasoning-delta': {
           const text = (p.text ?? '') as string
-          pushEvent(buffer, { type: 'reasoning', text })
+          emit({ type: 'reasoning', text })
           break
         }
         case 'tool-call': {
           const input = (p.input ?? {}) as Record<string, unknown>
-          pushEvent(buffer, {
+          emit({
             type: 'tool-call',
             id: p.toolCallId as string,
             toolName: p.toolName as string,
@@ -172,7 +172,7 @@ async function runLibrarianInner(
           break
         }
         case 'tool-result': {
-          pushEvent(buffer, {
+          emit({
             type: 'tool-result',
             id: p.toolCallId as string,
             toolName: (p.toolName as string) ?? '',
@@ -201,16 +201,14 @@ async function runLibrarianInner(
     }
 
     // Emit final finish event
-    pushEvent(buffer, {
+    emit({
       type: 'finish',
       finishReason: lastFinishReason,
       stepCount,
     })
-    finishBuffer(buffer)
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err)
-    pushEvent(buffer, { type: 'error', error: errorMsg })
-    finishBuffer(buffer, errorMsg)
+    emit({ type: 'error', error: errorMsg })
     throw err
   }
 
@@ -257,7 +255,7 @@ async function runLibrarianInner(
       sourceFragmentId: fragmentId,
     })),
     directions: collector.directions,
-    trace: buffer.events as LibrarianAnalysis['trace'],
+    trace: traceEvents as LibrarianAnalysis['trace'],
   }
 
   const autoApplySuggestions = story.settings?.autoApplyLibrarianSuggestions === true && !disableSuggestions
@@ -345,9 +343,6 @@ async function runLibrarianInner(
 
   // Deferred summary application
   await applyDeferredSummaries(dataDir, storyId, story, updatedState, requestLogger)
-
-  // Clean up buffer after analysis is saved
-  clearBuffer(storyId)
 
   return analysis
 }
