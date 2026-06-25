@@ -45,15 +45,10 @@ export function AgentActivityPanel({ storyId }: AgentActivityPanelProps) {
 
   return (
     <div className="h-full flex flex-col">
-      {/* Status strip */}
-      <StatusStrip status={status} runStatus={runStatus} active={active} />
+      {/* Librarian scheduler status (states the active registry can't express) */}
+      <StatusStrip status={status} runStatus={runStatus} />
 
-      {/* Live analysis trace */}
-      {runStatus === 'running' && (
-        <LiveAnalysisTrace storyId={storyId} />
-      )}
-
-      {/* Agent runs */}
+      {/* Running agents (live) + completed runs */}
       <div className="flex-1 min-h-0">
         <ActivityContent storyId={storyId} active={active} />
       </div>
@@ -66,44 +61,36 @@ export function AgentActivityPanel({ storyId }: AgentActivityPanelProps) {
 interface StatusStripProps {
   status: LibrarianState | undefined
   runStatus: string
-  active: ActiveAgent[]
 }
 
-function StatusStrip({ status, runStatus, active }: StatusStripProps) {
+// The librarian's scheduler status — the one agent whose idle/queued/error and
+// last-analyzed state the active registry can't express. Running agents (including
+// the librarian) surface uniformly in the runs list below.
+function StatusStrip({ status, runStatus }: StatusStripProps) {
+  const isActive = runStatus === 'running' || runStatus === 'scheduled'
   const isError = runStatus === 'error'
-  // The librarian's own state is carried by runStatus; any other running agent
-  // (the writer, refine, …) makes the panel read "Working" rather than "Idle".
-  const otherActive = active.some(a => a.agentName !== 'librarian.analyze')
-  const showWorking = runStatus !== 'running' && runStatus !== 'scheduled' && !isError && otherActive
-  const isActive = runStatus === 'running' || runStatus === 'scheduled' || showWorking
 
   const dotColor = runStatus === 'running'
     ? 'bg-blue-400'
     : runStatus === 'scheduled'
       ? 'bg-amber-400'
-      : showWorking
-        ? 'bg-blue-400'
-        : isError
-          ? 'bg-red-400'
-          : 'bg-emerald-500/50'
+      : isError
+        ? 'bg-red-400'
+        : 'bg-emerald-500/50'
 
   const label = runStatus === 'running'
     ? 'Analyzing'
     : runStatus === 'scheduled'
       ? 'Queued'
-      : showWorking
-        ? 'Working'
-        : isError
-          ? 'Error'
-          : 'Idle'
+      : isError
+        ? 'Error'
+        : 'Idle'
 
   const fragmentId = runStatus === 'running'
     ? status?.runningFragmentId
     : runStatus === 'scheduled'
       ? status?.pendingFragmentId
-      : showWorking
-        ? null
-        : status?.lastAnalyzedFragmentId
+      : status?.lastAnalyzedFragmentId
 
   return (
     <div className="shrink-0 mx-4 mt-3 mb-1">
@@ -154,10 +141,7 @@ function ActivityContent({ storyId, active }: { storyId: string; active: ActiveA
   })
 
   const hasRuns = agentRuns && agentRuns.length > 0
-  // The librarian's running state has its own status strip + live trace above, so
-  // surface every other running agent here instead of duplicating it.
-  const running = active.filter(a => a.agentName !== 'librarian.analyze')
-  const hasAny = running.length > 0 || hasRuns
+  const hasAny = active.length > 0 || hasRuns
 
   return (
     <ScrollArea className="h-full">
@@ -166,8 +150,8 @@ function ActivityContent({ storyId, active }: { storyId: string; active: ActiveA
           <SectionLabel icon={<GitBranch className="size-3" />}>Agent Runs</SectionLabel>
           {hasAny ? (
             <div className="space-y-1 mt-1.5">
-              {running.map((agent) => (
-                <ActiveRunRow key={agent.id} agent={agent} />
+              {active.map((agent) => (
+                <ActiveRunRow key={agent.id} agent={agent} storyId={storyId} />
               ))}
               {agentRuns?.slice(0, 12).map((run) => {
                 const expanded = expandedRunId === run.rootRunId
@@ -228,15 +212,46 @@ function formatDuration(ms: number): string {
 }
 
 // A currently-running agent (from the active registry), shown above completed runs.
-function ActiveRunRow({ agent }: { agent: ActiveAgent }) {
+// The librarian streams a live analyze trace, so its row expands to reveal it;
+// other agents have no live trace to surface here.
+function ActiveRunRow({ agent, storyId }: { agent: ActiveAgent; storyId: string }) {
+  const hasTrace = agent.agentName === 'librarian.analyze'
+  const [expanded, setExpanded] = useState(hasTrace)
+
+  const dot = (
+    <span className="relative flex size-1.5 shrink-0">
+      <span className="absolute inset-0 rounded-full bg-blue-400 animate-ping" style={{ animationDuration: '2s' }} />
+      <span className="relative inline-flex size-1.5 rounded-full bg-blue-400" />
+    </span>
+  )
+  const name = <span className="font-mono text-foreground/70 truncate">{agent.agentName}</span>
+  const status = <span className="ml-auto text-[0.5625rem] font-mono text-blue-400/80 shrink-0">running</span>
+
+  if (!hasTrace) {
+    return (
+      <div className="rounded-md border border-blue-400/30 bg-blue-400/[0.04] flex items-center gap-1.5 px-2.5 py-2 text-[0.6875rem]">
+        {dot}{name}{status}
+      </div>
+    )
+  }
+
   return (
-    <div className="rounded-md border border-blue-400/30 bg-blue-400/[0.04] flex items-center gap-1.5 px-2.5 py-2 text-[0.6875rem]">
-      <span className="relative flex size-1.5 shrink-0">
-        <span className="absolute inset-0 rounded-full bg-blue-400 animate-ping" style={{ animationDuration: '2s' }} />
-        <span className="relative inline-flex size-1.5 rounded-full bg-blue-400" />
-      </span>
-      <span className="font-mono text-foreground/70 truncate">{agent.agentName}</span>
-      <span className="ml-auto text-[0.5625rem] font-mono text-blue-400/80 shrink-0">running</span>
+    <div className="rounded-md border border-blue-400/30 bg-blue-400/[0.04] overflow-hidden">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full flex items-center gap-1.5 px-2.5 py-2 text-[0.6875rem] hover:bg-blue-400/[0.07] transition-colors"
+      >
+        {expanded
+          ? <ChevronDown className="size-3 text-muted-foreground shrink-0" />
+          : <ChevronRight className="size-3 text-muted-foreground shrink-0" />
+        }
+        {dot}{name}{status}
+      </button>
+      {expanded && (
+        <div className="border-t border-blue-400/15 px-2 py-1.5 bg-muted/15">
+          <LiveAnalysisTrace storyId={storyId} embedded />
+        </div>
+      )}
     </div>
   )
 }
@@ -408,7 +423,7 @@ type CollapsedTraceItem =
   | { kind: 'tool-call'; toolName: string; args: Record<string, unknown> }
   | { kind: 'tool-result'; toolName: string; result: unknown }
 
-function LiveAnalysisTrace({ storyId }: { storyId: string }) {
+function LiveAnalysisTrace({ storyId, embedded }: { storyId: string; embedded?: boolean }) {
   const [events, setEvents] = useState<ChatEvent[]>([])
   const [connected, setConnected] = useState(false)
   const readerRef = useRef<ReadableStreamDefaultReader<ChatEvent> | null>(null)
@@ -472,6 +487,20 @@ function LiveAnalysisTrace({ storyId }: { storyId: string }) {
     if (textBuf) collapsed.push({ kind: 'text', text: textBuf })
     return collapsed
   }, [events])
+
+  // Embedded inside the librarian's running row: just the trace items, no chrome.
+  if (embedded) {
+    if (items.length === 0) {
+      return <p className="text-[0.5625rem] text-muted-foreground px-1">Connecting to live trace…</p>
+    }
+    return (
+      <div className="space-y-0.5 max-h-32 overflow-y-auto">
+        {items.map((item, i) => (
+          <LiveTraceItem key={`${item.kind}-${i}`} item={item} />
+        ))}
+      </div>
+    )
+  }
 
   if (!connected && events.length === 0) return null
 
