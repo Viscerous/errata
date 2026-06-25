@@ -159,7 +159,7 @@ function StreamingSection({
                 steps={thoughtSteps}
                 streaming={isGenerating}
                 hasText={!!streamedText}
-                defaultExpanded={story?.settings.expandThoughtsByDefault ?? true}
+                defaultExpanded={story?.settings.expandThoughtsByDefault ?? false}
               />
             )}
             <StreamMarkdown content={streamedText} streaming={isGenerating} variant="prose" />
