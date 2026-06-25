@@ -16,7 +16,7 @@ import { inspectGenerationForFragment, type InspectAspect } from './inspect-gene
 import { runLibrarian } from './agent'
 import { withBranch } from '../fragments/branches'
 import type { ChatStreamEvent, ChatResult } from '../agents/stream-types'
-import type { AgentBlockContext } from '../agents/agent-block-context'
+import { type AgentBlockContext, baseBlockContext } from '../agents/agent-block-context'
 
 export type { ChatStreamEvent, ChatResult }
 
@@ -162,14 +162,7 @@ async function librarianChatInner(
 
   // Build agent block context
   const blockContext: AgentBlockContext = {
-    story: ctxState.story,
-    proseFragments: ctxState.proseFragments,
-    stickyGuidelines: ctxState.stickyGuidelines,
-    stickyKnowledge: ctxState.stickyKnowledge,
-    stickyCharacters: ctxState.stickyCharacters,
-    guidelineShortlist: ctxState.guidelineShortlist,
-    knowledgeShortlist: ctxState.knowledgeShortlist,
-    characterShortlist: ctxState.characterShortlist,
+    ...baseBlockContext(ctxState, ctxState.story),
     systemPromptFragments,
     pluginToolDescriptions,
     modelId,

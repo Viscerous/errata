@@ -1,6 +1,6 @@
 import { agentBlockRegistry } from '../agents/agent-block-registry'
 import { instructionRegistry } from '../instructions'
-import type { AgentBlockContext } from '../agents/agent-block-context'
+import { type AgentBlockContext, baseBlockContext } from '../agents/agent-block-context'
 import { registry } from '../fragments/registry'
 import { createDefaultBlocks, buildContextState, type ContextBlock } from './context-builder'
 import { createFragmentTools } from './tools'
@@ -57,15 +57,7 @@ async function buildGenerationPreviewContext(dataDir: string, storyId: string): 
   // the preview; we use a self-explanatory placeholder rather than a bare token.
   const state = await buildContextState(dataDir, storyId, GENERATION_PREVIEW_INPUT)
   return {
-    story: state.story,
-    proseFragments: state.proseFragments,
-    stickyGuidelines: state.stickyGuidelines,
-    stickyKnowledge: state.stickyKnowledge,
-    stickyCharacters: state.stickyCharacters,
-    recentCharacters: state.recentCharacters,
-    guidelineShortlist: state.guidelineShortlist,
-    knowledgeShortlist: state.knowledgeShortlist,
-    characterShortlist: state.characterShortlist,
+    ...baseBlockContext(state, state.story),
     systemPromptFragments: [],
     // The flat fields above feed custom script blocks; the block builder renders
     // from this full state so nothing is dropped in a state→ctx→state round-trip.
