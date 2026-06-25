@@ -172,11 +172,11 @@ describe('compileAgentContext', () => {
     await saveAgentBlockConfig(dataDir, STORY_ID, 'librarian.analyze', {
       customBlocks: [],
       overrides: {},
-      blockOrder: ['new-prose', 'story-summary', 'instructions'],
+      blockOrder: ['prose-new', 'story-summary', 'instructions'],
       disabledTools: [],
     })
     const result = await compileAgentContext(dataDir, STORY_ID, 'librarian.analyze', ctx, {})
-    const proseBlock = result.blocks.find(b => b.id === 'new-prose')!
+    const proseBlock = result.blocks.find(b => b.id === 'prose-new')!
     const summaryBlock = result.blocks.find(b => b.id === 'story-summary')!
     const instBlock = result.blocks.find(b => b.id === 'instructions')!
     expect(proseBlock.order).toBeLessThan(summaryBlock.order)
