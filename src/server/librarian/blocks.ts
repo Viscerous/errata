@@ -27,10 +27,10 @@ export function buildAnalyzeSystemPrompt(opts?: { disableDirections?: boolean; d
   // drift). Steps for disabled tools are omitted and the rest renumber, so the
   // prompt never names a tool the model wasn't given.
   const steps: string[] = [
-    'Report every character who appears — call reportMentions with their IDs. It returns each one\'s full sheet to edit against.',
+    'Report every character who appears — call reportMentions with their IDs, so their names are highlighted in the prose.',
     'Summarize what happened — call updateSummary.',
     'Record contradictions with established facts (reportContradictions) and significant events (reportTimeline) when the prose has them.',
-    'Update a fragment when the prose changes a lasting fact about it — a death, an injury, a change in allegiance, title, location, or relationship. The character and knowledge sheets are the record of current state and are fed into later writing, so the change must land on the sheet itself; the summary and timeline log the event but do not keep the sheet current. To change a name or description, call updateFragment with just those fields (it leaves the body untouched); to change part of the body, call editFragment with an exact span from the returned sheet; to rewrite a body wholesale, call updateFragment with complete new content from that sheet — never from the one-line summary.',
+    'Update a fragment when the prose changes a lasting fact about it — a death, an injury, a change in allegiance, title, location, or relationship. The character and knowledge sheets are the record of current state and are fed into later writing, so the change must land on the sheet itself; the summary and timeline log the event but do not keep the sheet current. To change a name or description, call updateFragment with just those fields (it leaves the body untouched); to change part of the body, call editFragment with an exact span from its full sheet; to rewrite a body wholesale, call updateFragment with complete new content built from its full sheet — never from the one-line summary.',
   ]
   if (!opts?.disableSuggestions) {
     steps.push('Suggest genuinely new characters or knowledge with suggestFragment — only ones that do not exist yet.')
@@ -48,7 +48,7 @@ export function buildAnalyzeSystemPrompt(opts?: { disableDirections?: boolean; d
 You are a librarian agent for a collaborative writing app.
 Your job is to analyze a new prose fragment and maintain story continuity.
 
-Your context lists characters as one-line summaries (ID, name, description); knowledge is provided in full.
+The characters in the recent prose are provided in full below, alongside knowledge; any other characters are one-line summaries — read one in full with getFragment before editing it.
 
 Work through these steps in order:
 ${numbered}
@@ -76,14 +76,29 @@ export function createLibrarianAnalyzeBlocks(ctx: AgentBlockContext): ContextBlo
     source: 'builtin',
   })
 
-  if (ctx.allCharacters && ctx.allCharacters.length > 0) {
-    blocks.push(fragmentSummaryBlock({ id: 'characters-shortlist', heading: 'Characters', items: ctx.allCharacters, order: 200, editable: true }))
+  // Characters in the recent prose are preloaded in full so edits land on their
+  // current sheet; the rest stay one-line summaries (getFragment reads any in full).
+  const recentIds = new Set((ctx.recentCharacters ?? []).map((c) => c.id))
+  if (ctx.recentCharacters && ctx.recentCharacters.length > 0) {
+    blocks.push({
+      id: 'characters-recent',
+      role: 'user',
+      content: [
+        '## Characters in Recent Prose',
+        ...ctx.recentCharacters.map((c) => `### ${c.id}: ${c.name}\n${c.description}\n\n${c.content}`),
+      ].join('\n\n'),
+      order: 200,
+      source: 'builtin',
+    })
+  }
+  const shortlistCharacters = (ctx.allCharacters ?? []).filter((c) => !recentIds.has(c.id))
+  if (shortlistCharacters.length > 0) {
+    blocks.push(fragmentSummaryBlock({ id: 'characters-shortlist', heading: 'Characters', items: shortlistCharacters, order: 210, editable: true }))
   }
 
   if (ctx.allKnowledge && ctx.allKnowledge.length > 0) {
     // Knowledge is delivered in full (bounded, read-mostly — analyze checks
-    // contradictions against it). Characters stay summaries; their bodies arrive
-    // via reportMentions.
+    // contradictions against it).
     blocks.push({
       id: 'knowledge',
       role: 'user',

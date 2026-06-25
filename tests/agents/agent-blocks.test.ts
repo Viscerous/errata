@@ -144,6 +144,27 @@ describe('Librarian Analyze Blocks', () => {
     expect(chBlock!.content).toContain('Hero')
   })
 
+  it('renders recent-cast characters in full and drops them from the shortlist', () => {
+    const def = agentBlockRegistry.get('librarian.analyze')!
+    const hero = makeFragment({ id: 'ch-hero01', name: 'Hero', description: 'A brave hero', content: 'Hero full sheet body.' })
+    const villain = makeFragment({ id: 'ch-vil01', name: 'Villain', description: 'The antagonist', content: 'Villain full sheet body.' })
+    const blocks = def.createDefaultBlocks(makeBaseContext({
+      allCharacters: [hero, villain],
+      recentCharacters: [hero],
+    }))
+
+    const recent = blocks.find(b => b.id === 'characters-recent')
+    expect(recent).toBeDefined()
+    expect(recent!.content).toContain('Hero full sheet body.')
+
+    // The recent character is not duplicated into the summary shortlist; the
+    // other character still appears there.
+    const shortlist = blocks.find(b => b.id === 'characters-shortlist')
+    expect(shortlist).toBeDefined()
+    expect(shortlist!.content).toContain('ch-vil01')
+    expect(shortlist!.content).not.toContain('ch-hero01')
+  })
+
   it('includes knowledge block when allKnowledge provided', () => {
     const def = agentBlockRegistry.get('librarian.analyze')!
     const blocks = def.createDefaultBlocks(makeBaseContext({
