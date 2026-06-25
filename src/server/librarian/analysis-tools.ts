@@ -147,7 +147,7 @@ export function createAnalysisTools(collector: AnalysisCollector, opts?: { dataD
     }),
 
     reportMentions: tool({
-      description: 'Report the characters who appear in the new prose so their names are highlighted. Call once with all of them; list each character once, using the name used in the prose.',
+      description: 'Report character mentions found in the new prose. Call once with all mentions. Each character should appear only once — use the primary name.',
       inputSchema: z.object({
         mentions: z.array(z.object({
           characterId: z.string().describe('The character fragment ID (e.g. ch-abc)'),
@@ -163,25 +163,11 @@ export function createAnalysisTools(collector: AnalysisCollector, opts?: { dataD
           collector.mentions.push(m)
         }
         // Persist annotations now so the prose highlights appear as soon as
-        // mentions resolve, not at the end of the run. Character sheets are
-        // preloaded into context, so this tool no longer fetches them.
+        // mentions resolve, not at the end of the run.
         if (opts?.proseFragmentId && collector.mentions.length > 0) {
           await persistMentionAnnotations(opts.dataDir, opts.storyId, opts.proseFragmentId, collector.mentions)
         }
         return { ok: true }
-      },
-    }),
-
-    getFragment: tool({
-      description: 'Read a character, knowledge, or guideline fragment in full by ID. The characters in the recent prose are already shown in full; use this only to read another fragment before editing it.',
-      inputSchema: z.object({
-        fragmentId: z.string().describe('The fragment ID to read (e.g. ch-abc, kn-xyz)'),
-      }),
-      execute: async ({ fragmentId }) => {
-        if (!opts) return { error: 'getFragment not available in this context' }
-        const frag = await getFragment(opts.dataDir, opts.storyId, fragmentId)
-        if (!frag) return { error: `Fragment ${fragmentId} not found` }
-        return { id: frag.id, name: frag.name, description: frag.description, content: frag.content, type: frag.type }
       },
     }),
 
@@ -210,6 +196,19 @@ export function createAnalysisTools(collector: AnalysisCollector, opts?: { dataD
       execute: async ({ events }) => {
         collector.timelineEvents.push(...events)
         return { ok: true }
+      },
+    }),
+
+    getFragment: tool({
+      description: 'Read a character, knowledge, or guideline fragment in full by ID. The characters in the recent prose are already shown in full; use this only to read another fragment before editing it.',
+      inputSchema: z.object({
+        fragmentId: z.string().describe('The fragment ID to read (e.g. ch-abc, kn-xyz)'),
+      }),
+      execute: async ({ fragmentId }) => {
+        if (!opts) return { error: 'getFragment not available in this context' }
+        const frag = await getFragment(opts.dataDir, opts.storyId, fragmentId)
+        if (!frag) return { error: `Fragment ${fragmentId} not found` }
+        return { id: frag.id, name: frag.name, description: frag.description, content: frag.content, type: frag.type }
       },
     }),
 

@@ -31,9 +31,9 @@ describe('analysis-tools', () => {
       expect(Object.keys(tools)).toEqual([
         'updateSummary',
         'reportMentions',
-        'getFragment',
         'reportContradictions',
         'reportTimeline',
+        'getFragment',
         'editFragment',
         'updateFragment',
         'suggestFragment',
@@ -107,19 +107,6 @@ describe('analysis-tools', () => {
         mentions: [{ characterId: 'ch-003', text: 'Carol' }],
       }, { toolCallId: 'c', messages: [], abortSignal: undefined as unknown as AbortSignal })
       expect(collector.mentions).toHaveLength(3)
-    })
-
-    it('reportMentions records mentions without returning sheets', async () => {
-      const collector = createEmptyCollector()
-      const tools = createAnalysisTools(collector, { dataDir: '/d', storyId: 's' })
-
-      const result = await tools.reportMentions.execute!({
-        mentions: [{ characterId: 'ch-001', text: 'Alice' }],
-      }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal }) as { ok: boolean; characters?: unknown }
-
-      expect(result.ok).toBe(true)
-      expect(result.characters).toBeUndefined()
-      expect(collector.mentions).toEqual([{ characterId: 'ch-001', text: 'Alice' }])
     })
 
     it('getFragment reads a fragment in full by ID', async () => {

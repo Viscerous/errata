@@ -91,40 +91,16 @@ async function runLibrarianInner(
     knowledgeCount: knowledge.length,
   })
 
-  // Preload the writer's character working set in full, so edits land on current
-  // state rather than a one-line summary. Prefer the set the writer actually
-  // worked from (forwarded on the prose meta — its full-context cast plus anything
-  // it looked up), so analyze audits against the same sheets. Fall back to
-  // rebuilding the recent cast from prose annotations for prose not written
-  // through the writer (re-analysis, older fragments). Knowledge IDs may ride in
-  // the forwarded set but are ignored here — knowledge is already rendered in full.
-  const forwardedIds = Array.isArray(fragment.meta?.writerContextIds)
-    ? (fragment.meta.writerContextIds as string[])
-    : []
-  let recentCharacters: Fragment[]
-  if (forwardedIds.length > 0) {
-    const idSet = new Set(forwardedIds)
-    recentCharacters = characters.filter((c) => idSet.has(c.id))
-  } else {
-    const RECENT_CAST_PROSE_WINDOW = 10
-    const activeProseIds = await getActiveProseIds(dataDir, storyId)
-    const recentProseFragments: Fragment[] = []
-    for (const pid of activeProseIds.slice(-RECENT_CAST_PROSE_WINDOW)) {
-      const p = await getFragment(dataDir, storyId, pid)
-      if (p) recentProseFragments.push(p)
-    }
-    const recentCastIds = new Set<string>()
-    for (const p of recentProseFragments) {
-      const annotations = Array.isArray(p.meta?.annotations)
-        ? (p.meta.annotations as Array<{ type?: string; fragmentId?: string }>)
-        : []
-      for (const a of annotations) {
-        if (a.type === 'mention' && a.fragmentId) recentCastIds.add(a.fragmentId)
-      }
-    }
-    recentCharacters = characters.filter((c) => recentCastIds.has(c.id))
-  }
-  requestLogger.debug('Recent cast resolved', { recentCharacters: recentCharacters.length, forwarded: forwardedIds.length > 0 })
+  // Preload the characters the writer worked from in full, so edits land on their
+  // current sheet rather than a one-line summary. The writer forwards this set on
+  // the prose meta — its full-context cast plus anything it looked up — and it
+  // rides along on re-analysis since it persists with the fragment. Knowledge IDs
+  // may be in the set but are ignored here, as knowledge is already rendered full.
+  const writerContextIds = new Set(
+    Array.isArray(fragment.meta?.writerContextIds) ? (fragment.meta.writerContextIds as string[]) : [],
+  )
+  const recentCharacters = characters.filter((c) => writerContextIds.has(c.id))
+  requestLogger.debug('Writer cast resolved', { recentCharacters: recentCharacters.length })
 
   // Load current librarian state for context
   const state = await getState(dataDir, storyId)
@@ -192,8 +168,6 @@ async function runLibrarianInner(
 
   const providerOptions = buildProviderOptions(story.settings.disableThinking ?? false)
 
-  // The recent cast's sheets are preloaded in context, so the model edits against
-  // what it already holds — no need to gate edits behind a mid-loop sheet fetch.
   const agent = new ToolLoopAgent({
     model,
     instructions: systemMessage?.content || 'You are a helpful assistant.',
