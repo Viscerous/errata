@@ -8,6 +8,7 @@ import { instructionRegistry } from '../instructions'
 import { reportUsage } from '../llm/token-tracker'
 import { createLogger } from '../logging'
 import { type AgentBlockContext, baseBlockContext } from '../agents/agent-block-context'
+import { loadSystemPromptFragments } from '../agents/block-helpers'
 
 const logger = createLogger('directions-suggest')
 
@@ -56,12 +57,7 @@ export async function suggestDirections(
   // Build context through the directions agent block system
   const ctxState = await buildContextState(dataDir, storyId, '')
 
-  const sysFragIds = await getFragmentsByTag(dataDir, storyId, 'pass-to-librarian-system-prompt')
-  const systemPromptFragments = []
-  for (const id of sysFragIds) {
-    const frag = await getFragment(dataDir, storyId, id)
-    if (frag) systemPromptFragments.push(frag)
-  }
+  const systemPromptFragments = await loadSystemPromptFragments(dataDir, storyId, getFragmentsByTag, getFragment)
 
   const blockContext: AgentBlockContext = {
     ...baseBlockContext(ctxState, ctxState.story),
