@@ -148,7 +148,7 @@ export async function buildAnalyzePreviewContext(dataDir: string, storyId: strin
     systemPromptFragments,
     allCharacters,
     allKnowledge,
-    newProse: { id: 'pr-preview', content: '(Preview — actual prose will appear here during analysis)' },
+    newProse: { id: '(the new fragment\'s ID)', content: '(the new prose passage will appear here)' },
   }
 }
 
