@@ -27,6 +27,18 @@ export function createDirectionsSuggestBlocks(ctx: AgentBlockContext): ContextBl
     source: 'builtin',
   })
 
+  // Sticky guidelines are the story's binding rules (tone, POV, boundaries);
+  // suggested directions should stay within them.
+  if (ctx.stickyGuidelines.length > 0) {
+    blocks.push({
+      id: 'guidelines',
+      role: 'user',
+      content: `## Guidelines\n${ctx.stickyGuidelines.map(g => `### ${g.name}\n${g.content}`).join('\n\n')}`,
+      order: 150,
+      source: 'builtin',
+    })
+  }
+
   if (ctx.stickyCharacters.length > 0 || ctx.characterShortlist.length > 0) {
     const chars = [...ctx.stickyCharacters, ...ctx.characterShortlist]
     const unique = chars.filter((c, i, arr) => arr.findIndex(x => x.id === c.id) === i)
