@@ -7,7 +7,8 @@ import { getFragmentsByTag } from '../fragments/associations'
 import { instructionRegistry } from '../instructions'
 import { reportUsage } from '../llm/token-tracker'
 import { createLogger } from '../logging'
-import type { AgentBlockContext } from '../agents/agent-block-context'
+import { type AgentBlockContext, baseBlockContext } from '../agents/agent-block-context'
+import { loadSystemPromptFragments } from '../agents/block-helpers'
 
 const logger = createLogger('directions-suggest')
 
@@ -56,22 +57,10 @@ export async function suggestDirections(
   // Build context through the directions agent block system
   const ctxState = await buildContextState(dataDir, storyId, '')
 
-  const sysFragIds = await getFragmentsByTag(dataDir, storyId, 'pass-to-librarian-system-prompt')
-  const systemPromptFragments = []
-  for (const id of sysFragIds) {
-    const frag = await getFragment(dataDir, storyId, id)
-    if (frag) systemPromptFragments.push(frag)
-  }
+  const systemPromptFragments = await loadSystemPromptFragments(dataDir, storyId, getFragmentsByTag, getFragment)
 
   const blockContext: AgentBlockContext = {
-    story: ctxState.story,
-    proseFragments: ctxState.proseFragments,
-    stickyGuidelines: ctxState.stickyGuidelines,
-    stickyKnowledge: ctxState.stickyKnowledge,
-    stickyCharacters: ctxState.stickyCharacters,
-    guidelineShortlist: ctxState.guidelineShortlist,
-    knowledgeShortlist: ctxState.knowledgeShortlist,
-    characterShortlist: ctxState.characterShortlist,
+    ...baseBlockContext(ctxState, ctxState.story),
     systemPromptFragments,
     modelId,
   }

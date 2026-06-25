@@ -6,7 +6,7 @@
  */
 
 import type { ContextBlock } from '../llm/context-builder'
-import type { AgentBlockContext } from './agent-block-context'
+import { type AgentBlockContext, baseBlockContext } from './agent-block-context'
 import type { Fragment } from '../fragments/schema'
 import { buildContextState, fragmentSummaryBlock } from '../llm/context-builder'
 import { instructionRegistry } from '../instructions'
@@ -66,7 +66,7 @@ export function stickyFragmentsBlock(ctx: AgentBlockContext): ContextBlock | nul
 export function recentProseBlock(ctx: AgentBlockContext): ContextBlock | null {
   if (ctx.proseFragments.length === 0) return null
   return {
-    id: 'prose',
+    id: 'prose-recent',
     role: 'user',
     content: [
       '## Recent Prose',
@@ -158,14 +158,7 @@ export async function buildBasePreviewContext(
 ): Promise<AgentBlockContext> {
   const ctxState = await buildContextState(dataDir, storyId, '')
   return {
-    story: ctxState.story,
-    proseFragments: ctxState.proseFragments,
-    stickyGuidelines: ctxState.stickyGuidelines,
-    stickyKnowledge: ctxState.stickyKnowledge,
-    stickyCharacters: ctxState.stickyCharacters,
-    guidelineShortlist: ctxState.guidelineShortlist,
-    knowledgeShortlist: ctxState.knowledgeShortlist,
-    characterShortlist: ctxState.characterShortlist,
+    ...baseBlockContext(ctxState, ctxState.story),
     systemPromptFragments: [],
   }
 }

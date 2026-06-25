@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { createEmptyCollector, createAnalysisTools, updateSummaryInputSchema, analyzeActiveTools } from '@/server/librarian/analysis-tools'
+import { createEmptyCollector, createAnalysisTools, updateSummaryInputSchema } from '@/server/librarian/analysis-tools'
 import { getFragment } from '@/server/fragments/storage'
 
 vi.mock('@/server/fragments/storage', () => ({
@@ -33,25 +33,12 @@ describe('analysis-tools', () => {
         'reportMentions',
         'reportContradictions',
         'reportTimeline',
+        'getFragment',
         'editFragment',
         'updateFragment',
         'suggestFragment',
         'suggestDirections',
       ])
-    })
-
-    it('analyzeActiveTools withholds edit tools until reportMentions has run', () => {
-      const all = Object.keys(createAnalysisTools(createEmptyCollector()))
-
-      const before = analyzeActiveTools(all, false)
-      expect(before).not.toContain('updateFragment')
-      expect(before).not.toContain('editFragment')
-      // Non-edit tools (including reportMentions) stay available.
-      expect(before).toContain('reportMentions')
-      expect(before).toContain('updateSummary')
-
-      const after = analyzeActiveTools(all, true)
-      expect(after).toEqual(all)
     })
 
     it('updateSummary sets summary (last call wins)', async () => {
@@ -122,7 +109,7 @@ describe('analysis-tools', () => {
       expect(collector.mentions).toHaveLength(3)
     })
 
-    it('reportMentions returns the full sheets of mentioned characters', async () => {
+    it('getFragment reads a fragment in full by ID', async () => {
       vi.mocked(getFragment).mockImplementation(async (_d, _s, id) =>
         id === 'ch-001'
           ? { id: 'ch-001', type: 'character', name: 'Alice', description: 'A knight', content: 'Full sheet for Alice.' } as never
@@ -131,14 +118,11 @@ describe('analysis-tools', () => {
       const collector = createEmptyCollector()
       const tools = createAnalysisTools(collector, { dataDir: '/d', storyId: 's' })
 
-      const result = await tools.reportMentions.execute!({
-        mentions: [{ characterId: 'ch-001', text: 'Alice' }],
-      }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal }) as { ok: boolean; characters: Array<{ id: string; content: string }> }
+      const result = await tools.getFragment.execute!({
+        fragmentId: 'ch-001',
+      }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal }) as { id: string; name: string; content: string }
 
-      expect(result.ok).toBe(true)
-      expect(result.characters).toEqual([
-        { id: 'ch-001', name: 'Alice', description: 'A knight', content: 'Full sheet for Alice.' },
-      ])
+      expect(result).toEqual({ id: 'ch-001', name: 'Alice', description: 'A knight', content: 'Full sheet for Alice.', type: 'character' })
       vi.mocked(getFragment).mockResolvedValue(null)
     })
 

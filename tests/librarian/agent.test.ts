@@ -239,6 +239,38 @@ describe('librarian agent', () => {
     expect(annotations[0].text).toBe('Alice')
   })
 
+  it('forwards the writer context cast as full character sheets', async () => {
+    await createStory(dataDir, makeStory())
+    await createFragment(dataDir, storyId, makeFragment({
+      id: 'ch-0001',
+      type: 'character',
+      name: 'Alice',
+      description: 'The protagonist',
+      content: 'Alice carries a rune-etched blade.',
+    }))
+    await createFragment(dataDir, storyId, makeFragment({
+      id: 'pr-0001',
+      content: 'Alice fought bravely.',
+      meta: { writerContextIds: ['ch-0001'] },
+    }))
+    await setupProseChain(dataDir, storyId, ['pr-0001'])
+
+    let capturedPrompt = ''
+    mockAgentStream.mockImplementation((args: { prompt?: string }) => {
+      capturedPrompt = args.prompt ?? ''
+      return {
+        fullStream: (async function* () {
+          yield { type: 'finish' as const, finishReason: 'stop' }
+        })(),
+      }
+    })
+
+    await runLibrarian(dataDir, storyId, 'pr-0001')
+
+    expect(capturedPrompt).toContain('## Characters in Recent Prose')
+    expect(capturedPrompt).toContain('Alice carries a rune-etched blade.')
+  })
+
   it('creates a new summary fragment when story had no prior summary', async () => {
     await createStory(dataDir, makeStory({ summary: '' }))
     await createFragment(dataDir, storyId, makeFragment({ id: 'pr-0001' }))

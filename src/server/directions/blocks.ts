@@ -44,7 +44,7 @@ export function createDirectionsSuggestBlocks(ctx: AgentBlockContext): ContextBl
   if (ctx.proseFragments.length > 0) {
     const recentProse = ctx.proseFragments.slice(-3)
     blocks.push({
-      id: 'recent-prose',
+      id: 'prose-recent',
       role: 'user',
       content: `## Recent Prose\n${recentProse.map(f => f.content).join('\n\n---\n\n')}`,
       order: 300,

@@ -91,7 +91,7 @@ In prewriter mode, the writer sees a stripped-down context instead of the full o
 |---|---|---|
 | `instructions` | system | Resolved from `generation.writer-brief.system` |
 | `tools` | system | Tool descriptions + `generation.writer-brief.tools-suffix` |
-| `prose` | user | Recent prose fragments (for continuity) |
+| `prose-recent` | user | Recent prose fragments (for continuity) |
 | `writing-brief` | user | The prewriter's output |
 
 Additionally, these blocks are carried over from the standard context:

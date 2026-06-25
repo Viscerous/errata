@@ -5,6 +5,7 @@ import { agentBlockRegistry } from '@/server/agents/agent-block-registry'
 import { modelRoleRegistry } from '@/server/agents/model-role-registry'
 import type { AgentBlockContext } from '@/server/agents/agent-block-context'
 import type { Fragment, StoryMeta } from '@/server/fragments/schema'
+import { recentCastFromFragment } from '@/server/librarian/blocks'
 
 const now = new Date().toISOString()
 
@@ -144,6 +145,36 @@ describe('Librarian Analyze Blocks', () => {
     expect(chBlock!.content).toContain('Hero')
   })
 
+  it('recentCastFromFragment resolves characters from the fragment writerContextIds', () => {
+    const alice = makeFragment({ id: 'ch-alice', type: 'character' })
+    const bob = makeFragment({ id: 'ch-bob', type: 'character' })
+    const fragment = makeFragment({ id: 'pr-1', type: 'prose', meta: { writerContextIds: ['ch-alice'] } })
+
+    expect(recentCastFromFragment([alice, bob], fragment).map(c => c.id)).toEqual(['ch-alice'])
+    expect(recentCastFromFragment([alice, bob], null)).toEqual([])
+  })
+
+  it('renders recent-cast characters in full and drops them from the shortlist', () => {
+    const def = agentBlockRegistry.get('librarian.analyze')!
+    const hero = makeFragment({ id: 'ch-hero01', name: 'Hero', description: 'A brave hero', content: 'Hero full sheet body.' })
+    const villain = makeFragment({ id: 'ch-vil01', name: 'Villain', description: 'The antagonist', content: 'Villain full sheet body.' })
+    const blocks = def.createDefaultBlocks(makeBaseContext({
+      allCharacters: [hero, villain],
+      recentCharacters: [hero],
+    }))
+
+    const recent = blocks.find(b => b.id === 'characters-recent')
+    expect(recent).toBeDefined()
+    expect(recent!.content).toContain('Hero full sheet body.')
+
+    // The recent character is not duplicated into the summary shortlist; the
+    // other character still appears there.
+    const shortlist = blocks.find(b => b.id === 'characters-shortlist')
+    expect(shortlist).toBeDefined()
+    expect(shortlist!.content).toContain('ch-vil01')
+    expect(shortlist!.content).not.toContain('ch-hero01')
+  })
+
   it('includes knowledge block when allKnowledge provided', () => {
     const def = agentBlockRegistry.get('librarian.analyze')!
     const blocks = def.createDefaultBlocks(makeBaseContext({
@@ -156,12 +187,12 @@ describe('Librarian Analyze Blocks', () => {
     expect(knBlock!.content).toContain('Elemental magic.')
   })
 
-  it('includes new-prose block when newProse provided', () => {
+  it('includes prose-new block when newProse provided', () => {
     const def = agentBlockRegistry.get('librarian.analyze')!
     const blocks = def.createDefaultBlocks(makeBaseContext({
       newProse: { id: 'pr-test01', content: 'The hero drew their sword.' },
     }))
-    const proseBlock = blocks.find(b => b.id === 'new-prose')
+    const proseBlock = blocks.find(b => b.id === 'prose-new')
     expect(proseBlock).toBeDefined()
     expect(proseBlock!.content).toContain('The hero drew their sword.')
   })
@@ -184,12 +215,12 @@ describe('Librarian Analyze Blocks', () => {
       allKnowledge: [makeFragment({ id: 'kn-test01', type: 'knowledge', name: 'Lore' })],
       newProse: { id: 'pr-test01', content: 'New content' },
     }))
-    // User blocks should be ordered: story-summary (100) < characters (200) < knowledge (300) < new-prose (400)
+    // User blocks should be ordered: story-summary (100) < characters (200) < knowledge (300) < prose-new (400)
     const userBlocks = blocks.filter(b => b.role === 'user')
     const summaryOrder = userBlocks.find(b => b.id === 'story-summary')!.order
     const charsOrder = userBlocks.find(b => b.id === 'characters-shortlist')!.order
     const knowledgeOrder = userBlocks.find(b => b.id === 'knowledge')!.order
-    const proseOrder = userBlocks.find(b => b.id === 'new-prose')!.order
+    const proseOrder = userBlocks.find(b => b.id === 'prose-new')!.order
     expect(summaryOrder).toBeLessThan(charsOrder)
     expect(charsOrder).toBeLessThan(knowledgeOrder)
     expect(knowledgeOrder).toBeLessThan(proseOrder)
@@ -272,7 +303,7 @@ describe('Librarian Refine Blocks', () => {
     const blocks = def.createDefaultBlocks(makeBaseContext({
       proseFragments: [makeFragment({ id: 'pr-test01', type: 'prose', name: 'Ch 1', content: 'Story text.' })],
     }))
-    expect(blocks.find(b => b.id === 'prose')).toBeDefined()
+    expect(blocks.find(b => b.id === 'prose-recent')).toBeDefined()
   })
 })
 

@@ -453,6 +453,22 @@ export function generationRoutes(dataDir: string) {
               const now = new Date().toISOString()
               let savedFragmentId: string
 
+              // Forward the writer's character/knowledge working set to the
+              // librarian via the prose meta — its full-context cast plus anything
+              // it looked up — so analyze audits against the same sheets the writer
+              // had. Analyze consumes the character IDs today; knowledge rides along
+              // for when its full block is dropped.
+              const lookedUpIds = toolCalls
+                .filter((tc) => tc.toolName === 'getFragment' || /^get[A-Z]/.test(tc.toolName))
+                .map((tc) => (tc.args as Record<string, unknown>)?.id)
+                .filter((x): x is string => typeof x === 'string')
+              const writerContextIds = [...new Set([
+                ...ctxState.stickyCharacters.map((f) => f.id),
+                ...(ctxState.recentCharacters ?? []).map((f) => f.id),
+                ...ctxState.stickyKnowledge.map((f) => f.id),
+                ...lookedUpIds,
+              ])]
+
               if ((mode === 'regenerate' || mode === 'refine') && existingFragment) {
                 // Create a NEW fragment as a variation (don't overwrite)
                 const id = generateFragmentId('prose')
@@ -475,6 +491,7 @@ export function generationRoutes(dataDir: string) {
                     generationMode: mode,
                     previousFragmentId: existingFragment.id,
                     variationOf: existingFragment.id,
+                    ...(writerContextIds.length ? { writerContextIds } : {}),
                   },
                   version: 1,
                   versions: [],
@@ -521,7 +538,7 @@ export function generationRoutes(dataDir: string) {
                   createdAt: now,
                   updatedAt: now,
                   order: 0,
-                  meta: { generatedFrom: body.input },
+                  meta: { generatedFrom: body.input, ...(writerContextIds.length ? { writerContextIds } : {}) },
                   version: 1,
                   versions: [],
                 }
