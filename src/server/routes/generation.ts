@@ -34,7 +34,7 @@ import { collectPluginToolsWithOrigin } from '../plugins/tools'
 import { triggerLibrarian } from '../librarian/scheduler'
 import { getAgentBlockConfig } from '../agents/agent-block-storage'
 import { invokeAgent } from '../agents/runner'
-import { registerActiveAgent, unregisterActiveAgent } from '../agents/active-registry'
+import { beginAgentRun } from '../agents/agent-run'
 import { reportUsage } from '../llm/token-tracker'
 import { normalizeTokenUsage } from '../llm/usage-normalizer'
 import { createLogger } from '../logging'
@@ -229,6 +229,7 @@ export function generationRoutes(dataDir: string) {
       let lastFinishReason = 'unknown'
       let stepCount = 0
       let wasAborted = false
+      let runError: string | null = null
 
       // Completion promise resolved when the stream ends — used by save path
       let completionResolve: ((val: void) => void) | null = null
@@ -236,7 +237,7 @@ export function generationRoutes(dataDir: string) {
         new Promise<void>((resolve) => { completionResolve = resolve })
       }
 
-      const genActivityId = registerActiveAgent(params.storyId, 'generation.writer')
+      const writerRun = beginAgentRun(params.storyId, 'generation.writer')
 
       const eventStream = new ReadableStream<Uint8Array>({
         async start(controller) {
@@ -252,7 +253,8 @@ export function generationRoutes(dataDir: string) {
             if (isPrewriterMode) {
               emit({ type: 'phase', phase: 'prewriting' })
 
-              const prewriterActivityId = registerActiveAgent(params.storyId, 'generation.prewriter')
+              const prewriterRun = beginAgentRun(params.storyId, 'generation.prewriter')
+              let prewriterOk = false
               try {
                 const configuredMax = story.settings.maxSteps ?? 10
                 const prewriterReasoningLevel = story.settings.prewriterReasoning ?? 'normal'
@@ -289,6 +291,7 @@ export function generationRoutes(dataDir: string) {
                     }
                   },
                 })
+                prewriterOk = true
 
                 // The prewriter chose to ask the author questions instead of
                 // finalizing a brief. Surface them and end the turn — no writer,
@@ -325,7 +328,7 @@ export function generationRoutes(dataDir: string) {
                 writerMessages = addCacheBreakpoints(writerCompiled)
                 logMessages = writerCompiled
               } finally {
-                unregisterActiveAgent(prewriterActivityId)
+                prewriterRun.finish(prewriterOk ? 'success' : 'error', prewriterOk ? { output: { stepCount: prewriterStepCount } } : undefined)
               }
 
               emit({ type: 'phase', phase: 'writing' })
@@ -428,10 +431,14 @@ export function generationRoutes(dataDir: string) {
                 // Controller may already be closed
               }
             } else {
+              runError = err instanceof Error ? err.message : String(err)
               controller.error(err)
             }
           } finally {
-            unregisterActiveAgent(genActivityId)
+            writerRun.finish(
+              runError ? 'error' : 'success',
+              runError ? { error: runError } : { output: { finishReason: lastFinishReason, stepCount } },
+            )
           }
 
           // Run save operation after stream completes (skip if aborted with no text)

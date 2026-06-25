@@ -435,14 +435,14 @@ export function createPrewriterBlocks(_ctx: AgentBlockContext): ContextBlock[] {
     {
       id: 'full-context',
       role: 'user' as const,
-      content: '(Full story context will be injected at runtime)',
+      content: '(the full story context will appear here)',
       order: 100,
       source: 'builtin',
     },
     {
       id: 'planning-request',
       role: 'user' as const,
-      content: '(Planning request will be injected at runtime based on generation mode)',
+      content: '(the planning request will appear here, based on generation mode)',
       order: 200,
       source: 'builtin',
     },
