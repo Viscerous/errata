@@ -113,7 +113,7 @@ export function createLibrarianAnalyzeBlocks(ctx: AgentBlockContext): ContextBlo
 
   if (ctx.newProse) {
     blocks.push({
-      id: 'new-prose',
+      id: 'prose-new',
       role: 'user',
       content: [
         '## New Prose Fragment',
