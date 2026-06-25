@@ -80,6 +80,24 @@ Other marker types used within block content:
 
 Order gaps of 100 leave room for inserting custom blocks between existing ones.
 
+## Content tiering
+
+Fragments enter context at one of three depths, by **relevance**, to keep token
+cost bounded:
+
+- **Full** — the entire body is inlined. Used for **sticky** fragments (always
+  relevant) and the **relevance set** — characters the writer actually worked from,
+  rendered in `characters-recent`. The relevance set comes from `writerContextIds`,
+  a type-agnostic signal the writer records on each prose fragment's `meta`.
+- **Summary** — one line per fragment (`id: name — description`) via
+  `fragmentSummaryBlock`. Used for the `*-shortlist` blocks (non-sticky, non-recent).
+- **On demand** — not in context at all; the agent fetches with `getFragment`.
+
+See [Context Strategy](analyze-context-design.md) for the full rationale, the
+relevance signal, and the deferred token-budget knob. (Note: `directions` and
+the analyze knowledge block currently inline full bodies and predate this signal —
+see that doc's "Current state vs the principle".)
+
 ## Block Manipulation
 
 Six utility functions are exported from `@tealios/errata-plugin-sdk`. All are pure and return new arrays:
