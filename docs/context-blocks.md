@@ -93,6 +93,13 @@ cost bounded:
   `fragmentSummaryBlock`. Used for the `*-shortlist` blocks (non-sticky, non-recent).
 - **On demand** — not in context at all; the agent fetches with `getFragment`.
 
+A fragment's **full** render is `name + content` (per type's `registry.renderContext`);
+the `description` is dropped, since it's the fragment's *summary* form and would be a
+redundant restatement once the body is inlined. (Image/icon keep it — with no content
+body, the description *is* the substance.) The one exception is the **analyze** agent,
+which renders character sheets *with* the description (and inline id) because it edits
+those fields and needs to see them.
+
 See [Context Strategy](analyze-context-design.md) for the full rationale, the
 relevance signal, and the deferred token-budget knob. (Note: `directions` and
 the analyze knowledge block currently inline full bodies and predate this signal —
