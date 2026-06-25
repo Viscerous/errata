@@ -2,7 +2,7 @@ import { agentBlockRegistry } from '../agents/agent-block-registry'
 import { instructionRegistry } from '../instructions'
 import type { AgentBlockContext } from '../agents/agent-block-context'
 import { registry } from '../fragments/registry'
-import { createDefaultBlocks, buildContextState, type ContextBuildState, type ContextBlock } from './context-builder'
+import { createDefaultBlocks, buildContextState, type ContextBlock } from './context-builder'
 import { createFragmentTools } from './tools'
 import { createPrewriterBlocks, buildPrewriterPreviewContext, createWriterBriefBlocks, PREWRITER_INSTRUCTIONS } from './prewriter'
 import {
@@ -44,20 +44,12 @@ function createGenerationBlocks(ctx: AgentBlockContext): ContextBlock[] {
     return createWriterBriefBlocks(ctx.proseFragments, placeholderBrief, ctx.modelId)
   }
 
-  const state: ContextBuildState = {
-    story: ctx.story,
-    proseFragments: ctx.proseFragments,
-    chapterSummaries: [],
-    stickyGuidelines: ctx.stickyGuidelines,
-    stickyKnowledge: ctx.stickyKnowledge,
-    stickyCharacters: ctx.stickyCharacters,
-    recentCharacters: ctx.recentCharacters ?? [],
-    guidelineShortlist: ctx.guidelineShortlist,
-    knowledgeShortlist: ctx.knowledgeShortlist,
-    characterShortlist: ctx.characterShortlist,
-    authorInput: GENERATION_PREVIEW_INPUT,
-  }
-  return createDefaultBlocks(state)
+  // Preview-only path: render the build state the preview already produced rather
+  // than reconstructing one from the flat ctx fields (which dropped chapterSummaries).
+  // modelId is set on ctx after the context is built, so thread it through.
+  const state = ctx.generationState
+  if (!state) throw new Error('generation.writer preview context is missing generationState')
+  return createDefaultBlocks(ctx.modelId ? { ...state, modelId: ctx.modelId } : state)
 }
 
 async function buildGenerationPreviewContext(dataDir: string, storyId: string): Promise<AgentBlockContext> {
@@ -75,6 +67,9 @@ async function buildGenerationPreviewContext(dataDir: string, storyId: string): 
     knowledgeShortlist: state.knowledgeShortlist,
     characterShortlist: state.characterShortlist,
     systemPromptFragments: [],
+    // The flat fields above feed custom script blocks; the block builder renders
+    // from this full state so nothing is dropped in a state→ctx→state round-trip.
+    generationState: state,
   }
 }
 
