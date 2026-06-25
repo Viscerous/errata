@@ -1,7 +1,7 @@
 import type { ContextBlock } from '../llm/context-builder'
 import { fragmentSummaryBlock } from '../llm/context-builder'
 import type { AgentBlockContext } from '../agents/agent-block-context'
-import type { Fragment } from '../fragments/schema'
+import type { Fragment, StoryMeta } from '../fragments/schema'
 import { getStory, listFragments, getFragment } from '../fragments/storage'
 import { getActiveProseIds } from '../fragments/prose-chain'
 import { getFragmentsByTag } from '../fragments/associations'
@@ -70,6 +70,38 @@ export function recentCastFromFragment(allCharacters: Fragment[], fragment: Frag
     Array.isArray(fragment?.meta?.writerContextIds) ? (fragment.meta.writerContextIds as string[]) : [],
   )
   return allCharacters.filter((c) => ids.has(c.id))
+}
+
+/**
+ * Build the analyze agent's block context. Single source for both a real run and
+ * the context preview, so neither can drift from the other — the only difference
+ * is the input: the run passes the prose being analyzed, the preview passes the
+ * latest prose (for the recent cast) with a placeholder new-prose block.
+ */
+export async function buildAnalyzeContext(
+  dataDir: string,
+  storyId: string,
+  story: StoryMeta,
+  input: { proseFragment: Fragment | null; newProse: { id: string; content: string } },
+): Promise<AgentBlockContext> {
+  const allCharacters = await listFragments(dataDir, storyId, 'character')
+  const allKnowledge = await listFragments(dataDir, storyId, 'knowledge')
+  const systemPromptFragments = await loadSystemPromptFragments(dataDir, storyId, getFragmentsByTag, getFragment)
+  return {
+    story,
+    proseFragments: [],
+    stickyGuidelines: [],
+    stickyKnowledge: [],
+    stickyCharacters: [],
+    guidelineShortlist: [],
+    knowledgeShortlist: [],
+    characterShortlist: [],
+    systemPromptFragments,
+    allCharacters,
+    recentCharacters: recentCastFromFragment(allCharacters, input.proseFragment),
+    allKnowledge,
+    newProse: input.newProse,
+  }
 }
 
 export function createLibrarianAnalyzeBlocks(ctx: AgentBlockContext): ContextBlock[] {
@@ -144,32 +176,16 @@ export async function buildAnalyzePreviewContext(dataDir: string, storyId: strin
   const story = await getStory(dataDir, storyId)
   if (!story) throw new Error(`Story ${storyId} not found`)
 
-  const allCharacters = await listFragments(dataDir, storyId, 'character')
-  const allKnowledge = await listFragments(dataDir, storyId, 'knowledge')
-  const systemPromptFragments = await loadSystemPromptFragments(dataDir, storyId, getFragmentsByTag, getFragment)
-
-  // Show characters-recent the way a real run would: resolve the cast from the
-  // latest prose fragment's forwarded writer context, the same input the run uses.
+  // Resolve the recent cast from the latest prose's forwarded writer context, the
+  // same input a run uses; the new-prose block is a placeholder until a run fills it.
   const activeProseIds = await getActiveProseIds(dataDir, storyId)
   const latestProseId = activeProseIds.at(-1)
   const latestProse = latestProseId ? await getFragment(dataDir, storyId, latestProseId) : null
-  const recentCharacters = recentCastFromFragment(allCharacters, latestProse)
 
-  return {
-    story,
-    proseFragments: [],
-    stickyGuidelines: [],
-    stickyKnowledge: [],
-    stickyCharacters: [],
-    guidelineShortlist: [],
-    knowledgeShortlist: [],
-    characterShortlist: [],
-    systemPromptFragments,
-    allCharacters,
-    recentCharacters,
-    allKnowledge,
+  return buildAnalyzeContext(dataDir, storyId, story, {
+    proseFragment: latestProse,
     newProse: { id: '(the new fragment\'s ID)', content: '(the new prose passage will appear here)' },
-  }
+  })
 }
 
 // ─── Librarian Chat ───
