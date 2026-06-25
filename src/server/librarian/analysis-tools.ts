@@ -352,3 +352,17 @@ export function createLibrarianAnalyzeTools(
 export function listLibrarianAnalyzeToolNames(): string[] {
   return Object.keys(createLibrarianAnalyzeTools(createEmptyCollector(), { dataDir: '', storyId: '' }))
 }
+
+/** Direct fragment-edit tools, withheld until reportMentions has delivered sheets. */
+export const ANALYZE_EDIT_TOOLS = ['updateFragment', 'editFragment'] as const
+
+/**
+ * Which tools to expose on a given analyze step. The edit tools are held back
+ * until reportMentions has run, so the model cannot author an edit in the same
+ * step it reports mentions (before the returned character sheet is in context).
+ */
+export function analyzeActiveTools(toolNames: string[], mentionsReported: boolean): string[] {
+  if (mentionsReported) return toolNames
+  const edits = new Set<string>(ANALYZE_EDIT_TOOLS)
+  return toolNames.filter(t => !edits.has(t))
+}
