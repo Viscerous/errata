@@ -573,7 +573,7 @@ export const ProseBlock = memo(function ProseBlock({
             steps={actionThoughtSteps}
             streaming={isStreamingAction}
             hasText={!!streamedActionText}
-            defaultExpanded={story?.settings.expandThoughtsByDefault ?? true}
+            defaultExpanded={story?.settings.expandThoughtsByDefault ?? false}
           />
         )}
         <StreamMarkdown
