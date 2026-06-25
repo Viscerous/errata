@@ -26,15 +26,13 @@ import { reportUsage } from '../llm/token-tracker'
 import { createLogger } from '../logging'
 import { compileAgentContext } from '../agents/compile-agent-context'
 import { createEmptyCollector, createLibrarianAnalyzeTools, toMentionAnnotations } from './analysis-tools'
-import { buildAnalyzeSystemPrompt, recentCastFromFragment } from './blocks'
+import { buildAnalyzeSystemPrompt, buildAnalyzeContext } from './blocks'
 import {
   createAnalysisBuffer,
   pushEvent,
   finishBuffer,
   clearBuffer,
 } from './analysis-stream'
-import { getFragmentsByTag } from '../fragments/associations'
-import type { AgentBlockContext } from '../agents/agent-block-context'
 
 const logger = createLogger('librarian-agent')
 
@@ -82,56 +80,20 @@ async function runLibrarianInner(
     throw new Error(`Fragment ${fragmentId} not found`)
   }
 
-  // Load characters and knowledge
-  requestLogger.debug('Loading characters and knowledge...')
-  const characters = await listFragments(dataDir, storyId, 'character')
-  const knowledge = await listFragments(dataDir, storyId, 'knowledge')
-  requestLogger.debug('Data loaded', {
-    characterCount: characters.length,
-    knowledgeCount: knowledge.length,
-  })
-
-  // Preload the characters the writer worked from in full, so edits land on their
-  // current sheet rather than a one-line summary. The writer forwards this set on
-  // the prose meta — its full-context cast plus anything it looked up — and it
-  // rides along on re-analysis since it persists with the fragment.
-  const recentCharacters = recentCastFromFragment(characters, fragment)
-  requestLogger.debug('Writer cast resolved', { recentCharacters: recentCharacters.length })
-
   // Load current librarian state for context
   const state = await getState(dataDir, storyId)
-
-  // Load system prompt fragments
-  const sysFragIds = await getFragmentsByTag(dataDir, storyId, 'pass-to-librarian-system-prompt')
-  const systemPromptFragments = []
-  for (const id of sysFragIds) {
-    const frag = await getFragment(dataDir, storyId, id)
-    if (frag) {
-      requestLogger.debug('Adding system prompt fragment to context', { fragmentId: frag.id, name: frag.name })
-      systemPromptFragments.push(frag)
-    }
-  }
 
   // Resolve model early so modelId is available for instruction resolution
   const { model, modelId, providerId, config, temperature } = await getModel(dataDir, storyId, { role: 'librarian.analyze' })
 
-  // Build agent block context
-  const blockContext: AgentBlockContext = {
-    story,
-    proseFragments: [],
-    stickyGuidelines: [],
-    stickyKnowledge: [],
-    stickyCharacters: [],
-    guidelineShortlist: [],
-    knowledgeShortlist: [],
-    characterShortlist: [],
-    systemPromptFragments,
-    allCharacters: characters,
-    recentCharacters,
-    allKnowledge: knowledge,
+  // Build agent block context (the run and the preview share this builder, so the
+  // context preview can't drift from what a run actually sees).
+  const blockContext = await buildAnalyzeContext(dataDir, storyId, story, {
+    proseFragment: fragment,
     newProse: { id: fragment.id, content: fragment.content },
-    modelId,
-  }
+  })
+  blockContext.modelId = modelId
+  requestLogger.debug('Analyze context built', { recentCharacters: blockContext.recentCharacters?.length ?? 0 })
 
   // Create collector and analysis tools
   const disableDirections = story.settings?.disableLibrarianDirections === true
