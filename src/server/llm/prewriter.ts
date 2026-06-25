@@ -6,7 +6,7 @@ import { compileAgentContext } from '../agents/compile-agent-context'
 import { instructionRegistry } from '../instructions'
 import { registry } from '../fragments/registry'
 import { buildContextState } from './context-builder'
-import type { AgentBlockContext } from '../agents/agent-block-context'
+import { type AgentBlockContext, baseBlockContext } from '../agents/agent-block-context'
 import type { Fragment } from '../fragments/schema'
 import type { TokenUsage } from './generation-logs'
 import { reportUsage } from './token-tracker'
@@ -455,14 +455,7 @@ export function createPrewriterBlocks(_ctx: AgentBlockContext): ContextBlock[] {
 export async function buildPrewriterPreviewContext(dataDir: string, storyId: string): Promise<AgentBlockContext> {
   const state = await buildContextState(dataDir, storyId, '(preview)')
   return {
-    story: state.story,
-    proseFragments: state.proseFragments,
-    stickyGuidelines: state.stickyGuidelines,
-    stickyKnowledge: state.stickyKnowledge,
-    stickyCharacters: state.stickyCharacters,
-    guidelineShortlist: state.guidelineShortlist,
-    knowledgeShortlist: state.knowledgeShortlist,
-    characterShortlist: state.characterShortlist,
+    ...baseBlockContext(state, state.story),
     systemPromptFragments: [],
   }
 }

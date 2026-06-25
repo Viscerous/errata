@@ -8,7 +8,7 @@
 import { ToolLoopAgent, stepCountIs, type ToolSet } from 'ai'
 import type { StoryMeta } from '../fragments/schema'
 import type { ContextBuildState } from '../llm/context-builder'
-import type { AgentBlockContext } from './agent-block-context'
+import { type AgentBlockContext, baseBlockContext } from './agent-block-context'
 import type { AgentStreamResult } from './stream-types'
 import { getModel, buildProviderOptions } from '../llm/client'
 import { getStory } from '../fragments/storage'
@@ -146,14 +146,7 @@ export function createStreamingRunner<TOpts extends object, TValidated = Record<
         : {}
 
       const blockContext: AgentBlockContext = {
-        story: ctxState?.story ?? story,
-        proseFragments: ctxState?.proseFragments ?? [],
-        stickyGuidelines: ctxState?.stickyGuidelines ?? [],
-        stickyKnowledge: ctxState?.stickyKnowledge ?? [],
-        stickyCharacters: ctxState?.stickyCharacters ?? [],
-        guidelineShortlist: ctxState?.guidelineShortlist ?? [],
-        knowledgeShortlist: ctxState?.knowledgeShortlist ?? [],
-        characterShortlist: ctxState?.characterShortlist ?? [],
+        ...baseBlockContext(ctxState, story),
         systemPromptFragments: [],
         modelId,
         ...extra,

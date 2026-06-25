@@ -58,3 +58,36 @@ export interface AgentBlockContext {
    */
   generationState?: ContextBuildState
 }
+
+/** The fields every agent's block context derives from a ContextBuildState. */
+type BaseBlockContext = Pick<
+  AgentBlockContext,
+  | 'story'
+  | 'proseFragments'
+  | 'stickyGuidelines'
+  | 'stickyKnowledge'
+  | 'stickyCharacters'
+  | 'recentCharacters'
+  | 'guidelineShortlist'
+  | 'knowledgeShortlist'
+  | 'characterShortlist'
+>
+
+/**
+ * Map a ContextBuildState into the story-context fields every agent's block
+ * context shares (empties when no state was built). Single source so the runtime
+ * runners and the context previews can't drift from each other field-by-field.
+ */
+export function baseBlockContext(ctxState: ContextBuildState | null | undefined, story: StoryMeta): BaseBlockContext {
+  return {
+    story: ctxState?.story ?? story,
+    proseFragments: ctxState?.proseFragments ?? [],
+    stickyGuidelines: ctxState?.stickyGuidelines ?? [],
+    stickyKnowledge: ctxState?.stickyKnowledge ?? [],
+    stickyCharacters: ctxState?.stickyCharacters ?? [],
+    recentCharacters: ctxState?.recentCharacters ?? [],
+    guidelineShortlist: ctxState?.guidelineShortlist ?? [],
+    knowledgeShortlist: ctxState?.knowledgeShortlist ?? [],
+    characterShortlist: ctxState?.characterShortlist ?? [],
+  }
+}
