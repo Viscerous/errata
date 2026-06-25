@@ -55,6 +55,10 @@ the original plan was written.
   re-analysis of older prose, the context preview, and prose not written by the
   writer still get author-pinned sheets in full (matching the writer's
   `full = pinned ∪ recent cast` relevance model).
+- Full sheets here render as `id: name`, **description**, then `content` — analyze
+  keeps the `description` that read-only agents drop in full renders (see
+  [Context Blocks](context-blocks.md#content-tiering)), because it *edits* all three
+  fields and must see the current value of each.
 - `reportMentions` is **annotation-only** (records who appears, for prose
   highlighting); it no longer returns bodies.
 - `getFragment` is the **backstop** for an appearing character not in the
