@@ -32,13 +32,13 @@ export function buildAnalyzeSystemPrompt(opts?: { disableDirections?: boolean; d
     'Report every character who appears — call reportMentions with their IDs, so their names are highlighted in the prose.',
     'Summarize what happened — call updateSummary.',
     'Record contradictions with established facts (reportContradictions) and significant events (reportTimeline) when the prose has them.',
-    'Update a fragment when the prose changes a lasting fact about it — a death, an injury, a change in allegiance, title, location, or relationship. The character and knowledge sheets are the record of current state and are fed into later writing, so the change must land on the sheet itself; the summary and timeline log the event but do not keep the sheet current. To change a name or description, call updateFragment with just those fields (it leaves the body untouched); to change part of the body, call editFragment with an exact span from its full sheet; to rewrite a body wholesale, call updateFragment with complete new content built from its full sheet — never from the one-line summary.',
+    'Update a fragment when the prose changes a lasting fact about it — its state, allegiance, title, location, or relationships. The sheet is the record of current state and feeds later writing, so the change must land on the sheet, not only the summary or timeline. Use editFragment to replace an exact span from its full sheet, or updateFragment to set a whole field (the others stay untouched); build any new content from the full sheet, never from the one-line summary.',
   ]
   if (!opts?.disableSuggestions) {
     steps.push('Suggest genuinely new characters or knowledge with suggestFragment — only ones that do not exist yet.')
   }
   if (!opts?.disableDirections) {
-    steps.push('Suggest 3-5 possible next directions for the story with suggestDirections.')
+    steps.push('Suggest 3-5 varied next directions for the story with suggestDirections.')
   }
   const numbered = steps.map((s, i) => `${i + 1}. ${s}`).join('\n')
 
