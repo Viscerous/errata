@@ -95,6 +95,11 @@ export function createAgentInstance<K extends string>(
       const rawOutput = await definition.run(invocationContext, parsedInput)
       const { eventStream, completion } = rawOutput as AgentStreamResult
 
+      // Mirror the agent's events onto its live activity trace while the caller
+      // consumes the original branch untouched. Each chunk is one NDJSON event.
+      const [forCaller, forTrace] = eventStream.tee()
+      void drainToTrace(forTrace, handle)
+
       const wrappedCompletion = completion.then(
         (result) => {
           finish('success', result)
@@ -106,11 +111,37 @@ export function createAgentInstance<K extends string>(
         },
       )
 
-      return { eventStream, completion: wrappedCompletion }
+      return { eventStream: forCaller, completion: wrappedCompletion }
     },
 
     fail(error: unknown): void {
       finish('error', error)
     },
+  }
+}
+
+/** Read an agent's NDJSON event stream and replay each event onto its run handle's
+ *  activity trace. Best-effort: a malformed or aborted stream is swallowed since
+ *  the trace is purely for live display. */
+async function drainToTrace(stream: ReadableStream<string>, handle: AgentRunHandle): Promise<void> {
+  const reader = stream.getReader()
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      for (const line of value.split('\n')) {
+        const trimmed = line.trim()
+        if (!trimmed) continue
+        try {
+          handle.pushEvent(JSON.parse(trimmed))
+        } catch {
+          // Ignore malformed lines.
+        }
+      }
+    }
+  } catch {
+    // Stream errored/cancelled — finish() records the outcome separately.
+  } finally {
+    reader.releaseLock()
   }
 }

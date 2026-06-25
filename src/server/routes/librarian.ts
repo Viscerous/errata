@@ -5,7 +5,6 @@ import {
   listGenerationLogs,
 } from '../llm/generation-logs'
 import { getLibrarianRuntimeStatus, triggerLibrarian } from '../librarian/scheduler'
-import { createSSEStream } from '../librarian/analysis-stream'
 import { createAgentInstance, listAgentRuns } from '../agents'
 import {
   getState as getLibrarianState,
@@ -80,17 +79,6 @@ export function librarianRoutes(dataDir: string) {
       })
       return { ok: true, fragmentId }
     }, { detail: { summary: 'Trigger librarian analysis on a specific fragment' } })
-
-    .get('/stories/:storyId/librarian/analysis-stream', async ({ params, set }) => {
-      const stream = createSSEStream(params.storyId)
-      if (!stream) {
-        set.status = 404
-        return { error: 'No active analysis' }
-      }
-      return new Response(encodeStream(stream), {
-        headers: { 'Content-Type': 'application/x-ndjson; charset=utf-8' },
-      })
-    }, { detail: { summary: 'Stream live analysis events (NDJSON)' } })
 
     .get('/stories/:storyId/librarian/analyses', async ({ params }) => {
       return listLibrarianAnalyses(dataDir, params.storyId)

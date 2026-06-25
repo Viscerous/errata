@@ -4,6 +4,8 @@ import { agentBlockRegistry } from '../agents/agent-block-registry'
 import { modelRoleRegistry } from '../agents/model-role-registry'
 import { ensureCoreAgentsRegistered } from '../agents/register-core'
 import { listActiveAgents } from '../agents/active-registry'
+import { createActivitySSE } from '../agents/activity-stream'
+import { encodeStream } from './encode-stream'
 import { compileBlocks, expandMessagesFragmentTags } from '../llm/context-builder'
 import { getModel } from '../llm/client'
 import { applyBlockConfig } from '../blocks/apply'
@@ -30,6 +32,18 @@ export function agentBlockRoutes(dataDir: string) {
     .get('/stories/:storyId/active-agents', ({ params }) => {
       return listActiveAgents(params.storyId)
     }, { detail: { summary: 'List currently running agents' } })
+
+    // Stream a running agent's live reasoning/tool trace (NDJSON)
+    .get('/stories/:storyId/activity/:agentName/stream', ({ params, set }) => {
+      const stream = createActivitySSE(params.storyId, params.agentName)
+      if (!stream) {
+        set.status = 404
+        return { error: 'No active run for this agent' }
+      }
+      return new Response(encodeStream(stream), {
+        headers: { 'Content-Type': 'application/x-ndjson; charset=utf-8' },
+      })
+    }, { detail: { summary: 'Stream a running agent\'s live activity (NDJSON)' } })
 
     // List all registered model roles (auto-discovered from agents)
     .get('/model-roles', () => {
