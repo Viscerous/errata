@@ -645,7 +645,7 @@ describe('context blocks', () => {
       const state = await buildContextState(dataDir, story.id, 'Continue')
       const blocks = createDefaultBlocks(state)
 
-      expect(findBlock(blocks, 'prose')).toBeUndefined()
+      expect(findBlock(blocks, 'prose-recent')).toBeUndefined()
     })
 
     it('creates prose block when prose fragments exist', async () => {
@@ -658,7 +658,7 @@ describe('context blocks', () => {
       const state = await buildContextState(dataDir, story.id, 'Continue')
       const blocks = createDefaultBlocks(state)
 
-      const prose = findBlock(blocks, 'prose')
+      const prose = findBlock(blocks, 'prose-recent')
       expect(prose).toBeDefined()
       expect(prose!.role).toBe('user')
       expect(prose!.content).toContain('Hello world.')

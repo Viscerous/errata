@@ -272,7 +272,7 @@ describe('Librarian Refine Blocks', () => {
     const blocks = def.createDefaultBlocks(makeBaseContext({
       proseFragments: [makeFragment({ id: 'pr-test01', type: 'prose', name: 'Ch 1', content: 'Story text.' })],
     }))
-    expect(blocks.find(b => b.id === 'prose')).toBeDefined()
+    expect(blocks.find(b => b.id === 'prose-recent')).toBeDefined()
   })
 })
 
