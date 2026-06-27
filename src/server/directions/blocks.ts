@@ -53,6 +53,26 @@ export function createDirectionsSuggestBlocks(ctx: AgentBlockContext): ContextBl
     }
   }
 
+  if (ctx.stickyKnowledge.length > 0) {
+    blocks.push({
+      id: 'knowledge-sticky',
+      role: 'user',
+      content: `## Pinned Knowledge\n${ctx.stickyKnowledge.map(k => `### ${k.name}\n${k.content}`).join('\n\n')}`,
+      order: 245,
+      source: 'builtin',
+    })
+  }
+
+  if (ctx.recentKnowledge && ctx.recentKnowledge.length > 0) {
+    blocks.push({
+      id: 'knowledge-recent',
+      role: 'user',
+      content: `## Knowledge in Recent Prose\n${ctx.recentKnowledge.map(k => `### ${k.name}\n${k.content}`).join('\n\n')}`,
+      order: 248,
+      source: 'builtin',
+    })
+  }
+
   if (ctx.proseFragments.length > 0) {
     const recentProse = ctx.proseFragments.slice(-3)
     blocks.push({

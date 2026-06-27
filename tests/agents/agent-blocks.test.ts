@@ -375,6 +375,50 @@ describe('Prose Transform Blocks', () => {
   })
 })
 
+describe('Directions Blocks', () => {
+  it('includes knowledge-sticky and knowledge-recent blocks when provided', () => {
+    const def = agentBlockRegistry.get('directions.suggest')!
+    const stickyKnowledge = makeFragment({ id: 'kn-magic', type: 'knowledge', name: 'Magic System', content: 'Sticky lore', sticky: true })
+    const recentKnowledge = makeFragment({ id: 'kn-sword', type: 'knowledge', name: 'Sword', content: 'Recent lore', sticky: false })
+
+    const blocks = def.createDefaultBlocks(makeBaseContext({
+      stickyKnowledge: [stickyKnowledge],
+      recentKnowledge: [recentKnowledge],
+    }))
+
+    const stickyBlock = blocks.find(b => b.id === 'knowledge-sticky')
+    expect(stickyBlock).toBeDefined()
+    expect(stickyBlock!.content).toContain('Magic System')
+    expect(stickyBlock!.content).toContain('Sticky lore')
+
+    const recentBlock = blocks.find(b => b.id === 'knowledge-recent')
+    expect(recentBlock).toBeDefined()
+    expect(recentBlock!.content).toContain('Sword')
+    expect(recentBlock!.content).toContain('Recent lore')
+  })
+})
+
+describe('Writer Blocks', () => {
+  it('includes knowledge-recent and knowledge-shortlist blocks when provided', () => {
+    const def = agentBlockRegistry.get('generation.writer')!
+    const recentKnowledge = makeFragment({ id: 'kn-sword', type: 'knowledge', name: 'Sword', content: 'Recent lore', sticky: false })
+    const knowledgeShortlist = [makeFragment({ id: 'kn-shield', type: 'knowledge', name: 'Shield', content: 'Shortlist lore', sticky: false })]
+
+    const blocks = def.createDefaultBlocks(makeBaseContext({
+      recentKnowledge: [recentKnowledge],
+      knowledgeShortlist: knowledgeShortlist,
+    }))
+
+    const recent = blocks.find(b => b.id === 'knowledge-recent')
+    expect(recent).toBeDefined()
+    expect(recent!.content).toContain('Recent lore')
+
+    const shortlist = blocks.find(b => b.id === 'knowledge-shortlist')
+    expect(shortlist).toBeDefined()
+    expect(shortlist!.content).toContain('Shield')
+  })
+})
+
 describe('Character Chat Blocks', () => {
   it('produces story-context block at minimum', () => {
     const def = agentBlockRegistry.get('character-chat.chat')!
