@@ -172,21 +172,15 @@ export const HELP_SECTIONS: HelpSection[] = [
             <div className="mt-4 mb-1">
               <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wider mb-2">Type-specific aliases</p>
               <P>
-                For each registered fragment type, the model also gets dedicated aliases:
+                Custom fragment types can expose dedicated aliases when their type enables LLM tools:
               </P>
               <div className="rounded-md border border-border/25 bg-accent/15 px-3 py-2.5 mb-2">
                 <div className="space-y-1">
                   <p className="text-[0.6875rem] font-mono text-foreground/55">
-                    <span className="text-primary/70">getCharacter</span>(id), <span className="text-primary/70">listCharacters</span>()
+                    <span className="text-primary/70">getLocation</span>(id), <span className="text-primary/70">listLocations</span>()
                   </p>
                   <p className="text-[0.6875rem] font-mono text-foreground/55">
-                    <span className="text-primary/70">getGuideline</span>(id), <span className="text-primary/70">listGuidelines</span>()
-                  </p>
-                  <p className="text-[0.6875rem] font-mono text-foreground/55">
-                    <span className="text-primary/70">getKnowledge</span>(id), <span className="text-primary/70">listKnowledge</span>()
-                  </p>
-                  <p className="text-[0.6875rem] font-mono text-foreground/55">
-                    <span className="text-primary/70">getProse</span>(id), <span className="text-primary/70">listProse</span>()
+                    <span className="text-primary/70">getFaction</span>(id), <span className="text-primary/70">listFactions</span>()
                   </p>
                 </div>
               </div>

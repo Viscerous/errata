@@ -82,8 +82,8 @@ export interface FragmentToolsOptions {
 /**
  * Creates LLM tool definitions for fragment operations.
  *
- * Generates type-specific aliased read tools per registered fragment type:
- *   getCharacter(id), listCharacters(), getProse(id), listProse(), etc.
+ * Generates type-specific aliased read tools for registry types that opt in:
+ *   getLocation(id), listLocations(), etc.
  *
  * Write tools (updateFragment, editFragment, deleteFragment) are generic
  * and only included when readOnly is false.

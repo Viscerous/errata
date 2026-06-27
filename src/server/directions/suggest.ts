@@ -1,4 +1,5 @@
 import { ToolLoopAgent, stepCountIs } from 'ai'
+import { z } from 'zod/v4'
 import { getModel, buildProviderOptions } from '../llm/client'
 import { getStory, getFragment } from '../fragments/storage'
 import { buildContextState } from '../llm/context-builder'
@@ -36,6 +37,27 @@ export interface SuggestDirectionsResult {
   suggestions: SuggestionDirection[]
   modelId: string
   durationMs: number
+}
+
+const suggestionDirectionSchema = z.object({
+  title: z.string().trim().min(1),
+  description: z.string().trim().min(1),
+  instruction: z.string().trim().min(1),
+})
+
+export function parseSuggestionDirectionsResponse(text: string, count: number): SuggestionDirection[] {
+  const jsonStr = text.trim().replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '')
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(jsonStr)
+  } catch (error) {
+    throw new Error(`Model response is not valid JSON: ${error instanceof Error ? error.message : String(error)}`)
+  }
+  const validation = z.array(suggestionDirectionSchema).length(count).safeParse(parsed)
+  if (!validation.success) {
+    throw new Error(`Model response must be a JSON array of exactly ${count} directions with title, description, and instruction`)
+  }
+  return validation.data
 }
 
 export async function suggestDirections(
@@ -113,12 +135,7 @@ export async function suggestDirections(
   const durationMs = Date.now() - startTime
 
   // Parse the JSON array from the response
-  const text = fullText.trim()
-  const jsonStr = text.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '')
-  const suggestions = JSON.parse(jsonStr)
-  if (!Array.isArray(suggestions)) {
-    throw new Error('Model response is not a JSON array')
-  }
+  const suggestions = parseSuggestionDirectionsResponse(fullText, count)
 
   requestLogger.info('Suggestions generated', { count: suggestions.length, durationMs })
 
