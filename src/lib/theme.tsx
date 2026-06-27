@@ -84,6 +84,10 @@ export function useCharacterMentions() {
   return useBoolPref('errata-character-mentions', false)
 }
 
+export function useKnowledgeMentions() {
+  return useBoolPref('errata-knowledge-mentions', false)
+}
+
 const TIMELINE_BAR_KEY = 'errata-timeline-bar'
 const TIMELINE_BAR_EVENT = 'errata-timeline-bar-change'
 

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, type StoryMeta, type GlobalConfigSafe } from '@/lib/api'
-import { useTheme, useQuickSwitch, useCharacterMentions, useTimelineBar, useProseWidth, useUiFontSize, UI_FONT_SIZE_LABELS, useProseFontSize, PROSE_FONT_SIZE_LABELS, useFontPreferences, getActiveFont, FONT_CATALOGUE, loadFullFontCatalogue, useCustomCss, useWritingTransforms, useTransformContext, TRANSFORM_CONTEXT_LABELS, type TransformContext, type FontRole, type ProseWidth, type UiFontSize, type ProseFontSize } from '@/lib/theme'
+import { useTheme, useQuickSwitch, useCharacterMentions, useKnowledgeMentions, useTimelineBar, useProseWidth, useUiFontSize, UI_FONT_SIZE_LABELS, useProseFontSize, PROSE_FONT_SIZE_LABELS, useFontPreferences, getActiveFont, FONT_CATALOGUE, loadFullFontCatalogue, useCustomCss, useWritingTransforms, useTransformContext, TRANSFORM_CONTEXT_LABELS, type TransformContext, type FontRole, type ProseWidth, type UiFontSize, type ProseFontSize } from '@/lib/theme'
 import { Settings2, ChevronRight, ExternalLink, Eye, EyeOff, Puzzle, RotateCcw, CircleHelp, Code } from 'lucide-react'
 import { useHelp } from '@/hooks/use-help'
 import { CustomCssPanel } from '@/components/settings/CustomCssPanel'
@@ -412,6 +412,7 @@ export function SettingsPanel({
   const { theme, setTheme } = useTheme()
   const [quickSwitch, setQuickSwitch] = useQuickSwitch()
   const [characterMentions, setCharacterMentions] = useCharacterMentions()
+  const [knowledgeMentions, setKnowledgeMentions] = useKnowledgeMentions()
   const [timelineBar, setTimelineBar] = useTimelineBar()
   const [proseWidth, setProseWidth] = useProseWidth()
   const [uiFontSize, setUiFontSize] = useUiFontSize()
@@ -466,6 +467,9 @@ export function SettingsPanel({
           </SettingRow>
           <SettingRow label="Character mentions" description="Highlight character names in prose">
             <Toggle checked={characterMentions} onChange={setCharacterMentions} label="Toggle character mentions" />
+          </SettingRow>
+          <SettingRow label="Knowledge mentions" description="Highlight knowledge terms in prose">
+            <Toggle checked={knowledgeMentions} onChange={setKnowledgeMentions} label="Toggle knowledge mentions" />
           </SettingRow>
           <SettingRow label="Timeline bar" description="Show timeline switcher above prose">
             <Toggle checked={timelineBar} onChange={setTimelineBar} label="Toggle timeline bar" />

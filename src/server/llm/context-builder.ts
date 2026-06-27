@@ -22,6 +22,7 @@ export interface ContextBuildState {
     summary: string
   }>
   recentCharacters?: Fragment[]
+  recentKnowledge?: Fragment[]
   authorInput?: string
   modelId?: string
 }
@@ -386,6 +387,8 @@ export async function buildContextState(
   }
   const recentCharacters = nonStickyCharacters.filter((f) => recentlyMentionedIds.has(f.id)).sort(sortByOrder)
   const characterShortlist = nonStickyCharacters.filter((f) => !recentlyMentionedIds.has(f.id))
+  const recentKnowledge = nonStickyKnowledge.filter((f) => recentlyMentionedIds.has(f.id)).sort(sortByOrder)
+  const knowledgeShortlist = nonStickyKnowledge.filter((f) => !recentlyMentionedIds.has(f.id))
 
   const state = {
     story: { ...story, summary: effectiveSummary },
@@ -395,8 +398,9 @@ export async function buildContextState(
     stickyKnowledge,
     stickyCharacters,
     recentCharacters,
+    recentKnowledge,
     guidelineShortlist: nonStickyGuidelines,
-    knowledgeShortlist: nonStickyKnowledge,
+    knowledgeShortlist,
     characterShortlist,
     authorInput,
   }
@@ -407,8 +411,9 @@ export async function buildContextState(
     stickyKnowledge: stickyKnowledge.length,
     stickyCharacters: stickyCharacters.length,
     recentCharacters: recentCharacters.length,
+    recentKnowledge: recentKnowledge.length,
     guidelineShortlist: nonStickyGuidelines.length,
-    knowledgeShortlist: nonStickyKnowledge.length,
+    knowledgeShortlist: knowledgeShortlist.length,
     characterShortlist: characterShortlist.length,
   })
 
@@ -519,6 +524,7 @@ export function createDefaultBlocks(state: ContextBuildState): ContextBlock[] {
     stickyKnowledge,
     stickyCharacters,
     recentCharacters = [],
+    recentKnowledge = [],
     guidelineShortlist,
     knowledgeShortlist,
     characterShortlist,
@@ -637,6 +643,21 @@ export function createDefaultBlocks(state: ContextBuildState): ContextBlock[] {
 
   if (guidelineShortlist.length > 0) {
     blocks.push(fragmentSummaryBlock({ id: 'guidelines-shortlist', heading: 'Guidelines', items: guidelineShortlist, order: 300 }))
+  }
+
+  // Full sheets for knowledge active in the recent prose — the writer continues
+  // them from current state. The shortlist below carries everyone else as summaries.
+  if (recentKnowledge.length > 0) {
+    blocks.push({
+      id: 'knowledge-recent',
+      role: 'user',
+      content: [
+        '## Knowledge in Recent Prose',
+        ...recentKnowledge.map(renderFragment),
+      ].join('\n'),
+      order: 308,
+      source: 'builtin',
+    })
   }
 
   if (knowledgeShortlist.length > 0) {

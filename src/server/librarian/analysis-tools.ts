@@ -2,10 +2,32 @@ import { tool, type ToolSet } from 'ai'
 import { z } from 'zod/v4'
 import { getFragment, updateFragment, updateFragmentVersioned } from '../fragments/storage'
 import { checkFragmentWrite } from '../fragments/protection'
+import type { LibrarianMention } from './storage'
+
+const mentionTextSchema = z.string().trim().min(1).describe('The exact non-empty name, title, or key term used in the prose')
+
+export const mentionInputSchema = z.union([
+  z.object({
+    characterId: z.string().startsWith('ch-').describe('The character fragment ID (e.g. ch-abc)'),
+    text: mentionTextSchema,
+  }).strict(),
+  z.object({
+    knowledgeId: z.string().startsWith('kn-').describe('The knowledge fragment ID (e.g. kn-xyz)'),
+    text: mentionTextSchema,
+  }).strict(),
+])
+
+function mentionFragmentId(mention: LibrarianMention): string {
+  return 'characterId' in mention ? mention.characterId : mention.knowledgeId
+}
+
+function mentionKey(mention: LibrarianMention): string {
+  return `${mentionFragmentId(mention)}\u0000${mention.text.trim().toLowerCase()}`
+}
 
 /** Map collected mentions to the prose annotation shape used for highlighting. */
-export function toMentionAnnotations(mentions: Array<{ characterId: string; text: string }>) {
-  return mentions.map(m => ({ type: 'mention' as const, fragmentId: m.characterId, text: m.text }))
+export function toMentionAnnotations(mentions: LibrarianMention[]) {
+  return mentions.map(m => ({ type: 'mention' as const, fragmentId: mentionFragmentId(m), text: m.text }))
 }
 
 /**
@@ -17,7 +39,7 @@ async function persistMentionAnnotations(
   dataDir: string,
   storyId: string,
   proseFragmentId: string,
-  mentions: Array<{ characterId: string; text: string }>,
+  mentions: LibrarianMention[],
 ): Promise<void> {
   const prose = await getFragment(dataDir, storyId, proseFragmentId)
   if (!prose) return
@@ -36,7 +58,7 @@ export interface AnalysisCollector {
     stateChanges: string[]
     openThreads: string[]
   }
-  mentions: Array<{ characterId: string; text: string }>
+  mentions: LibrarianMention[]
   contradictions: Array<{ description: string; fragmentIds: string[] }>
   fragmentSuggestions: Array<{
     type: 'character' | 'knowledge'
@@ -147,19 +169,18 @@ export function createAnalysisTools(collector: AnalysisCollector, opts?: { dataD
     }),
 
     reportMentions: tool({
-      description: 'Report character mentions in the new prose — references by name, nickname, or title, not pronouns. Call once with all mentions; each character appears only once, by primary name.',
+      description: 'Report character and knowledge fragment mentions in the new prose — references by name, title, or key term. Call once with all mentions.',
       inputSchema: z.object({
-        mentions: z.array(z.object({
-          characterId: z.string().describe('The character fragment ID (e.g. ch-abc)'),
-          text: z.string().describe('The exact name, nickname, or title used to refer to the character (not pronouns)'),
-        })),
+        mentions: z.array(mentionInputSchema),
       }),
       execute: async ({ mentions }) => {
-        // Deduplicate by characterId — keep the first mention text for each
-        const seen = new Set(collector.mentions.map(m => m.characterId))
+        // Deduplicate by fragment+surface text. Multiple terms can resolve to
+        // the same fragment and should all highlight.
+        const seen = new Set(collector.mentions.map(mentionKey))
         for (const m of mentions) {
-          if (seen.has(m.characterId)) continue
-          seen.add(m.characterId)
+          const key = mentionKey(m)
+          if (seen.has(key)) continue
+          seen.add(key)
           collector.mentions.push(m)
         }
         // Persist annotations now so the prose highlights appear as soon as

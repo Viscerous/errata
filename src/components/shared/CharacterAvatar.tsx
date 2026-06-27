@@ -1,12 +1,12 @@
 import type { Fragment } from '@/lib/api'
 import { resolveFragmentVisual } from '@/lib/fragment-visuals'
 
-export function CharacterAvatar({ character, mediaById, size = 'md' }: {
-  character: Fragment
+export function FragmentAvatar({ fragment, mediaById, size = 'md' }: {
+  fragment: Fragment
   mediaById: Map<string, Fragment>
   size?: 'sm' | 'md' | 'lg'
 }) {
-  const visual = resolveFragmentVisual(character, mediaById)
+  const visual = resolveFragmentVisual(fragment, mediaById)
   const sizeClass = size === 'sm' ? 'size-6' : size === 'lg' ? 'w-14 h-14' : 'size-9'
   const textClass = size === 'sm' ? 'text-[0.625rem]' : size === 'lg' ? 'text-xl' : 'text-sm'
 
@@ -36,8 +36,16 @@ export function CharacterAvatar({ character, mediaById, size = 'md' }: {
   return (
     <div className={`${sizeClass} shrink-0 rounded-full bg-primary/5 border border-primary/10 flex items-center justify-center`}>
       <span className={`font-display ${textClass} text-primary/60`}>
-        {character.name.charAt(0)}
+        {fragment.name.charAt(0)}
       </span>
     </div>
   )
+}
+
+export function CharacterAvatar({ character, mediaById, size = 'md' }: {
+  character: Fragment
+  mediaById: Map<string, Fragment>
+  size?: 'sm' | 'md' | 'lg'
+}) {
+  return <FragmentAvatar fragment={character} mediaById={mediaById} size={size} />
 }

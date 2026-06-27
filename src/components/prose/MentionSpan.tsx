@@ -1,8 +1,8 @@
 import { HoverCard } from 'radix-ui'
-import { useCharacterMentionContext } from './CharacterMentionContext'
-import { CharacterPreviewCard } from './CharacterPreviewCard'
+import { useMentionContext } from './MentionContext'
+import { MentionPreviewCard } from './MentionPreviewCard'
 
-interface CharacterMentionSpanProps {
+interface MentionSpanProps {
   fragmentId: string
   className?: string
   style?: React.CSSProperties
@@ -13,7 +13,7 @@ interface CharacterMentionSpanProps {
   children?: React.ReactNode
 }
 
-export function CharacterMentionSpan({
+export function MentionSpan({
   fragmentId,
   className,
   style,
@@ -22,12 +22,12 @@ export function CharacterMentionSpan({
   role,
   tabIndex,
   children,
-}: CharacterMentionSpanProps) {
-  const ctx = useCharacterMentionContext()
-  const character = ctx?.getCharacter(fragmentId)
+}: MentionSpanProps) {
+  const ctx = useMentionContext()
+  const fragment = ctx?.getFragment(fragmentId)
 
-  // No context or character not found — render plain span
-  if (!ctx || !character) {
+  // No context or fragment not found — render plain span.
+  if (!ctx || !fragment) {
     return (
       <span
         className={className}
@@ -63,8 +63,8 @@ export function CharacterMentionSpan({
           sideOffset={6}
           className="w-72 rounded-xl border border-border/50 bg-popover/95 backdrop-blur-md shadow-xl shadow-black/10 z-50 animate-in fade-in-0 zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2"
         >
-          <CharacterPreviewCard
-            character={character}
+          <MentionPreviewCard
+            fragment={fragment}
             mediaById={ctx.mediaById}
           />
         </HoverCard.Content>
