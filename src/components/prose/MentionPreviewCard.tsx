@@ -1,16 +1,16 @@
 import type { Fragment } from '@/lib/api'
-import { CharacterAvatar } from '@/components/shared/CharacterAvatar'
+import { FragmentAvatar } from '@/components/shared/CharacterAvatar'
 import { Badge } from '@/components/ui/badge'
 
-export function CharacterPreviewCard({
-  character,
+export function MentionPreviewCard({
+  fragment,
   mediaById,
 }: {
-  character: Fragment
+  fragment: Fragment
   mediaById: Map<string, Fragment>
 }) {
   // Filter out internal tags (color=, etc.)
-  const displayTags = character.tags
+  const displayTags = fragment.tags
     .filter(t => !t.startsWith('color='))
     .slice(0, 3)
 
@@ -18,24 +18,24 @@ export function CharacterPreviewCard({
     <div className="flex flex-col gap-2.5 p-3">
       {/* Header: avatar + name + description */}
       <div className="flex items-start gap-3">
-        <CharacterAvatar character={character} mediaById={mediaById} size="lg" />
+        <FragmentAvatar fragment={fragment} mediaById={mediaById} size="lg" />
         <div className="flex-1 min-w-0">
           <div className="font-display text-sm tracking-tight text-popover-foreground">
-            {character.name}
+            {fragment.name}
           </div>
-          {character.description && (
+          {fragment.description && (
             <p className="text-[0.6875rem] text-muted-foreground leading-snug mt-0.5 line-clamp-2">
-              {character.description}
+              {fragment.description}
             </p>
           )}
         </div>
       </div>
 
       {/* Content preview */}
-      {character.content && (
+      {fragment.content && (
         <div className="relative">
           <p className="text-xs text-muted-foreground/80 leading-relaxed line-clamp-3 mention-preview-fade">
-            {character.content}
+            {fragment.content}
           </p>
         </div>
       )}

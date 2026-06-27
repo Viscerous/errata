@@ -29,7 +29,7 @@ export function buildAnalyzeSystemPrompt(opts?: { disableDirections?: boolean; d
   // drift). Steps for disabled tools are omitted and the rest renumber, so the
   // prompt never names a tool the model wasn't given.
   const steps: string[] = [
-    'Report every character who appears — call reportMentions with their IDs, so their names are highlighted in the prose.',
+    'Report knowledge and every character who appears or is referred to — call reportMentions with their IDs and text, so they are highlighted in the prose.',
     'Summarize what happened — call updateSummary.',
     'Record contradictions with established facts (reportContradictions) and significant events (reportTimeline) when the prose has them.',
     'Update a fragment when the prose changes a lasting fact about it — its state, allegiance, title, location, or relationships. The sheet is the record of current state and feeds later writing, so the change must land on the sheet, not only the summary or timeline. Use editFragment to replace an exact span from its full sheet, or updateFragment to set a whole field (the others stay untouched); build any new content from the full sheet, never from the one-line summary.',

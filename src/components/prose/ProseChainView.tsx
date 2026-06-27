@@ -6,14 +6,14 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { StreamMarkdown } from '@/components/ui/stream-markdown'
 import { Loader2, Wand2, Bookmark, List } from 'lucide-react'
 import { Hint } from '@/components/ui/prose-text'
-import { useQuickSwitch, useProseWidth, PROSE_WIDTH_VALUES, useCharacterMentions } from '@/lib/theme'
+import { useQuickSwitch, useProseWidth, PROSE_WIDTH_VALUES, useCharacterMentions, useKnowledgeMentions } from '@/lib/theme'
 import { parseVisualRefs } from '@/lib/fragment-visuals'
 import { ProseBlock } from './ProseBlock'
 import { ChapterMarker } from './ChapterMarker'
 import { InlineGenerationInput, type ThoughtStep } from './InlineGenerationInput'
 import { GenerationThoughts } from './GenerationThoughts'
 import { ProseOutlinePanel } from './ProseOutlinePanel'
-import { CharacterMentionProvider } from './CharacterMentionContext'
+import { MentionProvider } from './MentionContext'
 
 interface ProseChainViewProps {
   storyId: string
@@ -209,7 +209,8 @@ export function ProseChainView({
   const scrollAreaRef = useRef<HTMLDivElement>(null)
   const [quickSwitch] = useQuickSwitch()
   const [proseWidth] = useProseWidth()
-  const [mentionsEnabled] = useCharacterMentions()
+  const [characterMentionsEnabled] = useCharacterMentions()
+  const [knowledgeMentionsEnabled] = useKnowledgeMentions()
   const queryClient = useQueryClient()
 
   // While the librarian is analyzing, poll its status so we can refresh prose as
@@ -218,8 +219,8 @@ export function ProseChainView({
   const { data: librarianStatus } = useQuery({
     queryKey: ['librarian-status', storyId],
     queryFn: () => api.librarian.getStatus(storyId),
-    enabled: mentionsEnabled,
-    refetchInterval: mentionsEnabled ? 2_000 : false,
+    enabled: characterMentionsEnabled || knowledgeMentionsEnabled,
+    refetchInterval: (characterMentionsEnabled || knowledgeMentionsEnabled) ? 2_000 : false,
   })
   const isAnalyzing = librarianStatus?.runStatus === 'running'
 
@@ -235,7 +236,7 @@ export function ProseChainView({
     queryKey: ['fragments', storyId, 'prose'],
     queryFn: () => api.fragments.list(storyId, 'prose'),
     // Pick up mention annotations mid-run; idle = no extra polling.
-    refetchInterval: mentionsEnabled && isAnalyzing ? 2_000 : false,
+    refetchInterval: (characterMentionsEnabled || knowledgeMentionsEnabled) && isAnalyzing ? 2_000 : false,
   })
 
   const { data: markerFragments = [] } = useQuery({
@@ -246,7 +247,13 @@ export function ProseChainView({
   const { data: characterFragments = [] } = useQuery({
     queryKey: ['fragments', storyId, 'character'],
     queryFn: () => api.fragments.list(storyId, 'character'),
-    enabled: mentionsEnabled,
+    enabled: characterMentionsEnabled,
+  })
+
+  const { data: knowledgeFragments = [] } = useQuery({
+    queryKey: ['fragments', storyId, 'knowledge'],
+    queryFn: () => api.fragments.list(storyId, 'knowledge'),
+    enabled: knowledgeMentionsEnabled,
   })
 
   // Prose headers need image fragments even when character-mentions are off.
@@ -258,13 +265,13 @@ export function ProseChainView({
   const { data: imageFragments = [] } = useQuery({
     queryKey: ['fragments', storyId, 'image'],
     queryFn: () => api.fragments.list(storyId, 'image'),
-    enabled: mentionsEnabled || anyProseHasImage,
+    enabled: characterMentionsEnabled || knowledgeMentionsEnabled || anyProseHasImage,
   })
 
   const { data: iconFragments = [] } = useQuery({
     queryKey: ['fragments', storyId, 'icon'],
     queryFn: () => api.fragments.list(storyId, 'icon'),
-    enabled: mentionsEnabled,
+    enabled: characterMentionsEnabled || knowledgeMentionsEnabled,
   })
 
   const { data: analysisIndex } = useQuery({
@@ -322,6 +329,10 @@ export function ProseChainView({
     mentionColorsRef.current = next
     return next
   }, [characterFragments])
+
+  const allMentionFragments = useMemo(() => {
+    return [...characterFragments, ...knowledgeFragments]
+  }, [characterFragments, knowledgeFragments])
 
   // Build combined fragment map from prose + markers
   const allFragmentsMap = useMemo(() => {
@@ -561,7 +572,7 @@ export function ProseChainView({
             <div className="absolute inset-0 bg-gradient-to-t from-background via-background/20 to-transparent" />
           </div>
         )}
-        <CharacterMentionProvider characters={characterFragments} mediaById={mediaById}>
+        <MentionProvider fragments={allMentionFragments} mediaById={mediaById}>
         <div className="mx-auto w-full py-6 px-4 sm:py-12 sm:px-8" style={{ maxWidth: PROSE_WIDTH_VALUES[proseWidth] }}>
           {orderedItems.length > 0 ? (
             useVirtual ? (
@@ -615,7 +626,8 @@ export function ProseChainView({
                           onAnalyze={handleAnalyze}
                           hasAnalysis={analyzedFragments.has(fragment.id)}
                           quickSwitch={quickSwitch}
-                          mentionsEnabled={mentionsEnabled}
+                          characterMentionsEnabled={characterMentionsEnabled}
+                          knowledgeMentionsEnabled={knowledgeMentionsEnabled}
                           mentionColors={mentionColors}
                           onClickMention={handleMentionClick}
                           mediaById={mediaById}
@@ -665,7 +677,8 @@ export function ProseChainView({
                           onAnalyze={handleAnalyze}
                           hasAnalysis={analyzedFragments.has(fragment.id)}
                           quickSwitch={quickSwitch}
-                          mentionsEnabled={mentionsEnabled}
+                          characterMentionsEnabled={characterMentionsEnabled}
+                          knowledgeMentionsEnabled={knowledgeMentionsEnabled}
                           mentionColors={mentionColors}
                           onClickMention={handleMentionClick}
                           mediaById={mediaById}
@@ -706,7 +719,7 @@ export function ProseChainView({
             scrollAreaRef={scrollAreaRef}
           />
         </div>
-        </CharacterMentionProvider>
+        </MentionProvider>
       </ScrollArea>
 
       {/* Outline panel — side rail on desktop */}

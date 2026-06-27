@@ -507,6 +507,7 @@ export function generationRoutes(dataDir: string) {
                 ...ctxState.stickyCharacters.map((f) => f.id),
                 ...(ctxState.recentCharacters ?? []).map((f) => f.id),
                 ...ctxState.stickyKnowledge.map((f) => f.id),
+                ...(ctxState.recentKnowledge ?? []).map((f) => f.id),
                 ...lookedUpIds,
               ])]
 

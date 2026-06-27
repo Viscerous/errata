@@ -426,6 +426,45 @@ describe('librarian agent', () => {
     expect(state.lastAnalyzedFragmentId).toBe('pr-0001')
   })
 
+  it('records multiple knowledge terms as annotations but one mentioned knowledge id', async () => {
+    await createStory(dataDir, makeStory())
+    await createFragment(dataDir, storyId, makeFragment({
+      id: 'kn-0001',
+      type: 'knowledge',
+      name: 'Necronomicon',
+      description: 'Ancient spellbook',
+    }))
+    await createFragment(dataDir, storyId, makeFragment({
+      id: 'pr-0001',
+      content: 'The Necronomicon, a spellbook, pulsed on the altar.',
+    }))
+    await setupProseChain(dataDir, storyId, ['pr-0001'])
+
+    mockStreamWithToolCalls([
+      { toolName: 'updateSummary', args: { summary: 'A forbidden book pulsed on the altar.' } },
+      {
+        toolName: 'reportMentions',
+        args: {
+          mentions: [
+            { knowledgeId: 'kn-0001', text: 'Necronomicon' },
+            { knowledgeId: 'kn-0001', text: 'spellbook' },
+          ],
+        },
+      },
+    ])
+
+    const analysis = await runLibrarian(dataDir, storyId, 'pr-0001')
+    expect(analysis.mentionedKnowledge).toEqual(['kn-0001'])
+    expect(analysis.mentions).toHaveLength(2)
+
+    const fragment = await getFragment(dataDir, storyId, 'pr-0001')
+    const annotations = fragment!.meta.annotations as Array<{ type: string; fragmentId: string; text: string }>
+    expect(annotations.map(a => a.text)).toEqual(['Necronomicon', 'spellbook'])
+
+    const state = await getState(dataDir, storyId)
+    expect(state.recentMentions['kn-0001']).toEqual(['pr-0001'])
+  })
+
   it('accumulates mentions across multiple runs', async () => {
     await createStory(dataDir, makeStory())
     await createFragment(dataDir, storyId, makeFragment({

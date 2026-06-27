@@ -340,7 +340,10 @@ function StoryContent({ storyId, status, onOpenChat }: LibrarianPanelProps & { s
     ...(knowledge ?? []),
   ].filter((f) => !f.archived), [characters, guidelines, knowledge])
 
-  const charName = (id: string) => characters?.find((c) => c.id === id)?.name ?? id
+  const charName = (id: string) => {
+    const found = characters?.find((c) => c.id === id) || knowledge?.find((k) => k.id === id)
+    return found?.name ?? id
+  }
 
   const totalContradictions = analyses?.reduce((n, a) => n + a.contradictionCount, 0) ?? 0
   const totalSuggestions = analyses?.reduce((n, a) => n + a.pendingSuggestionCount, 0) ?? 0
@@ -413,21 +416,48 @@ function StoryContent({ storyId, status, onOpenChat }: LibrarianPanelProps & { s
           />
         )}
 
-        {/* Character mentions */}
+        {/* Character/Knowledge mentions */}
         {hasMentions && status && (
-          <section>
-            <SectionLabel icon={<Users className="size-3" />}>Characters</SectionLabel>
-            <div className="space-y-0.5 mt-1.5">
-              {Object.entries(status.recentMentions ?? {}).map(([charId, fragmentIds]) => (
-                <div key={charId} className="flex items-center justify-between py-1 px-2 rounded-md hover:bg-accent/30 transition-colors">
-                  <span className="text-[0.6875rem] text-foreground/70">{charName(charId)}</span>
-                  <span className="text-[0.625rem] font-mono text-muted-foreground">
-                    {fragmentIds.length} mention{fragmentIds.length !== 1 ? 's' : ''}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </section>
+          (() => {
+            const entries = Object.entries(status.recentMentions ?? {})
+            const charMentions = entries.filter(([id]) => !id.startsWith('kn-'))
+            const knMentions = entries.filter(([id]) => id.startsWith('kn-'))
+            return (
+              <>
+                {charMentions.length > 0 && (
+                  <section>
+                    <SectionLabel icon={<Users className="size-3" />}>Characters</SectionLabel>
+                    <div className="space-y-0.5 mt-1.5">
+                      {charMentions.map(([charId, fragmentIds]) => (
+                        <div key={charId} className="flex items-center justify-between py-1 px-2 rounded-md hover:bg-accent/30 transition-colors">
+                          <span className="text-[0.6875rem] text-foreground/70">{charName(charId)}</span>
+                          <span className="text-[0.625rem] font-mono text-muted-foreground">
+                            {fragmentIds.length} mention{fragmentIds.length !== 1 ? 's' : ''}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                )}
+
+                {knMentions.length > 0 && (
+                  <section className="mt-3">
+                    <SectionLabel icon={<BookOpen className="size-3" />}>Knowledge</SectionLabel>
+                    <div className="space-y-0.5 mt-1.5">
+                      {knMentions.map(([knId, fragmentIds]) => (
+                        <div key={knId} className="flex items-center justify-between py-1 px-2 rounded-md hover:bg-accent/30 transition-colors">
+                          <span className="text-[0.6875rem] text-foreground/70">{charName(knId)}</span>
+                          <span className="text-[0.625rem] font-mono text-muted-foreground">
+                            {fragmentIds.length} mention{fragmentIds.length !== 1 ? 's' : ''}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                )}
+              </>
+            )
+          })()
         )}
 
         {/* Timeline */}
@@ -715,6 +745,17 @@ function AnalysisItem({
             <div className="flex items-center gap-1 flex-wrap">
               <span className="text-muted-foreground text-[0.625rem] mr-1">Characters</span>
               {analysis.mentionedCharacters.map((id) => (
+                <Badge key={id} variant="outline" className="text-[0.5625rem] h-4 px-1.5">
+                  {charName(id)}
+                </Badge>
+              ))}
+            </div>
+          )}
+
+          {analysis.mentionedKnowledge && analysis.mentionedKnowledge.length > 0 && (
+            <div className="flex items-center gap-1 flex-wrap">
+              <span className="text-muted-foreground text-[0.625rem] mr-1">Knowledge</span>
+              {analysis.mentionedKnowledge.map((id) => (
                 <Badge key={id} variant="outline" className="text-[0.5625rem] h-4 px-1.5">
                   {charName(id)}
                 </Badge>

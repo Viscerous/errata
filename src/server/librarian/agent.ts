@@ -234,12 +234,14 @@ async function runLibrarianInner(
     collector.summaryUpdate = fullText.trim()
   }
 
-  // Derive mentionedCharacters from mentions
-  const mentionedCharacterIds = [...new Set(collector.mentions.map(m => m.characterId))]
+  // Derive mentionedCharacters and mentionedKnowledge from mentions
+  const mentionedCharacterIds = [...new Set(collector.mentions.flatMap(m => 'characterId' in m ? [m.characterId] : []))]
+  const mentionedKnowledgeIds = [...new Set(collector.mentions.flatMap(m => 'knowledgeId' in m ? [m.knowledgeId] : []))]
 
   requestLogger.debug('Analysis parsed', {
     mentions: collector.mentions.length,
     mentionedCharacters: mentionedCharacterIds.length,
+    mentionedKnowledge: mentionedKnowledgeIds.length,
     contradictions: collector.contradictions.length,
     fragmentSuggestions: collector.fragmentSuggestions.length,
     timelineEvents: collector.timelineEvents.length,
@@ -254,6 +256,7 @@ async function runLibrarianInner(
     summaryUpdate: collector.summaryUpdate,
     structuredSummary: collector.structuredSummary,
     mentionedCharacters: mentionedCharacterIds,
+    mentionedKnowledge: mentionedKnowledgeIds,
     mentions: collector.mentions,
     contradictions: collector.contradictions,
     timelineEvents: collector.timelineEvents,
@@ -329,6 +332,12 @@ async function runLibrarianInner(
       updatedMentions[charId] = []
     }
     updatedMentions[charId].push(fragmentId)
+  }
+  for (const knId of mentionedKnowledgeIds) {
+    if (!updatedMentions[knId]) {
+      updatedMentions[knId] = []
+    }
+    updatedMentions[knId].push(fragmentId)
   }
 
   const updatedTimeline = [...state.timeline]

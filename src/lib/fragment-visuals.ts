@@ -204,6 +204,7 @@ function diamondPoints(cx: number, cy: number, r: number): string {
 export { hexagonPoints, diamondPoints }
 
 export const CHARACTER_MENTION_COLORS = TYPE_PALETTES.character.colors
+export const KNOWLEDGE_MENTION_COLORS = TYPE_PALETTES.knowledge.colors
 
 // ── Prose header images ───────────────────────────────
 // A prose fragment can carry an image visualRef that renders as a framed

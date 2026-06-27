@@ -1,6 +1,6 @@
 import { type ReactNode, createElement, Children, isValidElement, cloneElement } from 'react'
-import { hashString, CHARACTER_MENTION_COLORS } from './fragment-visuals'
-import { CharacterMentionSpan } from '@/components/prose/CharacterMentionSpan'
+import { hashString, CHARACTER_MENTION_COLORS, KNOWLEDGE_MENTION_COLORS } from './fragment-visuals'
+import { MentionSpan } from '@/components/prose/MentionSpan'
 
 export interface Annotation {
   type: string
@@ -9,6 +9,10 @@ export interface Annotation {
 }
 
 function colorForId(fragmentId: string): string {
+  if (fragmentId.startsWith('kn-')) {
+    const idx = Math.abs(hashString(fragmentId)) % KNOWLEDGE_MENTION_COLORS.length
+    return KNOWLEDGE_MENTION_COLORS[idx]
+  }
   const idx = Math.abs(hashString(fragmentId)) % CHARACTER_MENTION_COLORS.length
   return CHARACTER_MENTION_COLORS[idx]
 }
@@ -17,12 +21,16 @@ function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
+function normalizeMentionText(text: string): string {
+  return text.trim().toLowerCase()
+}
+
 export function buildAnnotationHighlighter(
   annotations: Annotation[],
   onClick: (fragmentId: string) => void,
   colorOverrides?: Map<string, string>,
 ): ((text: string) => ReactNode) | null {
-  const mentions = annotations.filter(a => a.type === 'mention')
+  const mentions = annotations.filter(a => a.type === 'mention' && a.fragmentId && a.text.trim())
   if (mentions.length === 0) return null
 
   // Deduplicate by text (case-insensitive), keep longest first
@@ -31,21 +39,22 @@ export function buildAnnotationHighlighter(
   // Sort longest-first so longer names match before shorter substrings
   const sorted = [...mentions].sort((a, b) => b.text.length - a.text.length)
   for (const m of sorted) {
-    const key = m.text.toLowerCase()
+    const key = normalizeMentionText(m.text)
     if (seen.has(key)) continue
     seen.add(key)
     unique.push(m)
   }
+  if (unique.length === 0) return null
 
   // Build a map from lowercase text -> annotation for lookup
   const textMap = new Map<string, Annotation>()
   for (const m of unique) {
-    textMap.set(m.text.toLowerCase(), m)
+    textMap.set(normalizeMentionText(m.text), m)
   }
 
-  // Build regex with word boundaries, case-insensitive
-  const pattern = unique.map(m => escapeRegex(m.text)).join('|')
-  const regex = new RegExp(`\\b(${pattern})\\b`, 'gi')
+  // Match whole terms without relying on \b, which fails for terms like C++ or #13.
+  const pattern = unique.map(m => escapeRegex(m.text.trim())).join('|')
+  const regex = new RegExp(`(^|[^\\p{L}\\p{N}_])(${pattern})(?=$|[^\\p{L}\\p{N}_])`, 'giu')
 
   return (text: string): ReactNode => {
     const parts: ReactNode[] = []
@@ -56,21 +65,27 @@ export function buildAnnotationHighlighter(
     regex.lastIndex = 0
 
     while ((match = regex.exec(text)) !== null) {
-      const matchedText = match[0]
-      const annotation = textMap.get(matchedText.toLowerCase())
+      const prefix = match[1] ?? ''
+      const matchedText = match[2] ?? ''
+      if (!matchedText) {
+        regex.lastIndex += 1
+        continue
+      }
+      const matchStart = match.index + prefix.length
+      const annotation = textMap.get(normalizeMentionText(matchedText))
       if (!annotation) continue
 
       // Add text before match
-      if (match.index > lastIndex) {
-        parts.push(text.slice(lastIndex, match.index))
+      if (matchStart > lastIndex) {
+        parts.push(text.slice(lastIndex, matchStart))
       }
 
       const color = colorOverrides?.get(annotation.fragmentId) ?? colorForId(annotation.fragmentId)
       parts.push(
         createElement(
-          CharacterMentionSpan,
+          MentionSpan,
           {
-            key: `${match.index}-${matchedText}`,
+            key: `${matchStart}-${matchedText}`,
             fragmentId: annotation.fragmentId,
             className: 'mention-highlight',
             style: { color },
@@ -92,7 +107,7 @@ export function buildAnnotationHighlighter(
         ),
       )
 
-      lastIndex = match.index + matchedText.length
+      lastIndex = matchStart + matchedText.length
     }
 
     // Add remaining text

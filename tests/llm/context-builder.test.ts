@@ -358,6 +358,41 @@ describe('context-builder', () => {
     expect(recent!.content).toContain('The dark lord rules with an iron fist.')
   })
 
+  it('promotes recently mentioned non-sticky knowledge to recentKnowledge and formats it', async () => {
+    const story = makeStory()
+    await createStory(dataDir, story)
+
+    const knowledge = makeFragment({
+      id: 'kn-0002',
+      type: 'knowledge',
+      name: 'Necronomicon',
+      description: 'Ancient spellbook',
+      content: 'Contains dark forbidden spells.',
+      sticky: false,
+    })
+    await createFragment(dataDir, story.id, knowledge)
+
+    // Prose the librarian annotated as mentioning the knowledge.
+    const prose = makeFragment({
+      id: 'pr-0002',
+      type: 'prose',
+      name: 'Ch1',
+      content: 'They found the book.',
+      order: 1,
+      meta: { annotations: [{ type: 'mention', fragmentId: 'kn-0002', text: 'spellbook' }] },
+    })
+    await createFragment(dataDir, story.id, prose)
+
+    const state = await buildContextState(dataDir, story.id, 'Continue')
+    expect((state.recentKnowledge ?? []).map((k) => k.id)).toContain('kn-0002')
+    expect(state.knowledgeShortlist.map((k) => k.id)).not.toContain('kn-0002')
+
+    const blocks = createDefaultBlocks(state)
+    const recent = findBlock(blocks, 'knowledge-recent')
+    expect(recent).toBeDefined()
+    expect(recent!.content).toContain('Contains dark forbidden spells.')
+  })
+
   it('carries tool usage policy without enumerating a tool catalog', async () => {
     const story = makeStory()
     await createStory(dataDir, story)
