@@ -371,7 +371,7 @@ describe('character chat endpoints', () => {
       expect(toolNames).not.toContain('deleteFragment')
     })
 
-    it('includes character name in system prompt', async () => {
+    it('keeps character instructions in system prompt and sends character details as user context', async () => {
       const story = makeStory()
       await createStory(dataDir, story)
       await createFragment(dataDir, story.id, makeFragment())
@@ -393,8 +393,16 @@ describe('character chat endpoints', () => {
 
       expect(mockAgentCtor).toHaveBeenCalled()
       const config = mockAgentCtor.mock.calls[0][0]
-      expect(config.instructions).toContain('Kael')
-      expect(config.instructions).toContain('riddles')
+      expect(config.instructions).not.toContain('Kael')
+      expect(config.instructions).not.toContain('riddles')
+
+      expect(mockAgentStream).toHaveBeenCalled()
+      const streamArgs = mockAgentStream.mock.calls[0][0]
+      expect(streamArgs.messages[0].role).toBe('user')
+      expect(streamArgs.messages[0].content).toContain('Story and character context')
+      expect(streamArgs.messages[0].content).toContain('Kael')
+      expect(streamArgs.messages[0].content).toContain('riddles')
+      expect(streamArgs.messages.at(-1)).toEqual({ role: 'user', content: 'Hello' })
     })
 
     it('returns 404 when conversation does not exist', async () => {

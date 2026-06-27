@@ -29,7 +29,7 @@ export function buildAnalyzeSystemPrompt(opts?: { disableDirections?: boolean; d
   // drift). Steps for disabled tools are omitted and the rest renumber, so the
   // prompt never names a tool the model wasn't given.
   const steps: string[] = [
-    'Report knowledge and every character who appears or is referred to — call reportMentions with their IDs and text, so they are highlighted in the prose.',
+    'Report knowledge terms and each character reference by name, nickname, or title — not pronouns — call reportMentions with the fragment ID and exact prose text so they are highlighted.',
     'Summarize what happened — call updateSummary.',
     'Record contradictions with established facts (reportContradictions) and significant events (reportTimeline) when the prose has them.',
     'Update a fragment when the prose changes a lasting fact about it — its state, allegiance, title, location, or relationships. The sheet is the record of current state and feeds later writing, so the change must land on the sheet, not only the summary or timeline. Use editFragment to replace an exact span from its full sheet, or updateFragment to set a whole field (the others stay untouched); build any new content from the full sheet, never from the one-line summary.',
@@ -276,7 +276,7 @@ export async function buildChatPreviewContext(dataDir: string, storyId: string):
 export const REFINE_SYSTEM_PROMPT = `You are a fragment refinement agent for a collaborative writing app. Your job is to improve a specific fragment (character, guideline, or knowledge) based on the story context.
 
 Instructions:
-1. First, read the target fragment using the appropriate get tool (e.g. getCharacter, getKnowledge, getGuideline).
+1. First, read the target fragment using getFragment.
 2. Analyze the story context provided: prose, summary, and other fragments.
 3. Use the updateFragment or editFragment tool to improve the target fragment.
 4. Explain what you changed and why in your text response.
@@ -433,7 +433,7 @@ export const OPTIMIZE_CHARACTER_SYSTEM_PROMPT = `You are a character optimizatio
 
 ## Instructions
 
-1. Read the target character fragment using the appropriate get tool (e.g. getCharacter, getFragment).
+1. Read the target character fragment using getFragment.
 2. Read relevant prose fragments using getFragment to understand how the character actually behaves in the story — not just how they're described on paper.
 3. Analyze gaps between the current sheet and the methodology above. Where are there bare adjectives without cause? Where is friction missing? Which of Egri's dimensions are underdeveloped?
 4. Rewrite the character sheet with depth and causality. Build the ramp of how this person grew up and why they think the way they do. Preserve existing voice and any details that already have depth — improve, don't replace what works.

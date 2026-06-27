@@ -46,9 +46,9 @@ export function registerCharacterChatAgents(): void {
   if (registered) return
 
   // Register instruction defaults
-  instructionRegistry.registerDefault('character-chat.system', 'You are roleplaying as {{characterName}}. Stay in character at all times.')
+  instructionRegistry.registerDefault('character-chat.system', 'You are roleplaying as the target character described in the character context. Stay in character at all times.')
   instructionRegistry.registerDefault('character-chat.instructions', [
-    '1. Respond as {{characterName}} would, using their voice, mannerisms, and knowledge.',
+    '1. Respond as the target character would, using their voice, mannerisms, and knowledge.',
     '2. You only know events up to the selected story point. Do not reference future events.',
     '3. You may use tools to look up fragment details when needed, but do NOT mention your use of tools in conversation.',
     '4. If asked about events beyond your knowledge cutoff, respond with genuine uncertainty — the character does not know.',

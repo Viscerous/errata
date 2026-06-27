@@ -5,14 +5,28 @@ import { buildBasePreviewContext } from '../agents/block-helpers'
 
 export function createCharacterChatBlocks(ctx: AgentBlockContext): ContextBlock[] {
   const blocks: ContextBlock[] = []
+  const characterName = ctx.character?.name ?? 'the character'
+  const systemTemplate = instructionRegistry.resolve('character-chat.system', ctx.modelId)
+  const instructionsTemplate = instructionRegistry.resolve('character-chat.instructions', ctx.modelId)
+
+  blocks.push({
+    id: 'instructions',
+    role: 'system',
+    content: [
+      systemTemplate.replace(/\{\{characterName\}\}/g, characterName),
+      '',
+      instructionsTemplate.replace(/\{\{characterName\}\}/g, characterName),
+    ].join('\n'),
+    order: 100,
+    source: 'builtin',
+  })
 
   if (ctx.character) {
-    const systemTemplate = instructionRegistry.resolve('character-chat.system', ctx.modelId)
     blocks.push({
       id: 'character',
-      role: 'system',
+      role: 'user',
       content: [
-        systemTemplate.replace(/\{\{characterName\}\}/g, ctx.character.name),
+        `## Character: ${ctx.character.name}`,
         '',
         '## Character Details',
         ctx.character.content,
@@ -28,7 +42,7 @@ export function createCharacterChatBlocks(ctx: AgentBlockContext): ContextBlock[
   if (ctx.personaDescription) {
     blocks.push({
       id: 'persona',
-      role: 'system',
+      role: 'user',
       content: [
         '## Who You Are Speaking With',
         ctx.personaDescription,
@@ -73,18 +87,12 @@ export function createCharacterChatBlocks(ctx: AgentBlockContext): ContextBlock[
     }
   }
 
-  const characterName = ctx.character?.name ?? 'the character'
-  const instructionsTemplate = instructionRegistry.resolve('character-chat.instructions', ctx.modelId)
-
   blocks.push({
     id: 'story-context',
-    role: 'system',
+    role: 'user',
     content: [
       '## Story Context',
       storyContextParts.join('\n'),
-      '',
-      '## Instructions',
-      instructionsTemplate.replace(/\{\{characterName\}\}/g, characterName),
     ].join('\n'),
     order: 300,
     source: 'builtin',

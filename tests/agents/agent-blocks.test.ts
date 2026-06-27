@@ -5,7 +5,7 @@ import { agentBlockRegistry } from '@/server/agents/agent-block-registry'
 import { modelRoleRegistry } from '@/server/agents/model-role-registry'
 import type { AgentBlockContext } from '@/server/agents/agent-block-context'
 import type { Fragment, StoryMeta } from '@/server/fragments/schema'
-import { recentCastFromFragment } from '@/server/librarian/blocks'
+import { buildAnalyzeSystemPrompt, recentCastFromFragment } from '@/server/librarian/blocks'
 
 const now = new Date().toISOString()
 
@@ -317,6 +317,9 @@ describe('Librarian Refine Blocks', () => {
     const ids = blocks.map(b => b.id)
     expect(ids).toContain('instructions')
     expect(ids).toContain('story-info')
+    const instructions = blocks.find(b => b.id === 'instructions')!
+    expect(instructions.content).toContain('read the target fragment using getFragment')
+    expect(instructions.content).not.toContain('getCharacter')
   })
 
   it('includes target block when targetFragment provided', () => {
@@ -337,6 +340,24 @@ describe('Librarian Refine Blocks', () => {
       proseFragments: [makeFragment({ id: 'pr-test01', type: 'prose', name: 'Ch 1', content: 'Story text.' })],
     }))
     expect(blocks.find(b => b.id === 'prose-recent')).toBeDefined()
+  })
+})
+
+describe('Librarian Analyze Prompt', () => {
+  it('reports named character references and excludes pronouns', () => {
+    const prompt = buildAnalyzeSystemPrompt()
+    expect(prompt).toContain('each character reference by name, nickname, or title')
+    expect(prompt).toContain('not pronouns')
+  })
+})
+
+describe('Librarian Optimize Character Blocks', () => {
+  it('uses the generic getFragment tool in instructions', () => {
+    const def = agentBlockRegistry.get('librarian.optimize-character')!
+    const blocks = def.createDefaultBlocks(makeBaseContext())
+    const instructions = blocks.find(b => b.id === 'instructions')!
+    expect(instructions.content).toContain('Read the target character fragment using getFragment')
+    expect(instructions.content).not.toContain('getCharacter')
   })
 })
 
@@ -431,9 +452,13 @@ describe('Character Chat Blocks', () => {
     const blocks = def.createDefaultBlocks(makeBaseContext({
       character: makeFragment({ id: 'ch-hero01', name: 'Hero', content: 'A brave hero.', description: 'Main protagonist' }),
     }))
+    const instructions = blocks.find(b => b.id === 'instructions')
+    expect(instructions).toBeDefined()
+    expect(instructions!.role).toBe('system')
+    expect(instructions!.content).not.toContain('Hero')
     const charBlock = blocks.find(b => b.id === 'character')
     expect(charBlock).toBeDefined()
-    expect(charBlock!.role).toBe('system')
+    expect(charBlock!.role).toBe('user')
     expect(charBlock!.content).toContain('Hero')
     expect(charBlock!.content).toContain('A brave hero.')
   })
@@ -445,6 +470,7 @@ describe('Character Chat Blocks', () => {
     }))
     const persona = blocks.find(b => b.id === 'persona')
     expect(persona).toBeDefined()
+    expect(persona!.role).toBe('user')
     expect(persona!.content).toContain('village elder')
   })
 
@@ -460,6 +486,7 @@ describe('Character Chat Blocks', () => {
       })],
     }))
     const ctx = blocks.find(b => b.id === 'story-context')!
+    expect(ctx.role).toBe('user')
     expect(ctx.content).toContain('Hero arrives at village')
   })
 })

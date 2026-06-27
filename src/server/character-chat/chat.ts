@@ -72,9 +72,16 @@ export const characterChat = createStreamingRunner<CharacterChatOptions, { chara
     ),
   }),
 
-  messages: ({ opts }) =>
-    opts.messages.map((m) => ({
-      role: m.role as 'user' | 'assistant',
-      content: m.content,
-    })),
+  messages: ({ compiled, opts }) => {
+    const contextMessage = compiled.messages.find(m => m.role === 'user')
+    return [
+      ...(contextMessage?.content.trim()
+        ? [{ role: 'user' as const, content: `Story and character context for this conversation:\n\n${contextMessage.content}` }]
+        : []),
+      ...opts.messages.map((m) => ({
+        role: m.role as 'user' | 'assistant',
+        content: m.content,
+      })),
+    ]
+  },
 })
