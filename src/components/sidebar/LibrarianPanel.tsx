@@ -57,6 +57,14 @@ type TabValue = 'chat' | 'story' | 'summaries'
 type MentionEntry = [string, string[]]
 type MentionGroup = { type: string; visual: FragmentTypeVisual; entries: MentionEntry[] }
 
+function mentionSourceCount(sourceFragmentIds: string[]): number {
+  return new Set(sourceFragmentIds).size
+}
+
+function mentionLinkCount(entries: MentionEntry[]): number {
+  return entries.reduce((sum, [, sourceFragmentIds]) => sum + mentionSourceCount(sourceFragmentIds), 0)
+}
+
 function tabStorageKey(storyId: string): string {
   return `errata.librarian.activeTab.${storyId}`
 }
@@ -587,7 +595,7 @@ function MentionGroupsSummary({
     <>
       {groups.map((group, index) => {
         const expanded = expandedByType[group.type] ?? group.type === 'character'
-        const mentionCount = group.entries.reduce((sum, [, fragmentIds]) => sum + fragmentIds.length, 0)
+        const mentionCount = mentionLinkCount(group.entries)
 
         return (
           <section key={group.type} className={index === 0 ? undefined : 'mt-2'}>
@@ -611,14 +619,17 @@ function MentionGroupsSummary({
 
             {expanded && (
               <div className="space-y-0.5 mt-1">
-                {group.entries.map(([fragmentId, fragmentIds]) => (
-                  <div key={fragmentId} className="flex items-center justify-between py-1 px-2 rounded-md hover:bg-accent/30 transition-colors">
-                    <span className="text-[0.6875rem] text-foreground/70">{charName(fragmentId)}</span>
-                    <span className="text-[0.625rem] font-mono text-muted-foreground">
-                      {fragmentIds.length} mention{fragmentIds.length !== 1 ? 's' : ''}
-                    </span>
-                  </div>
-                ))}
+                {group.entries.map(([fragmentId, fragmentIds]) => {
+                  const count = mentionSourceCount(fragmentIds)
+                  return (
+                    <div key={fragmentId} className="flex items-center justify-between py-1 px-2 rounded-md hover:bg-accent/30 transition-colors">
+                      <span className="text-[0.6875rem] text-foreground/70">{charName(fragmentId)}</span>
+                      <span className="text-[0.625rem] font-mono text-muted-foreground">
+                        {count} mention{count !== 1 ? 's' : ''}
+                      </span>
+                    </div>
+                  )
+                })}
               </div>
             )}
           </section>

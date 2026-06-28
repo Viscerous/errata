@@ -33,6 +33,30 @@ import { getActivityBuffer, pushActivityEvent, type ActivityStreamEvent } from '
 
 const logger = createLogger('librarian-agent')
 
+function updateRecentMentionsForFragment(
+  current: Record<string, string[]>,
+  sourceFragmentId: string,
+  mentionedFragmentIds: string[],
+): Record<string, string[]> {
+  const next: Record<string, string[]> = {}
+
+  for (const [mentionedId, sourceIds] of Object.entries(current)) {
+    const remainingSourceIds = [...new Set(sourceIds)].filter((id) => id !== sourceFragmentId)
+    if (remainingSourceIds.length > 0) {
+      next[mentionedId] = remainingSourceIds
+    }
+  }
+
+  for (const mentionedId of mentionedFragmentIds) {
+    const sourceIds = next[mentionedId] ?? []
+    if (!sourceIds.includes(sourceFragmentId)) {
+      next[mentionedId] = [...sourceIds, sourceFragmentId]
+    }
+  }
+
+  return next
+}
+
 function compactSummaryByCharacters(summary: string, maxCharacters: number, targetCharacters: number): string {
   const normalized = summary.trim()
   if (normalized.length <= maxCharacters) return normalized
@@ -321,13 +345,11 @@ async function runLibrarianInner(
 
   // Update librarian state
   requestLogger.debug('Updating librarian state...')
-  const updatedMentions = { ...state.recentMentions }
-  for (const mentionedId of mentionedFragmentIds) {
-    if (!updatedMentions[mentionedId]) {
-      updatedMentions[mentionedId] = []
-    }
-    updatedMentions[mentionedId].push(fragmentId)
-  }
+  const updatedMentions = updateRecentMentionsForFragment(
+    state.recentMentions,
+    fragmentId,
+    mentionedFragmentIds,
+  )
 
   const updatedTimeline = [...state.timeline]
   for (const event of analysis.timelineEvents) {
