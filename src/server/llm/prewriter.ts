@@ -2,9 +2,9 @@ import { tool, ToolLoopAgent, stepCountIs, hasToolCall, type ToolSet, type Provi
 import { z } from 'zod/v4'
 import { getModel } from './client'
 import { compileBlocks, expandMessagesFragmentTags, type ContextBlock, type ContextMessage } from './context-builder'
+import { renderFragmentWithMarker } from './fragment-context-blocks'
 import { compileAgentContext } from '../agents/compile-agent-context'
 import { instructionRegistry } from '../instructions'
-import { registry } from '../fragments/registry'
 import { buildContextState } from './context-builder'
 import { type AgentBlockContext, baseBlockContext } from '../agents/agent-block-context'
 import type { Fragment } from '../fragments/schema'
@@ -523,10 +523,7 @@ export function createWriterBriefBlocks(
       role: 'user' as const,
       content: [
         '## Recent Prose',
-        ...proseFragments.map(p => {
-          const rendered = registry.renderContext(p)
-          return `[@fragment=${p.id}]\n${rendered}`
-        }),
+        ...proseFragments.map(renderFragmentWithMarker),
         '\n## End of Recent Prose',
       ].join('\n'),
       order: 100,

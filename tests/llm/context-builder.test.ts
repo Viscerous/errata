@@ -464,9 +464,16 @@ describe('context-builder', () => {
 
     const shortlist = findBlock(blocks, 'location-shortlist')
     expect(shortlist).toBeDefined()
+    expect(shortlist!.content).toContain('## Locations (Summary Index)')
+    expect(shortlist!.content).toContain('not the full fragment sheet')
     expect(shortlist!.content).toContain('loc-0002')
     expect(shortlist!.content).toContain('A dangerous crossing')
     expect(shortlist!.content).not.toContain('The bridge stones remember every betrayal.')
+    expect(shortlist!.fragmentContext).toEqual({
+      mode: 'summary-index',
+      scope: 'available',
+      fragmentType: 'location',
+    })
   })
 
   it('carries tool usage policy without enumerating a tool catalog', async () => {
@@ -790,8 +797,13 @@ describe('context blocks', () => {
       const state = await buildContextState(dataDir, story.id, 'Continue')
       const blocks = createDefaultBlocks(state)
 
-      expect(findBlock(blocks, 'guidelines-shortlist')).toBeDefined()
-      expect(findBlock(blocks, 'knowledge-shortlist')).toBeDefined()
+      const guidelines = findBlock(blocks, 'guidelines-shortlist')
+      const knowledge = findBlock(blocks, 'knowledge-shortlist')
+      expect(guidelines).toBeDefined()
+      expect(knowledge).toBeDefined()
+      expect(guidelines!.content).toContain('## Guidelines (Summary Index)')
+      expect(knowledge!.content).toContain('## Knowledge (Summary Index)')
+      expect(guidelines!.content).toContain('not the full fragment sheet')
     })
 
     it('omits shortlist blocks when no non-sticky fragments of that type', async () => {

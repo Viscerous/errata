@@ -142,6 +142,8 @@ describe('Librarian Analyze Blocks', () => {
     }))
     const chBlock = blocks.find(b => b.id === 'characters-shortlist')
     expect(chBlock).toBeDefined()
+    expect(chBlock!.content).toContain('## Characters (Summary Index)')
+    expect(chBlock!.content).toContain('not the full fragment sheet')
     expect(chBlock!.content).toContain('Hero')
   })
 
@@ -299,12 +301,15 @@ describe('Librarian Chat Blocks', () => {
     expect(proseBlock!.content).toContain('Hero begins journey')
   })
 
-  it('includes sticky-fragments and shortlist when provided', () => {
+  it('combines pinned, recent, and available fragment summaries into one index per type', () => {
     const def = agentBlockRegistry.get('librarian.chat')!
     const blocks = def.createDefaultBlocks(makeBaseContext({
       stickyGuidelines: [makeFragment({ id: 'gl-stick1', name: 'Tone', description: 'Keep it dark' })],
+      stickyKnowledge: [makeFragment({ id: 'kn-stick1', type: 'knowledge', name: 'Treaty', description: 'Binding lore' })],
+      recentKnowledge: [makeFragment({ id: 'kn-recent1', type: 'knowledge', name: 'Omen', description: 'Recently mentioned lore' })],
       stickyCustomFragments: [makeFragment({ id: 'loc-stick1', type: 'location', name: 'Library', description: 'Pinned place' })],
       guidelineShortlist: [makeFragment({ id: 'gl-other1', name: 'Style', description: 'Gothic' })],
+      knowledgeShortlist: [makeFragment({ id: 'kn-other1', type: 'knowledge', name: 'Crown', description: 'Available lore' })],
       customFragmentShortlists: [
         {
           type: 'location',
@@ -313,13 +318,35 @@ describe('Librarian Chat Blocks', () => {
         },
       ],
     }))
-    const sticky = blocks.find(b => b.id === 'sticky-fragments')
-    expect(sticky).toBeDefined()
-    expect(sticky!.content).toContain('loc-stick1')
+    expect(blocks.find(b => b.id === 'guidelines-pinned-summary-index')).toBeUndefined()
+    expect(blocks.find(b => b.id === 'guidelines-shortlist')).toBeUndefined()
+    expect(blocks.find(b => b.id === 'knowledge-pinned-summary-index')).toBeUndefined()
+    expect(blocks.find(b => b.id === 'knowledge-shortlist')).toBeUndefined()
 
-    const shortlist = blocks.find(b => b.id === 'shortlist')
-    expect(shortlist).toBeDefined()
-    expect(shortlist!.content).toContain('loc-other1')
+    const guidelines = blocks.find(b => b.id === 'guidelines-summary-index')
+    expect(guidelines).toBeDefined()
+    expect(guidelines!.content).toContain('## Guidelines (Summary Index)')
+    expect(guidelines!.content).toContain('not the full fragment sheet')
+    expect(guidelines!.content).toContain('gl-stick1: Tone (pinned)')
+    expect(guidelines!.content).toContain('gl-other1: Style')
+
+    const knowledge = blocks.find(b => b.id === 'knowledge-summary-index')
+    expect(knowledge).toBeDefined()
+    expect(knowledge!.content).toContain('## Knowledge (Summary Index)')
+    expect(knowledge!.content).toContain('kn-stick1: Treaty (pinned)')
+    expect(knowledge!.content).toContain('kn-recent1: Omen (recent)')
+    expect(knowledge!.content).toContain('kn-other1: Crown')
+
+    const locations = blocks.find(b => b.id === 'location-summary-index')
+    expect(locations).toBeDefined()
+    expect(locations!.content).toContain('## Locations (Summary Index)')
+    expect(locations!.content).toContain('loc-stick1: Library (pinned)')
+    expect(locations!.content).toContain('loc-other1: Bridge')
+    expect(locations!.fragmentContext).toEqual({
+      mode: 'summary-index',
+      scope: 'catalog',
+      fragmentType: 'location',
+    })
   })
 })
 
@@ -379,6 +406,7 @@ describe('Librarian Analyze Prompt', () => {
 
     const custom = blocks.find(b => b.id === 'location-shortlist')
     expect(custom).toBeDefined()
+    expect(custom!.content).toContain('## Locations (Summary Index)')
     expect(custom!.content).toContain('loc-0001')
     expect(custom!.content).toContain('A market below the city')
   })
@@ -391,6 +419,24 @@ describe('Librarian Optimize Character Blocks', () => {
     const instructions = blocks.find(b => b.id === 'instructions')!
     expect(instructions.content).toContain('Read the target character fragment using getFragment')
     expect(instructions.content).not.toContain('getCharacter')
+  })
+
+  it('uses one all-character summary index instead of separate pinned character summaries', () => {
+    const def = agentBlockRegistry.get('librarian.optimize-character')!
+    const pinned = makeFragment({ id: 'ch-pin01', name: 'Mentor', description: 'Pinned mentor', sticky: true })
+    const other = makeFragment({ id: 'ch-oth01', name: 'Rival', description: 'Other character' })
+    const blocks = def.createDefaultBlocks(makeBaseContext({
+      stickyCharacters: [pinned],
+      allCharacters: [pinned, other],
+      targetFragment: pinned,
+    }))
+
+    expect(blocks.find(b => b.id === 'characters-pinned-summary-index')).toBeUndefined()
+    const allCharacters = blocks.find(b => b.id === 'characters-shortlist')
+    expect(allCharacters).toBeDefined()
+    expect(allCharacters!.content).toContain('## All Characters (Summary Index)')
+    expect(allCharacters!.content).toContain('ch-pin01')
+    expect(allCharacters!.content).toContain('ch-oth01')
   })
 })
 
@@ -497,17 +543,29 @@ describe('Writer Blocks', () => {
 
     const shortlist = blocks.find(b => b.id === 'knowledge-shortlist')
     expect(shortlist).toBeDefined()
+    expect(shortlist!.content).toContain('## Knowledge (Summary Index)')
     expect(shortlist!.content).toContain('Shield')
 
     const customRecent = blocks.find(b => b.id === 'location-recent')
     expect(customRecent).toBeDefined()
     expect(customRecent!.content).toContain('Recent place lore')
+    expect(customRecent!.fragmentContext).toEqual({
+      mode: 'full',
+      scope: 'recent',
+      fragmentType: 'location',
+    })
 
     const customShortlist = blocks.find(b => b.id === 'location-shortlist')
     expect(customShortlist).toBeDefined()
+    expect(customShortlist!.content).toContain('## Locations (Summary Index)')
     expect(customShortlist!.content).toContain('loc-bridge')
     expect(customShortlist!.content).toContain('Optional place')
     expect(customShortlist!.content).not.toContain('Shortlist full lore')
+    expect(customShortlist!.fragmentContext).toEqual({
+      mode: 'summary-index',
+      scope: 'available',
+      fragmentType: 'location',
+    })
   })
 })
 
@@ -559,5 +617,44 @@ describe('Character Chat Blocks', () => {
     const ctx = blocks.find(b => b.id === 'story-context')!
     expect(ctx.role).toBe('user')
     expect(ctx.content).toContain('Hero arrives at village')
+  })
+
+  it('labels pinned story context as summaries', () => {
+    const def = agentBlockRegistry.get('character-chat.chat')!
+    const blocks = def.createDefaultBlocks(makeBaseContext({
+      stickyKnowledge: [makeFragment({
+        id: 'kn-test01',
+        type: 'knowledge',
+        name: 'Magic System',
+        description: 'Rules for magic',
+        content: 'Full magic details should not be in this summary list.',
+      })],
+    }))
+    const ctx = blocks.find(b => b.id === 'story-context')!
+    expect(ctx.content).toContain('## Pinned Knowledge (Summary Index)')
+    expect(ctx.content).toContain('not the full fragment sheet')
+    expect(ctx.content).toContain('kn-test01')
+    expect(ctx.content).toContain('Rules for magic')
+    expect(ctx.content).not.toContain('Full magic details should not be in this summary list.')
+  })
+
+  it('does not duplicate the active character in pinned character summaries', () => {
+    const def = agentBlockRegistry.get('character-chat.chat')!
+    const hero = makeFragment({
+      id: 'ch-hero01',
+      type: 'character',
+      name: 'Hero',
+      description: 'Pinned protagonist',
+      content: 'Full hero sheet.',
+      sticky: true,
+    })
+    const blocks = def.createDefaultBlocks(makeBaseContext({
+      character: hero,
+      stickyCharacters: [hero],
+    }))
+
+    const ctx = blocks.find(b => b.id === 'story-context')!
+    expect(ctx.content).not.toContain('## Pinned Characters (Summary Index)')
+    expect(ctx.content).not.toContain('- ch-hero01:')
   })
 })

@@ -1,4 +1,5 @@
-import { renderContextFragment, type ContextBlock } from '../llm/context-builder'
+import type { ContextBlock } from '../llm/context-builder'
+import { renderFragmentWithMarker } from '../llm/fragment-context-blocks'
 import type { AgentBlockContext } from '../agents/agent-block-context'
 import { getFragment } from '../fragments/storage'
 import { getFragmentsByTag } from '../fragments/associations'
@@ -10,10 +11,6 @@ import {
 } from '../agents/block-helpers'
 
 export const DIRECTIONS_SYSTEM_PROMPT = `You are a creative writing assistant that suggests possible story directions. Propose distinct and compelling directions the narrative could take. Each suggestion should have a short evocative title, a brief description, and a detailed instruction prompt suitable for a writer.`
-
-function renderFullFragment(fragment: Parameters<typeof renderContextFragment>[0]): string {
-  return `[@fragment=${fragment.id}]\n${renderContextFragment(fragment)}`
-}
 
 export function createDirectionsSuggestBlocks(ctx: AgentBlockContext): ContextBlock[] {
   const blocks: ContextBlock[] = []
@@ -83,7 +80,7 @@ export function createDirectionsSuggestBlocks(ctx: AgentBlockContext): ContextBl
       role: 'user',
       content: [
         '## Pinned Custom Context',
-        ...(ctx.stickyCustomFragments ?? []).map(renderFullFragment),
+        ...(ctx.stickyCustomFragments ?? []).map(renderFragmentWithMarker),
       ].join('\n\n'),
       order: 250,
       source: 'builtin',
@@ -97,7 +94,7 @@ export function createDirectionsSuggestBlocks(ctx: AgentBlockContext): ContextBl
       role: 'user',
       content: [
         `## ${group.name} in Recent Prose`,
-        ...group.fragments.map(renderFullFragment),
+        ...group.fragments.map(renderFragmentWithMarker),
       ].join('\n\n'),
       order: customOrder++,
       source: 'builtin',

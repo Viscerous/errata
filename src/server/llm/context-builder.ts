@@ -1,10 +1,34 @@
 import { getStory, listFragments, getFragment, migrateStoryToSummaryFragments } from '../fragments/storage'
-import { registry } from '../fragments/registry'
 import { instructionRegistry } from '../instructions'
 import { createLogger } from '../logging'
 import { getActiveProseIds, findSectionIndex, getProseChain } from '../fragments/prose-chain'
-import { FRAGMENT_TYPES, type Fragment, type StoryMeta } from '../fragments/schema'
+import { type Fragment, type StoryMeta } from '../fragments/schema'
+import {
+  customContextFragmentTypes,
+  fragmentContextBlock,
+  fragmentTypeLabel,
+  renderContextFragment,
+  renderFragmentWithMarker,
+  type FragmentContextMetadata,
+} from './fragment-context-blocks'
 import type { ModelMessage } from 'ai'
+
+export {
+  customContextFragmentTypes,
+  fragmentContextBlock,
+  fragmentContextBlocks,
+  fragmentSummaryIndexHeading,
+  fragmentSummaryList,
+  fragmentTypeLabel,
+  groupFragmentsByType,
+  renderContextFragment,
+  renderFragmentContextGroup,
+  renderFragmentWithMarker,
+  type FragmentContextGroup,
+  type FragmentContextMetadata,
+  type FragmentContextMode,
+  type FragmentContextScope,
+} from './fragment-context-blocks'
 
 export interface CustomFragmentGroup {
   type: string
@@ -51,6 +75,7 @@ export interface ContextBlock {
   content: string
   order: number
   source: 'builtin' | string
+  fragmentContext?: FragmentContextMetadata
 }
 
 // --- Block manipulation utilities (pure, immutable) ---
@@ -85,41 +110,6 @@ export function reorderBlock(blocks: ContextBlock[], id: string, newOrder: numbe
 
 const DEFAULT_PROSE_LIMIT = 10
 const logger = createLogger('context-builder')
-const BUILTIN_FRAGMENT_TYPES = new Set<string>(FRAGMENT_TYPES)
-const BUILTIN_CONTEXT_LABELS: Record<string, string> = {
-  guideline: 'Guidelines',
-  knowledge: 'Knowledge',
-  character: 'Characters',
-}
-
-function titleFromType(type: string): string {
-  return type
-    .split(/[-_]+/)
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(' ')
-}
-
-export function customContextFragmentTypes(story: StoryMeta): Array<{ type: string; name: string }> {
-  const types = new Map<string, { type: string; name: string }>()
-
-  for (const def of story.settings.customFragmentTypes ?? []) {
-    if (BUILTIN_FRAGMENT_TYPES.has(def.type)) continue
-    types.set(def.type, { type: def.type, name: def.name })
-  }
-
-  return [...types.values()]
-}
-
-export function fragmentTypeLabel(story: StoryMeta, type: string): string {
-  const builtinLabel = BUILTIN_CONTEXT_LABELS[type]
-  if (builtinLabel) return builtinLabel
-
-  const custom = story.settings.customFragmentTypes?.find((def) => def.type === type)
-  if (custom) return custom.name
-
-  return titleFromType(type)
-}
 
 export type ContextCompactType = 'proseLimit' | 'maxTokens' | 'maxCharacters'
 
@@ -494,66 +484,6 @@ export async function buildContextState(
   return state
 }
 
-function renderGenericFragmentContext(f: Fragment): string {
-  return [
-    `### ${f.name}`,
-    f.description ? f.description : undefined,
-    f.content,
-  ].filter((part): part is string => Boolean(part)).join('\n')
-}
-
-export function renderContextFragment(f: Fragment): string {
-  return registry.getType(f.type)
-    ? registry.renderContext(f)
-    : renderGenericFragmentContext(f)
-}
-
-/** Renders a single fragment with a source marker */
-function renderFragment(f: Fragment): string {
-  return `[@fragment=${f.id}]\n${renderContextFragment(f)}`
-}
-
-/**
- * Renders a list of fragments as one-line summaries under a consistent heading,
- * with a single line telling the model how to expand them. Shared by every
- * agent so the whole context chain reads the same way.
- */
-export function fragmentSummaryList(
-  heading: string,
-  items: Array<{ id: string; name: string; description: string }>,
-  opts: { editable?: boolean } = {},
-): string {
-  const expand = opts.editable
-    ? 'Read one in full with getFragment(id) before you edit it.'
-    : 'Call getFragment(id) to read one in full.'
-  return [
-    `## ${heading}`,
-    `Each entry is a one-line summary. ${expand}`,
-    ...items.map(f => `- ${f.id}: ${f.name} — ${f.description}`),
-  ].join('\n')
-}
-
-/**
- * Builds a complete summary-list block. Centralizing id, display name, heading,
- * and content here keeps every agent's fragment lists labelled and worded the
- * same way in both the context and the preview.
- */
-export function fragmentSummaryBlock(args: {
-  id: string
-  heading: string
-  items: Array<{ id: string; name: string; description: string }>
-  order: number
-  editable?: boolean
-}): ContextBlock {
-  return {
-    id: args.id,
-    role: 'user',
-    content: fragmentSummaryList(args.heading, args.items, { editable: args.editable }),
-    order: args.order,
-    source: 'builtin',
-  }
-}
-
 /**
  * Renders sticky fragments grouped by type into content parts.
  */
@@ -561,7 +491,7 @@ function renderTypeGrouped(fragments: Fragment[], label: string): string[] {
   if (fragments.length === 0) return []
   const parts: string[] = [`\n[@section=${label}]\n## ${label}`]
   for (const f of fragments) {
-    parts.push(renderFragment(f))
+    parts.push(renderFragmentWithMarker(f))
   }
   return parts
 }
@@ -646,7 +576,7 @@ function renderAdvancedOrder(fragments: Fragment[], fragmentOrder: string[]): st
 
   const parts: string[] = ['\n[@section=Context]\n## Context']
   for (const f of ordered) {
-    parts.push(renderFragment(f))
+    parts.push(renderFragmentWithMarker(f))
   }
   return parts
 }
@@ -684,6 +614,9 @@ export function createDefaultBlocks(state: ContextBuildState): ContextBlock[] {
   const userPlaced = allSticky.filter(f => (f.placement ?? 'user') === 'user')
 
   const blocks: ContextBlock[] = []
+  const pushFragmentBlock = (block: ContextBlock | null) => {
+    if (block) blocks.push(block)
+  }
 
   // --- System blocks ---
 
@@ -773,47 +706,59 @@ export function createDefaultBlocks(state: ContextBuildState): ContextBlock[] {
     })
   }
 
-  if (guidelineShortlist.length > 0) {
-    blocks.push(fragmentSummaryBlock({ id: 'guidelines-shortlist', heading: 'Guidelines', items: guidelineShortlist, order: 300 }))
-  }
+  pushFragmentBlock(fragmentContextBlock({
+    id: 'guidelines-shortlist',
+    type: 'guideline',
+    label: 'Guidelines',
+    fragments: guidelineShortlist,
+    mode: 'summary-index',
+    scope: 'available',
+    order: 300,
+  }))
 
   // Full sheets for knowledge active in the recent prose — the writer continues
   // them from current state. The shortlist below carries everyone else as summaries.
-  if (recentKnowledge.length > 0) {
-    blocks.push({
-      id: 'knowledge-recent',
-      role: 'user',
-      content: [
-        '## Knowledge in Recent Prose',
-        ...recentKnowledge.map(renderFragment),
-      ].join('\n'),
-      order: 308,
-      source: 'builtin',
-    })
-  }
+  pushFragmentBlock(fragmentContextBlock({
+    id: 'knowledge-recent',
+    type: 'knowledge',
+    label: 'Knowledge',
+    fragments: recentKnowledge,
+    mode: 'full',
+    scope: 'recent',
+    order: 308,
+  }))
 
-  if (knowledgeShortlist.length > 0) {
-    blocks.push(fragmentSummaryBlock({ id: 'knowledge-shortlist', heading: 'Knowledge', items: knowledgeShortlist, order: 310 }))
-  }
+  pushFragmentBlock(fragmentContextBlock({
+    id: 'knowledge-shortlist',
+    type: 'knowledge',
+    label: 'Knowledge',
+    fragments: knowledgeShortlist,
+    mode: 'summary-index',
+    scope: 'available',
+    order: 310,
+  }))
 
   // Full sheets for characters active in the recent prose — the writer continues
   // them from current state. The shortlist below carries everyone else as summaries.
-  if (recentCharacters.length > 0) {
-    blocks.push({
-      id: 'characters-recent',
-      role: 'user',
-      content: [
-        '## Characters in Recent Prose',
-        ...recentCharacters.map(renderFragment),
-      ].join('\n'),
-      order: 315,
-      source: 'builtin',
-    })
-  }
+  pushFragmentBlock(fragmentContextBlock({
+    id: 'characters-recent',
+    type: 'character',
+    label: 'Characters',
+    fragments: recentCharacters,
+    mode: 'full',
+    scope: 'recent',
+    order: 315,
+  }))
 
-  if (characterShortlist.length > 0) {
-    blocks.push(fragmentSummaryBlock({ id: 'characters-shortlist', heading: 'Characters', items: characterShortlist, order: 320 }))
-  }
+  pushFragmentBlock(fragmentContextBlock({
+    id: 'characters-shortlist',
+    type: 'character',
+    label: 'Characters',
+    fragments: characterShortlist,
+    mode: 'summary-index',
+    scope: 'available',
+    order: 320,
+  }))
 
   // Custom fragment types follow the same routing as built-in knowledge and
   // characters without pretending to be either: recently mentioned items are
@@ -821,23 +766,25 @@ export function createDefaultBlocks(state: ContextBuildState): ContextBlock[] {
   let customOrder = 330
   for (const lane of orderedCustomContextLanes(story, recentCustomFragments, customFragmentShortlists)) {
     if (lane.recent.length > 0) {
-      blocks.push({
+      pushFragmentBlock(fragmentContextBlock({
         id: `${lane.type}-recent`,
-        role: 'user',
-        content: [
-          `## ${lane.name} in Recent Prose`,
-          ...lane.recent.map(renderFragment),
-        ].join('\n'),
+        type: lane.type,
+        label: lane.name,
+        fragments: lane.recent,
+        mode: 'full',
+        scope: 'recent',
         order: customOrder++,
-        source: 'builtin',
-      })
+      }))
     }
 
     if (lane.shortlist.length > 0) {
-      blocks.push(fragmentSummaryBlock({
+      pushFragmentBlock(fragmentContextBlock({
         id: `${lane.type}-shortlist`,
-        heading: lane.name,
-        items: lane.shortlist,
+        type: lane.type,
+        label: lane.name,
+        fragments: lane.shortlist,
+        mode: 'summary-index',
+        scope: 'available',
         order: customOrder++,
       }))
     }
@@ -849,7 +796,7 @@ export function createDefaultBlocks(state: ContextBuildState): ContextBlock[] {
       role: 'user',
       content: [
         '## Recent Prose',
-        ...proseFragments.map(p => renderFragment(p)),
+        ...proseFragments.map(p => renderFragmentWithMarker(p)),
         '\n## End of Recent Prose',
       ].join('\n'),
       order: 500,
@@ -972,7 +919,7 @@ export interface ExpandFragmentTagsOptions {
 
 /**
  * Expands fragment reference tags in a string.
- * - `<@ch-bafego>` → full rendered content via registry.renderContext()
+ * - `<@ch-bafego>` → full rendered fragment context
  * - `<@ch-bafego:short>` → `{name}: {description}`
  * - Unknown fragment → `[unknown fragment: {id}]`
  *
@@ -1028,7 +975,7 @@ export async function expandFragmentTags(
     } else if (m.modifier === 'short') {
       replacement = `${fragment.name}: ${fragment.description}`
     } else {
-      replacement = registry.renderContext(fragment)
+      replacement = renderContextFragment(fragment)
       // Recurse into expanded content if depth allows
       if (maxDepth > 0) {
         const childAncestors = new Set(ancestors)

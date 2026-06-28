@@ -1,5 +1,8 @@
 import type { ContextBlock, CustomFragmentGroup } from '../llm/context-builder'
-import { customContextFragmentTypes, fragmentSummaryBlock } from '../llm/context-builder'
+import {
+  customContextFragmentTypes,
+  fragmentContextBlock,
+} from '../llm/fragment-context-blocks'
 import { baseBlockContext, type AgentBlockContext } from '../agents/agent-block-context'
 import type { Fragment, StoryMeta } from '../fragments/schema'
 import { getStory, listFragments, getFragment } from '../fragments/storage'
@@ -10,16 +13,18 @@ import {
   instructionsBlock,
   systemFragmentsBlock,
   storyInfoBlock,
-  stickyFragmentsBlock,
   recentProseBlock,
   proseSummariesBlock,
   targetFragmentBlock,
-  allCharactersBlock,
-  shortlistBlock,
   compactBlocks,
   buildBasePreviewContext,
   loadSystemPromptFragments,
 } from '../agents/block-helpers'
+import {
+  allCharactersBlock,
+  fragmentSummaryCatalogBlocks,
+  pinnedFragmentSummaryBlocks,
+} from '../agents/fragment-summary-blocks'
 
 // ─── Librarian Analyze ───
 
@@ -111,6 +116,9 @@ export async function buildAnalyzeContext(
 
 export function createLibrarianAnalyzeBlocks(ctx: AgentBlockContext): ContextBlock[] {
   const blocks: ContextBlock[] = []
+  const pushFragmentBlock = (block: ContextBlock | null) => {
+    if (block) blocks.push(block)
+  }
 
   blocks.push(instructionsBlock('librarian.analyze.system', ctx))
 
@@ -138,52 +146,72 @@ export function createLibrarianAnalyzeBlocks(ctx: AgentBlockContext): ContextBlo
   // Author-pinned, always-relevant — full and in their own block whether or not
   // they also appear in the recent prose, so a pin reliably shows up here.
   if (sticky.length > 0) {
-    blocks.push({
+    pushFragmentBlock(fragmentContextBlock({
       id: 'characters-sticky',
-      role: 'user',
-      content: ['## Pinned Characters', ...sticky.map(renderSheet)].join('\n\n'),
+      type: 'character',
+      label: 'Characters',
+      fragments: sticky,
+      mode: 'full',
+      scope: 'pinned',
       order: 195,
-      source: 'builtin',
-    })
+      heading: 'Pinned Characters',
+      renderFragment: renderSheet,
+      separator: '\n\n',
+    }))
   }
 
   const recentNonPinned = recent.filter((c) => !stickyIds.has(c.id))
   if (recentNonPinned.length > 0) {
-    blocks.push({
+    pushFragmentBlock(fragmentContextBlock({
       id: 'characters-recent',
-      role: 'user',
-      content: ['## Characters in Recent Prose', ...recentNonPinned.map(renderSheet)].join('\n\n'),
+      type: 'character',
+      label: 'Characters',
+      fragments: recentNonPinned,
+      mode: 'full',
+      scope: 'recent',
       order: 200,
-      source: 'builtin',
-    })
+      renderFragment: renderSheet,
+      separator: '\n\n',
+    }))
   }
 
   const shortlistCharacters = (ctx.allCharacters ?? []).filter((c) => !stickyIds.has(c.id) && !recentIds.has(c.id))
-  if (shortlistCharacters.length > 0) {
-    blocks.push(fragmentSummaryBlock({ id: 'characters-shortlist', heading: 'Characters', items: shortlistCharacters, order: 210, editable: true }))
-  }
+  pushFragmentBlock(fragmentContextBlock({
+    id: 'characters-shortlist',
+    type: 'character',
+    label: 'Characters',
+    fragments: shortlistCharacters,
+    mode: 'summary-index',
+    scope: 'available',
+    order: 210,
+    editable: true,
+  }))
 
   if (ctx.allKnowledge && ctx.allKnowledge.length > 0) {
     // Knowledge is delivered in full (bounded, read-mostly — analyze checks
     // contradictions against it).
-    blocks.push({
+    pushFragmentBlock(fragmentContextBlock({
       id: 'knowledge',
-      role: 'user',
-      content: [
-        '## Knowledge',
-        ...ctx.allKnowledge.map(k => `### ${k.id}: ${k.name}\n${k.content}`),
-      ].join('\n\n'),
+      type: 'knowledge',
+      label: 'Knowledge',
+      fragments: ctx.allKnowledge,
+      mode: 'full',
+      scope: 'all',
       order: 300,
-      source: 'builtin',
-    })
+      renderFragment: (k) => `### ${k.id}: ${k.name}\n${k.content}`,
+      separator: '\n\n',
+    }))
   }
 
   let customOrder = 320
   for (const group of ctx.allCustomFragments ?? []) {
-    blocks.push(fragmentSummaryBlock({
+    pushFragmentBlock(fragmentContextBlock({
       id: `${group.type}-shortlist`,
-      heading: group.name,
-      items: group.fragments,
+      type: group.type,
+      label: group.name,
+      fragments: group.fragments,
+      mode: 'summary-index',
+      scope: 'available',
       order: customOrder++,
       editable: true,
     }))
@@ -275,11 +303,7 @@ export function createLibrarianChatBlocks(ctx: AgentBlockContext): ContextBlock[
   const prose = proseSummariesBlock(ctx, '## Prose Fragments (use getFragment to read/edit)')
   if (prose) blocks.push(prose)
 
-  const sticky = stickyFragmentsBlock(ctx)
-  if (sticky) blocks.push(sticky)
-
-  const shortlist = shortlistBlock(ctx, { includeCustomFragments: true })
-  if (shortlist) blocks.push(shortlist)
+  blocks.push(...fragmentSummaryCatalogBlocks(ctx, { includeCustomFragments: true }))
 
   return blocks
 }
@@ -313,7 +337,7 @@ export function createLibrarianRefineBlocks(ctx: AgentBlockContext): ContextBloc
     instructionsBlock('librarian.refine.system', ctx),
     storyInfoBlock(ctx),
     recentProseBlock(ctx),
-    stickyFragmentsBlock(ctx),
+    ...pinnedFragmentSummaryBlocks(ctx),
     targetFragmentBlock(ctx,
       'fragment to refine',
       'No specific instructions provided. Improve this fragment based on recent story events for consistency, clarity, and depth.',
@@ -466,7 +490,7 @@ export function createOptimizeCharacterBlocks(ctx: AgentBlockContext): ContextBl
     instructionsBlock('librarian.optimize-character.system', ctx),
     storyInfoBlock(ctx),
     recentProseBlock(ctx),
-    stickyFragmentsBlock(ctx),
+    ...pinnedFragmentSummaryBlocks(ctx, { includeCharacters: false }),
     allCharactersBlock(ctx),
     targetFragmentBlock(ctx,
       'character to optimize',
