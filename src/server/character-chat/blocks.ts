@@ -1,7 +1,9 @@
 import type { ContextBlock } from '../llm/context-builder'
+import { renderFragmentContextGroup } from '../llm/fragment-context-blocks'
 import type { AgentBlockContext } from '../agents/agent-block-context'
 import { instructionRegistry } from '../instructions'
 import { buildBasePreviewContext } from '../agents/block-helpers'
+import { pinnedFragmentSummaryGroups } from '../agents/fragment-summary-blocks'
 
 export function createCharacterChatBlocks(ctx: AgentBlockContext): ContextBlock[] {
   const blocks: ContextBlock[] = []
@@ -74,18 +76,12 @@ export function createCharacterChatBlocks(ctx: AgentBlockContext): ContextBlock[
     }
   }
 
-  // Sticky fragments
-  const stickyAll = [
-    ...ctx.stickyGuidelines,
-    ...ctx.stickyKnowledge,
-    ...ctx.stickyCharacters,
-    ...(ctx.stickyCustomFragments ?? []),
-  ]
-  if (stickyAll.length > 0) {
-    storyContextParts.push('\n## World Context')
-    for (const f of stickyAll) {
-      storyContextParts.push(`- ${f.id}: ${f.name} — ${f.description}`)
-    }
+  // Pinned fragment summaries, split by type so summary indexes cannot read as full sheets.
+  const pinnedSummaryGroups = pinnedFragmentSummaryGroups(ctx, {
+    excludeIds: ctx.character ? [ctx.character.id] : [],
+  })
+  for (const group of pinnedSummaryGroups) {
+    storyContextParts.push(`\n${renderFragmentContextGroup(group)}`)
   }
 
   blocks.push({

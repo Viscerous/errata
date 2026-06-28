@@ -8,7 +8,7 @@
 import type { ContextBlock } from '../llm/context-builder'
 import { type AgentBlockContext, baseBlockContext } from './agent-block-context'
 import type { Fragment } from '../fragments/schema'
-import { buildContextState, fragmentSummaryBlock } from '../llm/context-builder'
+import { buildContextState } from '../llm/context-builder'
 import { instructionRegistry } from '../instructions'
 
 // ─── Block helpers ───
@@ -49,18 +49,6 @@ export function storyInfoBlock(ctx: AgentBlockContext): ContextBlock {
     order: 100,
     source: 'builtin',
   }
-}
-
-/** Sticky guidelines, knowledge, characters, and custom fragments. */
-export function stickyFragmentsBlock(ctx: AgentBlockContext): ContextBlock | null {
-  const all = [
-    ...ctx.stickyGuidelines,
-    ...ctx.stickyKnowledge,
-    ...ctx.stickyCharacters,
-    ...(ctx.stickyCustomFragments ?? []),
-  ]
-  if (all.length === 0) return null
-  return fragmentSummaryBlock({ id: 'sticky-fragments', heading: 'Active Context', items: all, order: 300 })
 }
 
 /** Full content of recent prose fragments. */
@@ -120,30 +108,6 @@ export function targetFragmentBlock(
     order: 400,
     source: 'builtin',
   }
-}
-
-/** All characters list for cross-reference. */
-export function allCharactersBlock(ctx: AgentBlockContext): ContextBlock | null {
-  if (!ctx.allCharacters || ctx.allCharacters.length === 0) return null
-  return fragmentSummaryBlock({ id: 'characters-shortlist', heading: 'Characters', items: ctx.allCharacters, order: 350 })
-}
-
-export interface ShortlistBlockOptions {
-  includeCustomFragments?: boolean
-}
-
-/** Shortlist fragments not already pinned or promoted to full recent context. */
-export function shortlistBlock(ctx: AgentBlockContext, options: ShortlistBlockOptions = {}): ContextBlock | null {
-  const all = [
-    ...ctx.guidelineShortlist,
-    ...ctx.knowledgeShortlist,
-    ...ctx.characterShortlist,
-    ...(options.includeCustomFragments
-      ? (ctx.customFragmentShortlists ?? []).flatMap((group) => group.fragments)
-      : []),
-  ]
-  if (all.length === 0) return null
-  return fragmentSummaryBlock({ id: 'shortlist', heading: 'Other Available Fragments', items: all, order: 400 })
 }
 
 // ─── Utilities ───
