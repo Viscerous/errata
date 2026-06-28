@@ -37,7 +37,7 @@ export interface LibrarianAnalysis {
     fragmentIds: string[]
   }>
   fragmentSuggestions: Array<{
-    type: 'character' | 'knowledge'
+    type: string
     targetFragmentId?: string
     name: string
     description: string
@@ -50,7 +50,7 @@ export interface LibrarianAnalysis {
   }>
   /** @deprecated Use fragmentSuggestions. Kept for backward compat with stored JSON. */
   knowledgeSuggestions?: Array<{
-    type: 'character' | 'knowledge'
+    type: string
     targetFragmentId?: string
     name: string
     description: string

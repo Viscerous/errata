@@ -125,7 +125,14 @@ async function runLibrarianInner(
   const disableDirections = story.settings?.disableLibrarianDirections === true
   const disableSuggestions = story.settings?.disableLibrarianSuggestions === true
   const collector = createEmptyCollector()
-  const analysisTools = createLibrarianAnalyzeTools(collector, { dataDir, storyId, proseFragmentId: fragmentId, disableDirections, disableSuggestions })
+  const analysisTools = createLibrarianAnalyzeTools(collector, {
+    dataDir,
+    storyId,
+    proseFragmentId: fragmentId,
+    disableDirections,
+    disableSuggestions,
+    customFragmentTypes: story.settings.customFragmentTypes,
+  })
 
   // Compile context via block system
   const compiled = await compileAgentContext(dataDir, storyId, 'librarian.analyze', blockContext, analysisTools)
@@ -151,9 +158,13 @@ async function runLibrarianInner(
   const systemMessage = compiled.messages.find(m => m.role === 'system')
   const userMessage = compiled.messages.find(m => m.role === 'user')
 
-  // Override system prompt when directions or suggestions are disabled
-  if ((disableDirections || disableSuggestions) && systemMessage) {
-    systemMessage.content = buildAnalyzeSystemPrompt({ disableDirections, disableSuggestions }).trim()
+  // Override system prompt with dynamic configuration and custom types list
+  if (systemMessage) {
+    systemMessage.content = buildAnalyzeSystemPrompt({
+      disableDirections,
+      disableSuggestions,
+      customFragmentTypes: story.settings.customFragmentTypes,
+    }).trim()
   }
 
   const providerOptions = buildProviderOptions(story.settings.disableThinking ?? false)
