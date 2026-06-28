@@ -1,12 +1,12 @@
 import { useState, useEffect, useRef, useCallback, useMemo, memo, Fragment as ReactFragment } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueries, useQueryClient } from '@tanstack/react-query'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { api, type Fragment, type ProseChainEntry } from '@/lib/api'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { StreamMarkdown } from '@/components/ui/stream-markdown'
 import { Loader2, Wand2, Bookmark, List } from 'lucide-react'
 import { Hint } from '@/components/ui/prose-text'
-import { useQuickSwitch, useProseWidth, PROSE_WIDTH_VALUES, useCharacterMentions, useKnowledgeMentions } from '@/lib/theme'
+import { useQuickSwitch, useProseWidth, PROSE_WIDTH_VALUES, useMentionTypes, BASE_MENTION_TYPES } from '@/lib/theme'
 import { parseVisualRefs } from '@/lib/fragment-visuals'
 import { ProseBlock } from './ProseBlock'
 import { ChapterMarker } from './ChapterMarker'
@@ -209,9 +209,27 @@ export function ProseChainView({
   const scrollAreaRef = useRef<HTMLDivElement>(null)
   const [quickSwitch] = useQuickSwitch()
   const [proseWidth] = useProseWidth()
-  const [characterMentionsEnabled] = useCharacterMentions()
-  const [knowledgeMentionsEnabled] = useKnowledgeMentions()
+  const [enabledMentionTypesList] = useMentionTypes()
   const queryClient = useQueryClient()
+
+  const { data: story } = useQuery({
+    queryKey: ['story', storyId],
+    queryFn: () => api.stories.get(storyId),
+  })
+
+  const enabledMentionTypes = useMemo(
+    () => new Set(enabledMentionTypesList),
+    [enabledMentionTypesList],
+  )
+
+  const mentionFragmentTypes = useMemo(() => {
+    const types = new Set<string>(BASE_MENTION_TYPES)
+    for (const def of story?.settings.customFragmentTypes ?? []) {
+      types.add(def.type)
+    }
+    return [...types].filter((type) => enabledMentionTypes.has(type))
+  }, [enabledMentionTypes, story?.settings.customFragmentTypes])
+  const mentionHighlightsEnabled = mentionFragmentTypes.length > 0
 
   // While the librarian is analyzing, poll its status so we can refresh prose as
   // soon as it writes mention annotations (it persists them at the start of the
@@ -219,8 +237,8 @@ export function ProseChainView({
   const { data: librarianStatus } = useQuery({
     queryKey: ['librarian-status', storyId],
     queryFn: () => api.librarian.getStatus(storyId),
-    enabled: characterMentionsEnabled || knowledgeMentionsEnabled,
-    refetchInterval: (characterMentionsEnabled || knowledgeMentionsEnabled) ? 2_000 : false,
+    enabled: mentionHighlightsEnabled,
+    refetchInterval: mentionHighlightsEnabled ? 2_000 : false,
   })
   const isAnalyzing = librarianStatus?.runStatus === 'running'
 
@@ -236,7 +254,7 @@ export function ProseChainView({
     queryKey: ['fragments', storyId, 'prose'],
     queryFn: () => api.fragments.list(storyId, 'prose'),
     // Pick up mention annotations mid-run; idle = no extra polling.
-    refetchInterval: (characterMentionsEnabled || knowledgeMentionsEnabled) && isAnalyzing ? 2_000 : false,
+    refetchInterval: mentionHighlightsEnabled && isAnalyzing ? 2_000 : false,
   })
 
   const { data: markerFragments = [] } = useQuery({
@@ -244,17 +262,24 @@ export function ProseChainView({
     queryFn: () => api.fragments.list(storyId, 'marker'),
   })
 
-  const { data: characterFragments = [] } = useQuery({
-    queryKey: ['fragments', storyId, 'character'],
-    queryFn: () => api.fragments.list(storyId, 'character'),
-    enabled: characterMentionsEnabled,
+  const mentionFragmentQueries = useQueries({
+    queries: mentionFragmentTypes.map((type) => ({
+      queryKey: ['fragments', storyId, type],
+      queryFn: () => api.fragments.list(storyId, type),
+      enabled: mentionHighlightsEnabled,
+    })),
   })
-
-  const { data: knowledgeFragments = [] } = useQuery({
-    queryKey: ['fragments', storyId, 'knowledge'],
-    queryFn: () => api.fragments.list(storyId, 'knowledge'),
-    enabled: knowledgeMentionsEnabled,
-  })
+  const allMentionFragments = useMemo(
+    () => mentionFragmentQueries.flatMap((query) => query.data ?? []),
+    [mentionFragmentQueries],
+  )
+  const mentionFragmentTypesById = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const fragment of allMentionFragments) {
+      map.set(fragment.id, fragment.type)
+    }
+    return map
+  }, [allMentionFragments])
 
   // Prose headers need image fragments even when character-mentions are off.
   const anyProseHasImage = useMemo(
@@ -265,13 +290,13 @@ export function ProseChainView({
   const { data: imageFragments = [] } = useQuery({
     queryKey: ['fragments', storyId, 'image'],
     queryFn: () => api.fragments.list(storyId, 'image'),
-    enabled: characterMentionsEnabled || knowledgeMentionsEnabled || anyProseHasImage,
+    enabled: mentionHighlightsEnabled || anyProseHasImage,
   })
 
   const { data: iconFragments = [] } = useQuery({
     queryKey: ['fragments', storyId, 'icon'],
     queryFn: () => api.fragments.list(storyId, 'icon'),
-    enabled: characterMentionsEnabled || knowledgeMentionsEnabled,
+    enabled: mentionHighlightsEnabled,
   })
 
   const { data: analysisIndex } = useQuery({
@@ -310,7 +335,8 @@ export function ProseChainView({
   const mentionColorsRef = useRef<Map<string, string>>(new Map())
   const mentionColors = useMemo(() => {
     const next = new Map<string, string>()
-    for (const char of characterFragments) {
+    for (const char of allMentionFragments) {
+      if (char.type !== 'character') continue
       const tag = char.tags.find(t => t.startsWith('color='))
       if (!tag) continue
       const value = tag.slice(6)
@@ -328,11 +354,7 @@ export function ProseChainView({
     }
     mentionColorsRef.current = next
     return next
-  }, [characterFragments])
-
-  const allMentionFragments = useMemo(() => {
-    return [...characterFragments, ...knowledgeFragments]
-  }, [characterFragments, knowledgeFragments])
+  }, [allMentionFragments])
 
   // Build combined fragment map from prose + markers
   const allFragmentsMap = useMemo(() => {
@@ -626,8 +648,8 @@ export function ProseChainView({
                           onAnalyze={handleAnalyze}
                           hasAnalysis={analyzedFragments.has(fragment.id)}
                           quickSwitch={quickSwitch}
-                          characterMentionsEnabled={characterMentionsEnabled}
-                          knowledgeMentionsEnabled={knowledgeMentionsEnabled}
+                          enabledMentionTypes={enabledMentionTypes}
+                          mentionFragmentTypesById={mentionFragmentTypesById}
                           mentionColors={mentionColors}
                           onClickMention={handleMentionClick}
                           mediaById={mediaById}
@@ -677,8 +699,8 @@ export function ProseChainView({
                           onAnalyze={handleAnalyze}
                           hasAnalysis={analyzedFragments.has(fragment.id)}
                           quickSwitch={quickSwitch}
-                          characterMentionsEnabled={characterMentionsEnabled}
-                          knowledgeMentionsEnabled={knowledgeMentionsEnabled}
+                          enabledMentionTypes={enabledMentionTypes}
+                          mentionFragmentTypesById={mentionFragmentTypesById}
                           mentionColors={mentionColors}
                           onClickMention={handleMentionClick}
                           mediaById={mediaById}

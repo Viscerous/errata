@@ -1,4 +1,4 @@
-import type { ContextBlock } from '../llm/context-builder'
+import { renderContextFragment, type ContextBlock } from '../llm/context-builder'
 import type { AgentBlockContext } from '../agents/agent-block-context'
 import { getFragment } from '../fragments/storage'
 import { getFragmentsByTag } from '../fragments/associations'
@@ -10,6 +10,10 @@ import {
 } from '../agents/block-helpers'
 
 export const DIRECTIONS_SYSTEM_PROMPT = `You are a creative writing assistant that suggests possible story directions. Propose distinct and compelling directions the narrative could take. Each suggestion should have a short evocative title, a brief description, and a detailed instruction prompt suitable for a writer.`
+
+function renderFullFragment(fragment: Parameters<typeof renderContextFragment>[0]): string {
+  return `[@fragment=${fragment.id}]\n${renderContextFragment(fragment)}`
+}
 
 export function createDirectionsSuggestBlocks(ctx: AgentBlockContext): ContextBlock[] {
   const blocks: ContextBlock[] = []
@@ -69,6 +73,33 @@ export function createDirectionsSuggestBlocks(ctx: AgentBlockContext): ContextBl
       role: 'user',
       content: `## Knowledge in Recent Prose\n${ctx.recentKnowledge.map(k => `### ${k.name}\n${k.content}`).join('\n\n')}`,
       order: 248,
+      source: 'builtin',
+    })
+  }
+
+  if ((ctx.stickyCustomFragments ?? []).length > 0) {
+    blocks.push({
+      id: 'custom-sticky',
+      role: 'user',
+      content: [
+        '## Pinned Custom Context',
+        ...(ctx.stickyCustomFragments ?? []).map(renderFullFragment),
+      ].join('\n\n'),
+      order: 250,
+      source: 'builtin',
+    })
+  }
+
+  let customOrder = 255
+  for (const group of ctx.recentCustomFragments ?? []) {
+    blocks.push({
+      id: `${group.type}-recent`,
+      role: 'user',
+      content: [
+        `## ${group.name} in Recent Prose`,
+        ...group.fragments.map(renderFullFragment),
+      ].join('\n\n'),
+      order: customOrder++,
       source: 'builtin',
     })
   }

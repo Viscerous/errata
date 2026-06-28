@@ -31,9 +31,7 @@ export interface LibrarianAnalysis {
     stateChanges: string[]
     openThreads: string[]
   }
-  mentionedCharacters: string[]
-  mentionedKnowledge?: string[]
-  mentions?: LibrarianMention[]
+  mentions: LibrarianMention[]
   contradictions: Array<{
     description: string
     fragmentIds: string[]
@@ -77,9 +75,7 @@ export interface LibrarianAnalysis {
   }>
 }
 
-export type LibrarianMention =
-  | { characterId: string; text: string }
-  | { knowledgeId: string; text: string }
+export type LibrarianMention = { fragmentId: string; text: string }
 
 export function selectLatestAnalysesByFragment(
   summaries: LibrarianAnalysisSummary[],

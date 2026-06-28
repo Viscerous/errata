@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, type StoryMeta, type GlobalConfigSafe } from '@/lib/api'
-import { useTheme, useQuickSwitch, useCharacterMentions, useKnowledgeMentions, useTimelineBar, useProseWidth, useUiFontSize, UI_FONT_SIZE_LABELS, useProseFontSize, PROSE_FONT_SIZE_LABELS, useFontPreferences, getActiveFont, FONT_CATALOGUE, loadFullFontCatalogue, useCustomCss, useWritingTransforms, useTransformContext, TRANSFORM_CONTEXT_LABELS, type TransformContext, type FontRole, type ProseWidth, type UiFontSize, type ProseFontSize } from '@/lib/theme'
+import { useTheme, useQuickSwitch, useMentionTypes, BASE_MENTION_TYPES, useTimelineBar, useProseWidth, useUiFontSize, UI_FONT_SIZE_LABELS, useProseFontSize, PROSE_FONT_SIZE_LABELS, useFontPreferences, getActiveFont, FONT_CATALOGUE, loadFullFontCatalogue, useCustomCss, useWritingTransforms, useTransformContext, TRANSFORM_CONTEXT_LABELS, type TransformContext, type FontRole, type ProseWidth, type UiFontSize, type ProseFontSize } from '@/lib/theme'
 import { Settings2, ChevronRight, ExternalLink, Eye, EyeOff, Puzzle, RotateCcw, CircleHelp, Code } from 'lucide-react'
 import { useHelp } from '@/hooks/use-help'
 import { CustomCssPanel } from '@/components/settings/CustomCssPanel'
@@ -15,6 +15,12 @@ import { ModelSelect } from '@/components/settings/ModelSelect'
 import { ProviderSelect } from '@/components/settings/ProviderSelect'
 import { getDesktopBridge, onDesktopBridgeReady } from '@/lib/desktop'
 import { resolveProvider, getInheritLabel } from '@/lib/model-role-helpers'
+import {
+  BUILTIN_FRAGMENT_TYPES,
+  compareFragmentTypeVisuals,
+  FragmentTypeDisplayIcon,
+  getFragmentTypeVisual,
+} from '@/components/fragments/fragment-type-icons'
 import {
   SettingsSection,
   SectionHeading,
@@ -85,6 +91,58 @@ function FontPicker({ role, label, description, activeFont, onSelect }: {
           )
         })}
       </div>
+    </div>
+  )
+}
+
+function MentionTypePicker({
+  story,
+  enabledTypes,
+  onChange,
+}: {
+  story: StoryMeta
+  enabledTypes: string[]
+  onChange: (types: string[]) => void
+}) {
+  const customTypes = story.settings.customFragmentTypes ?? []
+  const options = useMemo(() => {
+    const visuals = [
+      ...BASE_MENTION_TYPES.map((type) => getFragmentTypeVisual(type, customTypes)),
+      ...customTypes
+        .filter((def) => !BUILTIN_FRAGMENT_TYPES.has(def.type))
+        .map((def) => getFragmentTypeVisual(def.type, customTypes)),
+    ]
+    return visuals.sort(compareFragmentTypeVisuals)
+  }, [customTypes])
+  const enabled = new Set(enabledTypes)
+
+  const toggleType = (type: string) => {
+    onChange(enabled.has(type)
+      ? enabledTypes.filter((current) => current !== type)
+      : [...enabledTypes, type])
+  }
+
+  return (
+    <div className="flex max-w-[22rem] flex-wrap justify-end gap-1.5">
+      {options.map((option) => {
+        const active = enabled.has(option.type)
+        return (
+          <button
+            key={option.type}
+            type="button"
+            aria-pressed={active}
+            onClick={() => toggleType(option.type)}
+            className={`inline-flex h-6 items-center gap-1 rounded-md border px-1.5 text-[0.625rem] font-medium transition-colors ${active
+                ? 'border-foreground/25 bg-foreground text-background shadow-[0_0_0_1px_rgba(0,0,0,0.03)]'
+                : 'border-border/40 bg-transparent text-muted-foreground hover:border-border/70 hover:text-foreground/75'
+              }`}
+            title={option.label}
+          >
+            <FragmentTypeDisplayIcon type={option.type} customTypes={customTypes} className="size-3" />
+            <span>{option.singularLabel}</span>
+          </button>
+        )
+      })}
     </div>
   )
 }
@@ -411,8 +469,7 @@ export function SettingsPanel({
   const { openHelp } = useHelp()
   const { theme, setTheme } = useTheme()
   const [quickSwitch, setQuickSwitch] = useQuickSwitch()
-  const [characterMentions, setCharacterMentions] = useCharacterMentions()
-  const [knowledgeMentions, setKnowledgeMentions] = useKnowledgeMentions()
+  const [mentionTypes, setMentionTypes] = useMentionTypes()
   const [timelineBar, setTimelineBar] = useTimelineBar()
   const [proseWidth, setProseWidth] = useProseWidth()
   const [uiFontSize, setUiFontSize] = useUiFontSize()
@@ -465,11 +522,8 @@ export function SettingsPanel({
           <SettingRow label="Quick switch" description="Show chevrons to swap between variations">
             <Toggle checked={quickSwitch} onChange={setQuickSwitch} label="Toggle quick switch" />
           </SettingRow>
-          <SettingRow label="Character mentions" description="Highlight character names in prose">
-            <Toggle checked={characterMentions} onChange={setCharacterMentions} label="Toggle character mentions" />
-          </SettingRow>
-          <SettingRow label="Knowledge mentions" description="Highlight knowledge terms in prose">
-            <Toggle checked={knowledgeMentions} onChange={setKnowledgeMentions} label="Toggle knowledge mentions" />
+          <SettingRow label="Mentions" description="Highlight analyzed fragment references in prose">
+            <MentionTypePicker story={story} enabledTypes={mentionTypes} onChange={setMentionTypes} />
           </SettingRow>
           <SettingRow label="Timeline bar" description="Show timeline switcher above prose">
             <Toggle checked={timelineBar} onChange={setTimelineBar} label="Toggle timeline bar" />

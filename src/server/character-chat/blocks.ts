@@ -79,6 +79,7 @@ export function createCharacterChatBlocks(ctx: AgentBlockContext): ContextBlock[
     ...ctx.stickyGuidelines,
     ...ctx.stickyKnowledge,
     ...ctx.stickyCharacters,
+    ...(ctx.stickyCustomFragments ?? []),
   ]
   if (stickyAll.length > 0) {
     storyContextParts.push('\n## World Context')

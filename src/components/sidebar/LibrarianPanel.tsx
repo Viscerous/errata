@@ -4,6 +4,7 @@ import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 import {
   api,
   type ConversationMeta,
+  type CustomFragmentType,
   type Fragment,
   type LibrarianAnalysis,
   type LibrarianAnalysisSummary,
@@ -21,7 +22,6 @@ import {
   Brain,
   Lightbulb,
   Clock,
-  Users,
   ChevronDown,
   ChevronRight,
   Plus,
@@ -38,6 +38,13 @@ import {
 import { EmptyState } from '@/components/ui/async-view'
 import { RefinementPanel } from '@/components/refinement/RefinementPanel'
 import { LibrarianChat } from '@/components/librarian/LibrarianChat'
+import {
+  compareFragmentTypeVisuals,
+  FragmentTypeDisplayIcon,
+  getFragmentTypeVisual,
+  inferFragmentTypeFromId,
+  type FragmentTypeVisual,
+} from '@/components/fragments/fragment-type-icons'
 
 interface LibrarianPanelProps {
   storyId: string
@@ -47,6 +54,8 @@ interface LibrarianPanelProps {
 }
 
 type TabValue = 'chat' | 'story' | 'summaries'
+type MentionEntry = [string, string[]]
+type MentionGroup = { type: string; visual: FragmentTypeVisual; entries: MentionEntry[] }
 
 function tabStorageKey(storyId: string): string {
   return `errata.librarian.activeTab.${storyId}`
@@ -300,6 +309,28 @@ function formatRelativeTime(date: Date): string {
   return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 }
 
+function buildMentionGroups(
+  entries: MentionEntry[],
+  fragmentById: Map<string, Fragment>,
+  customTypeByType: Map<string, CustomFragmentType>,
+): MentionGroup[] {
+  const groups = new Map<string, MentionGroup>()
+  for (const entry of entries) {
+    const [fragmentId] = entry
+    const type = fragmentById.get(fragmentId)?.type ?? inferFragmentTypeFromId(fragmentId) ?? 'custom'
+    const group = groups.get(type) ?? {
+      type,
+      visual: getFragmentTypeVisual(type, customTypeByType),
+      entries: [],
+    }
+    group.entries.push(entry)
+    groups.set(type, group)
+  }
+  return [...groups.values()].sort((a, b) =>
+    compareFragmentTypeVisuals(a.visual, b.visual),
+  )
+}
+
 // ─── Story Tab ─────────────────────────────────────────────
 
 function StoryContent({ storyId, status, onOpenChat }: LibrarianPanelProps & { status: LibrarianState | undefined; onOpenChat?: (message: string) => void }) {
@@ -322,6 +353,16 @@ function StoryContent({ storyId, status, onOpenChat }: LibrarianPanelProps & { s
     queryFn: () => api.fragments.list(storyId, 'knowledge'),
   })
 
+  const { data: allFragments } = useQuery({
+    queryKey: ['fragments', storyId],
+    queryFn: () => api.fragments.list(storyId),
+  })
+
+  const { data: story } = useQuery({
+    queryKey: ['story', storyId],
+    queryFn: () => api.stories.get(storyId),
+  })
+
   const { data: analyses } = useQuery({
     queryKey: ['librarian-analyses', storyId],
     queryFn: () => api.librarian.listAnalyses(storyId),
@@ -340,8 +381,20 @@ function StoryContent({ storyId, status, onOpenChat }: LibrarianPanelProps & { s
     ...(knowledge ?? []),
   ].filter((f) => !f.archived), [characters, guidelines, knowledge])
 
+  const fragmentById = useMemo(
+    () => new Map((allFragments ?? []).map((fragment) => [fragment.id, fragment])),
+    [allFragments],
+  )
+
+  const customTypeByType = useMemo(
+    () => new Map((story?.settings.customFragmentTypes ?? []).map((def) => [def.type, def])),
+    [story?.settings.customFragmentTypes],
+  )
+
   const charName = (id: string) => {
-    const found = characters?.find((c) => c.id === id) || knowledge?.find((k) => k.id === id)
+    const found = characters?.find((c) => c.id === id)
+      || knowledge?.find((k) => k.id === id)
+      || fragmentById.get(id)
     return found?.name ?? id
   }
 
@@ -393,6 +446,8 @@ function StoryContent({ storyId, status, onOpenChat }: LibrarianPanelProps & { s
                   onToggle={() => setExpandedId(expandedId === summary.id ? null : summary.id)}
                   onOpenChat={onOpenChat}
                   charName={charName}
+                  fragmentById={fragmentById}
+                  customTypeByType={customTypeByType}
                 />
               ))}
               {!showAllAnalyses && analyses.length > 6 && (
@@ -416,45 +471,22 @@ function StoryContent({ storyId, status, onOpenChat }: LibrarianPanelProps & { s
           />
         )}
 
-        {/* Character/Knowledge mentions */}
+        {/* Fragment mentions */}
         {hasMentions && status && (
           (() => {
-            const entries = Object.entries(status.recentMentions ?? {})
-            const charMentions = entries.filter(([id]) => !id.startsWith('kn-'))
-            const knMentions = entries.filter(([id]) => id.startsWith('kn-'))
+            const mentionGroups = buildMentionGroups(
+              Object.entries(status.recentMentions ?? {}),
+              fragmentById,
+              customTypeByType,
+            )
+
             return (
               <>
-                {charMentions.length > 0 && (
-                  <section>
-                    <SectionLabel icon={<Users className="size-3" />}>Characters</SectionLabel>
-                    <div className="space-y-0.5 mt-1.5">
-                      {charMentions.map(([charId, fragmentIds]) => (
-                        <div key={charId} className="flex items-center justify-between py-1 px-2 rounded-md hover:bg-accent/30 transition-colors">
-                          <span className="text-[0.6875rem] text-foreground/70">{charName(charId)}</span>
-                          <span className="text-[0.625rem] font-mono text-muted-foreground">
-                            {fragmentIds.length} mention{fragmentIds.length !== 1 ? 's' : ''}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </section>
-                )}
-
-                {knMentions.length > 0 && (
-                  <section className="mt-3">
-                    <SectionLabel icon={<BookOpen className="size-3" />}>Knowledge</SectionLabel>
-                    <div className="space-y-0.5 mt-1.5">
-                      {knMentions.map(([knId, fragmentIds]) => (
-                        <div key={knId} className="flex items-center justify-between py-1 px-2 rounded-md hover:bg-accent/30 transition-colors">
-                          <span className="text-[0.6875rem] text-foreground/70">{charName(knId)}</span>
-                          <span className="text-[0.625rem] font-mono text-muted-foreground">
-                            {fragmentIds.length} mention{fragmentIds.length !== 1 ? 's' : ''}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </section>
-                )}
+                <MentionGroupsSummary
+                  groups={mentionGroups}
+                  charName={charName}
+                  customTypeByType={customTypeByType}
+                />
               </>
             )
           })()
@@ -538,6 +570,64 @@ function SectionLabel({ children, icon }: { children: React.ReactNode; icon?: Re
   )
 }
 
+function MentionGroupsSummary({
+  groups,
+  charName,
+  customTypeByType,
+}: {
+  groups: MentionGroup[]
+  charName: (fragmentId: string) => string
+  customTypeByType: Map<string, CustomFragmentType>
+}) {
+  const [expandedByType, setExpandedByType] = useState<Record<string, boolean>>({})
+
+  if (groups.length === 0) return null
+
+  return (
+    <>
+      {groups.map((group, index) => {
+        const expanded = expandedByType[group.type] ?? group.type === 'character'
+        const mentionCount = group.entries.reduce((sum, [, fragmentIds]) => sum + fragmentIds.length, 0)
+
+        return (
+          <section key={group.type} className={index === 0 ? undefined : 'mt-2'}>
+            <button
+              type="button"
+              onClick={() => setExpandedByType((prev) => ({ ...prev, [group.type]: !expanded }))}
+              className="flex w-full items-center gap-1.5 rounded-md px-1 py-1 text-left transition-colors hover:bg-accent/25"
+            >
+              {expanded
+                ? <ChevronDown className="size-3 text-muted-foreground shrink-0" />
+                : <ChevronRight className="size-3 text-muted-foreground shrink-0" />
+              }
+              <FragmentTypeDisplayIcon type={group.type} customTypes={customTypeByType} className="size-3 text-muted-foreground shrink-0" />
+              <span className="text-[0.5625rem] text-muted-foreground uppercase tracking-[0.15em] font-medium">
+                {group.visual.label}
+              </span>
+              <span className="ml-auto font-mono text-[0.5625rem] text-muted-foreground">
+                {mentionCount} mention{mentionCount !== 1 ? 's' : ''}
+              </span>
+            </button>
+
+            {expanded && (
+              <div className="space-y-0.5 mt-1">
+                {group.entries.map(([fragmentId, fragmentIds]) => (
+                  <div key={fragmentId} className="flex items-center justify-between py-1 px-2 rounded-md hover:bg-accent/30 transition-colors">
+                    <span className="text-[0.6875rem] text-foreground/70">{charName(fragmentId)}</span>
+                    <span className="text-[0.625rem] font-mono text-muted-foreground">
+                      {fragmentIds.length} mention{fragmentIds.length !== 1 ? 's' : ''}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+        )
+      })}
+    </>
+  )
+}
+
 function AnalysisItem({
   storyId,
   summary,
@@ -546,6 +636,8 @@ function AnalysisItem({
   onToggle,
   onOpenChat,
   charName,
+  fragmentById,
+  customTypeByType,
 }: {
   storyId: string
   summary: LibrarianAnalysisSummary
@@ -554,6 +646,8 @@ function AnalysisItem({
   onToggle: () => void
   onOpenChat?: (message: string) => void
   charName: (id: string) => string
+  fragmentById: Map<string, Fragment>
+  customTypeByType: Map<string, CustomFragmentType>
 }) {
   const queryClient = useQueryClient()
   const [editingSummary, setEditingSummary] = useState(false)
@@ -608,6 +702,15 @@ function AnalysisItem({
   }
 
   const pendingSuggestions = summary.pendingSuggestionCount
+  const mentionGroups = useMemo(
+    () => buildMentionGroups(
+      [...new Set((analysis?.mentions ?? []).map(mention => mention.fragmentId))]
+        .map((fragmentId) => [fragmentId, []] as MentionEntry),
+      fragmentById,
+      customTypeByType,
+    ),
+    [analysis?.mentions, fragmentById, customTypeByType],
+  )
 
   return (
     <div className="rounded-md border border-border/25 overflow-hidden">
@@ -741,27 +844,16 @@ function AnalysisItem({
             </div>
           )}
 
-          {analysis.mentionedCharacters.length > 0 && (
-            <div className="flex items-center gap-1 flex-wrap">
-              <span className="text-muted-foreground text-[0.625rem] mr-1">Characters</span>
-              {analysis.mentionedCharacters.map((id) => (
+          {mentionGroups.map((group) => (
+            <div key={group.type} className="flex items-center gap-1 flex-wrap">
+              <span className="text-muted-foreground text-[0.625rem] mr-1">{group.visual.label}</span>
+              {group.entries.map(([id]) => (
                 <Badge key={id} variant="outline" className="text-[0.5625rem] h-4 px-1.5">
                   {charName(id)}
                 </Badge>
               ))}
             </div>
-          )}
-
-          {analysis.mentionedKnowledge && analysis.mentionedKnowledge.length > 0 && (
-            <div className="flex items-center gap-1 flex-wrap">
-              <span className="text-muted-foreground text-[0.625rem] mr-1">Knowledge</span>
-              {analysis.mentionedKnowledge.map((id) => (
-                <Badge key={id} variant="outline" className="text-[0.5625rem] h-4 px-1.5">
-                  {charName(id)}
-                </Badge>
-              ))}
-            </div>
-          )}
+          ))}
 
           {analysis.contradictions.length > 0 && (
             <div className="space-y-1.5">

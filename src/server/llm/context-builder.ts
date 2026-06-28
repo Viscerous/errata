@@ -3,8 +3,14 @@ import { registry } from '../fragments/registry'
 import { instructionRegistry } from '../instructions'
 import { createLogger } from '../logging'
 import { getActiveProseIds, findSectionIndex, getProseChain } from '../fragments/prose-chain'
-import type { Fragment, StoryMeta } from '../fragments/schema'
+import { FRAGMENT_TYPES, type Fragment, type StoryMeta } from '../fragments/schema'
 import type { ModelMessage } from 'ai'
+
+export interface CustomFragmentGroup {
+  type: string
+  name: string
+  fragments: Fragment[]
+}
 
 export interface ContextBuildState {
   story: StoryMeta
@@ -12,9 +18,13 @@ export interface ContextBuildState {
   stickyGuidelines: Fragment[]
   stickyKnowledge: Fragment[]
   stickyCharacters: Fragment[]
+  // Pinned custom fragments are author intent and can be injected with other sticky context.
+  stickyCustomFragments?: Fragment[]
   guidelineShortlist: Fragment[]
   knowledgeShortlist: Fragment[]
   characterShortlist: Fragment[]
+  // Summary candidates for broad-context agents, mirroring knowledge/character shortlists.
+  customFragmentShortlists?: CustomFragmentGroup[]
   // Writer-specific; other agents (which extend this via AgentBlockContext) omit them.
   chapterSummaries?: Array<{
     markerId: string
@@ -23,6 +33,8 @@ export interface ContextBuildState {
   }>
   recentCharacters?: Fragment[]
   recentKnowledge?: Fragment[]
+  // Recently mentioned custom fragments can be injected like recent characters/knowledge.
+  recentCustomFragments?: CustomFragmentGroup[]
   authorInput?: string
   modelId?: string
 }
@@ -73,6 +85,41 @@ export function reorderBlock(blocks: ContextBlock[], id: string, newOrder: numbe
 
 const DEFAULT_PROSE_LIMIT = 10
 const logger = createLogger('context-builder')
+const BUILTIN_FRAGMENT_TYPES = new Set<string>(FRAGMENT_TYPES)
+const BUILTIN_CONTEXT_LABELS: Record<string, string> = {
+  guideline: 'Guidelines',
+  knowledge: 'Knowledge',
+  character: 'Characters',
+}
+
+function titleFromType(type: string): string {
+  return type
+    .split(/[-_]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ')
+}
+
+export function customContextFragmentTypes(story: StoryMeta): Array<{ type: string; name: string }> {
+  const types = new Map<string, { type: string; name: string }>()
+
+  for (const def of story.settings.customFragmentTypes ?? []) {
+    if (BUILTIN_FRAGMENT_TYPES.has(def.type)) continue
+    types.set(def.type, { type: def.type, name: def.name })
+  }
+
+  return [...types.values()]
+}
+
+export function fragmentTypeLabel(story: StoryMeta, type: string): string {
+  const builtinLabel = BUILTIN_CONTEXT_LABELS[type]
+  if (builtinLabel) return builtinLabel
+
+  const custom = story.settings.customFragmentTypes?.find((def) => def.type === type)
+  if (custom) return custom.name
+
+  return titleFromType(type)
+}
 
 export type ContextCompactType = 'proseLimit' | 'maxTokens' | 'maxCharacters'
 
@@ -229,6 +276,13 @@ export async function buildContextState(
   const allGuidelines = await listFragments(dataDir, storyId, 'guideline')
   const allKnowledge = await listFragments(dataDir, storyId, 'knowledge')
   const allCharacters = await listFragments(dataDir, storyId, 'character')
+  const customFragmentGroups: CustomFragmentGroup[] = []
+  for (const def of customContextFragmentTypes(story)) {
+    const fragments = await listFragments(dataDir, storyId, def.type)
+    if (fragments.length > 0) {
+      customFragmentGroups.push({ ...def, fragments })
+    }
+  }
 
   // Load prose from chain - get active prose fragment IDs
   // If no chain exists (empty array), fall back to listing all prose fragments
@@ -289,6 +343,8 @@ export async function buildContextState(
     guidelineCount: allGuidelines.length,
     knowledgeCount: allKnowledge.length,
     characterCount: allCharacters.length,
+    customContextTypeCount: customFragmentGroups.length,
+    customFragmentCount: customFragmentGroups.reduce((sum, group) => sum + group.fragments.length, 0),
   })
 
   // Sort prose by order, then createdAt
@@ -371,6 +427,9 @@ export async function buildContextState(
   const nonStickyKnowledge = allKnowledge.filter((f) => !f.sticky)
   const stickyCharacters = allCharacters.filter((f) => f.sticky).sort(sortByOrder)
   const nonStickyCharacters = allCharacters.filter((f) => !f.sticky)
+  const stickyCustomFragments = customFragmentGroups
+    .flatMap((group) => group.fragments.filter((f) => f.sticky))
+    .sort(sortByOrder)
 
   // Characters the librarian recorded as appearing in the recent prose ride along
   // in full, so the writer continues them from their current sheet rather than a
@@ -389,6 +448,15 @@ export async function buildContextState(
   const characterShortlist = nonStickyCharacters.filter((f) => !recentlyMentionedIds.has(f.id))
   const recentKnowledge = nonStickyKnowledge.filter((f) => recentlyMentionedIds.has(f.id)).sort(sortByOrder)
   const knowledgeShortlist = nonStickyKnowledge.filter((f) => !recentlyMentionedIds.has(f.id))
+  const recentCustomFragments: CustomFragmentGroup[] = []
+  const customFragmentShortlists: CustomFragmentGroup[] = []
+  for (const group of customFragmentGroups) {
+    const nonSticky = group.fragments.filter((f) => !f.sticky)
+    const recent = nonSticky.filter((f) => recentlyMentionedIds.has(f.id)).sort(sortByOrder)
+    const shortlist = nonSticky.filter((f) => !recentlyMentionedIds.has(f.id)).sort(sortByOrder)
+    if (recent.length > 0) recentCustomFragments.push({ ...group, fragments: recent })
+    if (shortlist.length > 0) customFragmentShortlists.push({ ...group, fragments: shortlist })
+  }
 
   const state = {
     story: { ...story, summary: effectiveSummary },
@@ -397,11 +465,14 @@ export async function buildContextState(
     stickyGuidelines,
     stickyKnowledge,
     stickyCharacters,
+    stickyCustomFragments,
     recentCharacters,
     recentKnowledge,
+    recentCustomFragments,
     guidelineShortlist: nonStickyGuidelines,
     knowledgeShortlist,
     characterShortlist,
+    customFragmentShortlists,
     authorInput,
   }
 
@@ -410,19 +481,36 @@ export async function buildContextState(
     stickyGuidelines: stickyGuidelines.length,
     stickyKnowledge: stickyKnowledge.length,
     stickyCharacters: stickyCharacters.length,
+    stickyCustomFragments: stickyCustomFragments.length,
     recentCharacters: recentCharacters.length,
     recentKnowledge: recentKnowledge.length,
+    recentCustomFragments: recentCustomFragments.reduce((sum, group) => sum + group.fragments.length, 0),
     guidelineShortlist: nonStickyGuidelines.length,
     knowledgeShortlist: knowledgeShortlist.length,
     characterShortlist: characterShortlist.length,
+    customFragmentShortlists: customFragmentShortlists.reduce((sum, group) => sum + group.fragments.length, 0),
   })
 
   return state
 }
 
+function renderGenericFragmentContext(f: Fragment): string {
+  return [
+    `### ${f.name}`,
+    f.description ? f.description : undefined,
+    f.content,
+  ].filter((part): part is string => Boolean(part)).join('\n')
+}
+
+export function renderContextFragment(f: Fragment): string {
+  return registry.getType(f.type)
+    ? registry.renderContext(f)
+    : renderGenericFragmentContext(f)
+}
+
 /** Renders a single fragment with a source marker */
 function renderFragment(f: Fragment): string {
-  return `[@fragment=${f.id}]\n${registry.renderContext(f)}`
+  return `[@fragment=${f.id}]\n${renderContextFragment(f)}`
 }
 
 /**
@@ -478,6 +566,59 @@ function renderTypeGrouped(fragments: Fragment[], label: string): string[] {
   return parts
 }
 
+function renderFragmentGroups(fragments: Fragment[], story: StoryMeta): string[] {
+  const groups = new Map<string, Fragment[]>()
+  for (const fragment of fragments) {
+    const group = groups.get(fragment.type)
+    if (group) {
+      group.push(fragment)
+    } else {
+      groups.set(fragment.type, [fragment])
+    }
+  }
+
+  const parts: string[] = []
+  for (const [type, group] of groups) {
+    parts.push(...renderTypeGrouped(group, fragmentTypeLabel(story, type)))
+  }
+  return parts
+}
+
+interface CustomContextLane {
+  type: string
+  name: string
+  recent: Fragment[]
+  shortlist: Fragment[]
+}
+
+function orderedCustomContextLanes(
+  story: StoryMeta,
+  recentGroups: CustomFragmentGroup[],
+  shortlistGroups: CustomFragmentGroup[],
+): CustomContextLane[] {
+  const lanes = new Map<string, CustomContextLane>()
+
+  const ensureLane = (type: string, name: string): CustomContextLane => {
+    const existing = lanes.get(type)
+    if (existing) return existing
+    const lane = { type, name, recent: [], shortlist: [] }
+    lanes.set(type, lane)
+    return lane
+  }
+
+  for (const def of customContextFragmentTypes(story)) {
+    ensureLane(def.type, def.name)
+  }
+  for (const group of recentGroups) {
+    ensureLane(group.type, group.name).recent = group.fragments
+  }
+  for (const group of shortlistGroups) {
+    ensureLane(group.type, group.name).shortlist = group.fragments
+  }
+
+  return [...lanes.values()].filter((lane) => lane.recent.length > 0 || lane.shortlist.length > 0)
+}
+
 /**
  * Renders sticky fragments in a custom order under a single heading.
  */
@@ -523,11 +664,14 @@ export function createDefaultBlocks(state: ContextBuildState): ContextBlock[] {
     stickyGuidelines,
     stickyKnowledge,
     stickyCharacters,
+    stickyCustomFragments = [],
     recentCharacters = [],
     recentKnowledge = [],
+    recentCustomFragments = [],
     guidelineShortlist,
     knowledgeShortlist,
     characterShortlist,
+    customFragmentShortlists = [],
     authorInput = '',
   } = state
 
@@ -535,7 +679,7 @@ export function createDefaultBlocks(state: ContextBuildState): ContextBlock[] {
   const fragmentOrder = story.settings.fragmentOrder ?? []
 
   // Partition sticky fragments by placement
-  const allSticky = [...stickyGuidelines, ...stickyKnowledge, ...stickyCharacters]
+  const allSticky = [...stickyGuidelines, ...stickyKnowledge, ...stickyCharacters, ...stickyCustomFragments]
   const systemPlaced = allSticky.filter(f => (f.placement ?? 'user') === 'system')
   const userPlaced = allSticky.filter(f => (f.placement ?? 'user') === 'user')
 
@@ -566,13 +710,7 @@ export function createDefaultBlocks(state: ContextBuildState): ContextBlock[] {
     if (contextOrderMode === 'advanced') {
       parts = renderAdvancedOrder(systemPlaced, fragmentOrder)
     } else {
-      parts = []
-      const sysGuidelines = systemPlaced.filter(f => f.type === 'guideline')
-      const sysKnowledge = systemPlaced.filter(f => f.type === 'knowledge')
-      const sysCharacters = systemPlaced.filter(f => f.type === 'character')
-      parts.push(...renderTypeGrouped(sysGuidelines, 'Guidelines'))
-      parts.push(...renderTypeGrouped(sysKnowledge, 'Knowledge'))
-      parts.push(...renderTypeGrouped(sysCharacters, 'Characters'))
+      parts = renderFragmentGroups(systemPlaced, story)
     }
     blocks.push({
       id: 'system-fragments',
@@ -624,13 +762,7 @@ export function createDefaultBlocks(state: ContextBuildState): ContextBlock[] {
     if (contextOrderMode === 'advanced') {
       parts = renderAdvancedOrder(userPlaced, fragmentOrder)
     } else {
-      parts = []
-      const userGuidelines = userPlaced.filter(f => f.type === 'guideline')
-      const userKnowledge = userPlaced.filter(f => f.type === 'knowledge')
-      const userCharacters = userPlaced.filter(f => f.type === 'character')
-      parts.push(...renderTypeGrouped(userGuidelines, 'Guidelines'))
-      parts.push(...renderTypeGrouped(userKnowledge, 'Knowledge'))
-      parts.push(...renderTypeGrouped(userCharacters, 'Characters'))
+      parts = renderFragmentGroups(userPlaced, story)
     }
     blocks.push({
       id: 'user-fragments',
@@ -681,6 +813,34 @@ export function createDefaultBlocks(state: ContextBuildState): ContextBlock[] {
 
   if (characterShortlist.length > 0) {
     blocks.push(fragmentSummaryBlock({ id: 'characters-shortlist', heading: 'Characters', items: characterShortlist, order: 320 }))
+  }
+
+  // Custom fragment types follow the same routing as built-in knowledge and
+  // characters without pretending to be either: recently mentioned items are
+  // full context, and the rest are one-line summaries.
+  let customOrder = 330
+  for (const lane of orderedCustomContextLanes(story, recentCustomFragments, customFragmentShortlists)) {
+    if (lane.recent.length > 0) {
+      blocks.push({
+        id: `${lane.type}-recent`,
+        role: 'user',
+        content: [
+          `## ${lane.name} in Recent Prose`,
+          ...lane.recent.map(renderFragment),
+        ].join('\n'),
+        order: customOrder++,
+        source: 'builtin',
+      })
+    }
+
+    if (lane.shortlist.length > 0) {
+      blocks.push(fragmentSummaryBlock({
+        id: `${lane.type}-shortlist`,
+        heading: lane.name,
+        items: lane.shortlist,
+        order: customOrder++,
+      }))
+    }
   }
 
   if (proseFragments.length > 0) {

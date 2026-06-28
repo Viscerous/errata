@@ -1,6 +1,6 @@
 import { isValidElement, type ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
-import { buildAnnotationHighlighter } from '@/lib/fragment-mentions'
+import { buildAnnotationHighlighter, filterMentionAnnotations } from '@/lib/fragment-mentions'
 
 function collectHighlightedText(node: ReactNode): string[] {
   if (Array.isArray(node)) return node.flatMap(collectHighlightedText)
@@ -27,5 +27,22 @@ describe('fragment mention highlighting', () => {
     ], vi.fn())
 
     expect(transform).toBeNull()
+  })
+
+  it('filters mention annotations by built-in and loaded custom fragment types', () => {
+    const annotations = [
+      { type: 'mention', fragmentId: 'ch-001', text: 'Alice' },
+      { type: 'mention', fragmentId: 'kn-001', text: 'Spellbook' },
+      { type: 'mention', fragmentId: 'loca-001', text: 'Ash Market' },
+    ]
+    const fragmentTypesById = new Map([['loca-001', 'location']])
+
+    const filtered = filterMentionAnnotations(
+      annotations,
+      new Set(['character', 'location']),
+      fragmentTypesById,
+    )
+
+    expect(filtered.map((annotation) => annotation.fragmentId)).toEqual(['ch-001', 'loca-001'])
   })
 })

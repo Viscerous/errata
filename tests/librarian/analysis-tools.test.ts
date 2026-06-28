@@ -84,77 +84,99 @@ describe('analysis-tools', () => {
       ).rejects.toThrow()
     })
 
-    it('reportMentions keeps multiple terms for one character and deduplicates exact repeats', async () => {
+    it('reportMentions keeps multiple terms for one fragment and deduplicates exact repeats', async () => {
       const collector = createEmptyCollector()
       const tools = createAnalysisTools(collector)
       await tools.reportMentions.execute!({
         mentions: [
-          { characterId: 'ch-001', text: 'Alice' },
-          { characterId: 'ch-002', text: 'Bob' },
+          { fragmentId: 'ch-0001', text: 'Alice' },
+          { fragmentId: 'ch-0002', text: 'Bob' },
         ],
       }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
       expect(collector.mentions).toHaveLength(2)
 
       // Repeating the same surface text for the same fragment is ignored.
       await tools.reportMentions.execute!({
-        mentions: [{ characterId: 'ch-001', text: 'alice' }],
+        mentions: [{ fragmentId: 'ch-0001', text: 'alice' }],
       }, { toolCallId: 'b', messages: [], abortSignal: undefined as unknown as AbortSignal })
       expect(collector.mentions).toHaveLength(2)
       expect(collector.mentions[0].text).toBe('Alice')
 
-      // A different term for the same character is preserved for highlighting.
+      // A different term for the same fragment is preserved for highlighting.
       await tools.reportMentions.execute!({
-        mentions: [{ characterId: 'ch-001', text: 'Detective' }],
+        mentions: [{ fragmentId: 'ch-0001', text: 'Detective' }],
       }, { toolCallId: 'c', messages: [], abortSignal: undefined as unknown as AbortSignal })
       expect(collector.mentions).toHaveLength(3)
 
-      // New character is still added.
+      // New fragment is still added.
       await tools.reportMentions.execute!({
-        mentions: [{ characterId: 'ch-003', text: 'Carol' }],
+        mentions: [{ fragmentId: 'ch-0003', text: 'Carol' }],
       }, { toolCallId: 'd', messages: [], abortSignal: undefined as unknown as AbortSignal })
       expect(collector.mentions).toHaveLength(4)
     })
 
-    it('reportMentions keeps multiple terms for one knowledge fragment and deduplicates exact repeats', async () => {
+    it('reportMentions keeps multiple terms across fragment types without typed fields', async () => {
       const collector = createEmptyCollector()
       const tools = createAnalysisTools(collector)
       await tools.reportMentions.execute!({
         mentions: [
-          { knowledgeId: 'kn-001', text: 'Necronomicon' },
-          { knowledgeId: 'kn-002', text: 'Arkham' },
+          { fragmentId: 'kn-0001', text: 'Necronomicon' },
+          { fragmentId: 'kn-0002', text: 'Arkham' },
         ],
       }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
       expect(collector.mentions).toHaveLength(2)
 
       // Exact repeat for the same fragment is ignored.
       await tools.reportMentions.execute!({
-        mentions: [{ knowledgeId: 'kn-001', text: 'necronomicon' }],
+        mentions: [{ fragmentId: 'kn-0001', text: 'necronomicon' }],
       }, { toolCallId: 'b', messages: [], abortSignal: undefined as unknown as AbortSignal })
       expect(collector.mentions).toHaveLength(2)
       expect(collector.mentions[0].text).toBe('Necronomicon')
 
-      // A distinct term for the same knowledge fragment is preserved.
+      // A distinct term for the same fragment is preserved.
       await tools.reportMentions.execute!({
-        mentions: [{ knowledgeId: 'kn-001', text: 'Spellbook' }],
+        mentions: [{ fragmentId: 'kn-0001', text: 'Spellbook' }],
       }, { toolCallId: 'c', messages: [], abortSignal: undefined as unknown as AbortSignal })
       expect(collector.mentions).toHaveLength(3)
 
-      // Mixed character and knowledge mentions.
+      // Mixed fragment types still use the same input shape.
       await tools.reportMentions.execute!({
-        mentions: [{ characterId: 'ch-001', text: 'Alice' }],
+        mentions: [{ fragmentId: 'ch-0001', text: 'Alice' }],
       }, { toolCallId: 'd', messages: [], abortSignal: undefined as unknown as AbortSignal })
       expect(collector.mentions).toHaveLength(4)
     })
 
-    it('reportMentions schema requires exactly one typed fragment id and non-empty text', async () => {
-      await expect(mentionInputSchema.parseAsync({ characterId: 'ch-001', text: 'Alice' }))
-        .resolves.toEqual({ characterId: 'ch-001', text: 'Alice' })
-      await expect(mentionInputSchema.parseAsync({ knowledgeId: 'kn-001', text: '  Spellbook  ' }))
-        .resolves.toEqual({ knowledgeId: 'kn-001', text: 'Spellbook' })
+    it('reportMentions accepts custom fragment IDs and deduplicates exact repeats', async () => {
+      const collector = createEmptyCollector()
+      const tools = createAnalysisTools(collector)
+
+      await tools.reportMentions.execute!({
+        mentions: [
+          { fragmentId: 'loc-0001', text: 'Ash Market' },
+          { fragmentId: 'loc-0002', text: 'Crystal Library' },
+        ],
+      }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
+      expect(collector.mentions).toHaveLength(2)
+
+      await tools.reportMentions.execute!({
+        mentions: [{ fragmentId: 'loc-0001', text: 'ash market' }],
+      }, { toolCallId: 'b', messages: [], abortSignal: undefined as unknown as AbortSignal })
+      expect(collector.mentions).toHaveLength(2)
+      expect(collector.mentions[0].text).toBe('Ash Market')
+    })
+
+    it('reportMentions schema requires a fragment id and non-empty text', async () => {
+      await expect(mentionInputSchema.parseAsync({ fragmentId: 'ch-0001', text: 'Alice' }))
+        .resolves.toEqual({ fragmentId: 'ch-0001', text: 'Alice' })
+      await expect(mentionInputSchema.parseAsync({ fragmentId: 'kn-0001', text: '  Spellbook  ' }))
+        .resolves.toEqual({ fragmentId: 'kn-0001', text: 'Spellbook' })
+      await expect(mentionInputSchema.parseAsync({ fragmentId: 'loc-0001', text: 'Ash Market' }))
+        .resolves.toEqual({ fragmentId: 'loc-0001', text: 'Ash Market' })
       await expect(mentionInputSchema.parseAsync({ text: 'No ID' })).rejects.toThrow()
-      await expect(mentionInputSchema.parseAsync({ characterId: 'ch-001', knowledgeId: 'kn-001', text: 'Both' })).rejects.toThrow()
-      await expect(mentionInputSchema.parseAsync({ characterId: 'kn-001', text: 'Wrong prefix' })).rejects.toThrow()
-      await expect(mentionInputSchema.parseAsync({ knowledgeId: 'kn-001', text: '   ' })).rejects.toThrow()
+      await expect(mentionInputSchema.parseAsync({ characterId: 'ch-0001', text: 'Wrong field' })).rejects.toThrow()
+      await expect(mentionInputSchema.parseAsync({ knowledgeId: 'kn-0001', text: 'Wrong field' })).rejects.toThrow()
+      await expect(mentionInputSchema.parseAsync({ fragmentId: 'bad-id', text: 'Wrong id' })).rejects.toThrow()
+      await expect(mentionInputSchema.parseAsync({ fragmentId: 'kn-0001', text: '   ' })).rejects.toThrow()
     })
 
     it('getFragment reads a fragment in full by ID', async () => {

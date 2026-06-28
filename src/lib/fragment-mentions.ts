@@ -8,6 +8,27 @@ export interface Annotation {
   text: string
 }
 
+export function inferMentionFragmentType(fragmentId: string): string | null {
+  if (fragmentId.startsWith('ch-')) return 'character'
+  if (fragmentId.startsWith('kn-')) return 'knowledge'
+  if (fragmentId.startsWith('gl-')) return 'guideline'
+  return null
+}
+
+export function filterMentionAnnotations(
+  annotations: Annotation[] | undefined,
+  enabledTypes: ReadonlySet<string>,
+  fragmentTypesById?: ReadonlyMap<string, string>,
+): Annotation[] {
+  if (!annotations || enabledTypes.size === 0) return []
+  return annotations.filter((annotation) => {
+    if (annotation.type !== 'mention') return false
+    const fragmentType = fragmentTypesById?.get(annotation.fragmentId)
+      ?? inferMentionFragmentType(annotation.fragmentId)
+    return fragmentType ? enabledTypes.has(fragmentType) : false
+  })
+}
+
 function colorForId(fragmentId: string): string {
   if (fragmentId.startsWith('kn-')) {
     const idx = Math.abs(hashString(fragmentId)) % KNOWLEDGE_MENTION_COLORS.length

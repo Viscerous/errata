@@ -23,14 +23,12 @@ import {
   Check,
   Globe,
   BookOpen,
-  User,
-  FileText,
-  ScrollText,
   Pin,
   ChevronDown,
   Loader2,
   Link as LinkIcon,
 } from 'lucide-react'
+import { FragmentTypeDisplayIcon, getFragmentTypeVisual } from '@/components/fragments/fragment-type-icons'
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -50,11 +48,11 @@ interface CharacterCardImportDialogProps {
 
 // ── Constants ──────────────────────────────────────────────────────────
 
-const TYPE_CONFIG: Record<ImportableItemType, { label: string; icon: typeof User; className: string }> = {
-  character: { label: 'Character', icon: User, className: 'bg-blue-500/10 text-blue-400 border-blue-500/20' },
-  knowledge: { label: 'Knowledge', icon: BookOpen, className: 'bg-amber-500/10 text-amber-400 border-amber-500/20' },
-  guideline: { label: 'Guideline', icon: ScrollText, className: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' },
-  prose: { label: 'Prose', icon: FileText, className: 'bg-purple-500/10 text-purple-400 border-purple-500/20' },
+const TYPE_CONFIG: Record<ImportableItemType, { label: string; className: string }> = {
+  character: { label: getFragmentTypeVisual('character').singularLabel, className: 'bg-blue-500/10 text-blue-400 border-blue-500/20' },
+  knowledge: { label: getFragmentTypeVisual('knowledge').singularLabel, className: 'bg-amber-500/10 text-amber-400 border-amber-500/20' },
+  guideline: { label: getFragmentTypeVisual('guideline').singularLabel, className: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' },
+  prose: { label: getFragmentTypeVisual('prose').singularLabel, className: 'bg-purple-500/10 text-purple-400 border-purple-500/20' },
 }
 
 const SOURCE_GROUPS = [
@@ -457,7 +455,6 @@ function ItemRow({
 }) {
   const activeType = state.typeOverride ?? item.suggestedType
   const config = TYPE_CONFIG[activeType]
-  const Icon = config.icon
 
   return (
     <div
@@ -514,27 +511,24 @@ function ItemRow({
             onClick={(e) => e.stopPropagation()}
             className={`shrink-0 flex items-center gap-1 text-[0.625rem] h-5 px-1.5 rounded-md border transition-colors ${config.className} hover:opacity-80`}
           >
-            <Icon className="size-3" />
+            <FragmentTypeDisplayIcon type={activeType} className="size-3" />
             <span>{config.label}</span>
             <ChevronDown className="size-2.5 opacity-50" />
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="min-w-[140px]">
           {(Object.entries(TYPE_CONFIG) as Array<[ImportableItemType, typeof TYPE_CONFIG.character]>).map(
-            ([type, cfg]) => {
-              const TypeIcon = cfg.icon
-              return (
-                <DropdownMenuItem
-                  key={type}
-                  onClick={(e) => { e.stopPropagation(); onTypeChange(type) }}
-                  className="gap-2 text-xs"
-                >
-                  <TypeIcon className="size-3.5" />
-                  {cfg.label}
-                  {type === activeType && <Check className="size-3 ml-auto text-primary" />}
-                </DropdownMenuItem>
-              )
-            },
+            ([type, cfg]) => (
+              <DropdownMenuItem
+                key={type}
+                onClick={(e) => { e.stopPropagation(); onTypeChange(type) }}
+                className="gap-2 text-xs"
+              >
+                <FragmentTypeDisplayIcon type={type} className="size-3.5" />
+                {cfg.label}
+                {type === activeType && <Check className="size-3 ml-auto text-primary" />}
+              </DropdownMenuItem>
+            ),
           )}
         </DropdownMenuContent>
       </DropdownMenu>

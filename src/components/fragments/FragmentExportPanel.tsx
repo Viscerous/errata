@@ -22,24 +22,16 @@ import {
   Download,
   Clipboard,
   Check,
-  BookOpen,
-  Users,
-  Database,
   Package,
   Settings2,
   UploadCloud,
 } from 'lucide-react'
+import { FragmentTypeDisplayIcon, getFragmentTypeVisual } from '@/components/fragments/fragment-type-icons'
 
 interface FragmentExportPanelProps {
   storyId: string
   storyName?: string
   onClose: () => void
-}
-
-const TYPE_CONFIG: Record<string, { label: string; icon: typeof BookOpen }> = {
-  guideline: { label: 'Guidelines', icon: BookOpen },
-  character: { label: 'Characters', icon: Users },
-  knowledge: { label: 'Knowledge', icon: Database },
 }
 
 const EXPORTABLE_TYPES = ['guideline', 'character', 'knowledge']
@@ -232,9 +224,7 @@ export function FragmentExportPanel({ storyId, storyName, onClose }: FragmentExp
 
       <PanelBody className="px-6 py-4 gap-6">
           {Object.entries(grouped).map(([type, fragments]) => {
-            const config = TYPE_CONFIG[type]
-            if (!config) return null
-            const Icon = config.icon
+            const visual = getFragmentTypeVisual(type)
             const groupAllSelected = fragments.every((f) => selected.has(f.id))
             const groupSomeSelected = fragments.some((f) => selected.has(f.id))
 
@@ -253,9 +243,9 @@ export function FragmentExportPanel({ storyId, storyName, onClose }: FragmentExp
                     className="size-3.5"
                     tabIndex={-1}
                   />
-                  <Icon className="size-3.5 text-muted-foreground" />
+                  <FragmentTypeDisplayIcon type={type} className="size-3.5 text-muted-foreground" />
                   <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground group-hover:text-foreground transition-colors">
-                    {config.label}
+                    {visual.label}
                   </span>
                   <span className="text-[0.625rem] text-muted-foreground ml-auto">
                     {fragments.filter((f) => selected.has(f.id)).length}/{fragments.length}
