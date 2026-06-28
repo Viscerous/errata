@@ -68,7 +68,7 @@ export const ANALYZE_SYSTEM_PROMPT = buildAnalyzeSystemPrompt()
 /**
  * The characters the writer worked from on a prose fragment, resolved to full
  * fragments from its forwarded `writerContextIds`. Shared by the analyze run and
- * its context preview so both populate the characters-recent block the same way.
+ * its context preview so both populate the character-recent block the same way.
  */
 export function recentCastFromFragment(allCharacters: Fragment[], fragment: Fragment | null | undefined): Fragment[] {
   const ids = new Set(
@@ -147,7 +147,7 @@ export function createLibrarianAnalyzeBlocks(ctx: AgentBlockContext): ContextBlo
   // they also appear in the recent prose, so a pin reliably shows up here.
   if (sticky.length > 0) {
     pushFragmentBlock(fragmentContextBlock({
-      id: 'characters-sticky',
+      id: 'character-sticky',
       type: 'character',
       label: 'Characters',
       fragments: sticky,
@@ -163,7 +163,7 @@ export function createLibrarianAnalyzeBlocks(ctx: AgentBlockContext): ContextBlo
   const recentNonPinned = recent.filter((c) => !stickyIds.has(c.id))
   if (recentNonPinned.length > 0) {
     pushFragmentBlock(fragmentContextBlock({
-      id: 'characters-recent',
+      id: 'character-recent',
       type: 'character',
       label: 'Characters',
       fragments: recentNonPinned,
@@ -177,7 +177,7 @@ export function createLibrarianAnalyzeBlocks(ctx: AgentBlockContext): ContextBlo
 
   const shortlistCharacters = (ctx.allCharacters ?? []).filter((c) => !stickyIds.has(c.id) && !recentIds.has(c.id))
   pushFragmentBlock(fragmentContextBlock({
-    id: 'characters-shortlist',
+    id: 'character-shortlist',
     type: 'character',
     label: 'Characters',
     fragments: shortlistCharacters,

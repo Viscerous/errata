@@ -140,7 +140,7 @@ describe('Librarian Analyze Blocks', () => {
     const blocks = def.createDefaultBlocks(makeBaseContext({
       allCharacters: [makeFragment({ id: 'ch-hero01', name: 'Hero', description: 'A brave hero' })],
     }))
-    const chBlock = blocks.find(b => b.id === 'characters-shortlist')
+    const chBlock = blocks.find(b => b.id === 'character-shortlist')
     expect(chBlock).toBeDefined()
     expect(chBlock!.content).toContain('## Characters (Summary Index)')
     expect(chBlock!.content).toContain('not the full fragment sheet')
@@ -165,13 +165,13 @@ describe('Librarian Analyze Blocks', () => {
       recentCharacters: [hero],
     }))
 
-    const recent = blocks.find(b => b.id === 'characters-recent')
+    const recent = blocks.find(b => b.id === 'character-recent')
     expect(recent).toBeDefined()
     expect(recent!.content).toContain('Hero full sheet body.')
 
     // The recent character is not duplicated into the summary shortlist; the
     // other character still appears there.
-    const shortlist = blocks.find(b => b.id === 'characters-shortlist')
+    const shortlist = blocks.find(b => b.id === 'character-shortlist')
     expect(shortlist).toBeDefined()
     expect(shortlist!.content).toContain('ch-vil01')
     expect(shortlist!.content).not.toContain('ch-hero01')
@@ -188,11 +188,11 @@ describe('Librarian Analyze Blocks', () => {
     }))
 
     // Pinned char is rendered in full in its own block, not duplicated into the shortlist.
-    const sticky = blocks.find(b => b.id === 'characters-sticky')
+    const sticky = blocks.find(b => b.id === 'character-sticky')
     expect(sticky).toBeDefined()
     expect(sticky!.content).toContain('## Pinned Characters')
     expect(sticky!.content).toContain('Mentor full sheet body.')
-    const shortlist = blocks.find(b => b.id === 'characters-shortlist')
+    const shortlist = blocks.find(b => b.id === 'character-shortlist')
     expect(shortlist!.content).toContain('ch-oth01')
     expect(shortlist!.content).not.toContain('ch-pin01')
   })
@@ -206,8 +206,8 @@ describe('Librarian Analyze Blocks', () => {
       stickyCharacters: [hero], // pinned AND recent — pinned takes precedence
     }))
 
-    expect(blocks.find(b => b.id === 'characters-sticky')!.content).toContain('Hero sheet.')
-    expect(blocks.find(b => b.id === 'characters-recent')).toBeUndefined()
+    expect(blocks.find(b => b.id === 'character-sticky')!.content).toContain('Hero sheet.')
+    expect(blocks.find(b => b.id === 'character-recent')).toBeUndefined()
   })
 
   it('includes knowledge block when allKnowledge provided', () => {
@@ -253,7 +253,7 @@ describe('Librarian Analyze Blocks', () => {
     // User blocks should be ordered: story-summary (100) < characters (200) < knowledge (300) < prose-new (400)
     const userBlocks = blocks.filter(b => b.role === 'user')
     const summaryOrder = userBlocks.find(b => b.id === 'story-summary')!.order
-    const charsOrder = userBlocks.find(b => b.id === 'characters-shortlist')!.order
+    const charsOrder = userBlocks.find(b => b.id === 'character-shortlist')!.order
     const knowledgeOrder = userBlocks.find(b => b.id === 'knowledge')!.order
     const proseOrder = userBlocks.find(b => b.id === 'prose-new')!.order
     expect(summaryOrder).toBeLessThan(charsOrder)
@@ -318,17 +318,17 @@ describe('Librarian Chat Blocks', () => {
         },
       ],
     }))
-    expect(blocks.find(b => b.id === 'guidelines-pinned-summary-index')).toBeUndefined()
-    expect(blocks.find(b => b.id === 'guidelines-shortlist')).toBeUndefined()
+    expect(blocks.find(b => b.id === 'guideline-pinned-summary-index')).toBeUndefined()
+    expect(blocks.find(b => b.id === 'guideline-shortlist')).toBeUndefined()
     expect(blocks.find(b => b.id === 'knowledge-pinned-summary-index')).toBeUndefined()
     expect(blocks.find(b => b.id === 'knowledge-shortlist')).toBeUndefined()
 
-    const guidelines = blocks.find(b => b.id === 'guidelines-summary-index')
-    expect(guidelines).toBeDefined()
-    expect(guidelines!.content).toContain('## Guidelines (Summary Index)')
-    expect(guidelines!.content).toContain('not the full fragment sheet')
-    expect(guidelines!.content).toContain('gl-stick1: Tone (pinned)')
-    expect(guidelines!.content).toContain('gl-other1: Style')
+    const guideline = blocks.find(b => b.id === 'guideline-summary-index')
+    expect(guideline).toBeDefined()
+    expect(guideline!.content).toContain('## Guidelines (Summary Index)')
+    expect(guideline!.content).toContain('not the full fragment sheet')
+    expect(guideline!.content).toContain('gl-stick1: Tone (pinned)')
+    expect(guideline!.content).toContain('gl-other1: Style')
 
     const knowledge = blocks.find(b => b.id === 'knowledge-summary-index')
     expect(knowledge).toBeDefined()
@@ -431,8 +431,8 @@ describe('Librarian Optimize Character Blocks', () => {
       targetFragment: pinned,
     }))
 
-    expect(blocks.find(b => b.id === 'characters-pinned-summary-index')).toBeUndefined()
-    const allCharacters = blocks.find(b => b.id === 'characters-shortlist')
+    expect(blocks.find(b => b.id === 'character-pinned-summary-index')).toBeUndefined()
+    const allCharacters = blocks.find(b => b.id === 'character-shortlist')
     expect(allCharacters).toBeDefined()
     expect(allCharacters!.content).toContain('## All Characters (Summary Index)')
     expect(allCharacters!.content).toContain('ch-pin01')

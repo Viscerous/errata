@@ -46,9 +46,9 @@ the original plan was written.
 ## How analyze applies it (shipped)
 
 - Characters split into three blocks, each character in exactly one: **pinned**
-  (`characters-sticky`, full — always, even when the pin is also in the scene), the
-  rest of the **recent cast** from `writerContextIds` (`characters-recent`, full),
-  and everyone else (`characters-shortlist`, one-line summaries). The full sheets
+  (`character-sticky`, full — always, even when the pin is also in the scene), the
+  rest of the **recent cast** from `writerContextIds` (`character-recent`, full),
+  and everyone else (`character-shortlist`, one-line summaries). The full sheets
   are in context **before** any edit — no mid-loop delivery, no ordering constraint,
   no gate.
 - Pins are loaded from `sticky` directly, **independent of the forward**, so

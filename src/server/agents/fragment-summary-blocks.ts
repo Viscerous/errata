@@ -69,13 +69,13 @@ export function pinnedFragmentSummaryGroups(
   }
 
   if (shouldInclude(options.includeGuidelines)) {
-    maybePush('guidelines-pinned-summary-index', 'guideline', 'Guidelines', ctx.stickyGuidelines, 300)
+    maybePush('guideline-pinned-summary-index', 'guideline', 'Guidelines', ctx.stickyGuidelines, 300)
   }
   if (shouldInclude(options.includeKnowledge)) {
     maybePush('knowledge-pinned-summary-index', 'knowledge', 'Knowledge', ctx.stickyKnowledge, 301)
   }
   if (shouldInclude(options.includeCharacters)) {
-    maybePush('characters-pinned-summary-index', 'character', 'Characters', ctx.stickyCharacters, 302)
+    maybePush('character-pinned-summary-index', 'character', 'Characters', ctx.stickyCharacters, 302)
   }
 
   if (shouldInclude(options.includeCustomFragments)) {
@@ -154,7 +154,7 @@ export function fragmentSummaryCatalogBlocks(
   }
 
   if (shouldInclude(options.includeGuidelines)) {
-    maybePush(summaryCatalogBlock('guidelines-summary-index', 'guideline', 'Guidelines', [
+    maybePush(summaryCatalogBlock('guideline-summary-index', 'guideline', 'Guidelines', [
       { fragments: ctx.stickyGuidelines, note: 'pinned' },
       { fragments: ctx.guidelineShortlist },
     ], 300))
@@ -169,7 +169,7 @@ export function fragmentSummaryCatalogBlocks(
   }
 
   if (shouldInclude(options.includeCharacters)) {
-    maybePush(summaryCatalogBlock('characters-summary-index', 'character', 'Characters', [
+    maybePush(summaryCatalogBlock('character-summary-index', 'character', 'Characters', [
       { fragments: ctx.stickyCharacters, note: 'pinned' },
       { fragments: ctx.recentCharacters ?? [], note: 'recent' },
       { fragments: ctx.characterShortlist },
@@ -223,7 +223,7 @@ export function fragmentSummaryCatalogBlocks(
 export function allCharactersBlock(ctx: AgentBlockContext): ContextBlock | null {
   if (!ctx.allCharacters || ctx.allCharacters.length === 0) return null
   return fragmentContextBlock({
-    id: 'characters-shortlist',
+    id: 'character-shortlist',
     type: 'character',
     label: 'Characters',
     fragments: ctx.allCharacters,
@@ -244,9 +244,9 @@ export function shortlistBlocks(ctx: AgentBlockContext, options: ShortlistBlockO
     if (block) blocks.push(block)
   }
 
-  maybePush(summaryIndexBlock('guidelines-shortlist', 'guideline', 'Guidelines', ctx.guidelineShortlist, 400))
+  maybePush(summaryIndexBlock('guideline-shortlist', 'guideline', 'Guidelines', ctx.guidelineShortlist, 400))
   maybePush(summaryIndexBlock('knowledge-shortlist', 'knowledge', 'Knowledge', ctx.knowledgeShortlist, 401))
-  maybePush(summaryIndexBlock('characters-shortlist', 'character', 'Characters', ctx.characterShortlist, 402))
+  maybePush(summaryIndexBlock('character-shortlist', 'character', 'Characters', ctx.characterShortlist, 402))
 
   if (options.includeCustomFragments) {
     let customOrder = 403
