@@ -7,15 +7,19 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { EmptyState } from '@/components/ui/async-view'
-import { FRAGMENT_TYPE_ICON_OPTIONS, FragmentTypeIcon, getFragmentTypeIconLabel } from '@/components/fragments/fragment-type-icons'
+import {
+  BUILTIN_FRAGMENT_TYPES,
+  FRAGMENT_TYPE_ICON_OPTIONS,
+  FragmentTypeIcon,
+  getFragmentTypeIconLabel,
+  titleFromFragmentType,
+} from '@/components/fragments/fragment-type-icons'
 import { componentId } from '@/lib/dom-ids'
 
 interface FragmentTypesPanelProps {
   storyId: string
   story: StoryMeta
 }
-
-const BUILTIN_TYPES = new Set(['prose', 'character', 'guideline', 'knowledge', 'image', 'icon', 'marker', 'summary'])
 
 function slugifyType(value: string) {
   return value
@@ -26,19 +30,11 @@ function slugifyType(value: string) {
     .slice(0, 40)
 }
 
-function titleFromType(type: string) {
-  return type
-    .split(/[-_]+/)
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(' ')
-}
-
 function normalizeDefinition(def: CustomFragmentType): CustomFragmentType {
   const type = slugifyType(def.type)
   return {
     type,
-    name: def.name.trim() || titleFromType(type) || 'Custom Fragment',
+    name: def.name.trim() || titleFromFragmentType(type) || 'Custom Fragment',
     description: def.description.trim(),
     icon: def.icon || 'Hash',
     showInSidebar: def.showInSidebar,
@@ -77,19 +73,19 @@ export function FragmentTypesPanel({ storyId, story }: FragmentTypesPanelProps) 
 
   const normalizedNewType = slugifyType(newType)
   const existingTypes = useMemo(() => new Set(drafts.map((def) => def.type)), [drafts])
-  const addDisabled = !normalizedNewType || BUILTIN_TYPES.has(normalizedNewType) || existingTypes.has(normalizedNewType)
+  const addDisabled = !normalizedNewType || BUILTIN_FRAGMENT_TYPES.has(normalizedNewType) || existingTypes.has(normalizedNewType)
   const addHint = !newType.trim()
     ? 'Enter a type'
     : !normalizedNewType
       ? 'Use letters, numbers, hyphens, or underscores'
-      : BUILTIN_TYPES.has(normalizedNewType)
+      : BUILTIN_FRAGMENT_TYPES.has(normalizedNewType)
         ? 'Built-in type'
         : existingTypes.has(normalizedNewType)
           ? 'Already added'
           : 'Ready'
   const hasInvalidDraft = drafts.some((def, index) => {
     const normalized = slugifyType(def.type)
-    if (!normalized || BUILTIN_TYPES.has(normalized)) return true
+    if (!normalized || BUILTIN_FRAGMENT_TYPES.has(normalized)) return true
     return drafts.some((other, otherIndex) => otherIndex !== index && slugifyType(other.type) === normalized)
   })
   const hasChanges = useMemo(
@@ -110,7 +106,7 @@ export function FragmentTypesPanel({ storyId, story }: FragmentTypesPanelProps) 
       ...prev,
       {
         type: normalizedNewType,
-        name: titleFromType(normalizedNewType),
+        name: titleFromFragmentType(normalizedNewType),
         description: '',
         icon: 'Hash',
         showInSidebar: true,
@@ -186,7 +182,7 @@ export function FragmentTypesPanel({ storyId, story }: FragmentTypesPanelProps) 
 
           {drafts.map((def, index) => {
             const normalizedType = slugifyType(def.type)
-            const invalidType = !normalizedType || BUILTIN_TYPES.has(normalizedType)
+            const invalidType = !normalizedType || BUILTIN_FRAGMENT_TYPES.has(normalizedType)
             const isExpanded = expandedIndex === index
             return (
               <div
@@ -207,7 +203,7 @@ export function FragmentTypesPanel({ storyId, story }: FragmentTypesPanelProps) 
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex min-w-0 items-center gap-2">
-                        <p className="truncate text-sm font-medium">{def.name.trim() || titleFromType(normalizedType) || 'Custom Fragment'}</p>
+                        <p className="truncate text-sm font-medium">{def.name.trim() || titleFromFragmentType(normalizedType) || 'Custom Fragment'}</p>
                         <span className="shrink-0 rounded border border-border/50 px-1.5 py-0.5 font-mono text-[0.625rem] text-muted-foreground">
                           {normalizedType || 'type'}
                         </span>

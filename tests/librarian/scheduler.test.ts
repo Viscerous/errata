@@ -50,7 +50,7 @@ function analysisResult() {
       createdAt: new Date().toISOString(),
       fragmentId: 'pr-0001',
       summaryUpdate: '',
-      mentionedCharacters: [],
+      mentions: [],
       contradictions: [],
       fragmentSuggestions: [],
       timelineEvents: [],

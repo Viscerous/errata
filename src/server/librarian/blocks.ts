@@ -1,5 +1,5 @@
-import type { ContextBlock } from '../llm/context-builder'
-import { fragmentSummaryBlock } from '../llm/context-builder'
+import type { ContextBlock, CustomFragmentGroup } from '../llm/context-builder'
+import { customContextFragmentTypes, fragmentSummaryBlock } from '../llm/context-builder'
 import { baseBlockContext, type AgentBlockContext } from '../agents/agent-block-context'
 import type { Fragment, StoryMeta } from '../fragments/schema'
 import { getStory, listFragments, getFragment } from '../fragments/storage'
@@ -29,7 +29,7 @@ export function buildAnalyzeSystemPrompt(opts?: { disableDirections?: boolean; d
   // drift). Steps for disabled tools are omitted and the rest renumber, so the
   // prompt never names a tool the model wasn't given.
   const steps: string[] = [
-    'Report knowledge terms and each character reference by name, nickname, or title — not pronouns — call reportMentions with the fragment ID and exact prose text so they are highlighted.',
+    'Report mentions of listed fragments by fragment ID and exact prose text — include knowledge terms, custom fragment references, and each character reference by name, nickname, or title, but not pronouns.',
     'Summarize what happened — call updateSummary.',
     'Record contradictions with established facts (reportContradictions) and significant events (reportTimeline) when the prose has them.',
     'Update a fragment when the prose changes a lasting fact about it — its state, allegiance, title, location, or relationships. The sheet is the record of current state and feeds later writing, so the change must land on the sheet, not only the summary or timeline. Use editFragment to replace an exact span from its full sheet, or updateFragment to set a whole field (the others stay untouched); build any new content from the full sheet, never from the one-line summary.',
@@ -86,6 +86,13 @@ export async function buildAnalyzeContext(
 ): Promise<AgentBlockContext> {
   const allCharacters = await listFragments(dataDir, storyId, 'character')
   const allKnowledge = await listFragments(dataDir, storyId, 'knowledge')
+  const allCustomFragments: CustomFragmentGroup[] = []
+  for (const def of customContextFragmentTypes(story)) {
+    const fragments = await listFragments(dataDir, storyId, def.type)
+    if (fragments.length > 0) {
+      allCustomFragments.push({ ...def, fragments })
+    }
+  }
   const systemPromptFragments = await loadSystemPromptFragments(dataDir, storyId, getFragmentsByTag, getFragment)
   return {
     // Start from the empty defaults so analyze states only the fields it uses
@@ -93,6 +100,7 @@ export async function buildAnalyzeContext(
     systemPromptFragments,
     allCharacters,
     allKnowledge,
+    allCustomFragments,
     newProse: input.newProse,
     // Author-pinned characters are always-relevant, so analyze loads them in full
     // independent of what the prose forwarded (writerContextIds).
@@ -168,6 +176,17 @@ export function createLibrarianAnalyzeBlocks(ctx: AgentBlockContext): ContextBlo
       order: 300,
       source: 'builtin',
     })
+  }
+
+  let customOrder = 320
+  for (const group of ctx.allCustomFragments ?? []) {
+    blocks.push(fragmentSummaryBlock({
+      id: `${group.type}-shortlist`,
+      heading: group.name,
+      items: group.fragments,
+      order: customOrder++,
+      editable: true,
+    }))
   }
 
   if (ctx.newProse) {
@@ -259,7 +278,7 @@ export function createLibrarianChatBlocks(ctx: AgentBlockContext): ContextBlock[
   const sticky = stickyFragmentsBlock(ctx)
   if (sticky) blocks.push(sticky)
 
-  const shortlist = shortlistBlock(ctx)
+  const shortlist = shortlistBlock(ctx, { includeCustomFragments: true })
   if (shortlist) blocks.push(shortlist)
 
   return blocks

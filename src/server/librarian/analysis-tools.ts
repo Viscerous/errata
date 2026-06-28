@@ -2,32 +2,23 @@ import { tool, type ToolSet } from 'ai'
 import { z } from 'zod/v4'
 import { getFragment, updateFragment, updateFragmentVersioned } from '../fragments/storage'
 import { checkFragmentWrite } from '../fragments/protection'
+import { FragmentIdSchema } from '../fragments/schema'
 import type { LibrarianMention } from './storage'
 
 const mentionTextSchema = z.string().trim().min(1).describe('The exact non-empty name, title, or key term used in the prose')
 
-export const mentionInputSchema = z.union([
-  z.object({
-    characterId: z.string().startsWith('ch-').describe('The character fragment ID (e.g. ch-abc)'),
-    text: mentionTextSchema,
-  }).strict(),
-  z.object({
-    knowledgeId: z.string().startsWith('kn-').describe('The knowledge fragment ID (e.g. kn-xyz)'),
-    text: mentionTextSchema,
-  }).strict(),
-])
-
-function mentionFragmentId(mention: LibrarianMention): string {
-  return 'characterId' in mention ? mention.characterId : mention.knowledgeId
-}
+export const mentionInputSchema = z.object({
+  fragmentId: FragmentIdSchema.describe('The ID of the mentioned fragment'),
+  text: mentionTextSchema,
+}).strict()
 
 function mentionKey(mention: LibrarianMention): string {
-  return `${mentionFragmentId(mention)}\u0000${mention.text.trim().toLowerCase()}`
+  return `${mention.fragmentId}\u0000${mention.text.trim().toLowerCase()}`
 }
 
 /** Map collected mentions to the prose annotation shape used for highlighting. */
 export function toMentionAnnotations(mentions: LibrarianMention[]) {
-  return mentions.map(m => ({ type: 'mention' as const, fragmentId: mentionFragmentId(m), text: m.text }))
+  return mentions.map(m => ({ type: 'mention' as const, fragmentId: m.fragmentId, text: m.text }))
 }
 
 /**
@@ -169,7 +160,7 @@ export function createAnalysisTools(collector: AnalysisCollector, opts?: { dataD
     }),
 
     reportMentions: tool({
-      description: 'Report character and knowledge fragment mentions in the new prose — references by name, title, or key term. Call once with all mentions.',
+      description: 'Report mentions of listed fragments in the new prose by fragment ID and exact prose text. Include characters, knowledge, and story-defined custom fragments when referenced by name, title, or key term. Call once with all mentions.',
       inputSchema: z.object({
         mentions: z.array(mentionInputSchema),
       }),
@@ -221,7 +212,7 @@ export function createAnalysisTools(collector: AnalysisCollector, opts?: { dataD
     }),
 
     getFragment: tool({
-      description: 'Read a character, knowledge, or guideline fragment in full by ID. The characters in the recent prose are already shown in full; use this only to read another fragment before editing it.',
+      description: 'Read a fragment in full by ID. The characters in the recent prose are already shown in full; use this only to read another fragment before editing it.',
       inputSchema: z.object({
         fragmentId: z.string().describe('The fragment ID to read (e.g. ch-abc, kn-xyz)'),
       }),
@@ -234,7 +225,7 @@ export function createAnalysisTools(collector: AnalysisCollector, opts?: { dataD
     }),
 
     editFragment: tool({
-      description: 'Replace an exact text span (oldText) with newText in a character, knowledge, or guideline fragment. Searches the name, description, and content, and changes only the matched span. oldText must match the current text exactly.',
+      description: 'Replace an exact text span (oldText) with newText in a non-prose fragment. Searches the name, description, and content, and changes only the matched span. oldText must match the current text exactly.',
       inputSchema: z.object({
         fragmentId: z.string().describe('The ID of the fragment to edit (e.g. ch-abc, kn-xyz)'),
         oldText: z.string().describe('The exact text span to find and replace, from the name, description, or content'),

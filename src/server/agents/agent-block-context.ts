@@ -1,5 +1,5 @@
 import type { Fragment, StoryMeta } from '../fragments/schema'
-import type { ContextBuildState } from '../llm/context-builder'
+import type { ContextBuildState, CustomFragmentGroup } from '../llm/context-builder'
 
 /**
  * Context every agent's block builder receives. It is the writer's
@@ -17,6 +17,7 @@ export interface AgentBlockContext extends ContextBuildState {
   // Librarian analyze
   allCharacters?: Fragment[]
   allKnowledge?: Fragment[]
+  allCustomFragments?: CustomFragmentGroup[]
   newProse?: { id: string; content: string }
 
   // Librarian refine
@@ -51,8 +52,11 @@ export function baseBlockContext(ctxState: ContextBuildState | null | undefined,
     stickyGuidelines: [],
     stickyKnowledge: [],
     stickyCharacters: [],
+    stickyCustomFragments: [],
     guidelineShortlist: [],
     knowledgeShortlist: [],
     characterShortlist: [],
+    customFragmentShortlists: [],
+    recentCustomFragments: [],
   }
 }

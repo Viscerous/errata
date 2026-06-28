@@ -393,6 +393,82 @@ describe('context-builder', () => {
     expect(recent!.content).toContain('Contains dark forbidden spells.')
   })
 
+  it('injects story custom fragment types as sticky, recent, and shortlist context', async () => {
+    const story = makeStory({
+      settings: {
+        ...makeTestSettings(),
+        customFragmentTypes: [
+          {
+            type: 'location',
+            name: 'Locations',
+            description: 'Places in the story',
+            icon: 'MapPin',
+            showInSidebar: true,
+          },
+        ],
+      },
+    })
+    await createStory(dataDir, story)
+
+    await createFragment(dataDir, story.id, makeFragment({
+      id: 'loc-0001',
+      type: 'location',
+      name: 'Crystal Library',
+      description: 'A bright archive',
+      content: 'Every shelf hums with captured starlight.',
+      sticky: true,
+    }))
+    await createFragment(dataDir, story.id, makeFragment({
+      id: 'loc-0002',
+      type: 'location',
+      name: 'Forgotten Bridge',
+      description: 'A dangerous crossing',
+      content: 'The bridge stones remember every betrayal.',
+      sticky: false,
+    }))
+    await createFragment(dataDir, story.id, makeFragment({
+      id: 'loc-0003',
+      type: 'location',
+      name: 'Ash Market',
+      description: 'A market below the city',
+      content: 'The Ash Market trades in debts and sealed names.',
+      sticky: false,
+    }))
+    await createFragment(dataDir, story.id, makeFragment({
+      id: 'pr-0002',
+      type: 'prose',
+      name: 'Ch1',
+      content: 'They descended below the city.',
+      order: 1,
+      meta: { annotations: [{ type: 'mention', fragmentId: 'loc-0003', text: 'market' }] },
+    }))
+
+    const state = await buildContextState(dataDir, story.id, 'Continue')
+    expect((state.stickyCustomFragments ?? []).map((f) => f.id)).toContain('loc-0001')
+
+    const recentLocations = (state.recentCustomFragments ?? []).find((group) => group.type === 'location')
+    expect(recentLocations?.fragments.map((f) => f.id)).toEqual(['loc-0003'])
+
+    const shortlistLocations = (state.customFragmentShortlists ?? []).find((group) => group.type === 'location')
+    expect(shortlistLocations?.fragments.map((f) => f.id)).toEqual(['loc-0002'])
+
+    const blocks = createDefaultBlocks(state)
+    const sticky = findBlock(blocks, 'user-fragments')
+    expect(sticky).toBeDefined()
+    expect(sticky!.content).toContain('## Locations')
+    expect(sticky!.content).toContain('Every shelf hums with captured starlight.')
+
+    const recent = findBlock(blocks, 'location-recent')
+    expect(recent).toBeDefined()
+    expect(recent!.content).toContain('The Ash Market trades in debts and sealed names.')
+
+    const shortlist = findBlock(blocks, 'location-shortlist')
+    expect(shortlist).toBeDefined()
+    expect(shortlist!.content).toContain('loc-0002')
+    expect(shortlist!.content).toContain('A dangerous crossing')
+    expect(shortlist!.content).not.toContain('The bridge stones remember every betrayal.')
+  })
+
   it('carries tool usage policy without enumerating a tool catalog', async () => {
     const story = makeStory()
     await createStory(dataDir, story)

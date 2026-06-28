@@ -51,12 +51,13 @@ export function storyInfoBlock(ctx: AgentBlockContext): ContextBlock {
   }
 }
 
-/** Sticky guidelines, knowledge, and characters. */
+/** Sticky guidelines, knowledge, characters, and custom fragments. */
 export function stickyFragmentsBlock(ctx: AgentBlockContext): ContextBlock | null {
   const all = [
     ...ctx.stickyGuidelines,
     ...ctx.stickyKnowledge,
     ...ctx.stickyCharacters,
+    ...(ctx.stickyCustomFragments ?? []),
   ]
   if (all.length === 0) return null
   return fragmentSummaryBlock({ id: 'sticky-fragments', heading: 'Active Context', items: all, order: 300 })
@@ -127,12 +128,19 @@ export function allCharactersBlock(ctx: AgentBlockContext): ContextBlock | null 
   return fragmentSummaryBlock({ id: 'characters-shortlist', heading: 'Characters', items: ctx.allCharacters, order: 350 })
 }
 
-/** Shortlist fragments (guidelines, knowledge, characters not in sticky). */
-export function shortlistBlock(ctx: AgentBlockContext): ContextBlock | null {
+export interface ShortlistBlockOptions {
+  includeCustomFragments?: boolean
+}
+
+/** Shortlist fragments not already pinned or promoted to full recent context. */
+export function shortlistBlock(ctx: AgentBlockContext, options: ShortlistBlockOptions = {}): ContextBlock | null {
   const all = [
     ...ctx.guidelineShortlist,
     ...ctx.knowledgeShortlist,
     ...ctx.characterShortlist,
+    ...(options.includeCustomFragments
+      ? (ctx.customFragmentShortlists ?? []).flatMap((group) => group.fragments)
+      : []),
   ]
   if (all.length === 0) return null
   return fragmentSummaryBlock({ id: 'shortlist', heading: 'Other Available Fragments', items: all, order: 400 })

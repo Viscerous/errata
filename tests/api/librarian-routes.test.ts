@@ -42,7 +42,7 @@ function makeAnalysis(overrides: Partial<LibrarianAnalysis> = {}): LibrarianAnal
     createdAt: new Date().toISOString(),
     fragmentId: 'pr-0001',
     summaryUpdate: 'Something happened.',
-    mentionedCharacters: ['ch-0001'],
+    mentions: [{ fragmentId: 'ch-0001', text: 'hero' }],
     contradictions: [],
     fragmentSuggestions: [],
     timelineEvents: [],
@@ -167,7 +167,7 @@ describe('librarian API routes', () => {
       await saveAnalysis(dataDir, storyId, makeAnalysis({
         id: 'analysis-detail',
         summaryUpdate: 'The hero entered the cave.',
-        mentionedCharacters: ['ch-0001'],
+        mentions: [{ fragmentId: 'ch-0001', text: 'hero' }],
         contradictions: [
           { description: 'Eye color mismatch', fragmentIds: ['pr-0001'] },
         ],
@@ -180,7 +180,7 @@ describe('librarian API routes', () => {
       const data = await res.json()
       expect(data.id).toBe('analysis-detail')
       expect(data.summaryUpdate).toBe('The hero entered the cave.')
-      expect(data.mentionedCharacters).toEqual(['ch-0001'])
+      expect(data.mentions).toEqual([{ fragmentId: 'ch-0001', text: 'hero' }])
       expect(data.contradictions).toHaveLength(1)
     })
 

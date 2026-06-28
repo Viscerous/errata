@@ -54,7 +54,7 @@ export function createLibrarianChatBespokeTools(dataDir: string, storyId: string
           ok: true,
           analysisId: analysis.id,
           summary: analysis.summaryUpdate,
-          mentionCount: analysis.mentionedCharacters.length,
+          mentionCount: analysis.mentions.length,
           contradictionCount: analysis.contradictions.length,
           suggestionCount: analysis.fragmentSuggestions.length,
           timelineEventCount: analysis.timelineEvents.length,

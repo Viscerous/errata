@@ -151,9 +151,12 @@ export function generationRoutes(dataDir: string) {
         stickyGuidelines: ctxState.stickyGuidelines.length,
         stickyKnowledge: ctxState.stickyKnowledge.length,
         stickyCharacters: ctxState.stickyCharacters.length,
+        stickyCustomFragments: (ctxState.stickyCustomFragments ?? []).length,
         guidelineShortlist: ctxState.guidelineShortlist.length,
         knowledgeShortlist: ctxState.knowledgeShortlist.length,
         characterShortlist: ctxState.characterShortlist.length,
+        customFragmentShortlists: (ctxState.customFragmentShortlists ?? [])
+          .reduce((sum, group) => sum + group.fragments.length, 0),
       }
       requestLogger.info('Context state built', contextFragments)
 
@@ -508,6 +511,8 @@ export function generationRoutes(dataDir: string) {
                 ...(ctxState.recentCharacters ?? []).map((f) => f.id),
                 ...ctxState.stickyKnowledge.map((f) => f.id),
                 ...(ctxState.recentKnowledge ?? []).map((f) => f.id),
+                ...(ctxState.stickyCustomFragments ?? []).map((f) => f.id),
+                ...(ctxState.recentCustomFragments ?? []).flatMap((group) => group.fragments.map((f) => f.id)),
                 ...lookedUpIds,
               ])]
 

@@ -397,7 +397,7 @@ describe('branches', () => {
         createdAt: new Date().toISOString(),
         fragmentId: 'pr-bakite',
         summaryUpdate: 'Alice arrived at the castle.',
-        mentionedCharacters: ['ch-alice'],
+        mentions: [{ fragmentId: 'ch-alice', text: 'Alice' }],
         contradictions: [],
         fragmentSuggestions: [],
         timelineEvents: [{ event: 'Alice arrives', position: 'during' }],

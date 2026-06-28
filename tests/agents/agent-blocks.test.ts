@@ -303,10 +303,23 @@ describe('Librarian Chat Blocks', () => {
     const def = agentBlockRegistry.get('librarian.chat')!
     const blocks = def.createDefaultBlocks(makeBaseContext({
       stickyGuidelines: [makeFragment({ id: 'gl-stick1', name: 'Tone', description: 'Keep it dark' })],
+      stickyCustomFragments: [makeFragment({ id: 'loc-stick1', type: 'location', name: 'Library', description: 'Pinned place' })],
       guidelineShortlist: [makeFragment({ id: 'gl-other1', name: 'Style', description: 'Gothic' })],
+      customFragmentShortlists: [
+        {
+          type: 'location',
+          name: 'Locations',
+          fragments: [makeFragment({ id: 'loc-other1', type: 'location', name: 'Bridge', description: 'Optional place' })],
+        },
+      ],
     }))
-    expect(blocks.find(b => b.id === 'sticky-fragments')).toBeDefined()
-    expect(blocks.find(b => b.id === 'shortlist')).toBeDefined()
+    const sticky = blocks.find(b => b.id === 'sticky-fragments')
+    expect(sticky).toBeDefined()
+    expect(sticky!.content).toContain('loc-stick1')
+
+    const shortlist = blocks.find(b => b.id === 'shortlist')
+    expect(shortlist).toBeDefined()
+    expect(shortlist!.content).toContain('loc-other1')
   })
 })
 
@@ -347,7 +360,27 @@ describe('Librarian Analyze Prompt', () => {
   it('reports named character references and excludes pronouns', () => {
     const prompt = buildAnalyzeSystemPrompt()
     expect(prompt).toContain('each character reference by name, nickname, or title')
+    expect(prompt).toContain('custom fragment references')
     expect(prompt).toContain('not pronouns')
+  })
+
+  it('includes custom fragment groups for mention detection', () => {
+    const def = agentBlockRegistry.get('librarian.analyze')!
+    const blocks = def.createDefaultBlocks(makeBaseContext({
+      allCustomFragments: [
+        {
+          type: 'location',
+          name: 'Locations',
+          fragments: [makeFragment({ id: 'loc-0001', type: 'location', name: 'Ash Market', description: 'A market below the city' })],
+        },
+      ],
+      newProse: { id: 'pr-0001', content: 'They crossed the Ash Market.' },
+    }))
+
+    const custom = blocks.find(b => b.id === 'location-shortlist')
+    expect(custom).toBeDefined()
+    expect(custom!.content).toContain('loc-0001')
+    expect(custom!.content).toContain('A market below the city')
   })
 })
 
@@ -417,17 +450,45 @@ describe('Directions Blocks', () => {
     expect(recentBlock!.content).toContain('Sword')
     expect(recentBlock!.content).toContain('Recent lore')
   })
+
+  it('includes custom sticky and recent context when provided', () => {
+    const def = agentBlockRegistry.get('directions.suggest')!
+    const stickyLocation = makeFragment({ id: 'loc-sticky', type: 'location', name: 'Library', description: 'Pinned place', content: 'Pinned place lore', sticky: true })
+    const recentLocation = makeFragment({ id: 'loc-recent', type: 'location', name: 'Market', description: 'Recent place', content: 'Recent place lore', sticky: false })
+    const shortlistLocation = makeFragment({ id: 'loc-short', type: 'location', name: 'Bridge', description: 'Optional place', content: 'Shortlist full lore', sticky: false })
+
+    const blocks = def.createDefaultBlocks(makeBaseContext({
+      stickyCustomFragments: [stickyLocation],
+      recentCustomFragments: [{ type: 'location', name: 'Locations', fragments: [recentLocation] }],
+      customFragmentShortlists: [{ type: 'location', name: 'Locations', fragments: [shortlistLocation] }],
+    }))
+
+    const sticky = blocks.find(b => b.id === 'custom-sticky')
+    expect(sticky).toBeDefined()
+    expect(sticky!.content).toContain('Pinned place lore')
+
+    const recent = blocks.find(b => b.id === 'location-recent')
+    expect(recent).toBeDefined()
+    expect(recent!.content).toContain('Recent place lore')
+
+    expect(blocks.find(b => b.id === 'location-shortlist')).toBeUndefined()
+    expect(blocks.map((block) => block.content).join('\n')).not.toContain('loc-short')
+  })
 })
 
 describe('Writer Blocks', () => {
-  it('includes knowledge-recent and knowledge-shortlist blocks when provided', () => {
+  it('includes recent and shortlist blocks for built-in and custom fragments when provided', () => {
     const def = agentBlockRegistry.get('generation.writer')!
     const recentKnowledge = makeFragment({ id: 'kn-sword', type: 'knowledge', name: 'Sword', content: 'Recent lore', sticky: false })
     const knowledgeShortlist = [makeFragment({ id: 'kn-shield', type: 'knowledge', name: 'Shield', content: 'Shortlist lore', sticky: false })]
+    const recentLocation = makeFragment({ id: 'loc-market', type: 'location', name: 'Market', description: 'Recent place', content: 'Recent place lore', sticky: false })
+    const shortlistLocation = makeFragment({ id: 'loc-bridge', type: 'location', name: 'Bridge', description: 'Optional place', content: 'Shortlist full lore', sticky: false })
 
     const blocks = def.createDefaultBlocks(makeBaseContext({
       recentKnowledge: [recentKnowledge],
       knowledgeShortlist: knowledgeShortlist,
+      recentCustomFragments: [{ type: 'location', name: 'Locations', fragments: [recentLocation] }],
+      customFragmentShortlists: [{ type: 'location', name: 'Locations', fragments: [shortlistLocation] }],
     }))
 
     const recent = blocks.find(b => b.id === 'knowledge-recent')
@@ -437,6 +498,16 @@ describe('Writer Blocks', () => {
     const shortlist = blocks.find(b => b.id === 'knowledge-shortlist')
     expect(shortlist).toBeDefined()
     expect(shortlist!.content).toContain('Shield')
+
+    const customRecent = blocks.find(b => b.id === 'location-recent')
+    expect(customRecent).toBeDefined()
+    expect(customRecent!.content).toContain('Recent place lore')
+
+    const customShortlist = blocks.find(b => b.id === 'location-shortlist')
+    expect(customShortlist).toBeDefined()
+    expect(customShortlist!.content).toContain('loc-bridge')
+    expect(customShortlist!.content).toContain('Optional place')
+    expect(customShortlist!.content).not.toContain('Shortlist full lore')
   })
 })
 

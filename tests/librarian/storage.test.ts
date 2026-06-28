@@ -19,7 +19,7 @@ function makeAnalysis(overrides: Partial<LibrarianAnalysis> = {}): LibrarianAnal
     createdAt: new Date().toISOString(),
     fragmentId: 'pr-0001',
     summaryUpdate: 'The hero entered the cave.',
-    mentionedCharacters: ['ch-0001'],
+    mentions: [{ fragmentId: 'ch-0001', text: 'hero' }],
     contradictions: [],
     fragmentSuggestions: [],
     timelineEvents: [],

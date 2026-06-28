@@ -8,7 +8,7 @@ import { ProseImageHeader } from './ProseImageHeader'
 import { resolveHeaderImage } from '@/lib/fragment-visuals'
 import { GenerationThoughts } from './GenerationThoughts'
 import { type ThoughtStep } from './InlineGenerationInput'
-import { buildAnnotationHighlighter, formatDialogue, composeTextTransforms, stripEmphasisInDialogue, type Annotation } from '@/lib/fragment-mentions'
+import { buildAnnotationHighlighter, filterMentionAnnotations, formatDialogue, composeTextTransforms, stripEmphasisInDialogue, type Annotation } from '@/lib/fragment-mentions'
 import { RefreshCw, Undo2, PenLine, Bug, Trash2, GitBranch, MessageSquare, ChevronLeft, ChevronRight, Info, BookOpen, Volume2, Square } from 'lucide-react'
 import { Caption } from '@/components/ui/prose-text'
 import { useConfirm } from '@/components/ui/confirm-dialog'
@@ -30,8 +30,8 @@ interface ProseBlockProps {
   onAnalyze?: (fragmentId: string) => void
   hasAnalysis?: boolean
   quickSwitch: boolean
-  characterMentionsEnabled?: boolean
-  knowledgeMentionsEnabled?: boolean
+  enabledMentionTypes?: ReadonlySet<string>
+  mentionFragmentTypesById?: ReadonlyMap<string, string>
   mentionColors?: Map<string, string>
   onClickMention?: (fragmentId: string) => void
   mediaById?: Map<string, Fragment>
@@ -112,8 +112,8 @@ export const ProseBlock = memo(function ProseBlock({
   onAnalyze,
   hasAnalysis,
   quickSwitch,
-  characterMentionsEnabled,
-  knowledgeMentionsEnabled,
+  enabledMentionTypes,
+  mentionFragmentTypesById,
   mentionColors,
   onClickMention,
   mediaById,
@@ -422,18 +422,18 @@ export const ProseBlock = memo(function ProseBlock({
   // Build text transform: dialogue italics + optional mention highlighting
   const annotations = fragment.meta?.annotations as Annotation[] | undefined
   const textTransform = useMemo(() => {
-    const filteredAnnotations = annotations?.filter(a => {
-      if (a.fragmentId.startsWith('ch-')) return characterMentionsEnabled
-      if (a.fragmentId.startsWith('kn-')) return knowledgeMentionsEnabled
-      return false
-    })
-    const hasAnyMentions = characterMentionsEnabled || knowledgeMentionsEnabled
+    const filteredAnnotations = filterMentionAnnotations(
+      annotations,
+      enabledMentionTypes ?? new Set<string>(),
+      mentionFragmentTypesById,
+    )
+    const hasAnyMentions = (enabledMentionTypes?.size ?? 0) > 0
     const mentionHighlighter = hasAnyMentions && filteredAnnotations && filteredAnnotations.length > 0 && onClickMention
       ? buildAnnotationHighlighter(filteredAnnotations, onClickMention, mentionColors)
       : null
     if (mentionHighlighter) return composeTextTransforms(formatDialogue, mentionHighlighter)
     return formatDialogue
-  }, [characterMentionsEnabled, knowledgeMentionsEnabled, annotations, onClickMention, mentionColors])
+  }, [enabledMentionTypes, mentionFragmentTypesById, annotations, onClickMention, mentionColors])
 
   // Resolve a linked image for the passage header (first image visual ref).
   const headerImage = useMemo(

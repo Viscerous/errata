@@ -220,7 +220,7 @@ describe('librarian agent', () => {
 
     mockStreamWithToolCalls([
       { toolName: 'updateSummary', args: { summary: 'Alice drew her sword.' } },
-      { toolName: 'reportMentions', args: { mentions: [{ characterId: 'ch-0001', text: 'Alice' }] } },
+      { toolName: 'reportMentions', args: { mentions: [{ fragmentId: 'ch-0001', text: 'Alice' }] } },
     ])
 
     const analysis = await runLibrarian(dataDir, storyId, 'pr-0001')
@@ -373,7 +373,7 @@ describe('librarian agent', () => {
       createdAt: '2025-01-01T00:00:00.000Z',
       fragmentId: 'pr-0001',
       summaryUpdate: 'Old version should not be used.',
-      mentionedCharacters: [],
+      mentions: [],
       contradictions: [],
       fragmentSuggestions: [],
       timelineEvents: [],
@@ -383,7 +383,7 @@ describe('librarian agent', () => {
       createdAt: '2025-01-02T00:00:00.000Z',
       fragmentId: 'pr-0001',
       summaryUpdate: 'New version should be used.',
-      mentionedCharacters: [],
+      mentions: [],
       contradictions: [],
       fragmentSuggestions: [],
       timelineEvents: [],
@@ -415,11 +415,11 @@ describe('librarian agent', () => {
 
     mockStreamWithToolCalls([
       { toolName: 'updateSummary', args: { summary: 'Alice confronted a dragon.' } },
-      { toolName: 'reportMentions', args: { mentions: [{ characterId: 'ch-0001', text: 'Alice' }] } },
+      { toolName: 'reportMentions', args: { mentions: [{ fragmentId: 'ch-0001', text: 'Alice' }] } },
     ])
 
     const analysis = await runLibrarian(dataDir, storyId, 'pr-0001')
-    expect(analysis.mentionedCharacters).toEqual(['ch-0001'])
+    expect(analysis.mentions).toEqual([{ fragmentId: 'ch-0001', text: 'Alice' }])
 
     const state = await getState(dataDir, storyId)
     expect(state.recentMentions['ch-0001']).toEqual(['pr-0001'])
@@ -446,16 +446,18 @@ describe('librarian agent', () => {
         toolName: 'reportMentions',
         args: {
           mentions: [
-            { knowledgeId: 'kn-0001', text: 'Necronomicon' },
-            { knowledgeId: 'kn-0001', text: 'spellbook' },
+            { fragmentId: 'kn-0001', text: 'Necronomicon' },
+            { fragmentId: 'kn-0001', text: 'spellbook' },
           ],
         },
       },
     ])
 
     const analysis = await runLibrarian(dataDir, storyId, 'pr-0001')
-    expect(analysis.mentionedKnowledge).toEqual(['kn-0001'])
-    expect(analysis.mentions).toHaveLength(2)
+    expect(analysis.mentions).toEqual([
+      { fragmentId: 'kn-0001', text: 'Necronomicon' },
+      { fragmentId: 'kn-0001', text: 'spellbook' },
+    ])
 
     const fragment = await getFragment(dataDir, storyId, 'pr-0001')
     const annotations = fragment!.meta.annotations as Array<{ type: string; fragmentId: string; text: string }>
@@ -463,6 +465,48 @@ describe('librarian agent', () => {
 
     const state = await getState(dataDir, storyId)
     expect(state.recentMentions['kn-0001']).toEqual(['pr-0001'])
+  })
+
+  it('records custom fragment mentions as generic annotations and recent mentions', async () => {
+    await createStory(dataDir, makeStory({
+      settings: {
+        customFragmentTypes: [
+          {
+            type: 'location',
+            name: 'Locations',
+            description: 'Places in the story',
+            icon: 'MapPin',
+            showInSidebar: true,
+          },
+        ],
+      },
+    }))
+    await createFragment(dataDir, storyId, makeFragment({
+      id: 'loc-0001',
+      type: 'location',
+      name: 'Ash Market',
+      description: 'A market below the city',
+    }))
+    await createFragment(dataDir, storyId, makeFragment({
+      id: 'pr-0001',
+      content: 'They entered the Ash Market below the city.',
+    }))
+    await setupProseChain(dataDir, storyId, ['pr-0001'])
+
+    mockStreamWithToolCalls([
+      { toolName: 'updateSummary', args: { summary: 'They entered an underground market.' } },
+      { toolName: 'reportMentions', args: { mentions: [{ fragmentId: 'loc-0001', text: 'Ash Market' }] } },
+    ])
+
+    const analysis = await runLibrarian(dataDir, storyId, 'pr-0001')
+    expect(analysis.mentions).toEqual([{ fragmentId: 'loc-0001', text: 'Ash Market' }])
+
+    const fragment = await getFragment(dataDir, storyId, 'pr-0001')
+    const annotations = fragment!.meta.annotations as Array<{ type: string; fragmentId: string; text: string }>
+    expect(annotations).toEqual([{ type: 'mention', fragmentId: 'loc-0001', text: 'Ash Market' }])
+
+    const state = await getState(dataDir, storyId)
+    expect(state.recentMentions['loc-0001']).toEqual(['pr-0001'])
   })
 
   it('accumulates mentions across multiple runs', async () => {
@@ -486,14 +530,14 @@ describe('librarian agent', () => {
     // First run
     mockStreamWithToolCalls([
       { toolName: 'updateSummary', args: { summary: 'Alice entered the castle.' } },
-      { toolName: 'reportMentions', args: { mentions: [{ characterId: 'ch-0001', text: 'Alice' }] } },
+      { toolName: 'reportMentions', args: { mentions: [{ fragmentId: 'ch-0001', text: 'Alice' }] } },
     ])
     await runLibrarian(dataDir, storyId, 'pr-0001')
 
     // Second run
     mockStreamWithToolCalls([
       { toolName: 'updateSummary', args: { summary: 'Alice found the treasure room.' } },
-      { toolName: 'reportMentions', args: { mentions: [{ characterId: 'ch-0001', text: 'Alice' }] } },
+      { toolName: 'reportMentions', args: { mentions: [{ fragmentId: 'ch-0001', text: 'Alice' }] } },
     ])
     await runLibrarian(dataDir, storyId, 'pr-0002')
 

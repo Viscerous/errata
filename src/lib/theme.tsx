@@ -80,12 +80,77 @@ export function useQuickSwitch() {
   return useBoolPref('errata-quick-switch', false)
 }
 
+export const BASE_MENTION_TYPES = ['character', 'knowledge'] as const
+
+const MENTION_TYPES_KEY = 'errata-mention-types'
+const MENTION_TYPES_EVENT = 'errata-mention-types-change'
+const LEGACY_CHARACTER_MENTIONS_KEY = 'errata-character-mentions'
+const LEGACY_KNOWLEDGE_MENTIONS_KEY = 'errata-knowledge-mentions'
+
+function normalizeMentionTypes(types: readonly string[]): string[] {
+  return [...new Set(types.map((type) => type.trim()).filter(Boolean))]
+}
+
+function readMentionTypes(): string[] {
+  if (typeof window === 'undefined') return []
+
+  const stored = localStorage.getItem(MENTION_TYPES_KEY)
+  if (stored !== null) {
+    try {
+      const parsed = JSON.parse(stored)
+      if (Array.isArray(parsed)) {
+        return normalizeMentionTypes(parsed.filter((type): type is string => typeof type === 'string'))
+      }
+    } catch {
+      return normalizeMentionTypes(stored.split(','))
+    }
+  }
+
+  const migrated: string[] = []
+  if (localStorage.getItem(LEGACY_CHARACTER_MENTIONS_KEY) === 'true') migrated.push('character')
+  if (localStorage.getItem(LEGACY_KNOWLEDGE_MENTIONS_KEY) === 'true') migrated.push('knowledge')
+  return migrated
+}
+
+export function useMentionTypes(): [string[], (types: string[]) => void] {
+  const [types, setTypes] = useState(readMentionTypes)
+
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<string[]>).detail
+      if (Array.isArray(detail)) setTypes(normalizeMentionTypes(detail))
+    }
+    window.addEventListener(MENTION_TYPES_EVENT, handler)
+    return () => window.removeEventListener(MENTION_TYPES_EVENT, handler)
+  }, [])
+
+  const set = useCallback((nextTypes: string[]) => {
+    const normalized = normalizeMentionTypes(nextTypes)
+    setTypes(normalized)
+    localStorage.setItem(MENTION_TYPES_KEY, JSON.stringify(normalized))
+    window.dispatchEvent(new CustomEvent(MENTION_TYPES_EVENT, { detail: normalized }))
+  }, [])
+
+  return [types, set]
+}
+
+function useMentionType(type: string): [boolean, (v: boolean) => void] {
+  const [types, setTypes] = useMentionTypes()
+  const enabled = types.includes(type)
+  const setEnabled = useCallback((next: boolean) => {
+    setTypes(next
+      ? normalizeMentionTypes([...types, type])
+      : types.filter((current) => current !== type))
+  }, [setTypes, type, types])
+  return [enabled, setEnabled]
+}
+
 export function useCharacterMentions() {
-  return useBoolPref('errata-character-mentions', false)
+  return useMentionType('character')
 }
 
 export function useKnowledgeMentions() {
-  return useBoolPref('errata-knowledge-mentions', false)
+  return useMentionType('knowledge')
 }
 
 const TIMELINE_BAR_KEY = 'errata-timeline-bar'
