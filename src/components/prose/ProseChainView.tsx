@@ -227,9 +227,9 @@ export function ProseChainView({
     for (const def of story?.settings.customFragmentTypes ?? []) {
       types.add(def.type)
     }
-    return [...types].filter((type) => enabledMentionTypes.has(type))
-  }, [enabledMentionTypes, story?.settings.customFragmentTypes])
-  const mentionHighlightsEnabled = mentionFragmentTypes.length > 0
+    return [...types]
+  }, [story?.settings.customFragmentTypes])
+  const mentionHighlightsEnabled = enabledMentionTypes.size > 0
 
   // While the librarian is analyzing, poll its status so we can refresh prose as
   // soon as it writes mention annotations (it persists them at the start of the
