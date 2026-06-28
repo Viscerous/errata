@@ -169,7 +169,7 @@ export interface LibrarianAnalysis {
     fragmentIds: string[]
   }>
   fragmentSuggestions: Array<{
-    type: 'character' | 'knowledge'
+    type: string
     targetFragmentId?: string
     name: string
     description: string

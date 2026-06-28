@@ -358,7 +358,7 @@ describe('Librarian Refine Blocks', () => {
     expect(ids).toContain('instructions')
     expect(ids).toContain('story-info')
     const instructions = blocks.find(b => b.id === 'instructions')!
-    expect(instructions.content).toContain('read the target fragment using getFragment')
+    expect(instructions.content).toContain('read the target fragment using **getFragment**')
     expect(instructions.content).not.toContain('getCharacter')
   })
 
@@ -386,9 +386,9 @@ describe('Librarian Refine Blocks', () => {
 describe('Librarian Analyze Prompt', () => {
   it('reports named character references and excludes pronouns', () => {
     const prompt = buildAnalyzeSystemPrompt()
-    expect(prompt).toContain('each character reference by name, nickname, or title')
-    expect(prompt).toContain('custom fragment references')
-    expect(prompt).toContain('not pronouns')
+    expect(prompt).toContain('Include direct names, nicknames, titles, roles')
+    expect(prompt).toContain('Report **EVERY** mention')
+    expect(prompt).toContain('Exclude pronouns')
   })
 
   it('includes custom fragment groups for mention detection', () => {

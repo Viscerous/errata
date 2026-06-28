@@ -52,7 +52,7 @@ export interface AnalysisCollector {
   mentions: LibrarianMention[]
   contradictions: Array<{ description: string; fragmentIds: string[] }>
   fragmentSuggestions: Array<{
-    type: 'character' | 'knowledge'
+    type: string
     targetFragmentId?: string
     name: string
     description: string
@@ -137,7 +137,17 @@ export const updateSummaryInputSchema = z.object({
 
 // --- Tools ---
 
-export function createAnalysisTools(collector: AnalysisCollector, opts?: { dataDir: string; storyId: string; proseFragmentId?: string; disableDirections?: boolean; disableSuggestions?: boolean }) {
+export function createAnalysisTools(
+  collector: AnalysisCollector,
+  opts?: { 
+    dataDir: string; 
+    storyId: string; 
+    proseFragmentId?: string; 
+    disableDirections?: boolean; 
+    disableSuggestions?: boolean;
+    customFragmentTypes?: Array<{ type: string; name: string }>;
+  },
+) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const tools: Record<string, any> = {
     updateSummary: tool({
@@ -279,13 +289,23 @@ export function createAnalysisTools(collector: AnalysisCollector, opts?: { dataD
   }
 
   if (!opts?.disableSuggestions) {
+    const customTypes = opts?.customFragmentTypes ?? []
+    const allowedTypes = ['character', 'knowledge', ...customTypes.map(t => t.type)]
+    const typeSchema = allowedTypes.length > 1
+      ? z.union(allowedTypes.map(t => z.literal(t)) as unknown as [z.ZodTypeAny, z.ZodTypeAny, ...z.ZodTypeAny[]])
+      : z.literal('character')
+
+    const typeDesc = customTypes.length > 0
+      ? `"character" for characters, "knowledge" for world-building, or other types: ${customTypes.map(t => t.type).join(', ')}`
+      : '"character" for characters, "knowledge" for world-building, locations, items, facts'
+
     tools.suggestFragment = tool({
-      description: 'Suggest creating or updating character/knowledge fragments based on new information in the prose. Each character or knowledge entry should appear only once. If updating an existing fragment, respect locked/frozen protections — locked fragments cannot be modified, and frozen sections must be preserved verbatim in the new content.',
+      description: 'Suggest creating or updating fragments based on new information in the prose. Each entry should appear only once. If updating an existing fragment, respect locked/frozen protections — locked fragments cannot be modified, and frozen sections must be preserved verbatim in the new content.',
       inputSchema: z.object({
         suggestions: z.array(z.object({
-          type: z.union([z.literal('character'), z.literal('knowledge')]).describe('"character" for characters, "knowledge" for world-building, locations, items, facts'),
+          type: typeSchema.describe(typeDesc),
           targetFragmentId: z.string().optional().describe('If updating an existing fragment, its ID. Omit for new fragments.'),
-          name: z.string().describe('Name of the character or knowledge entry'),
+          name: z.string().describe('Name of the fragment entry'),
           description: z.string().describe('Short description (max 250 chars)'),
           content: z.string().describe('Full content. Retain important established facts when updating.'),
         })),
@@ -358,7 +378,14 @@ export function createAnalysisTools(collector: AnalysisCollector, opts?: { dataD
  */
 export function createLibrarianAnalyzeTools(
   collector: AnalysisCollector,
-  opts: { dataDir: string; storyId: string; proseFragmentId?: string; disableDirections?: boolean; disableSuggestions?: boolean },
+  opts: { 
+    dataDir: string; 
+    storyId: string; 
+    proseFragmentId?: string; 
+    disableDirections?: boolean; 
+    disableSuggestions?: boolean;
+    customFragmentTypes?: Array<{ type: string; name: string }>;
+  },
 ): ToolSet {
   return createAnalysisTools(collector, opts)
 }
