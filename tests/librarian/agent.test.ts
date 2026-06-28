@@ -546,6 +546,49 @@ describe('librarian agent', () => {
     expect(state.lastAnalyzedFragmentId).toBe('pr-0002')
   })
 
+  it('replaces recent mention links when reanalyzing the same prose fragment', async () => {
+    await createStory(dataDir, makeStory())
+    await createFragment(dataDir, storyId, makeFragment({
+      id: 'ch-0001',
+      type: 'character',
+      name: 'Alice',
+    }))
+    await createFragment(dataDir, storyId, makeFragment({
+      id: 'ch-0002',
+      type: 'character',
+      name: 'Bob',
+    }))
+    await createFragment(dataDir, storyId, makeFragment({
+      id: 'pr-0001',
+      content: 'Alice entered the castle.',
+    }))
+    await setupProseChain(dataDir, storyId, ['pr-0001'])
+
+    mockStreamWithToolCalls([
+      { toolName: 'updateSummary', args: { summary: 'Alice entered the castle.' } },
+      { toolName: 'reportMentions', args: { mentions: [{ fragmentId: 'ch-0001', text: 'Alice' }] } },
+    ])
+    await runLibrarian(dataDir, storyId, 'pr-0001')
+
+    mockStreamWithToolCalls([
+      { toolName: 'updateSummary', args: { summary: 'Bob entered the castle.' } },
+      { toolName: 'reportMentions', args: { mentions: [{ fragmentId: 'ch-0002', text: 'Bob' }] } },
+    ])
+    await runLibrarian(dataDir, storyId, 'pr-0001')
+
+    let state = await getState(dataDir, storyId)
+    expect(state.recentMentions['ch-0001']).toBeUndefined()
+    expect(state.recentMentions['ch-0002']).toEqual(['pr-0001'])
+
+    mockStreamWithToolCalls([
+      { toolName: 'updateSummary', args: { summary: 'The castle was empty.' } },
+    ])
+    await runLibrarian(dataDir, storyId, 'pr-0001')
+
+    state = await getState(dataDir, storyId)
+    expect(state.recentMentions).toEqual({})
+  })
+
   it('flags contradictions', async () => {
     await createStory(dataDir, makeStory({ summary: 'Alice has blue eyes.' }))
     await createFragment(dataDir, storyId, makeFragment({
