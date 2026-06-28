@@ -71,10 +71,10 @@ Other marker types used within block content:
 | `story-info` | user | 100 | Story name + description |
 | `summary` | user | 200 | Story summary (omitted if empty) |
 | `user-fragments` | user | 300 | User-placed sticky fragments |
-| `guidelines-shortlist` | user | 300 | Non-sticky guideline shortlist |
+| `guideline-shortlist` | user | 300 | Non-sticky guideline shortlist |
 | `knowledge-shortlist` | user | 310 | Non-sticky knowledge shortlist |
-| `characters-recent` | user | 315 | Full sheets for non-sticky characters appearing in the recent prose |
-| `characters-shortlist` | user | 320 | Remaining non-sticky character shortlist |
+| `character-recent` | user | 315 | Full sheets for non-sticky characters appearing in the recent prose |
+| `character-shortlist` | user | 320 | Remaining non-sticky character shortlist |
 | `prose-recent` | user | 500 | Recent prose chain |
 | `author-input` | user | 600 | Author's direction |
 
@@ -87,7 +87,7 @@ cost bounded:
 
 - **Full** — the entire body is inlined. Used for **sticky** fragments (always
   relevant) and the **relevance set** — characters the writer actually worked from,
-  rendered in `characters-recent`. The relevance set comes from `writerContextIds`,
+  rendered in `character-recent`. The relevance set comes from `writerContextIds`,
   a type-agnostic signal the writer records on each prose fragment's `meta`.
 - **Summary** — one line per fragment (`id: name — description`) via
   `fragmentSummaryBlock`. Used for the `*-shortlist` blocks (non-sticky, non-recent).

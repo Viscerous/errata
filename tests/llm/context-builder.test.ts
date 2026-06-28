@@ -353,7 +353,7 @@ describe('context-builder', () => {
     expect(state.characterShortlist.map((c) => c.id)).not.toContain('ch-0002')
 
     const blocks = createDefaultBlocks(state)
-    const recent = findBlock(blocks, 'characters-recent')
+    const recent = findBlock(blocks, 'character-recent')
     expect(recent).toBeDefined()
     expect(recent!.content).toContain('The dark lord rules with an iron fist.')
   })
@@ -797,13 +797,13 @@ describe('context blocks', () => {
       const state = await buildContextState(dataDir, story.id, 'Continue')
       const blocks = createDefaultBlocks(state)
 
-      const guidelines = findBlock(blocks, 'guidelines-shortlist')
+      const guideline = findBlock(blocks, 'guideline-shortlist')
       const knowledge = findBlock(blocks, 'knowledge-shortlist')
-      expect(guidelines).toBeDefined()
+      expect(guideline).toBeDefined()
       expect(knowledge).toBeDefined()
-      expect(guidelines!.content).toContain('## Guidelines (Summary Index)')
+      expect(guideline!.content).toContain('## Guidelines (Summary Index)')
       expect(knowledge!.content).toContain('## Knowledge (Summary Index)')
-      expect(guidelines!.content).toContain('not the full fragment sheet')
+      expect(guideline!.content).toContain('not the full fragment sheet')
     })
 
     it('omits shortlist blocks when no non-sticky fragments of that type', async () => {
@@ -813,9 +813,9 @@ describe('context blocks', () => {
       const state = await buildContextState(dataDir, story.id, 'Continue')
       const blocks = createDefaultBlocks(state)
 
-      expect(findBlock(blocks, 'guidelines-shortlist')).toBeUndefined()
+      expect(findBlock(blocks, 'guideline-shortlist')).toBeUndefined()
       expect(findBlock(blocks, 'knowledge-shortlist')).toBeUndefined()
-      expect(findBlock(blocks, 'characters-shortlist')).toBeUndefined()
+      expect(findBlock(blocks, 'character-shortlist')).toBeUndefined()
     })
 
     it('all blocks have source "builtin"', async () => {

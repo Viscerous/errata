@@ -707,7 +707,7 @@ export function createDefaultBlocks(state: ContextBuildState): ContextBlock[] {
   }
 
   pushFragmentBlock(fragmentContextBlock({
-    id: 'guidelines-shortlist',
+    id: 'guideline-shortlist',
     type: 'guideline',
     label: 'Guidelines',
     fragments: guidelineShortlist,
@@ -741,7 +741,7 @@ export function createDefaultBlocks(state: ContextBuildState): ContextBlock[] {
   // Full sheets for characters active in the recent prose — the writer continues
   // them from current state. The shortlist below carries everyone else as summaries.
   pushFragmentBlock(fragmentContextBlock({
-    id: 'characters-recent',
+    id: 'character-recent',
     type: 'character',
     label: 'Characters',
     fragments: recentCharacters,
@@ -751,7 +751,7 @@ export function createDefaultBlocks(state: ContextBuildState): ContextBlock[] {
   }))
 
   pushFragmentBlock(fragmentContextBlock({
-    id: 'characters-shortlist',
+    id: 'character-shortlist',
     type: 'character',
     label: 'Characters',
     fragments: characterShortlist,
