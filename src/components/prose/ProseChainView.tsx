@@ -474,6 +474,33 @@ export function ProseChainView({
     (isGenerating || pendingGenerationSnapshot.text.length > 0) &&
     !hasSavedPendingGeneration
 
+  const pendingOutlineFragment = useMemo<Fragment | null>(() => {
+    if (!showPendingGeneration) return null
+    return {
+      id: 'pending-generation-fragment',
+      type: 'prose',
+      name: 'Generating...',
+      description: '',
+      content: pendingGenerationSnapshot.text || 'Generating...',
+      tags: [],
+      refs: [],
+      sticky: false,
+      placement: 'system',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      order: Number.MAX_SAFE_INTEGER,
+      meta: {},
+      archived: false,
+    }
+  }, [showPendingGeneration, pendingGenerationSnapshot.text])
+
+  const outlineFragments = useMemo(() => {
+    if (pendingOutlineFragment) {
+      return [...orderedItems, pendingOutlineFragment]
+    }
+    return orderedItems
+  }, [orderedItems, pendingOutlineFragment])
+
   const visibleOrderedItems = useMemo(() => {
     if (!pendingGeneration) return orderedItems
 
@@ -595,6 +622,16 @@ export function ProseChainView({
           return
         }
       }
+
+      const hasPendingOrHandoff = showPendingGeneration || !!savedGenerationHandoffFragment
+      if (hasPendingOrHandoff && items.length > 0) {
+        const lastItem = items[items.length - 1]
+        if (lastItem && center > lastItem.end) {
+          setActiveIndexIfChanged(visibleOrderedItems.length)
+          return
+        }
+      }
+
       const row = orderedRows[items[items.length - 1].index]
       setActiveIndexIfChanged(row?.displayIndex ?? Math.max(0, visibleOrderedItems.length - 1))
     },
@@ -951,8 +988,15 @@ export function ProseChainView({
   }, [orderedRows.length, SCROLL_POS_KEY, getViewport, virtualizer])
 
   const scrollToIndex = useCallback((index: number) => {
-    virtualizer.scrollToIndex(index, { align: 'start' })
-  }, [virtualizer])
+    if (index >= orderedRows.length) {
+      const viewport = getViewport()
+      if (viewport) {
+        viewport.scrollTop = viewport.scrollHeight
+      }
+    } else {
+      virtualizer.scrollToIndex(index, { align: 'start' })
+    }
+  }, [virtualizer, orderedRows.length, getViewport])
 
   const setVirtualListContainer = useCallback((node: HTMLDivElement | null) => {
     listContainerRef.current = node
@@ -1206,11 +1250,11 @@ export function ProseChainView({
       </div>
 
       {/* Outline panel — side rail on desktop */}
-      {orderedItems.length > 1 && (
+      {outlineFragments.length > 1 && (
         <div className="hidden md:flex">
           <ProseOutlinePanel
             storyId={storyId}
-            fragments={orderedItems}
+            fragments={outlineFragments}
             activeIndex={activeIndex}
             open={outlineOpen ?? true}
             onJump={scrollToIndex}
@@ -1220,7 +1264,7 @@ export function ProseChainView({
 
       {/* Outline on mobile — a trigger that opens the passages as a full-screen
           overlay (no room for a persistent rail). Sits left of the chat button. */}
-      {orderedItems.length > 1 && (
+      {outlineFragments.length > 1 && (
         <>
           <button
             type="button"
@@ -1239,7 +1283,7 @@ export function ProseChainView({
             >
               <ProseOutlinePanel
                 storyId={storyId}
-                fragments={orderedItems}
+                fragments={outlineFragments}
                 activeIndex={activeIndex}
                 open
                 mobile
