@@ -22,6 +22,10 @@ import { copyFragmentToClipboard } from '@/lib/fragment-clipboard'
 import { CropDialog } from '@/components/fragments/CropDialog'
 import { useConfirm } from '@/components/ui/confirm-dialog'
 import { Hint, EmptyHint, MetaLabel } from '@/components/ui/prose-text'
+import {
+  compareFragmentTypeVisuals,
+  getFragmentTypeVisual,
+} from '@/components/fragments/fragment-type-icons'
 
 export interface FragmentPrefill {
   name: string
@@ -104,6 +108,11 @@ export function FragmentEditor({
     enabled: !!fragment?.id && isVersionedType,
   })
 
+  const { data: story } = useQuery({
+    queryKey: ['story', storyId],
+    queryFn: () => api.stories.get(storyId),
+  })
+
   const { data: fragmentTypes } = useQuery({
     queryKey: ['fragment-types', storyId],
     queryFn: () => api.fragments.types(storyId),
@@ -111,16 +120,13 @@ export function FragmentEditor({
 
   const sortedTypes = useMemo(() => {
     if (!fragmentTypes) return []
-    const sidebarOrder = ['prose', 'guideline', 'character', 'knowledge']
+    const customTypes = story?.settings.customFragmentTypes ?? []
     return [...fragmentTypes].sort((a, b) => {
-      const idxA = sidebarOrder.indexOf(a.type)
-      const idxB = sidebarOrder.indexOf(b.type)
-      if (idxA !== -1 && idxB !== -1) return idxA - idxB
-      if (idxA !== -1) return -1
-      if (idxB !== -1) return 1
-      return fragmentTypes.indexOf(a) - fragmentTypes.indexOf(b)
+      const visualA = getFragmentTypeVisual(a.type, customTypes)
+      const visualB = getFragmentTypeVisual(b.type, customTypes)
+      return compareFragmentTypeVisuals(visualA, visualB)
     })
-  }, [fragmentTypes])
+  }, [fragmentTypes, story?.settings.customFragmentTypes])
 
   // Sync local state from the source fragment (prop or live query data).
   // Uses liveFragment so that external updates (e.g. refinement agent) are reflected.
