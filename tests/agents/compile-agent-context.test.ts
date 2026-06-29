@@ -2,9 +2,10 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { tool } from 'ai'
 import { z } from 'zod/v4'
 import { createTempDir, makeTestSettings } from '../setup'
-import { createStory } from '@/server/fragments/storage'
-import type { StoryMeta } from '@/server/fragments/schema'
+import { createFragment, createStory } from '@/server/fragments/storage'
+import type { Fragment, StoryMeta } from '@/server/fragments/schema'
 import { ensureCoreAgentsRegistered } from '@/server/agents'
+import { agentBlockRegistry } from '@/server/agents/agent-block-registry'
 import { compileAgentContext } from '@/server/agents/compile-agent-context'
 import { saveAgentBlockConfig } from '@/server/agents/agent-block-storage'
 import type { AgentBlockContext } from '@/server/agents/agent-block-context'
@@ -38,6 +39,26 @@ function makeContext(overrides: Partial<AgentBlockContext> = {}): AgentBlockCont
     knowledgeShortlist: [],
     characterShortlist: [],
     systemPromptFragments: [],
+    ...overrides,
+  }
+}
+
+function makeSummaryFragment(overrides: Partial<Fragment> = {}): Fragment {
+  return {
+    id: 'sm-test01',
+    type: 'summary',
+    name: 'Opening summary',
+    description: 'Running summary',
+    content: 'Fragment-backed summary.',
+    tags: [],
+    refs: [],
+    sticky: false,
+    placement: 'system',
+    createdAt: now,
+    updatedAt: now,
+    order: 0,
+    meta: { chapterId: null, isEraSummary: false },
+    archived: false,
     ...overrides,
   }
 }
@@ -181,6 +202,18 @@ describe('compileAgentContext', () => {
     const instBlock = result.blocks.find(b => b.id === 'instructions')!
     expect(proseBlock.order).toBeLessThan(summaryBlock.order)
     expect(summaryBlock.order).toBeLessThan(instBlock.order)
+  })
+
+  it('hydrates librarian analyze preview summary from summary fragments', async () => {
+    await createFragment(dataDir, STORY_ID, makeSummaryFragment())
+
+    const def = agentBlockRegistry.get('librarian.analyze')!
+    const ctx = await def.buildPreviewContext(dataDir, STORY_ID)
+    const blocks = def.createDefaultBlocks(ctx)
+    const summaryBlock = blocks.find(b => b.id === 'story-summary')!
+
+    expect(summaryBlock.content).toContain('Fragment-backed summary.')
+    expect(summaryBlock.content).not.toContain('(summary will appear here)')
   })
 
   it('works with librarian.chat agent', async () => {
