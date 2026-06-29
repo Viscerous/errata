@@ -267,43 +267,75 @@ function SmoothStreamCursor({
   cursorId: string
 }) {
   const ref = useRef<HTMLSpanElement>(null)
+  const isMountedRef = useRef(false)
 
   useIsomorphicLayoutEffect(() => {
     const element = ref.current
     if (!element || typeof window === 'undefined') return
 
+    const container = element.closest('.stream-markdown')
+    const containerRect = container ? container.getBoundingClientRect() : { left: 0, top: 0 }
+
+    // 1. Measure current visual position (including active transition)
     const rect = element.getBoundingClientRect()
+    const visualLeft = rect.left - containerRect.left
+    const visualTop = rect.top - containerRect.top
+
+    // 2. Temporarily disable transition to snap to layout position and measure it
+    const oldTransition = element.style.transition
+    element.style.transition = 'none'
+    const layoutRect = element.getBoundingClientRect()
+    const localLeft = layoutRect.left - containerRect.left
+    const localTop = layoutRect.top - containerRect.top
+    element.style.transition = oldTransition
+
     const previous = streamCursorRects.get(cursorId)
-    streamCursorRects.set(cursorId, { left: rect.left, top: rect.top })
+    streamCursorRects.set(cursorId, { left: localLeft, top: localTop })
 
-    if (!previous) return
+    let dx = 0
+    let dy = 0
 
-    const dx = previous.left - rect.left
-    const dy = previous.top - rect.top
+    if (isMountedRef.current) {
+      // Within the same block/paragraph: animate from the current visual position
+      dx = visualLeft - localLeft
+      dy = visualTop - localTop
+    } else {
+      // New block / Paragraph crossing: animate from the stored previous cursor position
+      isMountedRef.current = true
+      if (previous) {
+        dx = previous.left - localLeft
+        dy = previous.top - localTop
+      } else {
+        return // First mount of the entire stream
+      }
+    }
+
     const distance = Math.hypot(dx, dy)
     if (distance < 0.5 || distance > CURSOR_MOVE_MAX_DISTANCE) return
 
     element.style.transition = 'none'
     element.style.transform = `translate3d(${dx}px, ${dy}px, 0)`
-    element.getBoundingClientRect()
+    
+    // Force layout reflow synchronously to ensure the starting position is registered
+    element.offsetHeight
 
     const duration = Math.min(
       CURSOR_MOVE_MAX_DURATION_MS,
       Math.max(CURSOR_MOVE_MIN_DURATION_MS, distance * 2.5),
     )
-    const frame = window.requestAnimationFrame(() => {
-      element.style.transition = `transform ${duration}ms cubic-bezier(0.16, 1, 0.3, 1)`
-      element.style.transform = 'translate3d(0, 0, 0)'
-    })
-
-    return () => window.cancelAnimationFrame(frame)
+    
+    element.style.transition = `transform ${duration}ms cubic-bezier(0.16, 1, 0.3, 1)`
+    element.style.transform = 'translate3d(0, 0, 0)'
   })
 
-  useIsomorphicLayoutEffect(() => () => {
-    streamCursorRects.delete(cursorId)
-  }, [cursorId])
-
-  return <span ref={ref} className={className} aria-hidden="true" />
+  return (
+    <span
+      ref={ref}
+      className={className}
+      style={{ willChange: 'transform' }}
+      aria-hidden="true"
+    />
+  )
 }
 
 function appendCursorToHast(node: any, cursorNode: any): boolean {
@@ -596,6 +628,10 @@ export const StreamMarkdown = memo(function StreamMarkdown({
 }: StreamMarkdownProps) {
   const s = variantStyles[variant]
   const cursorId = useId()
+
+  useEffect(() => () => {
+    streamCursorRects.delete(cursorId)
+  }, [cursorId])
   const previousContentRef = useRef('')
   const revealSegmentsRef = useRef<RevealSegment[]>([])
   const streamingBlocks = useMemo(() => {
