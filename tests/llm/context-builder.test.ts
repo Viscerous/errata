@@ -464,8 +464,8 @@ describe('context-builder', () => {
 
     const shortlist = findBlock(blocks, 'location-shortlist')
     expect(shortlist).toBeDefined()
-    expect(shortlist!.content).toContain('## Locations (Summary Index)')
-    expect(shortlist!.content).toContain('not the full fragment sheet')
+    expect(shortlist!.content).toContain('## Locations (Shortlist)')
+    expect(shortlist!.content).toContain('not the full fragment')
     expect(shortlist!.content).toContain('loc-0002')
     expect(shortlist!.content).toContain('A dangerous crossing')
     expect(shortlist!.content).not.toContain('The bridge stones remember every betrayal.')
@@ -801,9 +801,9 @@ describe('context blocks', () => {
       const knowledge = findBlock(blocks, 'knowledge-shortlist')
       expect(guideline).toBeDefined()
       expect(knowledge).toBeDefined()
-      expect(guideline!.content).toContain('## Guidelines (Summary Index)')
-      expect(knowledge!.content).toContain('## Knowledge (Summary Index)')
-      expect(guideline!.content).toContain('not the full fragment sheet')
+      expect(guideline!.content).toContain('## Guidelines (Shortlist)')
+      expect(knowledge!.content).toContain('## Knowledge (Shortlist)')
+      expect(guideline!.content).toContain('not the full fragment')
     })
 
     it('omits shortlist blocks when no non-sticky fragments of that type', async () => {

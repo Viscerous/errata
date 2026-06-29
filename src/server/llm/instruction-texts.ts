@@ -8,9 +8,10 @@ export const GENERATION_SYSTEM_PROMPT = [
   'Output the finished prose directly as your text response — there is no save tool, the text you write is captured automatically.',
 ].join('\n')
 
-export const GENERATION_TOOLS_SUFFIX =
-  'Before writing, retrieve the full details of the characters and knowledge your passage will lean on, so you write from an accurate picture. ' +
-  'Once you have what you need, write the prose — do not narrate or explain your lookups.'
+export const GENERATION_TOOLS_SUFFIX = [
+  'Before writing, retrieve the full details of characters who speak or act in your passage, and any related fragments you only have the summary of.',
+  'Then write the prose — do not narrate or explain your lookups.'
+].join('\n')
 
 export const WRITER_BRIEF_SYSTEM_PROMPT = [
   'You are a creative writing assistant. Follow the WRITING BRIEF below to write prose.',
