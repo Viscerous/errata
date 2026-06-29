@@ -240,6 +240,41 @@ describe('analysis-tools', () => {
       expect(collector.fragmentSuggestions[0].type).toBe('character')
     })
 
+    it('suggestFragment skips targeted suggestions when target type does not match', async () => {
+      vi.mocked(getFragment).mockResolvedValueOnce({
+        id: 'kn-001',
+        type: 'knowledge',
+        name: 'Treaty',
+        description: '',
+        content: 'Original content',
+        tags: [],
+        refs: [],
+        sticky: false,
+        placement: 'user',
+        createdAt: '',
+        updatedAt: '',
+        order: 0,
+        meta: {},
+        version: 1,
+        versions: [],
+      })
+
+      const collector = createEmptyCollector()
+      const tools = createAnalysisTools(collector, { dataDir: '/tmp', storyId: 'test-story' })
+      const result = await tools.suggestFragment.execute!({
+        suggestions: [{
+          type: 'character',
+          targetFragmentId: 'kn-001',
+          name: 'Treaty',
+          description: 'Wrong target type',
+          content: 'New content',
+        }],
+      }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
+
+      expect(collector.fragmentSuggestions).toHaveLength(0)
+      expect((result as any).skipped[0].reason).toContain('not "character"')
+    })
+
     it('reportTimeline accumulates timeline events', async () => {
       const collector = createEmptyCollector()
       const tools = createAnalysisTools(collector)

@@ -28,7 +28,7 @@ import { normalizeTokenUsage } from '../llm/usage-normalizer'
 import { createLogger } from '../logging'
 import { compileAgentContext } from '../agents/compile-agent-context'
 import { createEmptyCollector, createLibrarianAnalyzeTools, toMentionAnnotations } from './analysis-tools'
-import { buildAnalyzeSystemPrompt, buildAnalyzeContext } from './blocks'
+import { buildAnalyzeContext } from './blocks'
 import { getActivityBuffer, pushActivityEvent, type ActivityStreamEvent } from '../agents/activity-stream'
 
 const logger = createLogger('librarian-agent')
@@ -154,18 +154,11 @@ async function runLibrarianInner(
     'User-Agent': config.headers['User-Agent'] ?? 'errata-librarian/1.0',
   }
 
-  // Extract system instructions from compiled messages
+  // Extract system instructions from compiled messages. The analyze default
+  // prompt is dynamic at block-construction time so block overrides, custom
+  // system blocks, and system prompt fragments stay in the compiled message.
   const systemMessage = compiled.messages.find(m => m.role === 'system')
   const userMessage = compiled.messages.find(m => m.role === 'user')
-
-  // Override system prompt with dynamic configuration and custom types list
-  if (systemMessage) {
-    systemMessage.content = buildAnalyzeSystemPrompt({
-      disableDirections,
-      disableSuggestions,
-      customFragmentTypes: story.settings.customFragmentTypes,
-    }).trim()
-  }
 
   const providerOptions = buildProviderOptions(story.settings.disableThinking ?? false)
 

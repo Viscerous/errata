@@ -5,6 +5,7 @@ import { modelRoleRegistry } from '../agents/model-role-registry'
 import { instructionRegistry } from '../instructions'
 import type { AgentDefinition } from '../agents/types'
 import { createFragmentTools } from '../llm/tools'
+import { getStory } from '../fragments/storage'
 import { createEmptyCollector, createLibrarianAnalyzeTools, listLibrarianAnalyzeToolNames } from './analysis-tools'
 import { runLibrarian } from './agent'
 import { librarianChat, createLibrarianChatBespokeTools } from './chat'
@@ -149,7 +150,16 @@ export function registerLibrarianAgents(): void {
     description: 'Analyzes prose fragments for continuity signals and summary updates.',
     createDefaultBlocks: createLibrarianAnalyzeBlocks,
     availableTools: listLibrarianAnalyzeToolNames(),
-    resolveTools: ({ dataDir, storyId }) => createLibrarianAnalyzeTools(createEmptyCollector(), { dataDir, storyId }),
+    resolveTools: async ({ dataDir, storyId }) => {
+      const story = await getStory(dataDir, storyId)
+      return createLibrarianAnalyzeTools(createEmptyCollector(), {
+        dataDir,
+        storyId,
+        disableDirections: story?.settings.disableLibrarianDirections === true,
+        disableSuggestions: story?.settings.disableLibrarianSuggestions === true,
+        customFragmentTypes: story?.settings.customFragmentTypes ?? [],
+      })
+    },
     buildPreviewContext: buildAnalyzePreviewContext,
   })
 

@@ -27,11 +27,42 @@ export interface FragmentContextGroup {
   separator?: string
 }
 
+export interface FragmentContextLane {
+  type: string
+  label: string
+  sticky: Fragment[]
+  recent: Fragment[]
+  available: Fragment[]
+  all: Fragment[]
+}
+
+export interface FragmentContextLaneSource {
+  story: StoryMeta
+  stickyGuidelines?: Fragment[]
+  stickyKnowledge?: Fragment[]
+  stickyCharacters?: Fragment[]
+  stickyCustomFragments?: Fragment[]
+  recentKnowledge?: Fragment[]
+  recentCharacters?: Fragment[]
+  recentCustomFragments?: Array<{ type: string; name: string; fragments: Fragment[] }>
+  guidelineShortlist?: Fragment[]
+  knowledgeShortlist?: Fragment[]
+  characterShortlist?: Fragment[]
+  customFragmentShortlists?: Array<{ type: string; name: string; fragments: Fragment[] }>
+  allKnowledge?: Fragment[]
+  allCharacters?: Fragment[]
+  allCustomFragments?: Array<{ type: string; name: string; fragments: Fragment[] }>
+}
+
 const BUILTIN_FRAGMENT_TYPES = new Set<string>(FRAGMENT_TYPES)
 const BUILTIN_CONTEXT_LABELS: Record<string, string> = {
   guideline: 'Guidelines',
   knowledge: 'Knowledge',
   character: 'Characters',
+}
+
+export function isBuiltinContextFragmentType(type: string): boolean {
+  return BUILTIN_FRAGMENT_TYPES.has(type)
 }
 
 function titleFromType(type: string): string {
@@ -76,6 +107,101 @@ export function groupFragmentsByType(story: StoryMeta, fragments: Fragment[]): A
     label: fragmentTypeLabel(story, type),
     fragments: group,
   }))
+}
+
+function uniqueFragments(groups: Fragment[][]): Fragment[] {
+  const seen = new Set<string>()
+  const fragments: Fragment[] = []
+  for (const group of groups) {
+    for (const fragment of group) {
+      if (seen.has(fragment.id)) continue
+      seen.add(fragment.id)
+      fragments.push(fragment)
+    }
+  }
+  return fragments
+}
+
+function mergeLaneFragments(existing: Fragment[], incoming: Fragment[]): Fragment[] {
+  return uniqueFragments([existing, incoming])
+}
+
+export function buildFragmentContextLanes(source: FragmentContextLaneSource): FragmentContextLane[] {
+  const lanes = new Map<string, FragmentContextLane>()
+  const ensureLane = (type: string, label = fragmentTypeLabel(source.story, type)): FragmentContextLane => {
+    const existing = lanes.get(type)
+    if (existing) {
+      existing.label = label
+      return existing
+    }
+    const lane: FragmentContextLane = {
+      type,
+      label,
+      sticky: [],
+      recent: [],
+      available: [],
+      all: [],
+    }
+    lanes.set(type, lane)
+    return lane
+  }
+
+  const setSticky = (type: string, label: string, fragments: Fragment[] | undefined) => {
+    const lane = ensureLane(type, label)
+    lane.sticky = mergeLaneFragments(lane.sticky, fragments ?? [])
+  }
+  const setRecent = (type: string, label: string, fragments: Fragment[] | undefined) => {
+    const lane = ensureLane(type, label)
+    lane.recent = mergeLaneFragments(lane.recent, fragments ?? [])
+  }
+  const setAvailable = (type: string, label: string, fragments: Fragment[] | undefined) => {
+    const lane = ensureLane(type, label)
+    lane.available = mergeLaneFragments(lane.available, fragments ?? [])
+  }
+  const setAll = (type: string, label: string, fragments: Fragment[] | undefined) => {
+    const lane = ensureLane(type, label)
+    lane.all = mergeLaneFragments(lane.all, fragments ?? [])
+  }
+
+  setSticky('guideline', 'Guidelines', source.stickyGuidelines)
+  setSticky('knowledge', 'Knowledge', source.stickyKnowledge)
+  setSticky('character', 'Characters', source.stickyCharacters)
+  setRecent('knowledge', 'Knowledge', source.recentKnowledge)
+  setRecent('character', 'Characters', source.recentCharacters)
+  setAvailable('guideline', 'Guidelines', source.guidelineShortlist)
+  setAvailable('knowledge', 'Knowledge', source.knowledgeShortlist)
+  setAvailable('character', 'Characters', source.characterShortlist)
+  setAll('knowledge', 'Knowledge', source.allKnowledge)
+  setAll('character', 'Characters', source.allCharacters)
+
+  for (const def of customContextFragmentTypes(source.story)) {
+    ensureLane(def.type, def.name)
+  }
+  for (const group of groupFragmentsByType(source.story, source.stickyCustomFragments ?? [])) {
+    setSticky(group.type, group.label, group.fragments)
+  }
+  for (const group of source.recentCustomFragments ?? []) {
+    setRecent(group.type, group.name, group.fragments)
+  }
+  for (const group of source.customFragmentShortlists ?? []) {
+    setAvailable(group.type, group.name, group.fragments)
+  }
+  for (const group of source.allCustomFragments ?? []) {
+    setAll(group.type, group.name, group.fragments)
+  }
+
+  return [...lanes.values()]
+    .map((lane) => ({
+      ...lane,
+      all: lane.all.length > 0
+        ? lane.all
+        : uniqueFragments([lane.sticky, lane.recent, lane.available]),
+    }))
+    .filter((lane) => lane.sticky.length > 0 || lane.recent.length > 0 || lane.available.length > 0 || lane.all.length > 0)
+}
+
+export function findFragmentContextLane(lanes: FragmentContextLane[], type: string): FragmentContextLane | undefined {
+  return lanes.find((lane) => lane.type === type)
 }
 
 function renderGenericFragmentContext(f: Fragment): string {

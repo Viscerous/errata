@@ -4,6 +4,7 @@ import { getFragment, updateFragment, updateFragmentVersioned } from '../fragmen
 import { checkFragmentWrite } from '../fragments/protection'
 import { FragmentIdSchema } from '../fragments/schema'
 import type { LibrarianMention } from './storage'
+import { validateSuggestionTargetWrite } from './suggestions'
 
 const mentionTextSchema = z.string().trim().min(1).describe('The exact non-empty name, title, or key term used in the prose')
 
@@ -320,15 +321,11 @@ export function createAnalysisTools(
           const key = `${s.type}:${s.name.trim().toLowerCase()}`
           if (seen.has(key)) continue
 
-          // Check protection if targeting an existing fragment
           if (s.targetFragmentId && opts) {
-            const existing = await getFragment(opts.dataDir, opts.storyId, s.targetFragmentId)
-            if (existing) {
-              const protection = checkFragmentWrite(existing, { content: s.content })
-              if (!protection.allowed) {
-                skipped.push({ name: s.name, reason: protection.reason! })
-                continue
-              }
+            const validation = await validateSuggestionTargetWrite(opts.dataDir, opts.storyId, s)
+            if (validation.error) {
+              skipped.push({ name: s.name, reason: validation.error })
+              continue
             }
           }
 

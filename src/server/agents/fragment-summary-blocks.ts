@@ -1,10 +1,13 @@
 import type { Fragment } from '../fragments/schema'
 import type { ContextBlock } from '../llm/context-builder'
 import {
+  buildFragmentContextLanes,
+  findFragmentContextLane,
   fragmentContextBlock,
   fragmentContextBlocks,
-  groupFragmentsByType,
+  isBuiltinContextFragmentType,
   type FragmentContextGroup,
+  type FragmentContextLane,
   type FragmentContextScope,
 } from '../llm/fragment-context-blocks'
 import type { AgentBlockContext } from './agent-block-context'
@@ -40,6 +43,25 @@ function shouldInclude(value: boolean | undefined): boolean {
   return value !== false
 }
 
+function includeLane(lane: FragmentContextLane, options: {
+  includeGuidelines?: boolean
+  includeKnowledge?: boolean
+  includeCharacters?: boolean
+  includeCustomFragments?: boolean
+}): boolean {
+  if (lane.type === 'guideline') return shouldInclude(options.includeGuidelines)
+  if (lane.type === 'knowledge') return shouldInclude(options.includeKnowledge)
+  if (lane.type === 'character') return shouldInclude(options.includeCharacters)
+  return shouldInclude(options.includeCustomFragments)
+}
+
+function laneOrder(lane: FragmentContextLane, customBaseOrder: number): number {
+  if (lane.type === 'guideline') return 300
+  if (lane.type === 'knowledge') return 301
+  if (lane.type === 'character') return 302
+  return customBaseOrder
+}
+
 /** Pinned guideline, knowledge, character, and custom fragment summary indexes. */
 export function pinnedFragmentSummaryGroups(
   ctx: AgentBlockContext,
@@ -48,41 +70,22 @@ export function pinnedFragmentSummaryGroups(
   const excludeIds = new Set(options.excludeIds ?? [])
   const withoutExcluded = (fragments: Fragment[]): Fragment[] => fragments.filter((fragment) => !excludeIds.has(fragment.id))
   const groups: FragmentContextGroup[] = []
-  const maybePush = (
-    id: string,
-    type: string,
-    label: string,
-    fragments: Fragment[],
-    order: number,
-  ) => {
-    const filtered = withoutExcluded(fragments)
-    if (filtered.length === 0) return
+  let customOrder = 303
+  for (const lane of buildFragmentContextLanes(ctx)) {
+    if (!includeLane(lane, options)) continue
+    const fragments = withoutExcluded(lane.sticky)
+    if (fragments.length === 0) continue
+    const order = laneOrder(lane, customOrder)
+    if (!isBuiltinContextFragmentType(lane.type)) customOrder++
     groups.push({
-      id,
-      type,
-      label,
-      fragments: filtered,
+      id: `${lane.type}-pinned-summary-index`,
+      type: lane.type,
+      label: lane.label,
+      fragments,
       mode: 'summary-index',
       scope: 'pinned',
       order,
     })
-  }
-
-  if (shouldInclude(options.includeGuidelines)) {
-    maybePush('guideline-pinned-summary-index', 'guideline', 'Guidelines', ctx.stickyGuidelines, 300)
-  }
-  if (shouldInclude(options.includeKnowledge)) {
-    maybePush('knowledge-pinned-summary-index', 'knowledge', 'Knowledge', ctx.stickyKnowledge, 301)
-  }
-  if (shouldInclude(options.includeCharacters)) {
-    maybePush('character-pinned-summary-index', 'character', 'Characters', ctx.stickyCharacters, 302)
-  }
-
-  if (shouldInclude(options.includeCustomFragments)) {
-    let customOrder = 303
-    for (const group of groupFragmentsByType(ctx.story, withoutExcluded(ctx.stickyCustomFragments ?? []))) {
-      maybePush(`${group.type}-pinned-summary-index`, group.type, group.label, group.fragments, customOrder++)
-    }
   }
 
   return groups
@@ -153,67 +156,16 @@ export function fragmentSummaryCatalogBlocks(
     if (block) blocks.push(block)
   }
 
-  if (shouldInclude(options.includeGuidelines)) {
-    maybePush(summaryCatalogBlock('guideline-summary-index', 'guideline', 'Guidelines', [
-      { fragments: ctx.stickyGuidelines, note: 'pinned' },
-      { fragments: ctx.guidelineShortlist },
-    ], 300))
-  }
-
-  if (shouldInclude(options.includeKnowledge)) {
-    maybePush(summaryCatalogBlock('knowledge-summary-index', 'knowledge', 'Knowledge', [
-      { fragments: ctx.stickyKnowledge, note: 'pinned' },
-      { fragments: ctx.recentKnowledge ?? [], note: 'recent' },
-      { fragments: ctx.knowledgeShortlist },
-    ], 301))
-  }
-
-  if (shouldInclude(options.includeCharacters)) {
-    maybePush(summaryCatalogBlock('character-summary-index', 'character', 'Characters', [
-      { fragments: ctx.stickyCharacters, note: 'pinned' },
-      { fragments: ctx.recentCharacters ?? [], note: 'recent' },
-      { fragments: ctx.characterShortlist },
-    ], 302))
-  }
-
-  if (shouldInclude(options.includeCustomFragments)) {
-    interface CustomCatalogLane {
-      type: string
-      label: string
-      pinned: Fragment[]
-      recent: Fragment[]
-      available: Fragment[]
-    }
-    const lanes = new Map<string, CustomCatalogLane>()
-    const ensureLane = (type: string, label: string, preferLabel = false): CustomCatalogLane => {
-      const existing = lanes.get(type)
-      if (existing) {
-        if (preferLabel) existing.label = label
-        return existing
-      }
-      const lane = { type, label, pinned: [], recent: [], available: [] }
-      lanes.set(type, lane)
-      return lane
-    }
-
-    for (const group of groupFragmentsByType(ctx.story, ctx.stickyCustomFragments ?? [])) {
-      ensureLane(group.type, group.label).pinned = group.fragments
-    }
-    for (const group of ctx.recentCustomFragments ?? []) {
-      ensureLane(group.type, group.name, true).recent = group.fragments
-    }
-    for (const group of ctx.customFragmentShortlists ?? []) {
-      ensureLane(group.type, group.name, true).available = group.fragments
-    }
-
-    let customOrder = 303
-    for (const lane of lanes.values()) {
-      maybePush(summaryCatalogBlock(`${lane.type}-summary-index`, lane.type, lane.label, [
-        { fragments: lane.pinned, note: 'pinned' },
-        { fragments: lane.recent, note: 'recent' },
-        { fragments: lane.available },
-      ], customOrder++))
-    }
+  let customOrder = 303
+  for (const lane of buildFragmentContextLanes(ctx)) {
+    if (!includeLane(lane, options)) continue
+    const order = laneOrder(lane, customOrder)
+    if (!isBuiltinContextFragmentType(lane.type)) customOrder++
+    maybePush(summaryCatalogBlock(`${lane.type}-summary-index`, lane.type, lane.label, [
+      { fragments: lane.sticky, note: 'pinned' },
+      { fragments: lane.recent, note: 'recent' },
+      { fragments: lane.available },
+    ], order))
   }
 
   return blocks
@@ -221,12 +173,13 @@ export function fragmentSummaryCatalogBlocks(
 
 /** All characters list for cross-reference. */
 export function allCharactersBlock(ctx: AgentBlockContext): ContextBlock | null {
-  if (!ctx.allCharacters || ctx.allCharacters.length === 0) return null
+  const characters = findFragmentContextLane(buildFragmentContextLanes(ctx), 'character')?.all ?? []
+  if (characters.length === 0) return null
   return fragmentContextBlock({
     id: 'character-shortlist',
     type: 'character',
     label: 'Characters',
-    fragments: ctx.allCharacters,
+    fragments: characters,
     mode: 'summary-index',
     scope: 'all',
     order: 350,
@@ -244,14 +197,16 @@ export function shortlistBlocks(ctx: AgentBlockContext, options: ShortlistBlockO
     if (block) blocks.push(block)
   }
 
-  maybePush(summaryIndexBlock('guideline-shortlist', 'guideline', 'Guidelines', ctx.guidelineShortlist, 400))
-  maybePush(summaryIndexBlock('knowledge-shortlist', 'knowledge', 'Knowledge', ctx.knowledgeShortlist, 401))
-  maybePush(summaryIndexBlock('character-shortlist', 'character', 'Characters', ctx.characterShortlist, 402))
+  const lanes = buildFragmentContextLanes(ctx)
+  maybePush(summaryIndexBlock('guideline-shortlist', 'guideline', 'Guidelines', findFragmentContextLane(lanes, 'guideline')?.available ?? [], 400))
+  maybePush(summaryIndexBlock('knowledge-shortlist', 'knowledge', 'Knowledge', findFragmentContextLane(lanes, 'knowledge')?.available ?? [], 401))
+  maybePush(summaryIndexBlock('character-shortlist', 'character', 'Characters', findFragmentContextLane(lanes, 'character')?.available ?? [], 402))
 
   if (options.includeCustomFragments) {
     let customOrder = 403
-    for (const group of ctx.customFragmentShortlists ?? []) {
-      maybePush(summaryIndexBlock(`${group.type}-shortlist`, group.type, group.name, group.fragments, customOrder++))
+    for (const lane of lanes) {
+      if (isBuiltinContextFragmentType(lane.type)) continue
+      maybePush(summaryIndexBlock(`${lane.type}-shortlist`, lane.type, lane.label, lane.available, customOrder++))
     }
   }
 

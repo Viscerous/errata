@@ -4,27 +4,35 @@ import { createLogger } from '../logging'
 import { getActiveProseIds, findSectionIndex, getProseChain } from '../fragments/prose-chain'
 import { type Fragment, type StoryMeta } from '../fragments/schema'
 import {
+  buildFragmentContextLanes,
   customContextFragmentTypes,
+  findFragmentContextLane,
   fragmentContextBlock,
+  isBuiltinContextFragmentType,
   fragmentTypeLabel,
   renderContextFragment,
   renderFragmentWithMarker,
+  type FragmentContextLane,
   type FragmentContextMetadata,
 } from './fragment-context-blocks'
 import type { ModelMessage } from 'ai'
 
 export {
+  buildFragmentContextLanes,
   customContextFragmentTypes,
+  findFragmentContextLane,
   fragmentContextBlock,
   fragmentContextBlocks,
   fragmentSummaryIndexHeading,
   fragmentSummaryList,
   fragmentTypeLabel,
   groupFragmentsByType,
+  isBuiltinContextFragmentType,
   renderContextFragment,
   renderFragmentContextGroup,
   renderFragmentWithMarker,
   type FragmentContextGroup,
+  type FragmentContextLane,
   type FragmentContextMetadata,
   type FragmentContextMode,
   type FragmentContextScope,
@@ -514,41 +522,6 @@ function renderFragmentGroups(fragments: Fragment[], story: StoryMeta): string[]
   return parts
 }
 
-interface CustomContextLane {
-  type: string
-  name: string
-  recent: Fragment[]
-  shortlist: Fragment[]
-}
-
-function orderedCustomContextLanes(
-  story: StoryMeta,
-  recentGroups: CustomFragmentGroup[],
-  shortlistGroups: CustomFragmentGroup[],
-): CustomContextLane[] {
-  const lanes = new Map<string, CustomContextLane>()
-
-  const ensureLane = (type: string, name: string): CustomContextLane => {
-    const existing = lanes.get(type)
-    if (existing) return existing
-    const lane = { type, name, recent: [], shortlist: [] }
-    lanes.set(type, lane)
-    return lane
-  }
-
-  for (const def of customContextFragmentTypes(story)) {
-    ensureLane(def.type, def.name)
-  }
-  for (const group of recentGroups) {
-    ensureLane(group.type, group.name).recent = group.fragments
-  }
-  for (const group of shortlistGroups) {
-    ensureLane(group.type, group.name).shortlist = group.fragments
-  }
-
-  return [...lanes.values()].filter((lane) => lane.recent.length > 0 || lane.shortlist.length > 0)
-}
-
 /**
  * Renders sticky fragments in a custom order under a single heading.
  */
@@ -591,25 +564,16 @@ export function createDefaultBlocks(state: ContextBuildState): ContextBlock[] {
     story,
     proseFragments,
     chapterSummaries = [],
-    stickyGuidelines,
-    stickyKnowledge,
-    stickyCharacters,
-    stickyCustomFragments = [],
-    recentCharacters = [],
-    recentKnowledge = [],
-    recentCustomFragments = [],
-    guidelineShortlist,
-    knowledgeShortlist,
-    characterShortlist,
-    customFragmentShortlists = [],
     authorInput = '',
   } = state
 
   const contextOrderMode = story.settings.contextOrderMode ?? 'simple'
   const fragmentOrder = story.settings.fragmentOrder ?? []
+  const lanes = buildFragmentContextLanes(state)
+  const lane = (type: string): FragmentContextLane | undefined => findFragmentContextLane(lanes, type)
 
   // Partition sticky fragments by placement
-  const allSticky = [...stickyGuidelines, ...stickyKnowledge, ...stickyCharacters, ...stickyCustomFragments]
+  const allSticky = lanes.flatMap((entry) => entry.sticky)
   const systemPlaced = allSticky.filter(f => (f.placement ?? 'user') === 'system')
   const userPlaced = allSticky.filter(f => (f.placement ?? 'user') === 'user')
 
@@ -710,7 +674,7 @@ export function createDefaultBlocks(state: ContextBuildState): ContextBlock[] {
     id: 'guideline-shortlist',
     type: 'guideline',
     label: 'Guidelines',
-    fragments: guidelineShortlist,
+    fragments: lane('guideline')?.available ?? [],
     mode: 'summary-index',
     scope: 'available',
     order: 300,
@@ -722,7 +686,7 @@ export function createDefaultBlocks(state: ContextBuildState): ContextBlock[] {
     id: 'knowledge-recent',
     type: 'knowledge',
     label: 'Knowledge',
-    fragments: recentKnowledge,
+    fragments: lane('knowledge')?.recent ?? [],
     mode: 'full',
     scope: 'recent',
     order: 308,
@@ -732,7 +696,7 @@ export function createDefaultBlocks(state: ContextBuildState): ContextBlock[] {
     id: 'knowledge-shortlist',
     type: 'knowledge',
     label: 'Knowledge',
-    fragments: knowledgeShortlist,
+    fragments: lane('knowledge')?.available ?? [],
     mode: 'summary-index',
     scope: 'available',
     order: 310,
@@ -744,7 +708,7 @@ export function createDefaultBlocks(state: ContextBuildState): ContextBlock[] {
     id: 'character-recent',
     type: 'character',
     label: 'Characters',
-    fragments: recentCharacters,
+    fragments: lane('character')?.recent ?? [],
     mode: 'full',
     scope: 'recent',
     order: 315,
@@ -754,7 +718,7 @@ export function createDefaultBlocks(state: ContextBuildState): ContextBlock[] {
     id: 'character-shortlist',
     type: 'character',
     label: 'Characters',
-    fragments: characterShortlist,
+    fragments: lane('character')?.available ?? [],
     mode: 'summary-index',
     scope: 'available',
     order: 320,
@@ -764,25 +728,25 @@ export function createDefaultBlocks(state: ContextBuildState): ContextBlock[] {
   // characters without pretending to be either: recently mentioned items are
   // full context, and the rest are one-line summaries.
   let customOrder = 330
-  for (const lane of orderedCustomContextLanes(story, recentCustomFragments, customFragmentShortlists)) {
-    if (lane.recent.length > 0) {
+  for (const customLane of lanes.filter((entry) => !isBuiltinContextFragmentType(entry.type))) {
+    if (customLane.recent.length > 0) {
       pushFragmentBlock(fragmentContextBlock({
-        id: `${lane.type}-recent`,
-        type: lane.type,
-        label: lane.name,
-        fragments: lane.recent,
+        id: `${customLane.type}-recent`,
+        type: customLane.type,
+        label: customLane.label,
+        fragments: customLane.recent,
         mode: 'full',
         scope: 'recent',
         order: customOrder++,
       }))
     }
 
-    if (lane.shortlist.length > 0) {
+    if (customLane.available.length > 0) {
       pushFragmentBlock(fragmentContextBlock({
-        id: `${lane.type}-shortlist`,
-        type: lane.type,
-        label: lane.name,
-        fragments: lane.shortlist,
+        id: `${customLane.type}-shortlist`,
+        type: customLane.type,
+        label: customLane.label,
+        fragments: customLane.available,
         mode: 'summary-index',
         scope: 'available',
         order: customOrder++,

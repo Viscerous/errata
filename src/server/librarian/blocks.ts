@@ -1,7 +1,10 @@
 import type { ContextBlock, CustomFragmentGroup } from '../llm/context-builder'
 import {
+  buildFragmentContextLanes,
   customContextFragmentTypes,
+  findFragmentContextLane,
   fragmentContextBlock,
+  isBuiltinContextFragmentType,
 } from '../llm/fragment-context-blocks'
 import { baseBlockContext, type AgentBlockContext } from '../agents/agent-block-context'
 import type { Fragment, StoryMeta } from '../fragments/schema'
@@ -122,7 +125,17 @@ export function createLibrarianAnalyzeBlocks(ctx: AgentBlockContext): ContextBlo
     if (block) blocks.push(block)
   }
 
-  blocks.push(instructionsBlock('librarian.analyze.system', ctx))
+  blocks.push({
+    id: 'instructions',
+    role: 'system',
+    content: buildAnalyzeSystemPrompt({
+      disableDirections: ctx.story.settings?.disableLibrarianDirections === true,
+      disableSuggestions: ctx.story.settings?.disableLibrarianSuggestions === true,
+      customFragmentTypes: ctx.story.settings.customFragmentTypes,
+    }).trim(),
+    order: 100,
+    source: 'builtin',
+  })
 
   const sysFrags = systemFragmentsBlock(ctx)
   if (sysFrags) blocks.push(sysFrags)
@@ -140,9 +153,11 @@ export function createLibrarianAnalyzeBlocks(ctx: AgentBlockContext): ContextBlo
   // in full). Each character lands in exactly one block: pinned takes precedence,
   // then recent, then the shortlist.
   const renderSheet = (c: Fragment) => `### ${c.id}: ${c.name}\n${c.description}\n\n${c.content}`
-  const sticky = ctx.stickyCharacters ?? []
+  const lanes = buildFragmentContextLanes(ctx)
+  const characterLane = findFragmentContextLane(lanes, 'character')
+  const sticky = characterLane?.sticky ?? []
   const stickyIds = new Set(sticky.map((c) => c.id))
-  const recent = ctx.recentCharacters ?? []
+  const recent = characterLane?.recent ?? []
   const recentIds = new Set(recent.map((c) => c.id))
 
   // Author-pinned, always-relevant — full and in their own block whether or not
@@ -177,7 +192,7 @@ export function createLibrarianAnalyzeBlocks(ctx: AgentBlockContext): ContextBlo
     }))
   }
 
-  const shortlistCharacters = (ctx.allCharacters ?? []).filter((c) => !stickyIds.has(c.id) && !recentIds.has(c.id))
+  const shortlistCharacters = (characterLane?.all ?? []).filter((c) => !stickyIds.has(c.id) && !recentIds.has(c.id))
   pushFragmentBlock(fragmentContextBlock({
     id: 'character-shortlist',
     type: 'character',
@@ -189,14 +204,15 @@ export function createLibrarianAnalyzeBlocks(ctx: AgentBlockContext): ContextBlo
     editable: true,
   }))
 
-  if (ctx.allKnowledge && ctx.allKnowledge.length > 0) {
+  const allKnowledge = findFragmentContextLane(lanes, 'knowledge')?.all ?? []
+  if (allKnowledge.length > 0) {
     // Knowledge is delivered in full (bounded, read-mostly — analyze checks
     // contradictions against it).
     pushFragmentBlock(fragmentContextBlock({
       id: 'knowledge',
       type: 'knowledge',
       label: 'Knowledge',
-      fragments: ctx.allKnowledge,
+      fragments: allKnowledge,
       mode: 'full',
       scope: 'all',
       order: 300,
@@ -206,12 +222,13 @@ export function createLibrarianAnalyzeBlocks(ctx: AgentBlockContext): ContextBlo
   }
 
   let customOrder = 320
-  for (const group of ctx.allCustomFragments ?? []) {
+  for (const lane of lanes) {
+    if (isBuiltinContextFragmentType(lane.type)) continue
     pushFragmentBlock(fragmentContextBlock({
-      id: `${group.type}-shortlist`,
-      type: group.type,
-      label: group.name,
-      fragments: group.fragments,
+      id: `${lane.type}-shortlist`,
+      type: lane.type,
+      label: lane.label,
+      fragments: lane.all,
       mode: 'summary-index',
       scope: 'available',
       order: customOrder++,
