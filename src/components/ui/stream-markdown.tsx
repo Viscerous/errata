@@ -136,6 +136,7 @@ interface CursorRect {
 
 const streamCursorRects = new Map<string, CursorRect>()
 const useIsomorphicLayoutEffect = typeof window !== 'undefined' ? useLayoutEffect : useEffect
+const REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)'
 
 function hashBlock(content: string): string {
   let hash = 5381
@@ -259,6 +260,31 @@ function normalizeStyle(style: unknown): CSSProperties | undefined {
   } as CSSProperties
 }
 
+function prefersReducedMotion(): boolean {
+  return typeof window !== 'undefined' &&
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia(REDUCED_MOTION_QUERY).matches
+}
+
+function getLocalCursorRect(element: HTMLElement): CursorRect {
+  const container = element.closest('.stream-markdown')
+  const containerRect = container ? container.getBoundingClientRect() : { left: 0, top: 0 }
+  const rect = element.getBoundingClientRect()
+
+  return {
+    left: rect.left - containerRect.left,
+    top: rect.top - containerRect.top,
+  }
+}
+
+function getFinalCursorRect(element: HTMLElement): CursorRect {
+  const oldTransition = element.style.transition
+  element.style.transition = 'none'
+  const rect = getLocalCursorRect(element)
+  element.style.transition = oldTransition
+  return rect
+}
+
 function SmoothStreamCursor({
   className,
   cursorId,
@@ -267,63 +293,37 @@ function SmoothStreamCursor({
   cursorId: string
 }) {
   const ref = useRef<HTMLSpanElement>(null)
-  const isMountedRef = useRef(false)
+  const hasMeasuredRef = useRef(false)
 
   useIsomorphicLayoutEffect(() => {
     const element = ref.current
     if (!element || typeof window === 'undefined') return
 
-    const container = element.closest('.stream-markdown')
-    const containerRect = container ? container.getBoundingClientRect() : { left: 0, top: 0 }
-
-    // 1. Measure current visual position (including active transition)
-    const rect = element.getBoundingClientRect()
-    const visualLeft = rect.left - containerRect.left
-    const visualTop = rect.top - containerRect.top
-
-    // 2. Temporarily disable transition to snap to layout position and measure it
-    const oldTransition = element.style.transition
-    element.style.transition = 'none'
-    const layoutRect = element.getBoundingClientRect()
-    const localLeft = layoutRect.left - containerRect.left
-    const localTop = layoutRect.top - containerRect.top
-    element.style.transition = oldTransition
-
+    const visualRect = getLocalCursorRect(element)
+    const finalRect = getFinalCursorRect(element)
     const previous = streamCursorRects.get(cursorId)
-    streamCursorRects.set(cursorId, { left: localLeft, top: localTop })
+    const fromRect = hasMeasuredRef.current ? visualRect : previous
 
-    let dx = 0
-    let dy = 0
+    hasMeasuredRef.current = true
+    streamCursorRects.set(cursorId, finalRect)
 
-    if (isMountedRef.current) {
-      // Within the same block/paragraph: animate from the current visual position
-      dx = visualLeft - localLeft
-      dy = visualTop - localTop
-    } else {
-      // New block / Paragraph crossing: animate from the stored previous cursor position
-      isMountedRef.current = true
-      if (previous) {
-        dx = previous.left - localLeft
-        dy = previous.top - localTop
-      } else {
-        return // First mount of the entire stream
-      }
-    }
+    if (!fromRect || prefersReducedMotion()) return
+
+    const dx = fromRect.left - finalRect.left
+    const dy = fromRect.top - finalRect.top
 
     const distance = Math.hypot(dx, dy)
     if (distance < 0.5 || distance > CURSOR_MOVE_MAX_DISTANCE) return
 
     element.style.transition = 'none'
     element.style.transform = `translate3d(${dx}px, ${dy}px, 0)`
-    
-    // Force layout reflow synchronously to ensure the starting position is registered
-    element.offsetHeight
+    void element.offsetHeight
 
     const duration = Math.min(
       CURSOR_MOVE_MAX_DURATION_MS,
       Math.max(CURSOR_MOVE_MIN_DURATION_MS, distance * 2.5),
     )
-    
+
     element.style.transition = `transform ${duration}ms cubic-bezier(0.16, 1, 0.3, 1)`
     element.style.transform = 'translate3d(0, 0, 0)'
   })
@@ -332,7 +332,6 @@ function SmoothStreamCursor({
     <span
       ref={ref}
       className={className}
-      style={{ willChange: 'transform' }}
       aria-hidden="true"
     />
   )
@@ -629,9 +628,12 @@ export const StreamMarkdown = memo(function StreamMarkdown({
   const s = variantStyles[variant]
   const cursorId = useId()
 
-  useEffect(() => () => {
-    streamCursorRects.delete(cursorId)
-  }, [cursorId])
+  useEffect(() => {
+    if (!streaming) streamCursorRects.delete(cursorId)
+    return () => {
+      streamCursorRects.delete(cursorId)
+    }
+  }, [cursorId, streaming])
   const previousContentRef = useRef('')
   const revealSegmentsRef = useRef<RevealSegment[]>([])
   const streamingBlocks = useMemo(() => {
