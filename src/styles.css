@@ -264,6 +264,30 @@ code {
   animation: text-fade-in 0.3s ease-out;
 }
 
+@keyframes stream-markdown-reveal {
+  from { opacity: 0.18; }
+  45% { opacity: 0.72; }
+  to { opacity: 1; }
+}
+
+.stream-markdown-reveal {
+  animation-name: stream-markdown-reveal;
+  animation-duration: 1s;
+  animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+  animation-fill-mode: both;
+  animation-delay: var(--stream-markdown-reveal-delay, 0ms);
+}
+
+.stream-markdown-cursor {
+  will-change: transform, opacity;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stream-markdown-reveal {
+    animation: none;
+  }
+}
+
 /* ── Guilloche background ────────────────────────────── */
 
 @keyframes guilloche-rotate {
@@ -532,6 +556,62 @@ code {
 .mention-preview-fade {
   mask-image: linear-gradient(to bottom, black 60%, transparent 100%);
   -webkit-mask-image: linear-gradient(to bottom, black 60%, transparent 100%);
+}
+
+.mention-preview-scroll-shell::after {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0;
+  height: 1.5rem;
+  pointer-events: none;
+  opacity: 0;
+  background: linear-gradient(
+    to bottom,
+    oklch(from var(--popover) l c h / 0),
+    var(--popover)
+  );
+  transition: opacity 120ms ease;
+  z-index: 1;
+}
+
+.mention-preview-scroll-shell-fade::after {
+  opacity: 1;
+}
+
+.mention-preview-scroll {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.mention-preview-scroll::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.mention-preview-scrollbar {
+  position: absolute;
+  top: 0.25rem;
+  right: 0.125rem;
+  bottom: 0.25rem;
+  width: 0.25rem;
+  pointer-events: none;
+  transition: opacity 160ms ease;
+  z-index: 2;
+}
+
+.mention-preview-scrollbar-thumb {
+  width: 100%;
+  border-radius: 999px;
+  background: oklch(0.5 0 0 / 25%);
+}
+
+.dark .mention-preview-scrollbar-thumb {
+  background: oklch(1 0 0 / 22%);
+}
+
+.high-contrast .mention-preview-scrollbar-thumb {
+  background: #ffffff;
 }
 
 /* ── Prose color overrides ───────────────────────────── */

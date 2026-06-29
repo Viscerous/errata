@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo, type CSSProperties } from 'react'
 import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { Button } from '@/components/ui/button'
@@ -24,7 +24,7 @@ type InputMode = 'freeform' | 'guided' | 'compose'
 interface InlineGenerationInputProps {
   storyId: string
   isGenerating: boolean
-  onGenerationStart: () => void
+  onGenerationStart: (prompt: string) => void
   onGenerationStream: (text: string) => void
   onGenerationThoughts?: (steps: ThoughtStep[]) => void
   onGenerationComplete: () => void
@@ -35,6 +35,7 @@ const STORAGE_KEY = 'errata:generation-mode'
 
 const DEFAULT_CONTINUE_INSTRUCTION = 'Continue the story naturally. Write the next scene, advancing the plot and developing characters.'
 const DEFAULT_SCENE_SETTING_INSTRUCTION = "Continue the story without advancing the plot. Focus on atmosphere, internal thoughts, sensory details, or character moments. Don't introduce new events or move the story forward."
+const SUGGESTION_SWITCH_SETTLE_MS = 160
 
 export function InlineGenerationInput({
   storyId,
@@ -74,6 +75,12 @@ export function InlineGenerationInput({
   const [manualSuggestions, setManualSuggestions] = useState<SuggestionDirection[] | null>(null)
   const [isFetchingSuggestions, setIsFetchingSuggestions] = useState(false)
   const [suggestionError, setSuggestionError] = useState<string | null>(null)
+  const [activeSuggestionIndex, setActiveSuggestionIndex] = useState<number | null>(null)
+  const activeSuggestionIndexRef = useRef<number | null>(null)
+  const suggestionSwitchResetRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [isSwitchingSuggestion, setIsSwitchingSuggestion] = useState(false)
+  const suggestionMeasureRef = useRef<HTMLDivElement | null>(null)
+  const [suggestionDetailHeight, setSuggestionDetailHeight] = useState(0)
 
   // Poll librarian status to detect when analysis completes
   const { data: librarianStatus } = useQuery({
@@ -126,6 +133,76 @@ export function InlineGenerationInput({
     }
   }, [manualSuggestions, analysisDirections])
 
+  useLayoutEffect(() => {
+    if (suggestions.length === 0) {
+      setSuggestionDetailHeight(0)
+      return
+    }
+
+    const measure = () => {
+      const node = suggestionMeasureRef.current
+      if (!node) return
+
+      const next = Math.ceil(
+        Math.max(
+          0,
+          ...Array.from(node.querySelectorAll<HTMLElement>('[data-suggestion-measure]'))
+            .map((element) => element.getBoundingClientRect().height),
+        ),
+      )
+      setSuggestionDetailHeight((current) => current === next ? current : next)
+    }
+
+    measure()
+    window.addEventListener('resize', measure)
+
+    if (!window.ResizeObserver || !suggestionMeasureRef.current) {
+      return () => window.removeEventListener('resize', measure)
+    }
+
+    const observer = new ResizeObserver(measure)
+    observer.observe(suggestionMeasureRef.current)
+
+    return () => {
+      observer.disconnect()
+      window.removeEventListener('resize', measure)
+    }
+  }, [suggestions])
+
+  const updateActiveSuggestion = useCallback((nextIndex: number | null) => {
+    const previousIndex = activeSuggestionIndexRef.current
+    activeSuggestionIndexRef.current = nextIndex
+
+    if (suggestionSwitchResetRef.current !== null) {
+      clearTimeout(suggestionSwitchResetRef.current)
+      suggestionSwitchResetRef.current = null
+    }
+
+    const isSwitch = previousIndex !== null && nextIndex !== null && previousIndex !== nextIndex
+    setIsSwitchingSuggestion(isSwitch)
+    setActiveSuggestionIndex(nextIndex)
+
+    if (isSwitch) {
+      suggestionSwitchResetRef.current = setTimeout(() => {
+        suggestionSwitchResetRef.current = null
+        setIsSwitchingSuggestion(false)
+      }, SUGGESTION_SWITCH_SETTLE_MS)
+    }
+  }, [])
+
+  useEffect(() => () => {
+    if (suggestionSwitchResetRef.current !== null) {
+      clearTimeout(suggestionSwitchResetRef.current)
+    }
+  }, [])
+
+  useEffect(() => {
+    const activeIndex = activeSuggestionIndexRef.current
+    if (activeIndex !== null && activeIndex >= suggestions.length) {
+      updateActiveSuggestion(null)
+    }
+  }, [suggestions.length, updateActiveSuggestion])
+
   const handleModeChange = (newMode: InputMode) => {
     setMode(newMode)
     try { localStorage.setItem(STORAGE_KEY, newMode) } catch {}
@@ -172,7 +249,7 @@ export function InlineGenerationInput({
   const handleGenerateWithInput = useCallback(async (generationInput: string, clarifications: Clarification[] = [], round = 0) => {
     if (!generationInput.trim() || isGenerating) return
 
-    onGenerationStart()
+    onGenerationStart(generationInput)
     setError(null)
     setPendingQuestions(null)
     prewriterDirectionsRef.current = null
@@ -364,7 +441,7 @@ export function InlineGenerationInput({
   })()
 
   return (
-    <div className="relative mt-2" data-component-id="inline-generation-root">
+    <div className="relative" data-component-id="inline-generation-root">
       {/* Error */}
       {(error || suggestionError) && (
         <div className="text-sm text-destructive mb-3 font-sans">
@@ -374,7 +451,7 @@ export function InlineGenerationInput({
 
       {/* Clarifying questions from the prewriter */}
       {pendingQuestions && (
-        <div className="mb-3 overflow-hidden rounded-xl border border-border/40 bg-card/40">
+        <div className="mb-3 overflow-hidden rounded-xl border border-border/40 bg-card shadow-md">
           <QuestionCard
             questions={pendingQuestions}
             onSubmit={handleAnswers}
@@ -387,10 +464,10 @@ export function InlineGenerationInput({
       {/* Unified input container */}
       <div
         className={cn(
-          'relative rounded-xl border transition-all duration-300',
+          'relative rounded-xl border transition-all duration-300 shadow-lg bg-card',
           (mode === 'freeform' || mode === 'compose') && isFocused
-            ? 'border-primary/25 shadow-[0_0_0_1px_var(--primary)/8%,0_2px_12px_-2px_var(--primary)/6%] bg-card/60'
-            : 'border-border/30 bg-card/20 hover:border-border/50 hover:bg-card/30',
+            ? 'border-primary/25 shadow-[0_0_0_1px_var(--primary)/8%,0_4px_16px_-2px_var(--primary)/6%]'
+            : 'border-border/30 hover:border-border/50',
         )}
       >
         {/* Mode toggle */}
@@ -458,25 +535,25 @@ export function InlineGenerationInput({
 
         {/* Guided mode */}
         {mode === 'guided' && (
-          <div className="px-3 pt-1.5 pb-2">
+          <div className="px-2.5 pt-1 pb-1.5">
             {/* Quick action buttons */}
-            <div className="flex gap-2 mb-2">
+            <div className="flex gap-1.5 mb-1.5">
               <button
                 type="button"
                 disabled={isGenerating}
                 onClick={() => handleGenerateWithInput(story?.settings.guidedContinuePrompt || DEFAULT_CONTINUE_INSTRUCTION)}
                 className={cn(
-                  'group flex-1 flex items-center gap-2.5 px-3.5 py-2.5 rounded-lg border transition-all duration-200 text-left',
+                  'group flex-1 flex items-center gap-2 px-2.5 py-1.5 rounded-md border transition-all duration-200 text-left',
                   'border-border/30 hover:border-primary/30 hover:bg-primary/[0.04]',
                   'disabled:opacity-40 disabled:pointer-events-none',
                 )}
               >
-                <div className="shrink-0 size-7 rounded-md bg-primary/10 flex items-center justify-center transition-colors group-hover:bg-primary/15">
+                <div className="shrink-0 size-6 rounded bg-primary/10 flex items-center justify-center transition-colors group-hover:bg-primary/15">
                   <ArrowRight className="size-3.5 text-primary/70" />
                 </div>
-                <div>
-                  <div className="text-[0.8125rem] font-medium text-foreground/85 font-sans leading-tight">Continue</div>
-                  <div className="text-[0.65625rem] text-muted-foreground leading-snug mt-0.5">Advance the plot naturally</div>
+                <div className="min-w-0">
+                  <div className="text-[0.75rem] font-medium text-foreground/85 font-sans leading-tight truncate">Continue</div>
+                  <div className="hidden sm:block text-[0.625rem] text-muted-foreground leading-tight mt-0.5 truncate">Advance plot</div>
                 </div>
               </button>
               <button
@@ -484,17 +561,17 @@ export function InlineGenerationInput({
                 disabled={isGenerating}
                 onClick={() => handleGenerateWithInput(story?.settings.guidedSceneSettingPrompt || DEFAULT_SCENE_SETTING_INSTRUCTION)}
                 className={cn(
-                  'group flex-1 flex items-center gap-2.5 px-3.5 py-2.5 rounded-lg border transition-all duration-200 text-left',
+                  'group flex-1 flex items-center gap-2 px-2.5 py-1.5 rounded-md border transition-all duration-200 text-left',
                   'border-border/30 hover:border-primary/30 hover:bg-primary/[0.04]',
                   'disabled:opacity-40 disabled:pointer-events-none',
                 )}
               >
-                <div className="shrink-0 size-7 rounded-md bg-primary/10 flex items-center justify-center transition-colors group-hover:bg-primary/15">
+                <div className="shrink-0 size-6 rounded bg-primary/10 flex items-center justify-center transition-colors group-hover:bg-primary/15">
                   <Pause className="size-3.5 text-primary/70" />
                 </div>
-                <div>
-                  <div className="text-[0.8125rem] font-medium text-foreground/85 font-sans leading-tight">Scene-setting</div>
-                  <div className="text-[0.65625rem] text-muted-foreground leading-snug mt-0.5">Atmosphere &amp; character moments</div>
+                <div className="min-w-0">
+                  <div className="text-[0.75rem] font-medium text-foreground/85 font-sans leading-tight truncate">Scene-setting</div>
+                  <div className="hidden sm:block text-[0.625rem] text-muted-foreground leading-tight mt-0.5 truncate">Atmosphere</div>
                 </div>
               </button>
             </div>
@@ -506,7 +583,7 @@ export function InlineGenerationInput({
                 disabled={isGenerating}
                 onClick={handleFetchSuggestions}
                 className={cn(
-                  'w-full flex items-center justify-center gap-2 py-2 rounded-lg transition-all duration-200',
+                  'w-full flex items-center justify-center gap-2 py-1.5 rounded-md transition-all duration-200',
                   'text-[0.75rem] font-sans text-muted-foreground hover:text-foreground/70',
                   'border border-dashed border-border/40 hover:border-primary/25 hover:bg-primary/[0.02]',
                   'disabled:opacity-40 disabled:pointer-events-none',
@@ -527,7 +604,12 @@ export function InlineGenerationInput({
 
             {/* Suggestion cards */}
             {suggestions.length > 0 && !isFetchingSuggestions && (
-              <div className="space-y-1.5">
+              <div
+                className="relative"
+                style={{
+                  '--suggestion-detail-height': `${suggestionDetailHeight}px`,
+                } as CSSProperties}
+              >
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-[0.625rem] text-muted-foreground font-sans uppercase tracking-wider">Directions</span>
                   <button
@@ -539,47 +621,115 @@ export function InlineGenerationInput({
                     <RefreshCw className="size-3" />
                   </button>
                 </div>
-                {suggestions.map((s, i) => (
-                  <div
-                    key={i}
-                    className={cn(
-                      'group/card flex items-stretch rounded-lg border transition-all duration-200',
-                      'border-border/25 hover:border-primary/25 bg-card/30 hover:bg-primary/[0.03]',
-                      isGenerating && 'opacity-40 pointer-events-none',
-                    )}
-                  >
-                    <button
-                      type="button"
-                      disabled={isGenerating}
-                      onClick={() => { setManualSuggestions(null); setSuggestions([]); handleGenerateWithInput(s.instruction) }}
-                      className="flex-1 text-left px-3.5 py-2.5 min-w-0"
-                    >
-                      <div className="text-[0.8125rem] font-medium text-foreground/80 font-sans leading-snug group-hover/card:text-foreground/90 transition-colors">
-                        {s.title}
-                      </div>
-                      <div className="text-[0.71875rem] text-muted-foreground leading-relaxed mt-0.5 line-clamp-2">
-                        {s.description}
-                      </div>
-                    </button>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <button
-                          type="button"
-                          disabled={isGenerating}
-                          onClick={() => {
-                            setInput(s.instruction)
-                            handleModeChange('freeform')
-                            requestAnimationFrame(() => textareaRef.current?.focus())
-                          }}
-                          className="shrink-0 flex items-center justify-center w-9 border-l border-border/20 text-muted-foreground/40 hover:text-foreground/60 hover:bg-muted/30 transition-colors rounded-r-lg"
+                <div
+                  className="flex flex-col gap-1"
+                  onPointerLeave={() => updateActiveSuggestion(null)}
+                  onBlur={(event) => {
+                    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                      updateActiveSuggestion(null)
+                    }
+                  }}
+                >
+                  {suggestions.map((s, i) => {
+                    const isExpanded = activeSuggestionIndex === i
+                    const chooseSuggestion = () => {
+                      setManualSuggestions(null)
+                      setSuggestions([])
+                      handleGenerateWithInput(s.instruction)
+                    }
+
+                    return (
+                      <div
+                        key={i}
+                        onPointerEnter={() => updateActiveSuggestion(i)}
+                        onFocus={() => updateActiveSuggestion(i)}
+                        className={cn(
+                          'group/card w-full overflow-hidden rounded-md border bg-card/90',
+                          'transition-[border-color,background-color,box-shadow] duration-200',
+                          'border-border/25 hover:border-primary/25 hover:bg-card hover:shadow-md',
+                          'focus-within:border-primary/25 focus-within:bg-card focus-within:shadow-md',
+                          isExpanded && 'border-primary/25 bg-card shadow-md',
+                          isGenerating && 'opacity-40',
+                        )}
+                      >
+                        {/* Top bar (one-line layout) */}
+                        <div className="flex min-h-8 w-full items-stretch">
+                          <button
+                            type="button"
+                            disabled={isGenerating}
+                            onClick={chooseSuggestion}
+                            className="flex-1 text-left px-2.5 py-1.5 min-w-0"
+                          >
+                            <div className="flex min-w-0 items-baseline gap-2">
+                              <span className="shrink-0 text-[0.75rem] font-medium text-foreground/80 font-sans leading-tight group-hover/card:text-foreground/90 transition-colors">
+                                {s.title}
+                              </span>
+                              <span
+                                className={cn(
+                                  'min-w-0 truncate text-[0.6875rem] text-muted-foreground leading-tight transition-[opacity,max-width] duration-300 ease-in-out',
+                                  isExpanded
+                                    ? 'opacity-0 max-w-0 pointer-events-none'
+                                    : 'opacity-100 max-w-full',
+                                )}
+                              >
+                                {s.description}
+                              </span>
+                            </div>
+                          </button>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <button
+                                type="button"
+                                disabled={isGenerating}
+                                onClick={() => {
+                                  setInput(s.instruction)
+                                  handleModeChange('freeform')
+                                  requestAnimationFrame(() => textareaRef.current?.focus())
+                                }}
+                                className="shrink-0 flex items-center justify-center w-8 border-l border-border/20 text-muted-foreground/40 hover:text-foreground/60 hover:bg-muted/30 transition-colors rounded-r-md"
+                              >
+                                <PenSquare className="size-3.5" />
+                              </button>
+                            </TooltipTrigger>
+                            <TooltipContent side="left">Edit before sending</TooltipContent>
+                          </Tooltip>
+                        </div>
+                        {/* Bottom expanded description */}
+                        <div
+                          className={cn(
+                            'overflow-hidden transition-[height] ease-[cubic-bezier(0.16,1,0.3,1)]',
+                            isSwitchingSuggestion ? 'duration-0' : 'duration-300',
+                          )}
+                          style={{ height: isExpanded ? 'var(--suggestion-detail-height)' : 0 }}
                         >
-                          <PenSquare className="size-3.5" />
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent side="left">Edit before sending</TooltipContent>
-                    </Tooltip>
-                  </div>
-                ))}
+                          <button
+                            type="button"
+                            disabled={isGenerating}
+                            onClick={chooseSuggestion}
+                            className="block h-full w-full px-2.5 pb-2 text-left text-[0.6875rem] text-muted-foreground leading-normal whitespace-normal break-words disabled:cursor-default"
+                          >
+                            {s.description}
+                          </button>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+                <div
+                  ref={suggestionMeasureRef}
+                  aria-hidden="true"
+                  className="pointer-events-none invisible absolute inset-x-0 top-0 -z-10"
+                >
+                  {suggestions.map((s, i) => (
+                    <div
+                      key={i}
+                      data-suggestion-measure="true"
+                      className="px-2.5 pb-2 text-[0.6875rem] leading-normal whitespace-normal break-words"
+                    >
+                      {s.description}
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
           </div>
