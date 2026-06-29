@@ -118,6 +118,7 @@ export function reorderBlock(blocks: ContextBlock[], id: string, newOrder: numbe
 
 const DEFAULT_PROSE_LIMIT = 10
 const logger = createLogger('context-builder')
+export const STORY_SUMMARY_PLACEHOLDER = '(summary will appear here)'
 
 export type ContextCompactType = 'proseLimit' | 'maxTokens' | 'maxCharacters'
 
@@ -181,7 +182,7 @@ function applyProseLimit(
  * Users who have placed or sticky-pinned summary fragments still see them
  * here — placement overrides only affect context position, not inclusion.
  */
-async function loadSummaryContent(
+export async function loadSummaryContent(
   dataDir: string,
   storyId: string,
 ): Promise<string> {
@@ -202,7 +203,7 @@ async function loadSummaryContent(
  * target. A summary fragment is relevant if its `meta.coverageEnd` falls
  * inside that window.
  */
-async function loadSummaryContentBefore(
+export async function loadSummaryContentBefore(
   dataDir: string,
   storyId: string,
   proseIdsInWindow: string[],
@@ -212,6 +213,7 @@ async function loadSummaryContentBefore(
 
   const windowIds = new Set(proseIdsInWindow)
   const relevant = summaries.filter(f => {
+    if (f.meta?.isEraSummary) return true
     const cov = f.meta?.coverageEnd as string | undefined
     if (!cov) return false
     return windowIds.has(cov)

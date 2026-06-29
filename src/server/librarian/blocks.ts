@@ -1,4 +1,9 @@
-import type { ContextBlock, CustomFragmentGroup } from '../llm/context-builder'
+import {
+  STORY_SUMMARY_PLACEHOLDER,
+  buildContextState,
+  type ContextBlock,
+  type CustomFragmentGroup,
+} from '../llm/context-builder'
 import {
   buildFragmentContextLanes,
   customContextFragmentTypes,
@@ -91,13 +96,17 @@ export function recentCastFromFragment(allCharacters: Fragment[], fragment: Frag
 export async function buildAnalyzeContext(
   dataDir: string,
   storyId: string,
-  story: StoryMeta,
+  _story: StoryMeta,
   input: { proseFragment: Fragment | null; newProse: { id: string; content: string } },
 ): Promise<AgentBlockContext> {
+  const ctxState = await buildContextState(dataDir, storyId, '', {
+    excludeFragmentId: input.proseFragment?.id,
+  })
+  const effectiveStory = ctxState.story
   const allCharacters = await listFragments(dataDir, storyId, 'character')
   const allKnowledge = await listFragments(dataDir, storyId, 'knowledge')
   const allCustomFragments: CustomFragmentGroup[] = []
-  for (const def of customContextFragmentTypes(story)) {
+  for (const def of customContextFragmentTypes(effectiveStory)) {
     const fragments = await listFragments(dataDir, storyId, def.type)
     if (fragments.length > 0) {
       allCustomFragments.push({ ...def, fragments })
@@ -105,8 +114,9 @@ export async function buildAnalyzeContext(
   }
   const systemPromptFragments = await loadSystemPromptFragments(dataDir, storyId, getFragmentsByTag, getFragment)
   return {
-    // Start from the empty defaults so analyze states only the fields it uses
-    ...baseBlockContext(null, story),
+    // Start from centralized story context so summary-fragment migration and
+    // summary loading cannot drift from the writer context.
+    ...baseBlockContext(ctxState, effectiveStory),
     systemPromptFragments,
     allCharacters,
     allKnowledge,
@@ -143,7 +153,7 @@ export function createLibrarianAnalyzeBlocks(ctx: AgentBlockContext): ContextBlo
   blocks.push({
     id: 'story-summary',
     role: 'user',
-    content: ['## Story Summary So Far', ctx.story.summary || '(No summary yet — this may be the beginning of the story.)'].join('\n'),
+    content: ['## Story Summary So Far', ctx.story.summary || STORY_SUMMARY_PLACEHOLDER].join('\n'),
     order: 100,
     source: 'builtin',
   })
@@ -414,7 +424,7 @@ export function createProseTransformBlocks(ctx: AgentBlockContext): ContextBlock
     role: 'user',
     content: [
       'Story summary:',
-      ctx.story.summary || '(none)',
+      ctx.story.summary || STORY_SUMMARY_PLACEHOLDER,
     ].join('\n'),
     order: 200,
     source: 'builtin',

@@ -1,4 +1,4 @@
-import type { ContextBlock } from '../llm/context-builder'
+import { STORY_SUMMARY_PLACEHOLDER, type ContextBlock } from '../llm/context-builder'
 import {
   buildFragmentContextLanes,
   findFragmentContextLane,
@@ -31,7 +31,7 @@ export function createDirectionsSuggestBlocks(ctx: AgentBlockContext): ContextBl
   blocks.push({
     id: 'story-summary',
     role: 'user',
-    content: `## Story Summary\n${ctx.story.summary || '(No summary yet.)'}`,
+    content: `## Story Summary\n${ctx.story.summary || STORY_SUMMARY_PLACEHOLDER}`,
     order: 100,
     source: 'builtin',
   })

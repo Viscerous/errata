@@ -4,6 +4,8 @@ import {
   createStory,
   createFragment,
   getFragment,
+  getStory,
+  listFragments,
   updateStory,
 } from '@/server/fragments/storage'
 import type { StoryMeta, Fragment } from '@/server/fragments/schema'
@@ -400,6 +402,72 @@ describe('LLM tools', () => {
 
       const deleted = await getFragment(dataDir, storyId, 'pr-0001')
       expect(deleted).toBeNull()
+    })
+  })
+
+  describe('story summary tools', () => {
+    it('reads the fragment-backed story summary', async () => {
+      await createFragment(dataDir, storyId, makeFragment({
+        id: 'sm-test01',
+        type: 'summary',
+        name: 'Opening summary',
+        content: 'The fragment summary is canonical.',
+        placement: 'system',
+        meta: { chapterId: null, isEraSummary: false },
+      }))
+
+      const tools = createFragmentTools(dataDir, storyId, { readOnly: false })
+      const result = await tools.getStorySummary.execute!(
+        {},
+        { toolCallId: 'tc-1', messages: [] },
+      )
+
+      expect(result.summary).toBe('The fragment summary is canonical.')
+    })
+
+    it('writes updateStorySummary into a summary fragment instead of story.summary', async () => {
+      const tools = createFragmentTools(dataDir, storyId, { readOnly: false })
+      const result = await tools.updateStorySummary.execute!(
+        { summary: 'A new canonical summary.' },
+        { toolCallId: 'tc-1', messages: [] },
+      )
+
+      expect(result.ok).toBe(true)
+      const summaries = await listFragments(dataDir, storyId, 'summary')
+      expect(summaries).toHaveLength(1)
+      expect(summaries[0].content).toBe('A new canonical summary.')
+
+      const story = await getStory(dataDir, storyId)
+      expect(story!.summary).toBe('')
+    })
+
+    it('does not flatten split summary fragments through updateStorySummary', async () => {
+      await createFragment(dataDir, storyId, makeFragment({
+        id: 'sm-test01',
+        type: 'summary',
+        name: 'Opening summary',
+        content: 'Opening events.',
+        placement: 'system',
+        meta: { chapterId: null, isEraSummary: false },
+      }))
+      await createFragment(dataDir, storyId, makeFragment({
+        id: 'sm-test02',
+        type: 'summary',
+        name: 'Chapter two summary',
+        content: 'Chapter two events.',
+        placement: 'system',
+        meta: { chapterId: 'mk-0001', isEraSummary: false },
+      }))
+
+      const tools = createFragmentTools(dataDir, storyId, { readOnly: false })
+      const result = await tools.updateStorySummary.execute!(
+        { summary: 'Flattened replacement.' },
+        { toolCallId: 'tc-1', messages: [] },
+      )
+
+      expect(result.error).toContain('split across 2 summary fragments')
+      const summaries = await listFragments(dataDir, storyId, 'summary')
+      expect(summaries.map(s => s.content).sort()).toEqual(['Chapter two events.', 'Opening events.'])
     })
   })
 

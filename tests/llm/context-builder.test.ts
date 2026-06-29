@@ -582,6 +582,42 @@ describe('context-builder', () => {
     expect(joined).not.toContain('Summary D.')
   })
 
+  it('keeps era summaries in before-fragment context even when they have no coverageEnd', async () => {
+    const story = makeStory({ summary: '' })
+    await createStory(dataDir, story)
+
+    const proseIds = ['pr-0001', 'pr-0002', 'pr-0003']
+    for (let i = 0; i < proseIds.length; i++) {
+      const fragment = makeFragment({
+        id: proseIds[i],
+        type: 'prose',
+        name: `Prose ${i + 1}`,
+        content: `Passage ${i + 1}`,
+        order: i + 1,
+      })
+      await createFragment(dataDir, story.id, fragment)
+      await addProseSection(dataDir, story.id, fragment.id)
+    }
+
+    await createFragment(dataDir, story.id, makeFragment({
+      id: 'sm-era001',
+      type: 'summary',
+      name: 'Opening era',
+      content: 'Old arc summary.',
+      placement: 'system',
+      meta: { chapterId: null, isEraSummary: true },
+    }))
+
+    const messages = await buildContext(dataDir, story.id, 'Regenerate C', {
+      proseBeforeFragmentId: 'pr-0003',
+      summaryBeforeFragmentId: 'pr-0003',
+      excludeFragmentId: 'pr-0003',
+    })
+    const joined = messages.map(m => m.content).join('\n')
+
+    expect(joined).toContain('Old arc summary.')
+  })
+
   it('omits the summary block when no summary fragments exist', async () => {
     const story = makeStory({ summary: '' })
     await createStory(dataDir, story)

@@ -5,6 +5,7 @@ import {
   getFragment,
   getStory,
   updateStory,
+  migrateStoryToSummaryFragments,
   listFragments,
   updateFragmentVersioned,
   deleteFragment,
@@ -17,6 +18,7 @@ import { generateFragmentId } from '@/lib/fragment-ids'
 import { checkFragmentWrite, isFragmentLocked } from '../fragments/protection'
 import { reanalyzeAfterProseChange } from '../librarian/scheduler'
 import { capitalize, pluralize } from './agents'
+import { loadSummaryContent, STORY_SUMMARY_PLACEHOLDER } from './context-builder'
 
 const logger = createLogger('llm-tools')
 const TOOL_LOG_MAX_CHARS = 1200
@@ -439,22 +441,65 @@ export function createFragmentTools(
       execute: withToolLogging('getStorySummary', storyId, async () => {
         const story = await getStory(dataDir, storyId)
         if (!story) return { error: 'Story not found' }
-        return { summary: story.summary || '(No summary yet)' }
+        await migrateStoryToSummaryFragments(dataDir, storyId)
+        const summary = await loadSummaryContent(dataDir, storyId)
+        return { summary: summary || STORY_SUMMARY_PLACEHOLDER }
       }),
     })
 
     tools.updateStorySummary = tool({
-      description: 'Replace the story\'s rolling summary with a new version. Use this to rewrite, condense, or correct the summary.',
+      description: 'Replace the story\'s rolling summary when it is stored as a single summary fragment. If the story has multiple summary fragments, list and edit the specific summary fragment instead.',
       inputSchema: z.object({
         summary: z.string().describe('The new story summary text'),
       }),
       execute: withToolLogging('updateStorySummary', storyId, async ({ summary }: { summary: string }) => {
         const story = await getStory(dataDir, storyId)
         if (!story) return { error: 'Story not found' }
+        await migrateStoryToSummaryFragments(dataDir, storyId)
+        const summaries = await listFragments(dataDir, storyId, 'summary')
+        const now = new Date().toISOString()
+
+        if (summaries.length === 0) {
+          await createFragmentInStorage(dataDir, storyId, {
+            id: generateFragmentId('summary'),
+            type: 'summary',
+            name: 'Story summary',
+            description: 'Rolling summary maintained by the librarian.',
+            content: summary,
+            tags: [],
+            refs: [],
+            sticky: false,
+            placement: 'system',
+            createdAt: now,
+            updatedAt: now,
+            order: 0,
+            meta: {
+              isEraSummary: true,
+              chapterId: null,
+              updatedByTool: 'updateStorySummary',
+            },
+            archived: false,
+            version: 1,
+            versions: [],
+          })
+        } else if (summaries.length === 1) {
+          await updateFragmentVersioned(
+            dataDir,
+            storyId,
+            summaries[0].id,
+            { content: summary },
+            { reason: 'updateStorySummary' },
+          )
+        } else {
+          return {
+            error: `Story summary is split across ${summaries.length} summary fragments. Use listFragments with type "summary", then updateFragment on the specific summary fragment to preserve chapter/era summary structure.`,
+          }
+        }
+
         await updateStory(dataDir, {
           ...story,
-          summary,
-          updatedAt: new Date().toISOString(),
+          summary: '',
+          updatedAt: now,
         })
         return { ok: true, summaryLength: summary.length }
       }),
