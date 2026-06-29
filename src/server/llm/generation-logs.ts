@@ -36,6 +36,7 @@ export interface GenerationLog {
   prewriterDurationMs?: number
   prewriterModel?: string
   prewriterUsage?: TokenUsage
+  prewriterToolCalls?: ToolCallLog[]
   prewriterDirections?: Array<{ pacing: string; title: string; description: string; instruction: string }>
 }
 
