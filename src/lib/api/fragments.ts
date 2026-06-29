@@ -8,8 +8,8 @@ export const fragments = {
     apiFetch<Fragment>(`/stories/${storyId}/fragments/${fragmentId}`),
   create: (storyId: string, data: { type: string; name: string; description: string; content: string; id?: string; tags?: string[]; meta?: Record<string, unknown> }) =>
     apiFetch<Fragment>(`/stories/${storyId}/fragments`, { method: 'POST', body: JSON.stringify(data) }),
-  update: (storyId: string, fragmentId: string, data: { name: string; description: string; content: string; sticky?: boolean; order?: number; placement?: 'system' | 'user'; meta?: Record<string, unknown> }) =>
-    apiFetch<Fragment>(`/stories/${storyId}/fragments/${fragmentId}`, { method: 'PUT', body: JSON.stringify(data) }),
+  update: (storyId: string, fragmentId: string, data: { type?: string; name: string; description: string; content: string; sticky?: boolean; order?: number; placement?: 'system' | 'user'; meta?: Record<string, unknown> }) =>
+    apiFetch<Fragment & { idChanged?: boolean }>(`/stories/${storyId}/fragments/${fragmentId}`, { method: 'PUT', body: JSON.stringify(data) }),
   edit: (storyId: string, fragmentId: string, data: { oldText: string; newText: string }) =>
     apiFetch<Fragment>(`/stories/${storyId}/fragments/${fragmentId}`, { method: 'PATCH', body: JSON.stringify(data) }),
   delete: (storyId: string, fragmentId: string) =>
