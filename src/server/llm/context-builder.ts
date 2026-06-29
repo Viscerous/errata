@@ -1012,6 +1012,12 @@ export function addCacheBreakpoints(messages: ContextMessage[]): ModelMessage[] 
         splitIndex = msg.content.indexOf('[@block=writing-brief]')
       }
 
+      // The prewriter prompt has a stable full-context prefix and a volatile
+      // planning request suffix.
+      if (splitIndex === -1) {
+        splitIndex = msg.content.indexOf('[@block=planning-request]')
+      }
+
       if (splitIndex === -1) {
         return { role: 'user', content: msg.content }
       }

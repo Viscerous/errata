@@ -231,6 +231,7 @@ export function generationRoutes(dataDir: string) {
       let prewriterUsage: { inputTokens: number; outputTokens: number } | undefined
       let prewriterLogMessages: Array<{ role: string; content: string }> | undefined
       let prewriterDirections: Array<{ pacing: string; title: string; description: string; instruction: string }> | undefined
+      let prewriterToolCalls: ToolCallLog[] = []
       let logMessages = messages // messages saved to generation log — updated to writer context in prewriter mode
 
       const modelMessages = addCacheBreakpoints(messages)
@@ -284,9 +285,10 @@ export function generationRoutes(dataDir: string) {
                   dataDir,
                   storyId: params.storyId,
                   compiledMessages: messages,
+                  blockContext: { ...ctxState, systemPromptFragments: [] },
                   authorInput: effectiveInput,
                   mode,
-                  tools,
+                  tools: allTools,
                   maxSteps: prewriterMaxSteps,
                   abortSignal: abortController.signal,
                   providerOptions,
@@ -331,6 +333,7 @@ export function generationRoutes(dataDir: string) {
                 prewriterModel = prewriterResult.model
                 prewriterUsage = prewriterResult.usage
                 prewriterLogMessages = prewriterResult.messages
+                prewriterToolCalls = prewriterResult.toolCalls
                 prewriterStepCount = prewriterResult.stepCount
                 if (prewriterResult.directions.length > 0) {
                   prewriterDirections = prewriterResult.directions
@@ -348,9 +351,11 @@ export function generationRoutes(dataDir: string) {
                 // Fall back to the full context (writerMessages already === modelMessages).
                 if (prewriterResult.brief.trim()) {
                   const writerBlocks = createWriterBriefBlocks(ctxState.proseFragments, prewriterResult.brief, resolvedModelId)
-                  const finalWriterBlocks = await applyBlockConfig(writerBlocks, agentConfig, scriptContext)
+                  let finalWriterBlocks = await applyBlockConfig(writerBlocks, agentConfig, scriptContext)
+                  finalWriterBlocks = await runBeforeBlocks(enabledPlugins, finalWriterBlocks)
                   let writerCompiled = compileBlocks(finalWriterBlocks)
                   writerCompiled = await expandMessagesFragmentTags(writerCompiled, dataDir, params.storyId)
+                  writerCompiled = await runBeforeGeneration(enabledPlugins, writerCompiled)
                   writerMessages = addCacheBreakpoints(writerCompiled)
                   logMessages = writerCompiled
                 } else {
@@ -502,10 +507,14 @@ export function generationRoutes(dataDir: string) {
               // it looked up — so analyze audits against the same sheets the writer
               // had. Analyze consumes the character IDs today; knowledge rides along
               // for when its full block is dropped.
-              const lookedUpIds = toolCalls
+              const fragmentLookupIds = (calls: ToolCallLog[]) => calls
                 .filter((tc) => tc.toolName === 'getFragment' || /^get[A-Z]/.test(tc.toolName))
                 .map((tc) => (tc.args as Record<string, unknown>)?.id)
                 .filter((x): x is string => typeof x === 'string')
+              const lookedUpIds = [
+                ...fragmentLookupIds(toolCalls),
+                ...fragmentLookupIds(prewriterToolCalls),
+              ]
               const writerContextIds = [...new Set([
                 ...ctxState.stickyCharacters.map((f) => f.id),
                 ...(ctxState.recentCharacters ?? []).map((f) => f.id),
@@ -666,6 +675,7 @@ export function generationRoutes(dataDir: string) {
                 ...(prewriterDurationMs ? { prewriterDurationMs } : {}),
                 ...(prewriterModel ? { prewriterModel } : {}),
                 ...(prewriterUsage ? { prewriterUsage } : {}),
+                ...(prewriterToolCalls.length ? { prewriterToolCalls } : {}),
                 ...(prewriterDirections?.length ? { prewriterDirections } : {}),
               }
               await saveGenerationLog(dataDir, params.storyId, log)

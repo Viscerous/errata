@@ -1,14 +1,14 @@
 import { tool, ToolLoopAgent, stepCountIs, hasToolCall, type ToolSet, type ProviderOptions } from 'ai'
 import { z } from 'zod/v4'
 import { getModel } from './client'
-import { compileBlocks, expandMessagesFragmentTags, type ContextBlock, type ContextMessage } from './context-builder'
+import { addCacheBreakpoints, compileBlocks, expandMessagesFragmentTags, type ContextBlock, type ContextMessage } from './context-builder'
 import { renderFragmentWithMarker } from './fragment-context-blocks'
 import { compileAgentContext } from '../agents/compile-agent-context'
 import { instructionRegistry } from '../instructions'
 import { buildContextState } from './context-builder'
 import { type AgentBlockContext, baseBlockContext } from '../agents/agent-block-context'
 import type { Fragment } from '../fragments/schema'
-import type { TokenUsage } from './generation-logs'
+import type { TokenUsage, ToolCallLog } from './generation-logs'
 import { reportUsage } from './token-tracker'
 import { normalizeTokenUsage } from './usage-normalizer'
 import { createLogger } from '../logging'
@@ -154,6 +154,7 @@ export interface RunPrewriterArgs {
   dataDir: string
   storyId: string
   compiledMessages: ContextMessage[]
+  blockContext?: AgentBlockContext
   authorInput: string
   mode: 'generate' | 'regenerate' | 'refine'
   tools?: ToolSet
@@ -177,6 +178,7 @@ export interface PrewriterResult {
   messages: Array<{ role: string; content: string }>
   customBlocks: ContextBlock[]
   directions: PrewriterDirection[]
+  toolCalls: ToolCallLog[]
   stepCount: number
   durationMs: number
   model: string
@@ -200,7 +202,7 @@ export async function runPrewriter(args: RunPrewriterArgs): Promise<PrewriterRes
   requestLogger.info('Prewriter model resolved', { modelId })
 
   // Build the prewriter prompt from blocks (allows user customization via block editor)
-  const blockContext: AgentBlockContext = {
+  const emptyBlockContext: AgentBlockContext = {
     story: { id: storyId, name: '', description: '', coverImage: null, summary: '', createdAt: '', updatedAt: '', settings: {} as any },
     proseFragments: [],
     stickyGuidelines: [],
@@ -212,11 +214,18 @@ export async function runPrewriter(args: RunPrewriterArgs): Promise<PrewriterRes
     systemPromptFragments: [],
     modelId,
   }
+  const blockContext: AgentBlockContext = {
+    ...emptyBlockContext,
+    ...(args.blockContext ?? {}),
+    modelId,
+  }
 
   let prewriterBlocks: ContextBlock[]
+  let configuredTools: ToolSet = tools ?? {}
   try {
-    const compiled = await compileAgentContext(dataDir, storyId, 'generation.prewriter', blockContext, {})
+    const compiled = await compileAgentContext(dataDir, storyId, 'generation.prewriter', blockContext, tools ?? {})
     prewriterBlocks = compiled.blocks
+    configuredTools = compiled.tools
   } catch {
     // If no agent block config exists, use default blocks
     prewriterBlocks = createPrewriterBlocks(blockContext)
@@ -318,7 +327,7 @@ export async function runPrewriter(args: RunPrewriterArgs): Promise<PrewriterRes
   })
 
   const mergedTools: ToolSet = {
-    ...(tools ?? {}),
+    ...configuredTools,
     suggestDirections: directionsTool,
     ...(canAskQuestions ? { askQuestions: askQuestionsTool } : {}),
   }
@@ -345,8 +354,10 @@ export async function runPrewriter(args: RunPrewriterArgs): Promise<PrewriterRes
   let fullReasoning = ''
   let stepCount = 0
   let terminalToolReturned = false
+  const toolCallArgsById = new Map<string, Record<string, unknown>>()
+  const toolCalls: ToolCallLog[] = []
   const result = await agent.stream({
-    messages: prewriterMessages,
+    messages: addCacheBreakpoints(prewriterMessages),
     abortSignal,
   })
 
@@ -373,20 +384,30 @@ export async function runPrewriter(args: RunPrewriterArgs): Promise<PrewriterRes
       fullReasoning += text
       onEvent?.({ type: 'reasoning', text })
     } else if (part.type === 'tool-call') {
+      const toolCallId = p.toolCallId as string
+      const input = (p.input ?? {}) as Record<string, unknown>
+      toolCallArgsById.set(toolCallId, input)
       onEvent?.({
         type: 'tool-call',
-        id: p.toolCallId as string,
+        id: toolCallId,
         toolName: p.toolName as string,
-        args: (p.input ?? {}) as Record<string, unknown>,
+        args: input,
       })
     } else if (part.type === 'tool-result') {
+      const toolName = (p.toolName as string) ?? ''
+      const toolCallId = p.toolCallId as string
+      toolCalls.push({
+        toolName,
+        args: toolCallArgsById.get(toolCallId) ?? {},
+        result: p.output,
+      })
       if (p.toolName === 'suggestDirections' || p.toolName === 'askQuestions') {
         terminalToolReturned = true
       }
       onEvent?.({
         type: 'tool-result',
-        id: p.toolCallId as string,
-        toolName: (p.toolName as string) ?? '',
+        id: toolCallId,
+        toolName,
         result: p.output,
       })
     } else if (part.type === 'finish-step') {
@@ -426,7 +447,7 @@ export async function runPrewriter(args: RunPrewriterArgs): Promise<PrewriterRes
 
   requestLogger.info('Prewriter steps used', { stepCount })
 
-  return { brief: briefText, reasoning: fullReasoning, messages: serializedMessages, customBlocks, directions: capturedDirections, stepCount, durationMs, model: modelId, usage, questions: capturedQuestions ?? undefined }
+  return { brief: briefText, reasoning: fullReasoning, messages: serializedMessages, customBlocks, directions: capturedDirections, toolCalls, stepCount, durationMs, model: modelId, usage, questions: capturedQuestions ?? undefined }
 }
 
 /**

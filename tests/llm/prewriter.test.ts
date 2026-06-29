@@ -4,8 +4,10 @@ import { createTempDir, seedTestProvider, makeTestSettings } from '../setup'
 import {
   createStory,
   createFragment,
+  listFragments,
 } from '@/server/fragments/storage'
 import { saveAgentBlockConfig } from '@/server/agents/agent-block-storage'
+import { pluginRegistry } from '@/server/plugins/registry'
 import type { StoryMeta, Fragment } from '@/server/fragments/schema'
 
 const { mockAgentCtor, mockAgentStream } = vi.hoisted(() => ({
@@ -178,6 +180,31 @@ function createMockPrewriterDuplicateBriefAcrossSteps(brief: string) {
   }
 }
 
+function createMockPrewriterLookupThenBrief(fragmentId: string, brief: string) {
+  async function* generateFullStream() {
+    yield {
+      type: 'tool-call' as const,
+      toolCallId: 'call-lookup',
+      toolName: 'getFragment',
+      input: { id: fragmentId },
+    }
+    yield {
+      type: 'tool-result' as const,
+      toolCallId: 'call-lookup',
+      toolName: 'getFragment',
+      output: { id: fragmentId, type: 'character', name: 'Looked Up', content: 'Looked-up sheet.' },
+    }
+    yield { type: 'finish-step' as const }
+    yield { type: 'text-delta' as const, text: brief }
+    yield { type: 'finish' as const, finishReason: 'stop' }
+  }
+
+  return {
+    fullStream: generateFullStream(),
+    totalUsage: Promise.resolve({ inputTokens: 10, outputTokens: 20 }),
+  }
+}
+
 /** Parse NDJSON response body into an array of events */
 async function parseNDJSON(res: Response): Promise<Array<Record<string, unknown>>> {
   const text = await res.text()
@@ -185,6 +212,13 @@ async function parseNDJSON(res: Response): Promise<Array<Record<string, unknown>
     .split('\n')
     .filter((line) => line.trim())
     .map((line) => JSON.parse(line))
+}
+
+function streamMessagesText(callIndex: number): string {
+  const args = mockAgentStream.mock.calls[callIndex][0] as any
+  return args.messages!
+    .map((m: any) => typeof m.content === 'string' ? m.content : m.content?.map((p: any) => p.text).join('') ?? '')
+    .join('\n')
 }
 
 describe('prewriter', () => {
@@ -320,6 +354,7 @@ describe('prewriter', () => {
     })
 
     afterEach(async () => {
+      pluginRegistry.unregister('prewriter-final-hook')
       await cleanup()
     })
 
@@ -627,6 +662,7 @@ describe('prewriter', () => {
         overrides: {},
         blockOrder: [],
         disabledTools: [],
+        disableAutoAnalysis: false,
       })
 
       let callCount = 0
@@ -733,6 +769,7 @@ describe('prewriter', () => {
         overrides: {},
         blockOrder: [],
         disabledTools: [],
+        disableAutoAnalysis: false,
       })
 
       let callCount = 0
@@ -759,6 +796,152 @@ describe('prewriter', () => {
       expect(writerText).not.toContain('PREWRITER_ONLY_SENTINEL')
     })
 
+    it('applies disabled tools from the prewriter config independently of the writer config', async () => {
+      await createStory(dataDir, makeStory({ generationMode: 'prewriter' }))
+
+      await saveAgentBlockConfig(dataDir, storyId, 'generation.prewriter', {
+        customBlocks: [],
+        overrides: {},
+        blockOrder: [],
+        disabledTools: ['getFragment'],
+        disableAutoAnalysis: false,
+      })
+
+      let callCount = 0
+      mockAgentStream.mockImplementation(() => {
+        callCount++
+        if (callCount === 1) return createMockStreamResult('A brief.') as any
+        return createMockStreamResult('Some prose.') as any
+      })
+
+      const res = await apiCall(`/stories/${storyId}/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ input: 'Continue', saveResult: false }),
+      })
+      expect(res.status).toBe(200)
+      await res.text()
+
+      const prewriterConfig = mockAgentCtor.mock.calls[0][0] as any
+      const writerConfig = mockAgentCtor.mock.calls[1][0] as any
+      expect(prewriterConfig.tools).not.toHaveProperty('getFragment')
+      expect(writerConfig.tools).toHaveProperty('getFragment')
+    })
+
+    it('evaluates prewriter custom script blocks with the real generation context', async () => {
+      await createStory(dataDir, makeStory({ generationMode: 'prewriter' }))
+      await createFragment(dataDir, storyId, makeFragment({
+        id: 'pr-ctx01',
+        type: 'prose',
+        name: 'Opening',
+        content: 'The opening passage.',
+      }))
+
+      await saveAgentBlockConfig(dataDir, storyId, 'generation.prewriter', {
+        customBlocks: [
+          {
+            id: 'cb-context',
+            name: 'Context Probe',
+            role: 'user',
+            order: 250,
+            enabled: true,
+            type: 'script',
+            content: "return `CTX_SENTINEL ${ctx.story.name} ${ctx.proseFragments.length}`",
+          },
+        ],
+        overrides: {},
+        blockOrder: [],
+        disabledTools: [],
+        disableAutoAnalysis: false,
+      })
+
+      let callCount = 0
+      mockAgentStream.mockImplementation(() => {
+        callCount++
+        if (callCount === 1) return createMockStreamResult('A brief.') as any
+        return createMockStreamResult('Some prose.') as any
+      })
+
+      const res = await apiCall(`/stories/${storyId}/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ input: 'Continue', saveResult: false }),
+      })
+      expect(res.status).toBe(200)
+      await res.text()
+
+      expect(streamMessagesText(0)).toContain('CTX_SENTINEL Test Story 1')
+    })
+
+    it('forwards prewriter fragment lookups into saved writerContextIds', async () => {
+      await createStory(dataDir, makeStory({
+        generationMode: 'prewriter',
+        disableLibrarianAutoAnalysis: true,
+      }))
+      await createFragment(dataDir, storyId, makeFragment({
+        id: 'ch-0002',
+        type: 'character',
+        name: 'Planner Character',
+        description: 'Only the prewriter looked this up',
+        content: 'Planner-only character sheet.',
+      }))
+
+      let callCount = 0
+      mockAgentStream.mockImplementation(() => {
+        callCount++
+        if (callCount === 1) return createMockPrewriterLookupThenBrief('ch-0002', 'Use the looked-up character.') as any
+        return createMockStreamResult('Generated prose.') as any
+      })
+
+      const res = await apiCall(`/stories/${storyId}/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ input: 'Continue', saveResult: true }),
+      })
+      expect(res.status).toBe(200)
+      await res.text()
+
+      let saved: Fragment | undefined
+      for (let i = 0; i < 10; i++) {
+        const prose = await listFragments(dataDir, storyId, 'prose')
+        saved = prose.find((fragment) => fragment.content === 'Generated prose.')
+        if (saved) break
+        await new Promise((r) => setTimeout(r, 25))
+      }
+      expect(saved).toBeDefined()
+      expect(saved!.meta?.writerContextIds).toContain('ch-0002')
+    })
+
+    it('applies plugin beforeGeneration hooks to the final writer context in prewriter mode', async () => {
+      pluginRegistry.register({
+        manifest: { name: 'prewriter-final-hook', version: '1.0.0', description: 'test' },
+        hooks: {
+          beforeGeneration: (messages) => [
+            ...messages,
+            { role: 'system' as const, content: 'FINAL_WRITER_HOOK_SENTINEL' },
+          ],
+        },
+      })
+      await createStory(dataDir, makeStory({ generationMode: 'prewriter', enabledPlugins: ['prewriter-final-hook'] }))
+
+      let callCount = 0
+      mockAgentStream.mockImplementation(() => {
+        callCount++
+        if (callCount === 1) return createMockStreamResult('A brief.') as any
+        return createMockStreamResult('Some prose.') as any
+      })
+
+      const res = await apiCall(`/stories/${storyId}/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ input: 'Continue', saveResult: false }),
+      })
+      expect(res.status).toBe(200)
+      await res.text()
+
+      expect(streamMessagesText(1)).toContain('FINAL_WRITER_HOOK_SENTINEL')
+    })
+
     it('writer writing-brief disabled override is respected in prewriter mode', async () => {
       await createStory(dataDir, makeStory({ generationMode: 'prewriter' }))
 
@@ -767,6 +950,7 @@ describe('prewriter', () => {
         overrides: { 'writing-brief': { enabled: false } },
         blockOrder: [],
         disabledTools: [],
+        disableAutoAnalysis: false,
       })
 
       let callCount = 0
