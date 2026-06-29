@@ -1,5 +1,10 @@
 import type { ContextBlock } from '../llm/context-builder'
-import { renderFragmentWithMarker } from '../llm/fragment-context-blocks'
+import {
+  buildFragmentContextLanes,
+  findFragmentContextLane,
+  isBuiltinContextFragmentType,
+  renderFragmentWithMarker,
+} from '../llm/fragment-context-blocks'
 import type { AgentBlockContext } from '../agents/agent-block-context'
 import { getFragment } from '../fragments/storage'
 import { getFragmentsByTag } from '../fragments/associations'
@@ -14,6 +19,9 @@ export const DIRECTIONS_SYSTEM_PROMPT = `You are a creative writing assistant th
 
 export function createDirectionsSuggestBlocks(ctx: AgentBlockContext): ContextBlock[] {
   const blocks: ContextBlock[] = []
+  const lanes = buildFragmentContextLanes(ctx)
+  const knowledgeLane = findFragmentContextLane(lanes, 'knowledge')
+  const characterLane = findFragmentContextLane(lanes, 'character')
 
   blocks.push(instructionsBlock('directions.system', ctx))
 
@@ -40,8 +48,8 @@ export function createDirectionsSuggestBlocks(ctx: AgentBlockContext): ContextBl
     })
   }
 
-  if (ctx.stickyCharacters.length > 0 || ctx.characterShortlist.length > 0) {
-    const chars = [...ctx.stickyCharacters, ...ctx.characterShortlist]
+  if ((characterLane?.sticky.length ?? 0) > 0 || (characterLane?.available.length ?? 0) > 0) {
+    const chars = [...(characterLane?.sticky ?? []), ...(characterLane?.available ?? [])]
     const unique = chars.filter((c, i, arr) => arr.findIndex(x => x.id === c.id) === i)
     if (unique.length > 0) {
       blocks.push({
@@ -54,33 +62,35 @@ export function createDirectionsSuggestBlocks(ctx: AgentBlockContext): ContextBl
     }
   }
 
-  if (ctx.stickyKnowledge.length > 0) {
+  if ((knowledgeLane?.sticky.length ?? 0) > 0) {
     blocks.push({
       id: 'knowledge-sticky',
       role: 'user',
-      content: `## Pinned Knowledge\n${ctx.stickyKnowledge.map(k => `### ${k.name}\n${k.content}`).join('\n\n')}`,
+      content: `## Pinned Knowledge\n${knowledgeLane!.sticky.map(k => `### ${k.name}\n${k.content}`).join('\n\n')}`,
       order: 245,
       source: 'builtin',
     })
   }
 
-  if (ctx.recentKnowledge && ctx.recentKnowledge.length > 0) {
+  if ((knowledgeLane?.recent.length ?? 0) > 0) {
     blocks.push({
       id: 'knowledge-recent',
       role: 'user',
-      content: `## Knowledge in Recent Prose\n${ctx.recentKnowledge.map(k => `### ${k.name}\n${k.content}`).join('\n\n')}`,
+      content: `## Knowledge in Recent Prose\n${knowledgeLane!.recent.map(k => `### ${k.name}\n${k.content}`).join('\n\n')}`,
       order: 248,
       source: 'builtin',
     })
   }
 
-  if ((ctx.stickyCustomFragments ?? []).length > 0) {
+  const customLanes = lanes.filter((lane) => !isBuiltinContextFragmentType(lane.type))
+  const stickyCustomFragments = customLanes.flatMap((lane) => lane.sticky)
+  if (stickyCustomFragments.length > 0) {
     blocks.push({
       id: 'custom-sticky',
       role: 'user',
       content: [
         '## Pinned Custom Context',
-        ...(ctx.stickyCustomFragments ?? []).map(renderFragmentWithMarker),
+        ...stickyCustomFragments.map(renderFragmentWithMarker),
       ].join('\n\n'),
       order: 250,
       source: 'builtin',
@@ -88,13 +98,14 @@ export function createDirectionsSuggestBlocks(ctx: AgentBlockContext): ContextBl
   }
 
   let customOrder = 255
-  for (const group of ctx.recentCustomFragments ?? []) {
+  for (const lane of customLanes) {
+    if (lane.recent.length === 0) continue
     blocks.push({
-      id: `${group.type}-recent`,
+      id: `${lane.type}-recent`,
       role: 'user',
       content: [
-        `## ${group.name} in Recent Prose`,
-        ...group.fragments.map(renderFragmentWithMarker),
+        `## ${lane.label} in Recent Prose`,
+        ...lane.recent.map(renderFragmentWithMarker),
       ].join('\n\n'),
       order: customOrder++,
       source: 'builtin',

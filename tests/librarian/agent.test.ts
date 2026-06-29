@@ -8,7 +8,9 @@ import {
   listFragments,
 } from '@/server/fragments/storage'
 import { getState, getAnalysis, listAnalyses, saveAnalysis } from '@/server/librarian/storage'
+import { saveAgentBlockConfig } from '@/server/agents/agent-block-storage'
 import { initProseChain, addProseSection } from '@/server/fragments/prose-chain'
+import { addTag } from '@/server/fragments/associations'
 import type { StoryMeta, Fragment } from '@/server/fragments/schema'
 
 const { mockAgentStream } = vi.hoisted(() => ({
@@ -22,11 +24,13 @@ vi.mock('ai', async () => {
     ...actual,
     ToolLoopAgent: class {
       tools: Record<string, { execute: (args: unknown) => Promise<unknown> }>
-      constructor(opts: { tools?: Record<string, unknown> } = {}) {
+      instructions: string
+      constructor(opts: { tools?: Record<string, unknown>; instructions?: string } = {}) {
         this.tools = (opts.tools ?? {}) as Record<string, { execute: (args: unknown) => Promise<unknown> }>
+        this.instructions = opts.instructions ?? ''
       }
       async stream(args: unknown) {
-        return mockAgentStream(args, this.tools)
+        return mockAgentStream(args, this.tools, { instructions: this.instructions })
       }
     },
   }
@@ -154,6 +158,63 @@ describe('librarian agent', () => {
 
   afterEach(async () => {
     await cleanup()
+  })
+
+  it('preserves analyzer instruction overrides and system fragments while using dynamic custom type wording', async () => {
+    await createStory(dataDir, makeStory({
+      settings: {
+        customFragmentTypes: [{
+          type: 'location',
+          name: 'Locations',
+          description: 'Places in the story',
+          icon: 'MapPin',
+          showInSidebar: true,
+        }],
+      },
+    }))
+    await createFragment(dataDir, storyId, makeFragment({
+      id: 'gl-sys01',
+      type: 'guideline',
+      name: 'Continuity Rules',
+      content: 'Never drop custom system fragments.',
+    }))
+    await addTag(dataDir, storyId, 'gl-sys01', 'pass-to-librarian-system-prompt')
+    await createFragment(dataDir, storyId, makeFragment({
+      id: 'pr-0001',
+      content: 'They crossed the Ash Market.',
+    }))
+    await setupProseChain(dataDir, storyId, ['pr-0001'])
+    await saveAgentBlockConfig(dataDir, storyId, 'librarian.analyze', {
+      customBlocks: [],
+      overrides: {
+        instructions: { contentMode: 'prepend', customContent: 'CUSTOM PREPEND' },
+      },
+      blockOrder: [],
+      disabledTools: [],
+    })
+
+    mockAgentStream.mockImplementation(async (
+      _args: unknown,
+      tools: Record<string, { execute: (args: unknown) => Promise<unknown> }>,
+      opts?: { instructions?: string },
+    ) => {
+      expect(opts?.instructions).toContain('CUSTOM PREPEND')
+      expect(opts?.instructions).toContain('Never drop custom system fragments.')
+      expect(opts?.instructions).toContain('Suggest genuinely new characters, knowledge, locations with suggestFragment')
+
+      return {
+        fullStream: (async function* () {
+          const id = 'call-0'
+          const input = { summary: 'They crossed a market.' }
+          yield { type: 'tool-call' as const, toolCallId: id, toolName: 'updateSummary', input }
+          const output = await tools.updateSummary.execute(input)
+          yield { type: 'tool-result' as const, toolCallId: id, toolName: 'updateSummary', output }
+          yield { type: 'finish' as const, finishReason: 'stop' }
+        })(),
+      }
+    })
+
+    await runLibrarian(dataDir, storyId, 'pr-0001')
   })
 
   it('appends summary update to a summary fragment (preserving legacy story.summary)', async () => {

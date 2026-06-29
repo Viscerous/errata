@@ -19,6 +19,11 @@ interface ApplySuggestionResult {
   updated: boolean
 }
 
+export interface SuggestionTargetValidation {
+  target?: Fragment
+  error?: string
+}
+
 function normalizeName(name: string): string {
   return name.trim().toLowerCase()
 }
@@ -30,16 +35,37 @@ function resolveSourceFragmentId(
   return suggestion.sourceFragmentId ?? analysis.fragmentId ?? null
 }
 
+export async function validateSuggestionTargetWrite(
+  dataDir: string,
+  storyId: string,
+  suggestion: { type: string; targetFragmentId?: string; content?: string },
+): Promise<SuggestionTargetValidation> {
+  if (!suggestion.targetFragmentId) return {}
+
+  const target = await getFragment(dataDir, storyId, suggestion.targetFragmentId)
+  if (!target) {
+    return { error: `Target fragment not found: ${suggestion.targetFragmentId}` }
+  }
+  if (target.type !== suggestion.type) {
+    return { target, error: `Target fragment ${suggestion.targetFragmentId} is type "${target.type}", not "${suggestion.type}"` }
+  }
+  if (suggestion.content !== undefined) {
+    const protection = checkFragmentWrite(target, { content: suggestion.content })
+    if (!protection.allowed) return { target, error: protection.reason ?? 'Fragment is protected' }
+  }
+
+  return { target }
+}
+
 async function findSuggestionFragment(
   dataDir: string,
   storyId: string,
   suggestion: FragmentSuggestion,
 ): Promise<Fragment | null> {
   if (suggestion.targetFragmentId) {
-    const target = await getFragment(dataDir, storyId, suggestion.targetFragmentId)
-    if (target && target.type === suggestion.type && (target.type === 'character' || target.type === 'knowledge')) {
-      return target
-    }
+    const validation = await validateSuggestionTargetWrite(dataDir, storyId, suggestion)
+    if (validation.error) throw new Error(validation.error)
+    return validation.target ?? null
   }
 
   if (suggestion.createdFragmentId) {

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { createTempDir, makeTestSettings } from '../setup'
 import { createApp } from '@/server/api'
-import { createStory, createFragment, getFragment, getStory, updateStory } from '@/server/fragments/storage'
+import { createStory, createFragment, getFragment, getStory, updateStory, listFragments } from '@/server/fragments/storage'
 import {
   saveAnalysis,
   saveState,
@@ -330,6 +330,68 @@ describe('librarian API routes', () => {
       expect(updated).toBeTruthy()
       expect(updated?.description).toBe('Ancient defended city')
       expect(updated?.content).toContain('stone sentinels')
+    })
+
+    it('updates an existing targeted custom fragment without creating a duplicate', async () => {
+      const story = await getStory(dataDir, storyId)
+      await updateStory(dataDir, {
+        ...story!,
+        settings: {
+          ...story!.settings,
+          customFragmentTypes: [{
+            type: 'location',
+            name: 'Locations',
+            description: 'Places in the story',
+            icon: 'MapPin',
+            showInSidebar: true,
+          }],
+        },
+      })
+
+      const now = new Date().toISOString()
+      await createFragment(dataDir, storyId, {
+        id: 'loc-0001',
+        type: 'location',
+        name: 'Ash Market',
+        description: 'A market below the city',
+        content: 'The Ash Market trades in debts.',
+        tags: [],
+        refs: [],
+        sticky: false,
+        placement: 'user',
+        createdAt: now,
+        updatedAt: now,
+        order: 0,
+        meta: {},
+      })
+
+      await saveAnalysis(dataDir, storyId, makeAnalysis({
+        id: 'analysis-target-custom-update',
+        fragmentSuggestions: [
+          {
+            type: 'location',
+            targetFragmentId: 'loc-0001',
+            name: 'Ash Market Gate',
+            description: 'The debt market entrance',
+            content: 'The Ash Market Gate admits only debtors and oathkeepers.',
+          },
+        ],
+      }))
+
+      const res = await app.fetch(
+        new Request(`http://localhost/api/stories/${storyId}/librarian/analyses/analysis-target-custom-update/suggestions/0/accept`, {
+          method: 'POST',
+        }),
+      )
+      expect(res.status).toBe(200)
+      const data = await res.json()
+      expect(data.createdFragmentId).toBe('loc-0001')
+
+      const updated = await getFragment(dataDir, storyId, 'loc-0001')
+      expect(updated?.name).toBe('Ash Market Gate')
+      expect(updated?.content).toContain('oathkeepers')
+      const locations = await listFragments(dataDir, storyId, 'location')
+      expect(locations.map((fragment) => fragment.id)).toEqual(['loc-0001'])
     })
 
     it('returns 404 for non-existent analysis', async () => {
