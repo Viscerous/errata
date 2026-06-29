@@ -117,12 +117,24 @@ export function getFragmentTypeVisual(
 
   const custom = customTypeMap(customTypes).get(type)
   const label = custom?.name?.trim() || titleFromFragmentType(type) || 'Custom Fragments'
+
+  let order = 100
+  if (customTypes) {
+    const keys = Array.isArray(customTypes)
+      ? customTypes.map((c) => c.type)
+      : Array.from(customTypes.keys())
+    const index = keys.indexOf(type)
+    if (index >= 0) {
+      order = 100 + index
+    }
+  }
+
   return {
     type,
     label,
     singularLabel: singularizeLabel(label),
     icon: custom?.icon || 'Database',
-    order: 100,
+    order,
     isBuiltin: false,
   }
 }
