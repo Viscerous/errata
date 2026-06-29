@@ -35,6 +35,8 @@ interface ProseBlockProps {
   mentionColors?: Map<string, string>
   onClickMention?: (fragmentId: string) => void
   mediaById?: Map<string, Fragment>
+  scrollAnchorId?: string
+  expandThoughtsByDefault?: boolean
 }
 
 /** Isolated sub-component so query cache subscriptions don't force ProseBlock re-renders */
@@ -117,16 +119,14 @@ export const ProseBlock = memo(function ProseBlock({
   mentionColors,
   onClickMention,
   mediaById,
+  scrollAnchorId,
+  expandThoughtsByDefault = false,
 }: ProseBlockProps) {
   // isFirst/isLast are part of the interface for future use
   void isFirst
   void isLast
   const queryClient = useQueryClient()
   const confirm = useConfirm()
-  const { data: story } = useQuery({
-    queryKey: ['story', storyId],
-    queryFn: () => api.stories.get(storyId),
-  })
   const [actionMode, setActionMode] = useState<'regenerate' | null>(null)
   const [showUndo, setShowUndo] = useState(false)
   const [isStreamingAction, setIsStreamingAction] = useState(false)
@@ -435,6 +435,12 @@ export const ProseBlock = memo(function ProseBlock({
     return formatDialogue
   }, [enabledMentionTypes, mentionFragmentTypesById, annotations, onClickMention, mentionColors])
 
+  const textTransformKey = useMemo(() => {
+    const types = enabledMentionTypes ? Array.from(enabledMentionTypes).sort().join(',') : ''
+    const anns = annotations ? annotations.map(a => `${a.id}-${a.type}`).join(',') : ''
+    return `${types}::${anns}`
+  }, [enabledMentionTypes, annotations])
+
   // Resolve a linked image for the passage header (first image visual ref).
   const headerImage = useMemo(
     () => (mediaById ? resolveHeaderImage(fragment, mediaById) : null),
@@ -571,7 +577,7 @@ export const ProseBlock = memo(function ProseBlock({
             if (!isStreamingAction) setShowActions(v => !v)
           }
         }}
-        className={`text-left w-full rounded-lg p-4 -mx-4 transition-all duration-150 cursor-default ${
+        className={`text-left rounded-lg p-4 -mx-4 transition-all duration-150 cursor-default ${
           showActions ? 'bg-card/50 ring-1 ring-primary/10' : 'hover:bg-card/40'
         }`}
         data-component-id={`prose-${fragment.id}-select`}
@@ -581,7 +587,7 @@ export const ProseBlock = memo(function ProseBlock({
             steps={actionThoughtSteps}
             streaming={isStreamingAction}
             hasText={!!streamedActionText}
-            defaultExpanded={story?.settings.expandThoughtsByDefault ?? false}
+            defaultExpanded={expandThoughtsByDefault}
           />
         )}
         <StreamMarkdown
@@ -591,7 +597,9 @@ export const ProseBlock = memo(function ProseBlock({
           }
           streaming={isStreamingAction}
           variant="prose"
-          textTransform={!isStreamingAction && !streamedActionText ? textTransform : undefined}
+          textTransform={textTransform}
+          textTransformKey={textTransformKey}
+          anchorId={scrollAnchorId}
         />
 
       </div>

@@ -334,6 +334,18 @@ function buildMentionGroups(
     group.entries.push(entry)
     groups.set(type, group)
   }
+
+  for (const group of groups.values()) {
+    group.entries.sort((a, b) => {
+      const countDiff = mentionSourceCount(b[1]) - mentionSourceCount(a[1])
+      if (countDiff !== 0) return countDiff
+
+      const aName = fragmentById.get(a[0])?.name ?? a[0]
+      const bName = fragmentById.get(b[0])?.name ?? b[0]
+      return aName.localeCompare(bName)
+    })
+  }
+
   return [...groups.values()].sort((a, b) =>
     compareFragmentTypeVisuals(a.visual, b.visual),
   )

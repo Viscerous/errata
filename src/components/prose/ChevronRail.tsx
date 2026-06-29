@@ -21,25 +21,32 @@ export function ChevronRail({ direction, disabled, onClick, fragmentId }: Chevro
     const block = rail.closest('[data-prose-index]') as HTMLElement | null
     if (!block) return
 
+    let rafId = 0
+
     const handleMove = (e: MouseEvent) => {
-      const blockRect = block.getBoundingClientRect()
-      const railRect = rail.getBoundingClientRect()
+      const { clientX, clientY } = e
+      cancelAnimationFrame(rafId)
+      rafId = requestAnimationFrame(() => {
+        const blockRect = block.getBoundingClientRect()
+        const railRect = rail.getBoundingClientRect()
 
-      // Chevron Y position relative to rail
-      const relY = e.clientY - railRect.top
-      const clamped = Math.max(12, Math.min(relY, railRect.height - 12))
-      setChevronY(clamped)
+        // Chevron Y position relative to rail
+        const relY = clientY - railRect.top
+        const clamped = Math.max(12, Math.min(relY, railRect.height - 12))
+        setChevronY(clamped)
 
-      // Proximity: how close the cursor is to the rail edge (0=far, 1=on it)
-      const distFromEdge = isLeft
-        ? e.clientX - blockRect.left
-        : blockRect.right - e.clientX
-      // Map 0..120px from edge → 1..0 proximity
-      const norm = Math.max(0, Math.min(1, 1 - distFromEdge / 120))
-      setProximity(norm)
+        // Proximity: how close the cursor is to the rail edge (0=far, 1=on it)
+        const distFromEdge = isLeft
+          ? clientX - blockRect.left
+          : blockRect.right - clientX
+        // Map 0..120px from edge → 1..0 proximity
+        const norm = Math.max(0, Math.min(1, 1 - distFromEdge / 120))
+        setProximity(norm)
+      })
     }
 
     const handleLeave = () => {
+      cancelAnimationFrame(rafId)
       setChevronY(null)
       setProximity(0)
     }
@@ -49,6 +56,7 @@ export function ChevronRail({ direction, disabled, onClick, fragmentId }: Chevro
     return () => {
       block.removeEventListener('mousemove', handleMove)
       block.removeEventListener('mouseleave', handleLeave)
+      cancelAnimationFrame(rafId)
     }
   }, [isLeft])
 
