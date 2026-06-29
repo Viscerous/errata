@@ -225,9 +225,9 @@ export function renderFragmentWithMarker(f: Fragment): string {
 export function fragmentSummaryIndexHeading(label: string, scope?: FragmentContextScope | string): string {
   const normalized = label.trim() || 'Fragments'
   const normalizedScope = scope?.trim().toLowerCase()
-  if (normalizedScope === 'pinned') return `Pinned ${normalized} (Summary Index)`
-  if (normalizedScope === 'all') return `All ${normalized} (Summary Index)`
-  return `${normalized} (Summary Index)`
+  if (normalizedScope === 'pinned') return `Pinned ${normalized} (Shortlist)`
+  if (normalizedScope === 'all') return `All ${normalized} (Shortlist)`
+  return `${normalized} (Shortlist)`
 }
 
 export function fragmentSummaryList(
@@ -240,7 +240,7 @@ export function fragmentSummaryList(
     : 'Use getFragment(id) to read the full fragment before relying on details.'
   return [
     `## ${heading}`,
-    `Each bullet is a one-line summary, not the full fragment sheet. ${expand}`,
+    `Each bullet is a one-line summary, not the full fragment. ${expand}`,
     ...items.map((f) => {
       const note = opts.summaryNote?.(f)
       return `- ${f.id}: ${f.name}${note ? ` (${note})` : ''} - ${f.description}`

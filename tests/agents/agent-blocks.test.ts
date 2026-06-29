@@ -142,8 +142,8 @@ describe('Librarian Analyze Blocks', () => {
     }))
     const chBlock = blocks.find(b => b.id === 'character-shortlist')
     expect(chBlock).toBeDefined()
-    expect(chBlock!.content).toContain('## Characters (Summary Index)')
-    expect(chBlock!.content).toContain('not the full fragment sheet')
+    expect(chBlock!.content).toContain('## Characters (Shortlist)')
+    expect(chBlock!.content).toContain('not the full fragment')
     expect(chBlock!.content).toContain('Hero')
   })
 
@@ -325,21 +325,21 @@ describe('Librarian Chat Blocks', () => {
 
     const guideline = blocks.find(b => b.id === 'guideline-summary-index')
     expect(guideline).toBeDefined()
-    expect(guideline!.content).toContain('## Guidelines (Summary Index)')
-    expect(guideline!.content).toContain('not the full fragment sheet')
+    expect(guideline!.content).toContain('## Guidelines (Shortlist)')
+    expect(guideline!.content).toContain('not the full fragment')
     expect(guideline!.content).toContain('gl-stick1: Tone (pinned)')
     expect(guideline!.content).toContain('gl-other1: Style')
 
     const knowledge = blocks.find(b => b.id === 'knowledge-summary-index')
     expect(knowledge).toBeDefined()
-    expect(knowledge!.content).toContain('## Knowledge (Summary Index)')
+    expect(knowledge!.content).toContain('## Knowledge (Shortlist)')
     expect(knowledge!.content).toContain('kn-stick1: Treaty (pinned)')
     expect(knowledge!.content).toContain('kn-recent1: Omen (recent)')
     expect(knowledge!.content).toContain('kn-other1: Crown')
 
     const locations = blocks.find(b => b.id === 'location-summary-index')
     expect(locations).toBeDefined()
-    expect(locations!.content).toContain('## Locations (Summary Index)')
+    expect(locations!.content).toContain('## Locations (Shortlist)')
     expect(locations!.content).toContain('loc-stick1: Library (pinned)')
     expect(locations!.content).toContain('loc-other1: Bridge')
     expect(locations!.fragmentContext).toEqual({
@@ -406,7 +406,7 @@ describe('Librarian Analyze Prompt', () => {
 
     const custom = blocks.find(b => b.id === 'location-shortlist')
     expect(custom).toBeDefined()
-    expect(custom!.content).toContain('## Locations (Summary Index)')
+    expect(custom!.content).toContain('## Locations (Shortlist)')
     expect(custom!.content).toContain('loc-0001')
     expect(custom!.content).toContain('A market below the city')
   })
@@ -434,7 +434,7 @@ describe('Librarian Optimize Character Blocks', () => {
     expect(blocks.find(b => b.id === 'character-pinned-summary-index')).toBeUndefined()
     const allCharacters = blocks.find(b => b.id === 'character-shortlist')
     expect(allCharacters).toBeDefined()
-    expect(allCharacters!.content).toContain('## All Characters (Summary Index)')
+    expect(allCharacters!.content).toContain('## All Characters (Shortlist)')
     expect(allCharacters!.content).toContain('ch-pin01')
     expect(allCharacters!.content).toContain('ch-oth01')
   })
@@ -543,7 +543,7 @@ describe('Writer Blocks', () => {
 
     const shortlist = blocks.find(b => b.id === 'knowledge-shortlist')
     expect(shortlist).toBeDefined()
-    expect(shortlist!.content).toContain('## Knowledge (Summary Index)')
+    expect(shortlist!.content).toContain('## Knowledge (Shortlist)')
     expect(shortlist!.content).toContain('Shield')
 
     const customRecent = blocks.find(b => b.id === 'location-recent')
@@ -557,7 +557,7 @@ describe('Writer Blocks', () => {
 
     const customShortlist = blocks.find(b => b.id === 'location-shortlist')
     expect(customShortlist).toBeDefined()
-    expect(customShortlist!.content).toContain('## Locations (Summary Index)')
+    expect(customShortlist!.content).toContain('## Locations (Shortlist)')
     expect(customShortlist!.content).toContain('loc-bridge')
     expect(customShortlist!.content).toContain('Optional place')
     expect(customShortlist!.content).not.toContain('Shortlist full lore')
@@ -631,8 +631,8 @@ describe('Character Chat Blocks', () => {
       })],
     }))
     const ctx = blocks.find(b => b.id === 'story-context')!
-    expect(ctx.content).toContain('## Pinned Knowledge (Summary Index)')
-    expect(ctx.content).toContain('not the full fragment sheet')
+    expect(ctx.content).toContain('## Pinned Knowledge (Shortlist)')
+    expect(ctx.content).toContain('not the full fragment')
     expect(ctx.content).toContain('kn-test01')
     expect(ctx.content).toContain('Rules for magic')
     expect(ctx.content).not.toContain('Full magic details should not be in this summary list.')
@@ -654,7 +654,7 @@ describe('Character Chat Blocks', () => {
     }))
 
     const ctx = blocks.find(b => b.id === 'story-context')!
-    expect(ctx.content).not.toContain('## Pinned Characters (Summary Index)')
+    expect(ctx.content).not.toContain('## Pinned Characters (Shortlist)')
     expect(ctx.content).not.toContain('- ch-hero01:')
   })
 })
