@@ -22,6 +22,7 @@ import {
   getBackRefs,
 } from '../fragments/associations'
 import { generateFragmentId } from '@/lib/fragment-ids'
+import { renameFragmentIdAcrossStory } from '../fragments/rename'
 import { registry } from '../fragments/registry'
 import { reanalyzeAfterProseChange } from '../librarian/scheduler'
 import { installFragmentBundle } from '../erratanet/pack-install'
@@ -158,6 +159,7 @@ export function fragmentRoutes(dataDir: string) {
       }
       const updated: Fragment = {
         ...versioned,
+        ...(body.type !== undefined ? { type: body.type } : {}),
         ...(body.sticky !== undefined ? { sticky: body.sticky } : {}),
         ...(body.order !== undefined ? { order: body.order } : {}),
         ...(body.placement !== undefined ? { placement: body.placement } : {}),
@@ -166,12 +168,23 @@ export function fragmentRoutes(dataDir: string) {
       }
       await updateFragment(dataDir, params.storyId, updated)
 
+      let idChanged = false
+      let finalId = updated.id
+      if (body.type && body.type !== existing.type) {
+        finalId = await renameFragmentIdAcrossStory(dataDir, params.storyId, updated.id, body.type)
+        if (finalId !== updated.id) {
+          idChanged = true
+          updated.id = finalId
+        }
+      }
+
       reanalyzeAfterProseChange(dataDir, params.storyId, existing, updated)
 
-      return updated
+      return { ...updated, idChanged }
     }, {
       detail: { summary: 'Update a fragment (full replace, versioned)' },
       body: t.Object({
+        type: t.Optional(t.String()),
         name: t.String(),
         description: t.String(),
         content: t.String(),

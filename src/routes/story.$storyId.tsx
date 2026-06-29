@@ -791,6 +791,7 @@ function StoryEditorPage() {
               mode={editorMode}
               onClose={handleEditorClose}
               onSaved={() => {}}
+              onFragmentChange={setSelectedFragment}
             />
           </div>
         )}

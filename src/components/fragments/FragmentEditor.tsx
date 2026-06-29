@@ -9,6 +9,12 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { Pin, Trash2, X, Monitor, User, Upload, ImagePlus, Link2, Unlink, Crop, Archive, Undo2, Copy, Check, Sparkles, Lock, Unlock, Snowflake } from 'lucide-react'
 import type { FrozenSection } from '@/lib/api/types'
 import { RefinementPanel } from '@/components/refinement/RefinementPanel'
@@ -29,6 +35,7 @@ interface FragmentEditorProps {
   mode: 'view' | 'edit'
   onClose: () => void
   onSaved: () => void
+  onFragmentChange?: (fragment: Fragment) => void
 }
 
 export function FragmentEditor({
@@ -37,6 +44,7 @@ export function FragmentEditor({
   mode,
   onClose,
   onSaved,
+  onFragmentChange,
 }: FragmentEditorProps) {
   const queryClient = useQueryClient()
   const confirm = useConfirm()
@@ -96,6 +104,24 @@ export function FragmentEditor({
     enabled: !!fragment?.id && isVersionedType,
   })
 
+  const { data: fragmentTypes } = useQuery({
+    queryKey: ['fragment-types', storyId],
+    queryFn: () => api.fragments.types(storyId),
+  })
+
+  const sortedTypes = useMemo(() => {
+    if (!fragmentTypes) return []
+    const sidebarOrder = ['prose', 'guideline', 'character', 'knowledge']
+    return [...fragmentTypes].sort((a, b) => {
+      const idxA = sidebarOrder.indexOf(a.type)
+      const idxB = sidebarOrder.indexOf(b.type)
+      if (idxA !== -1 && idxB !== -1) return idxA - idxB
+      if (idxA !== -1) return -1
+      if (idxB !== -1) return 1
+      return fragmentTypes.indexOf(a) - fragmentTypes.indexOf(b)
+    })
+  }, [fragmentTypes])
+
   // Sync local state from the source fragment (prop or live query data).
   // Uses liveFragment so that external updates (e.g. refinement agent) are reflected.
   // Skips sync when the user has unsaved edits to prevent overwriting their work.
@@ -147,10 +173,13 @@ export function FragmentEditor({
   }
 
   const updateMutation = useMutation({
-    mutationFn: (data: { name: string; description: string; content: string }) =>
+    mutationFn: (data: { name: string; description: string; content: string; type?: string }) =>
       api.fragments.update(storyId, fragment!.id, data),
-    onSuccess: () => {
+    onSuccess: (data) => {
       invalidate()
+      if (data.idChanged) {
+        onFragmentChange?.(data)
+      }
       onSaved()
     },
   })
@@ -197,7 +226,7 @@ export function FragmentEditor({
   // Auto-save mutation — only invalidates list queries, not the individual fragment,
   // so the sync effect doesn't overwrite the user's in-progress edits.
   const autoSaveMutation = useMutation({
-    mutationFn: (data: { name: string; description: string; content: string }) =>
+    mutationFn: (data: { name: string; description: string; content: string; type?: string }) =>
       api.fragments.update(storyId, fragment!.id, data),
     onSuccess: () => {
       const fType = fragment?.type
@@ -449,7 +478,31 @@ export function FragmentEditor({
           {fragment && (
             <div className="flex items-center gap-1.5 shrink-0">
               <span className="text-[0.625rem] font-mono text-muted-foreground hidden sm:inline">{fragment.id}</span>
-              <Badge variant="secondary" className="text-[0.625rem] h-4">{fragment.type}</Badge>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Badge variant="secondary" className="text-[0.625rem] h-4 cursor-pointer hover:bg-secondary/80 transition-colors">
+                    {fragment.type}
+                  </Badge>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="max-h-64 overflow-y-auto">
+                  {sortedTypes.map((t) => (
+                    <DropdownMenuItem
+                      key={t.type}
+                      className="text-xs"
+                      onClick={() => {
+                        updateMutation.mutate({
+                          type: t.type,
+                          name: name || fragment.name,
+                          description: description || fragment.description,
+                          content: content || fragment.content
+                        })
+                      }}
+                    >
+                      {t.type}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
               {fragment.sticky && (
                 <Badge className="text-[0.625rem] h-4 gap-0.5">
                   <Pin className="size-2" />
