@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo, type CSSProperties } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { Button } from '@/components/ui/button'
@@ -35,7 +35,6 @@ const STORAGE_KEY = 'errata:generation-mode'
 
 const DEFAULT_CONTINUE_INSTRUCTION = 'Continue the story naturally. Write the next scene, advancing the plot and developing characters.'
 const DEFAULT_SCENE_SETTING_INSTRUCTION = "Continue the story without advancing the plot. Focus on atmosphere, internal thoughts, sensory details, or character moments. Don't introduce new events or move the story forward."
-const SUGGESTION_SWITCH_SETTLE_MS = 160
 
 export function InlineGenerationInput({
   storyId,
@@ -76,11 +75,6 @@ export function InlineGenerationInput({
   const [isFetchingSuggestions, setIsFetchingSuggestions] = useState(false)
   const [suggestionError, setSuggestionError] = useState<string | null>(null)
   const [activeSuggestionIndex, setActiveSuggestionIndex] = useState<number | null>(null)
-  const activeSuggestionIndexRef = useRef<number | null>(null)
-  const suggestionSwitchResetRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const [isSwitchingSuggestion, setIsSwitchingSuggestion] = useState(false)
-  const suggestionMeasureRef = useRef<HTMLDivElement | null>(null)
-  const [suggestionDetailHeight, setSuggestionDetailHeight] = useState(0)
 
   // Poll librarian status to detect when analysis completes
   const { data: librarianStatus } = useQuery({
@@ -133,75 +127,15 @@ export function InlineGenerationInput({
     }
   }, [manualSuggestions, analysisDirections])
 
-  useLayoutEffect(() => {
-    if (suggestions.length === 0) {
-      setSuggestionDetailHeight(0)
-      return
-    }
-
-    const measure = () => {
-      const node = suggestionMeasureRef.current
-      if (!node) return
-
-      const next = Math.ceil(
-        Math.max(
-          0,
-          ...Array.from(node.querySelectorAll<HTMLElement>('[data-suggestion-measure]'))
-            .map((element) => element.getBoundingClientRect().height),
-        ),
-      )
-      setSuggestionDetailHeight((current) => current === next ? current : next)
-    }
-
-    measure()
-    window.addEventListener('resize', measure)
-
-    if (!window.ResizeObserver || !suggestionMeasureRef.current) {
-      return () => window.removeEventListener('resize', measure)
-    }
-
-    const observer = new ResizeObserver(measure)
-    observer.observe(suggestionMeasureRef.current)
-
-    return () => {
-      observer.disconnect()
-      window.removeEventListener('resize', measure)
-    }
-  }, [suggestions])
-
   const updateActiveSuggestion = useCallback((nextIndex: number | null) => {
-    const previousIndex = activeSuggestionIndexRef.current
-    activeSuggestionIndexRef.current = nextIndex
-
-    if (suggestionSwitchResetRef.current !== null) {
-      clearTimeout(suggestionSwitchResetRef.current)
-      suggestionSwitchResetRef.current = null
-    }
-
-    const isSwitch = previousIndex !== null && nextIndex !== null && previousIndex !== nextIndex
-    setIsSwitchingSuggestion(isSwitch)
     setActiveSuggestionIndex(nextIndex)
-
-    if (isSwitch) {
-      suggestionSwitchResetRef.current = setTimeout(() => {
-        suggestionSwitchResetRef.current = null
-        setIsSwitchingSuggestion(false)
-      }, SUGGESTION_SWITCH_SETTLE_MS)
-    }
-  }, [])
-
-  useEffect(() => () => {
-    if (suggestionSwitchResetRef.current !== null) {
-      clearTimeout(suggestionSwitchResetRef.current)
-    }
   }, [])
 
   useEffect(() => {
-    const activeIndex = activeSuggestionIndexRef.current
-    if (activeIndex !== null && activeIndex >= suggestions.length) {
+    if (activeSuggestionIndex !== null && activeSuggestionIndex >= suggestions.length) {
       updateActiveSuggestion(null)
     }
-  }, [suggestions.length, updateActiveSuggestion])
+  }, [activeSuggestionIndex, suggestions.length, updateActiveSuggestion])
 
   const handleModeChange = (newMode: InputMode) => {
     setMode(newMode)
@@ -604,12 +538,7 @@ export function InlineGenerationInput({
 
             {/* Suggestion cards */}
             {suggestions.length > 0 && !isFetchingSuggestions && (
-              <div
-                className="relative"
-                style={{
-                  '--suggestion-detail-height': `${suggestionDetailHeight}px`,
-                } as CSSProperties}
-              >
+              <div className="relative">
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-[0.625rem] text-muted-foreground font-sans uppercase tracking-wider">Directions</span>
                   <button
@@ -697,38 +626,24 @@ export function InlineGenerationInput({
                         {/* Bottom expanded description */}
                         <div
                           className={cn(
-                            'overflow-hidden transition-[height] ease-[cubic-bezier(0.16,1,0.3,1)]',
-                            isSwitchingSuggestion ? 'duration-0' : 'duration-300',
+                            'grid overflow-hidden transition-[grid-template-rows] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]',
+                            isExpanded ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]',
                           )}
-                          style={{ height: isExpanded ? 'var(--suggestion-detail-height)' : 0 }}
                         >
-                          <button
-                            type="button"
-                            disabled={isGenerating}
-                            onClick={chooseSuggestion}
-                            className="block h-full w-full px-2.5 pb-2 text-left text-[0.6875rem] text-muted-foreground leading-normal whitespace-normal break-words disabled:cursor-default"
-                          >
-                            {s.description}
-                          </button>
+                          <div className="min-h-0 overflow-hidden">
+                            <button
+                              type="button"
+                              disabled={isGenerating}
+                              onClick={chooseSuggestion}
+                              className="block w-full px-2.5 pb-2 text-left text-[0.6875rem] text-muted-foreground leading-normal whitespace-normal break-words disabled:cursor-default"
+                            >
+                              {s.description}
+                            </button>
+                          </div>
                         </div>
                       </div>
                     )
                   })}
-                </div>
-                <div
-                  ref={suggestionMeasureRef}
-                  aria-hidden="true"
-                  className="pointer-events-none invisible absolute inset-x-0 top-0 -z-10"
-                >
-                  {suggestions.map((s, i) => (
-                    <div
-                      key={i}
-                      data-suggestion-measure="true"
-                      className="px-2.5 pb-2 text-[0.6875rem] leading-normal whitespace-normal break-words"
-                    >
-                      {s.description}
-                    </div>
-                  ))}
                 </div>
               </div>
             )}
