@@ -41,10 +41,10 @@ export function buildAnalyzeSystemPrompt(opts?: {
   // drift). Steps for disabled tools are omitted and the rest renumber, so the
   // prompt never names a tool the model wasn't given.
   const steps: string[] = [
-    '**Scan the new prose word-by-word** against the listed fragments. Report **EVERY** mention of any listed fragment by its exact ID and the exact text used in the prose. Be exhaustive. Include direct names, nicknames, titles, roles, or synonymous key terms. Include minor, passing, or indirect references. **Exclude pronouns** like I, he, she, it, or they (never map the pronoun "I" to the narrator\'s character ID). If an ambiguous word or title refers to two different entities in the same passage, do not report the bare word; instead, report a longer, unique surrounding phrase to distinguish them (e.g., "Captain of the guard" and "Captain of the ship" instead of just "Captain").',
+    '**Scan the new prose word-by-word** against the listed fragments. Report **EVERY** mention of any listed fragment by its exact ID and the exact text used in the prose by calling reportMentions. Be exhaustive. Include direct names, nicknames, titles, roles, or synonymous key terms. Include minor, passing, or indirect references. **Exclude pronouns** like I, he, she, it, or they (never map the pronoun "I" to the narrator\'s character ID). If an ambiguous word or title refers to two different entities in the same passage, do not report the bare word; instead, report a longer, unique surrounding phrase to distinguish them (e.g., "Captain of the guard" and "Captain of the ship" instead of just "Captain").',
     'Summarize what happened by calling updateSummary.',
     'Record contradictions with established facts by calling reportContradictions, and log significant events by calling reportTimeline when the prose has them.',
-    'Update a fragment if the prose changes a lasting fact about it, such as its state, allegiance, title, location, or relationships. The fragment is the record of current state and feeds later writing, so the change must land on the fragment, not only the summary or timeline. You only see a one-line description for most fragments in the shortlist. **CRITICAL:** Never build new content or update a fragment using only the shortlist description. You must use getFragment to fetch the full fragment before making any updates. Use editFragment to replace a specific text span, or updateFragment to set entire fields.',
+    'Update a fragment if the prose changes a lasting fact about it, such as its state, allegiance, title, location, or relationships. The fragment is the record of current state and feeds later writing, so the change must land on the fragment, not only the summary or timeline. When writing updates, you must provide the complete updated text; never use ellipses, truncated text, or placeholders. If you only need to modify a small portion, prefer editFragment to replace a specific text span, or updateFragment to set entire fields with complete text.',
   ]
   if (!opts?.disableSuggestions) {
     const customTypes = opts?.customFragmentTypes ?? []
@@ -286,6 +286,7 @@ You are a conversational librarian assistant for a collaborative writing app. Yo
 7. You can make multiple tool calls in sequence to accomplish complex tasks.
 8. Keep fragment descriptions within the 250 character limit.
 9. Be concise but thorough in your responses.
+10. CRITICAL: When using updateFragment or createFragment, you must provide the content in full. Do NOT truncate the text, use ellipses, or write placeholders. To modify a specific sentence or paragraph without rewriting the entire content, prefer editFragment.
 
 ## Fragment ID Prefixes
 
@@ -355,7 +356,8 @@ export const REFINE_SYSTEM_PROMPT = `You are a fragment refinement agent for a c
 - Preserve the fragment's existing voice and style unless asked otherwise.
 - Update descriptions to stay within the 250 character limit.
 - **Do NOT** delete fragments unless explicitly asked.
-- **Do NOT** modify prose fragments — refine only characters, guidelines, knowledge, and other fragment types.`
+- **Do NOT** modify prose fragments — refine only characters, guidelines, knowledge, and other fragment types.
+- **CRITICAL:** When using updateFragment, you must write the content in full. Never truncate the text, use ellipses, or include placeholders. If you only want to modify a specific text span, prefer editFragment.`
 
 export function createLibrarianRefineBlocks(ctx: AgentBlockContext): ContextBlock[] {
   return compactBlocks([
@@ -505,7 +507,7 @@ export const OPTIMIZE_CHARACTER_SYSTEM_PROMPT = `You are a character optimizatio
 2. Read relevant prose fragments using getFragment to understand how the character actually behaves in the story — not just how they're described on paper.
 3. Analyze gaps between the current fragment and the methodology above. Where are there bare adjectives without cause? Where is friction missing? Which of Egri's dimensions are underdeveloped?
 4. Rewrite the character fragment with depth and causality. Build the ramp of how this person grew up and why they think the way they do. Preserve existing voice and any details that already have depth — improve, don't replace what works.
-5. Use updateFragment to save the improved version. Keep descriptions within the 250 character limit.
+5. Use updateFragment to save the improved version. You must write out the complete updated character sheet in full — never truncate the sheet, use ellipses, or write placeholders. Keep descriptions within the 250 character limit.
 6. Explain what you changed and why — which dimensions you developed, what friction you introduced, what causal chains you built.
 
 Do NOT delete the fragment. Do NOT modify prose fragments. Focus entirely on deepening the character fragment.`
