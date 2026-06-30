@@ -1,14 +1,16 @@
 import { ToolLoopAgent, stepCountIs } from 'ai'
-import { getModel, buildProviderOptions } from '../llm/client'
+import { resolveAgentRuntime } from '../llm/client'
 import { getStory, getFragment, updateFragment } from '../fragments/storage'
 import { getProseChain } from '../fragments/prose-chain'
 import { instructionRegistry } from '../instructions'
 import { createLogger } from '../logging'
+import { drainAgentStream } from '../agents/drain-agent-stream'
+import { resolveAndReportUsage } from '../llm/usage-normalizer'
 
 const logger = createLogger('chapter-summarize')
 
-export const CHAPTER_SUMMARIZE_SYSTEM_PROMPT = `You are a story summarizer for a collaborative writing app.
-Given prose content from a chapter, write a concise 2 paragraph summary capturing the key events, character actions, and mood.
+export const CHAPTER_SUMMARIZE_SYSTEM_PROMPT = `You summarize chapters of an ongoing story.
+Write a concise two-paragraph summary of the chapter's prose, capturing the key events, character actions, and mood.
 Respond with only the summary text.`
 
 export interface ChapterSummarizeInput {
@@ -69,11 +71,11 @@ export async function summarizeChapter(
     proseFragments: proseContent.length,
   })
 
-  const { model, modelId, temperature } = await getModel(dataDir, storyId, { role: 'librarian' })
-  requestLogger.info('Resolved model', { modelId })
-
   const story = await getStory(dataDir, storyId)
-  const providerOptions = buildProviderOptions(story?.settings.disableThinking ?? false)
+  if (!story) throw new Error(`Story ${storyId} not found`)
+
+  const { model, modelId, temperature, providerOptions, guards } = await resolveAgentRuntime(dataDir, storyId, 'librarian', story)
+  requestLogger.info('Resolved model', { modelId })
 
   const agent = new ToolLoopAgent({
     model,
@@ -83,44 +85,29 @@ export async function summarizeChapter(
     stopWhen: stepCountIs(1),
     temperature,
     providerOptions,
+    maxOutputTokens: guards.maxOutputTokens,
   })
 
   const startTime = Date.now()
-  let fullText = ''
-  let fullReasoning = ''
-  let stepCount = 0
-  let lastFinishReason = 'unknown'
   const trace: StreamEvent[] = []
 
   const result = await agent.stream({
     prompt: `Summarize this chapter:\n\n${proseContent.join('\n\n')}`,
   })
 
-  for await (const part of result.fullStream) {
-    const p = part as Record<string, unknown>
+  // Adapt the normalized text/reasoning events back to this agent's own trace
+  // naming (text-delta/reasoning-delta) — an existing, unconsumed output shape
+  // kept as-is rather than migrated in the same pass that unified the loop.
+  const drained = await drainAgentStream(result.fullStream, (event) => {
+    if (event.type === 'text') trace.push({ type: 'text-delta', text: event.text })
+    else if (event.type === 'reasoning') trace.push({ type: 'reasoning-delta', text: event.text })
+  })
+  const { fullText, fullReasoning, stepCount, finishReason: lastFinishReason } = drained
+  trace.push({ type: 'finish', finishReason: lastFinishReason, stepCount })
 
-    switch (part.type) {
-      case 'text-delta': {
-        const text = (p.text ?? '') as string
-        fullText += text
-        trace.push({ type: 'text-delta', text })
-        break
-      }
-      case 'reasoning-delta': {
-        const text = (p.text ?? '') as string
-        fullReasoning += text
-        trace.push({ type: 'reasoning-delta', text })
-        break
-      }
-      case 'finish-step':
-        stepCount++
-        break
-      case 'finish':
-        lastFinishReason = (p.finishReason as string) ?? 'unknown'
-        trace.push({ type: 'finish', finishReason: lastFinishReason, stepCount })
-        break
-    }
-  }
+  // Source is the agent's own name for per-agent attribution; 'librarian' is
+  // only its model-resolution role.
+  await resolveAndReportUsage(dataDir, storyId, 'chapters.summarize', result.totalUsage, modelId)
 
   const durationMs = Date.now() - startTime
   const summary = fullText.trim()

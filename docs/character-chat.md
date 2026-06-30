@@ -107,8 +107,8 @@ Example events from `/chat` stream:
 
 ```json
 {"type":"text","text":"I remember smoke before I saw flames..."}
-{"type":"tool-call","id":"...","toolName":"getFragment","args":{"id":"pr-ab12"}}
-{"type":"tool-result","id":"...","toolName":"getFragment","result":{"ok":true}}
+{"type":"tool-call","id":"...","toolName":"readFragments","args":{"fragmentIds":["pr-ab12"]}}
+{"type":"tool-result","id":"...","toolName":"readFragments","result":{"fragments":[{"id":"pr-ab12","baseHash":"..."}]}}
 {"type":"finish","finishReason":"stop","stepCount":2}
 ```
 
@@ -139,7 +139,7 @@ The Character Chat view is mounted from the story route. The composer auto-resiz
 
 Character chat uses the **agent block system** for context assembly. Instead of hardcoded system prompts and manual context string building, the character chat agent registers block definitions in `src/server/character-chat/blocks.ts`. At runtime, `compileAgentContext()` assembles the system and user messages from those blocks, applying any per-story agent block config overrides.
 
-The agent is created via the shared `createToolAgent()` wrapper, and the response stream is built by `createEventStream()` — both from `src/server/agents/`.
+The agent is built with the shared `createStreamingRunner()` factory, and the response stream is produced by `createEventStream()` — both from `src/server/agents/`.
 
 Character portraits are shown in the chat UI when the character fragment has an image reference in its `refs` array.
 
@@ -149,7 +149,7 @@ Character portraits are shown in the chat UI when the character fragment has an 
 - `src/server/character-chat/blocks.ts` — agent block definitions (system prompt, context layout)
 - `src/server/character-chat/storage.ts`
 - `src/server/character-chat/agents.ts`
-- `src/server/agents/create-agent.ts` — shared `createToolAgent` wrapper
+- `src/server/agents/create-streaming-runner.ts` — shared streaming-agent pipeline factory
 - `src/server/agents/create-event-stream.ts` — shared NDJSON stream builder
 - `src/server/agents/compile-agent-context.ts` — block-based context compiler
 - `tests/character-chat/chat.test.ts`

@@ -153,6 +153,99 @@ export interface LibrarianAnalysisSummary {
   hasTrace?: boolean
 }
 
+export type FragmentChangeAction =
+  | 'create_fragment'
+  | 'replace_text'
+  | 'append_paragraph'
+  | 'set_fields'
+  | 'archive_fragment'
+
+export type FragmentEditableField = 'name' | 'description' | 'content'
+
+export interface FragmentOperationError {
+  code: string
+  message: string
+  nextAction?: 'readFragments' | 'listFragments' | 'proposeProseChanges'
+}
+
+export interface FragmentDiffPreview {
+  field: FragmentEditableField
+  before: string
+  after: string
+}
+
+export interface FragmentOperationValidation {
+  operationId: string
+  action: FragmentChangeAction
+  status: 'valid' | 'invalid' | 'applied' | 'skipped'
+  target?: { fragmentId: string; field?: FragmentEditableField }
+  errors?: FragmentOperationError[]
+  warnings?: string[]
+  diffs?: FragmentDiffPreview[]
+  createdFragmentId?: string
+}
+
+export interface LibrarianAppliedFieldChange {
+  before: string
+  after: string
+}
+
+export type LibrarianAppliedProposalChange =
+  | {
+      kind: 'create'
+      fragmentId: string
+      afterHash: string
+      fields: Partial<Record<FragmentEditableField, LibrarianAppliedFieldChange>>
+    }
+  | {
+      kind: 'update'
+      fragmentId: string
+      beforeHash: string
+      afterHash: string
+      fields: Partial<Record<FragmentEditableField, LibrarianAppliedFieldChange>>
+      addedRefs?: string[]
+      previousLastLibrarianChangeProposal?: unknown
+    }
+  | {
+      kind: 'archive'
+      fragmentId: string
+      beforeHash: string
+      afterHash: string
+    }
+
+export interface LibrarianProposalRevertResult {
+  kind: LibrarianAppliedProposalChange['kind']
+  fragmentId: string
+  status: 'reverted' | 'skipped'
+  message?: string
+}
+
+export type FragmentChangeOperation = {
+  operationId?: string
+  action: FragmentChangeAction
+  reason?: string
+  [key: string]: unknown
+}
+
+export interface LibrarianFragmentChangeProposal {
+  title?: string
+  rationale?: string
+  operations: FragmentChangeOperation[]
+  validation: FragmentOperationValidation[]
+  sourceFragmentId?: string
+  accepted?: boolean
+  autoApplied?: boolean
+  dismissed?: boolean
+  /** Pre-apply validation failed against current state; renders as dismissed but revives if a revert makes it valid again. */
+  stale?: boolean
+  staleReason?: string
+  appliedResults?: FragmentOperationValidation[]
+  appliedChanges?: LibrarianAppliedProposalChange[]
+  reverted?: boolean
+  revertedAt?: string
+  revertResults?: LibrarianProposalRevertResult[]
+}
+
 export interface LibrarianAnalysis {
   id: string
   createdAt: string
@@ -168,18 +261,7 @@ export interface LibrarianAnalysis {
     description: string
     fragmentIds: string[]
   }>
-  fragmentSuggestions: Array<{
-    type: string
-    targetFragmentId?: string
-    name: string
-    description: string
-    content: string
-    sourceFragmentId?: string
-    accepted?: boolean
-    autoApplied?: boolean
-    createdFragmentId?: string
-    dismissed?: boolean
-  }>
+  fragmentChangeProposals: LibrarianFragmentChangeProposal[]
   timelineEvents: Array<{
     event: string
     position: 'before' | 'during' | 'after'
@@ -232,9 +314,22 @@ export interface AgentRunTraceRecord {
   trace: AgentTraceEntry[]
 }
 
-export interface LibrarianAcceptSuggestionResponse {
+export interface LibrarianAcceptChangeProposalResponse {
   analysis: LibrarianAnalysis
-  createdFragmentId: string | null
+  appliedResults: FragmentOperationValidation[]
+  appliedChanges: LibrarianAppliedProposalChange[]
+  createdFragmentIds: string[]
+  updatedFragmentIds: string[]
+  archivedFragmentIds: string[]
+  readFragmentIds: string[]
+}
+
+export interface LibrarianRevertChangeProposalResponse {
+  analysis: LibrarianAnalysis
+  revertResults: LibrarianProposalRevertResult[]
+  updatedFragmentIds: string[]
+  archivedFragmentIds: string[]
+  restoredFragmentIds: string[]
 }
 
 export interface ChatHistory {

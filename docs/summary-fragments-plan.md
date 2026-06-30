@@ -6,7 +6,7 @@ Move librarian-maintained summaries from loose fields (`story.summary`, `analysi
 
 ## Non-goals
 
-- No change to librarian's LLM-facing tools (`updateSummary`, `flagContradiction`, etc). The tool output still writes a `summaryUpdate` string on the analysis; we just additionally materialize it as a fragment.
+- No change to the summary-fragment storage goal. The analysis tool output still writes a `summaryUpdate` string on the analysis; we just additionally materialize it as a fragment.
 - No user-facing tagging convention change. Existing `sticky` and `placement` semantics apply.
 - No rewrite of the chapter marker system.
 

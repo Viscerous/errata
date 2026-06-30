@@ -36,3 +36,10 @@ class InstructionRegistry {
 }
 
 export const instructionRegistry = new InstructionRegistry()
+
+/**
+ * Last-resort system prompt used when a compiled agent context is missing its
+ * system message. Every agent registers a real prompt, so this firing means a
+ * block-compilation bug — shared here so the sentinel is greppable in one place.
+ */
+export const MISSING_SYSTEM_PROMPT_FALLBACK = 'You are a helpful assistant.'

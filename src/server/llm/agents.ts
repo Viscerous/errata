@@ -1,9 +1,8 @@
 import { agentBlockRegistry } from '../agents/agent-block-registry'
 import { instructionRegistry } from '../instructions'
 import type { AgentBlockContext } from '../agents/agent-block-context'
-import { registry } from '../fragments/registry'
 import { createDefaultBlocks, buildContextState, type ContextBlock } from './context-builder'
-import { createFragmentTools } from './tools'
+import { coreReadToolNames, createFragmentTools } from './tools'
 import { createPrewriterBlocks, buildPrewriterPreviewContext, createWriterBriefBlocks, PREWRITER_INSTRUCTIONS } from './prewriter'
 import {
   GENERATION_SYSTEM_PROMPT,
@@ -22,17 +21,7 @@ export function pluralize(name: string): string {
 }
 
 function getAvailableTools(): string[] {
-  const tools: string[] = []
-  const types = registry.listTypes()
-  for (const t of types) {
-    if (t.llmTools === false) continue
-    const cap = capitalize(t.type)
-    const plural = capitalize(pluralize(t.type))
-    tools.push(`get${cap}`)
-    tools.push(`list${plural}`)
-  }
-  tools.push('getFragment', 'listFragments', 'searchFragments', 'listFragmentTypes')
-  return tools
+  return coreReadToolNames()
 }
 
 /** Placeholder author direction shown in the generation context preview. */

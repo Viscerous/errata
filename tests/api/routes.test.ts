@@ -73,6 +73,12 @@ describe('Story API routes', () => {
     expect(res.status).toBe(404)
   })
 
+  it('POST /api/stories/:id/propose-directions returns 404 for unknown story', async () => {
+    const res = await apiJson('/stories/nonexistent/propose-directions', { count: 1 })
+    expect(res.status).toBe(404)
+    expect(await res.json()).toEqual({ error: 'Story not found' })
+  })
+
   it('PUT /api/stories/:id updates a story', async () => {
     const created = await (await apiJson('/stories', story)).json()
     const res = await apiJson(

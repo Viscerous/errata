@@ -3,8 +3,9 @@ import { getGlobalConfig } from '../config/storage'
 import { getStory } from '../fragments/storage'
 import { modelRoleRegistry } from '../agents/model-role-registry'
 import { ensureCoreAgentsRegistered } from '../agents/register-core'
-import type { LanguageModel } from 'ai'
+import type { LanguageModel, ToolLoopAgentSettings } from 'ai'
 import { createLogger } from '../logging'
+import type { StoryMeta } from '../fragments/schema'
 
 // Normalize old camelCase modelOverrides keys to dot-separated agent names
 const OVERRIDE_KEY_ALIASES: Record<string, string> = {
@@ -61,7 +62,7 @@ function getCachedProvider(id: string, baseURL: string, apiKey: string, name: st
   return provider
 }
 
-export type ProviderOptions = Record<string, Record<string, unknown>>
+export type ProviderOptions = NonNullable<ToolLoopAgentSettings['providerOptions']>
 
 /**
  * Build providerOptions that suppress extended thinking / reasoning.
@@ -70,6 +71,33 @@ export type ProviderOptions = Record<string, Record<string, unknown>>
 export function buildProviderOptions(disableThinking: boolean): ProviderOptions | undefined {
   if (!disableThinking) return undefined
   return { openaiCompatible: { reasoningEffort: 'none' } }
+}
+
+/**
+ * Default per-generation cap. Bounds a single LLM step so a runaway or looping
+ * generation fails fast instead of streaming until the request timeout. Sized
+ * with headroom over the largest legitimate output (a full whole-field rewrite),
+ * so it truncates loops, not real work. Tunable per story via
+ * `settings.generationLimits.maxOutputTokens`.
+ */
+export const DEFAULT_MAX_OUTPUT_TOKENS = 8192
+
+export interface GenerationGuards {
+  maxOutputTokens: number
+}
+
+/**
+ * Resolve the per-generation safety settings applied to every agent LLM call,
+ * merging story-level overrides over the defaults. Centralized so the agent
+ * construction sites stay in sync. Deliberately does not set sampling penalties
+ * (frequency/presence) — those vary per model and are left to the provider/model.
+ */
+export function resolveGenerationGuards(
+  limits?: { maxOutputTokens?: number },
+): GenerationGuards {
+  return {
+    maxOutputTokens: limits?.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
+  }
 }
 
 export interface ResolvedModel {
@@ -191,4 +219,36 @@ export async function getModel(dataDir: string, storyId?: string, opts: GetModel
 
   // 5. No provider found — throw descriptive error
   throw new Error('No LLM provider configured. Add a provider in Settings > Providers.')
+}
+
+/**
+ * Everything an agent's `ToolLoopAgent` construction needs beyond its role's
+ * resolved model: the thinking toggle and the per-generation safety caps, both
+ * derived from `story.settings` rather than the role. Bundling them here means
+ * a new cross-cutting knob (the next one, whatever it is) is a one-place change
+ * instead of a re-edit of every agent construction site.
+ */
+export interface AgentRuntime extends ResolvedModel {
+  providerOptions?: ProviderOptions
+  guards: GenerationGuards
+}
+
+/**
+ * Resolve a role's model plus the story-level runtime knobs (`disableThinking`,
+ * `generationLimits`) in one call. Takes `story` rather than reloading it —
+ * every call site already has it (fetched for its own settings checks), so this
+ * never hides a redundant fetch behind a "just resolve everything" call.
+ */
+export async function resolveAgentRuntime(
+  dataDir: string,
+  storyId: string,
+  role: string,
+  story: StoryMeta,
+): Promise<AgentRuntime> {
+  const resolved = await getModel(dataDir, storyId, { role })
+  return {
+    ...resolved,
+    providerOptions: buildProviderOptions(story.settings.disableThinking ?? false),
+    guards: resolveGenerationGuards(story.settings.generationLimits),
+  }
 }

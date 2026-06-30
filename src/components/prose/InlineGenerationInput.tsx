@@ -350,7 +350,7 @@ export function InlineGenerationInput({
     setIsFetchingSuggestions(true)
     setSuggestionError(null)
     try {
-      const result = await api.generation.suggestDirections(storyId)
+      const result = await api.generation.proposeDirections(storyId)
       setManualSuggestions(result.suggestions)
     } catch (err) {
       setSuggestionError(err instanceof Error ? err.message : 'Failed to load suggestions')

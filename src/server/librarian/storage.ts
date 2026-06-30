@@ -5,6 +5,7 @@ import { getContentRoot } from '../fragments/branches'
 import { generateConversationId } from '@/lib/fragment-ids'
 import { writeJsonAtomic } from '../fs-utils'
 import { withKeyLock } from '../async-lock'
+import type { EditableField, FragmentChangeOperation, OperationValidation } from '../fragments/change-operations'
 
 /** Serializes read-modify-write of a story's analysis index against concurrent saves. */
 function withIndexLock<T>(storyId: string, fn: () => Promise<T>): Promise<T> {
@@ -12,6 +13,60 @@ function withIndexLock<T>(storyId: string, fn: () => Promise<T>): Promise<T> {
 }
 
 // --- Types ---
+
+export interface LibrarianFragmentChangeProposal {
+  title?: string
+  rationale?: string
+  operations: FragmentChangeOperation[]
+  validation: OperationValidation[]
+  sourceFragmentId?: string
+  accepted?: boolean
+  autoApplied?: boolean
+  dismissed?: boolean
+  /** Pre-apply validation failed against current state; renders as dismissed but revives if a revert makes it valid again. */
+  stale?: boolean
+  staleReason?: string
+  appliedResults?: OperationValidation[]
+  appliedChanges?: LibrarianAppliedProposalChange[]
+  reverted?: boolean
+  revertedAt?: string
+  revertResults?: LibrarianProposalRevertResult[]
+}
+
+export interface LibrarianAppliedFieldChange {
+  before: string
+  after: string
+}
+
+export type LibrarianAppliedProposalChange =
+  | {
+      kind: 'create'
+      fragmentId: string
+      afterHash: string
+      fields: Partial<Record<EditableField, LibrarianAppliedFieldChange>>
+    }
+  | {
+      kind: 'update'
+      fragmentId: string
+      beforeHash: string
+      afterHash: string
+      fields: Partial<Record<EditableField, LibrarianAppliedFieldChange>>
+      addedRefs?: string[]
+      previousLastLibrarianChangeProposal?: unknown
+    }
+  | {
+      kind: 'archive'
+      fragmentId: string
+      beforeHash: string
+      afterHash: string
+    }
+
+export interface LibrarianProposalRevertResult {
+  kind: LibrarianAppliedProposalChange['kind']
+  fragmentId: string
+  status: 'reverted' | 'skipped'
+  message?: string
+}
 
 export interface LibrarianAnalysis {
   id: string
@@ -36,30 +91,7 @@ export interface LibrarianAnalysis {
     description: string
     fragmentIds: string[]
   }>
-  fragmentSuggestions: Array<{
-    type: string
-    targetFragmentId?: string
-    name: string
-    description: string
-    content: string
-    sourceFragmentId?: string
-    accepted?: boolean
-    autoApplied?: boolean
-    createdFragmentId?: string
-    dismissed?: boolean
-  }>
-  /** @deprecated Use fragmentSuggestions. Kept for backward compat with stored JSON. */
-  knowledgeSuggestions?: Array<{
-    type: string
-    targetFragmentId?: string
-    name: string
-    description: string
-    content: string
-    sourceFragmentId?: string
-    accepted?: boolean
-    autoApplied?: boolean
-    createdFragmentId?: string
-  }>
+  fragmentChangeProposals: LibrarianFragmentChangeProposal[]
   timelineEvents: Array<{
     event: string
     position: 'before' | 'during' | 'after'
@@ -292,14 +324,10 @@ export async function getAnalysis(
   return normalizeAnalysis(JSON.parse(raw))
 }
 
-/** Migrate old knowledgeSuggestions → fragmentSuggestions on read */
 function normalizeAnalysis(data: Record<string, unknown>): LibrarianAnalysis {
   const analysis = data as unknown as LibrarianAnalysis
-  if (!analysis.fragmentSuggestions && analysis.knowledgeSuggestions) {
-    analysis.fragmentSuggestions = analysis.knowledgeSuggestions
-  }
-  if (!analysis.fragmentSuggestions) {
-    analysis.fragmentSuggestions = []
+  if (!analysis.fragmentChangeProposals) {
+    analysis.fragmentChangeProposals = []
   }
   return analysis
 }
@@ -348,13 +376,16 @@ export async function listAnalyses(
     if (!entry.endsWith('.json')) continue
     const raw = await readFile(join(dir, entry), 'utf-8')
     const analysis = normalizeAnalysis(JSON.parse(raw))
+    const suggestionCount = analysis.fragmentChangeProposals.length
+    const pendingSuggestionCount = analysis.fragmentChangeProposals.filter((s) => !s.accepted && !s.dismissed).length
+
     summaries.push({
       id: analysis.id,
       createdAt: analysis.createdAt,
       fragmentId: analysis.fragmentId,
       contradictionCount: analysis.contradictions.length,
-      suggestionCount: analysis.fragmentSuggestions.length,
-      pendingSuggestionCount: analysis.fragmentSuggestions.filter((s) => !s.accepted && !s.dismissed).length,
+      suggestionCount,
+      pendingSuggestionCount,
       timelineEventCount: analysis.timelineEvents.length,
       directionsCount: analysis.directions?.length ?? 0,
       hasTrace: !!analysis.trace?.length,

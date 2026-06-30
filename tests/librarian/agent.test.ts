@@ -12,6 +12,7 @@ import { saveAgentBlockConfig } from '@/server/agents/agent-block-storage'
 import { initProseChain, addProseSection } from '@/server/fragments/prose-chain'
 import { addTag } from '@/server/fragments/associations'
 import type { StoryMeta, Fragment } from '@/server/fragments/schema'
+import { fragmentBaseHash } from '@/server/fragments/change-operations'
 
 const { mockAgentStream } = vi.hoisted(() => ({
   mockAgentStream: vi.fn(),
@@ -200,15 +201,16 @@ describe('librarian agent', () => {
     ) => {
       expect(opts?.instructions).toContain('CUSTOM PREPEND')
       expect(opts?.instructions).toContain('Never drop custom system fragments.')
-      expect(opts?.instructions).toContain('Suggest genuinely new characters, knowledge, locations with suggestFragment')
+      expect(opts?.instructions).toContain('when the prose changes a lasting fact')
+      expect(opts?.instructions).toContain('create genuinely new characters, knowledge, locations')
 
       return {
         fullStream: (async function* () {
           const id = 'call-0'
           const input = { summary: 'They crossed a market.' }
-          yield { type: 'tool-call' as const, toolCallId: id, toolName: 'updateSummary', input }
-          const output = await tools.updateSummary.execute(input)
-          yield { type: 'tool-result' as const, toolCallId: id, toolName: 'updateSummary', output }
+          yield { type: 'tool-call' as const, toolCallId: id, toolName: 'reportAnalysis', input }
+          const output = await tools.reportAnalysis.execute(input)
+          yield { type: 'tool-result' as const, toolCallId: id, toolName: 'reportAnalysis', output }
           yield { type: 'finish' as const, finishReason: 'stop' }
         })(),
       }
@@ -226,7 +228,7 @@ describe('librarian agent', () => {
     await setupProseChain(dataDir, storyId, ['pr-0001'])
 
     mockStreamWithToolCalls([
-      { toolName: 'updateSummary', args: { summary: 'The hero ventured into the dark forest.' } },
+      { toolName: 'reportAnalysis', args: { summary: 'The hero ventured into the dark forest.' } },
     ])
 
     await runLibrarian(dataDir, storyId, 'pr-0001')
@@ -252,7 +254,7 @@ describe('librarian agent', () => {
     await setupProseChain(dataDir, storyId, ['pr-0001'])
 
     mockStreamWithToolCalls([
-      { toolName: 'updateSummary', args: { summary: 'The hero ventured into the dark forest.' } },
+      { toolName: 'reportAnalysis', args: { summary: 'The hero ventured into the dark forest.' } },
     ])
 
     const analysis = await runLibrarian(dataDir, storyId, 'pr-0001')
@@ -280,8 +282,8 @@ describe('librarian agent', () => {
     await setupProseChain(dataDir, storyId, ['pr-0001'])
 
     mockStreamWithToolCalls([
-      { toolName: 'updateSummary', args: { summary: 'Alice drew her sword.' } },
-      { toolName: 'reportMentions', args: { mentions: [{ fragmentId: 'ch-0001', text: 'Alice' }] } },
+      { toolName: 'reportAnalysis', args: { summary: 'Alice drew her sword.' } },
+      { toolName: 'reportAnalysis', args: { mentions: [{ fragmentId: 'ch-0001', text: 'Alice' }] } },
     ])
 
     const analysis = await runLibrarian(dataDir, storyId, 'pr-0001')
@@ -329,6 +331,7 @@ describe('librarian agent', () => {
     await runLibrarian(dataDir, storyId, 'pr-0001')
 
     expect(capturedPrompt).toContain('## Characters in Recent Prose')
+    expect(capturedPrompt).toContain('### `ch-0001` | Alice | The protagonist')
     expect(capturedPrompt).toContain('Alice carries a rune-etched blade.')
   })
 
@@ -338,7 +341,7 @@ describe('librarian agent', () => {
     await setupProseChain(dataDir, storyId, ['pr-0001'])
 
     mockStreamWithToolCalls([
-      { toolName: 'updateSummary', args: { summary: 'The story begins.' } },
+      { toolName: 'reportAnalysis', args: { summary: 'The story begins.' } },
     ])
 
     await runLibrarian(dataDir, storyId, 'pr-0001')
@@ -365,7 +368,7 @@ describe('librarian agent', () => {
     await setupProseChain(dataDir, storyId, ['pr-0001', 'pr-0002', 'pr-0003', 'pr-0004'])
 
     mockStreamWithToolCalls([
-      { toolName: 'updateSummary', args: { summary: 'Summary one.' } },
+      { toolName: 'reportAnalysis', args: { summary: 'Summary one.' } },
     ])
     await runLibrarian(dataDir, storyId, 'pr-0001')
 
@@ -376,7 +379,7 @@ describe('librarian agent', () => {
     // pr-0002 remains unanalyzed. Even though pr-0003 has an analysis,
     // summarizedUpTo must not leap over the gap.
     mockStreamWithToolCalls([
-      { toolName: 'updateSummary', args: { summary: 'Summary three should wait.' } },
+      { toolName: 'reportAnalysis', args: { summary: 'Summary three should wait.' } },
     ])
     await runLibrarian(dataDir, storyId, 'pr-0003')
 
@@ -397,7 +400,7 @@ describe('librarian agent', () => {
     // Overflow threshold is 2000. Two large summaries combined should split.
     const big = 'Lorem ipsum dolor sit amet. '.repeat(50) // ≈1400 chars
     mockStreamWithToolCalls([
-      { toolName: 'updateSummary', args: { summary: big + 'A' } },
+      { toolName: 'reportAnalysis', args: { summary: big + 'A' } },
     ])
     await runLibrarian(dataDir, storyId, 'pr-0001')
 
@@ -405,7 +408,7 @@ describe('librarian agent', () => {
     await setupProseChain(dataDir, storyId, ['pr-0001', 'pr-0002'])
 
     mockStreamWithToolCalls([
-      { toolName: 'updateSummary', args: { summary: big + 'B' } },
+      { toolName: 'reportAnalysis', args: { summary: big + 'B' } },
     ])
     await runLibrarian(dataDir, storyId, 'pr-0002')
 
@@ -436,7 +439,7 @@ describe('librarian agent', () => {
       summaryUpdate: 'Old version should not be used.',
       mentions: [],
       contradictions: [],
-      fragmentSuggestions: [],
+      fragmentChangeProposals: [],
       timelineEvents: [],
     })
     await saveAnalysis(dataDir, storyId, {
@@ -446,12 +449,12 @@ describe('librarian agent', () => {
       summaryUpdate: 'New version should be used.',
       mentions: [],
       contradictions: [],
-      fragmentSuggestions: [],
+      fragmentChangeProposals: [],
       timelineEvents: [],
     })
 
     mockStreamWithToolCalls([
-      { toolName: 'updateSummary', args: { summary: 'Second prose summary.' } },
+      { toolName: 'reportAnalysis', args: { summary: 'Second prose summary.' } },
     ])
     await runLibrarian(dataDir, storyId, 'pr-0002')
 
@@ -475,8 +478,8 @@ describe('librarian agent', () => {
     await setupProseChain(dataDir, storyId, ['pr-0001'])
 
     mockStreamWithToolCalls([
-      { toolName: 'updateSummary', args: { summary: 'Alice confronted a dragon.' } },
-      { toolName: 'reportMentions', args: { mentions: [{ fragmentId: 'ch-0001', text: 'Alice' }] } },
+      { toolName: 'reportAnalysis', args: { summary: 'Alice confronted a dragon.' } },
+      { toolName: 'reportAnalysis', args: { mentions: [{ fragmentId: 'ch-0001', text: 'Alice' }] } },
     ])
 
     const analysis = await runLibrarian(dataDir, storyId, 'pr-0001')
@@ -502,9 +505,9 @@ describe('librarian agent', () => {
     await setupProseChain(dataDir, storyId, ['pr-0001'])
 
     mockStreamWithToolCalls([
-      { toolName: 'updateSummary', args: { summary: 'A forbidden book pulsed on the altar.' } },
+      { toolName: 'reportAnalysis', args: { summary: 'A forbidden book pulsed on the altar.' } },
       {
-        toolName: 'reportMentions',
+        toolName: 'reportAnalysis',
         args: {
           mentions: [
             { fragmentId: 'kn-0001', text: 'Necronomicon' },
@@ -555,8 +558,8 @@ describe('librarian agent', () => {
     await setupProseChain(dataDir, storyId, ['pr-0001'])
 
     mockStreamWithToolCalls([
-      { toolName: 'updateSummary', args: { summary: 'They entered an underground market.' } },
-      { toolName: 'reportMentions', args: { mentions: [{ fragmentId: 'loc-0001', text: 'Ash Market' }] } },
+      { toolName: 'reportAnalysis', args: { summary: 'They entered an underground market.' } },
+      { toolName: 'reportAnalysis', args: { mentions: [{ fragmentId: 'loc-0001', text: 'Ash Market' }] } },
     ])
 
     const analysis = await runLibrarian(dataDir, storyId, 'pr-0001')
@@ -590,15 +593,15 @@ describe('librarian agent', () => {
 
     // First run
     mockStreamWithToolCalls([
-      { toolName: 'updateSummary', args: { summary: 'Alice entered the castle.' } },
-      { toolName: 'reportMentions', args: { mentions: [{ fragmentId: 'ch-0001', text: 'Alice' }] } },
+      { toolName: 'reportAnalysis', args: { summary: 'Alice entered the castle.' } },
+      { toolName: 'reportAnalysis', args: { mentions: [{ fragmentId: 'ch-0001', text: 'Alice' }] } },
     ])
     await runLibrarian(dataDir, storyId, 'pr-0001')
 
     // Second run
     mockStreamWithToolCalls([
-      { toolName: 'updateSummary', args: { summary: 'Alice found the treasure room.' } },
-      { toolName: 'reportMentions', args: { mentions: [{ fragmentId: 'ch-0001', text: 'Alice' }] } },
+      { toolName: 'reportAnalysis', args: { summary: 'Alice found the treasure room.' } },
+      { toolName: 'reportAnalysis', args: { mentions: [{ fragmentId: 'ch-0001', text: 'Alice' }] } },
     ])
     await runLibrarian(dataDir, storyId, 'pr-0002')
 
@@ -621,19 +624,20 @@ describe('librarian agent', () => {
     }))
     await createFragment(dataDir, storyId, makeFragment({
       id: 'pr-0001',
-      content: 'Alice entered the castle.',
+      // Both names present so both runs' mentions anchor to the prose text.
+      content: 'Alice and Bob entered the castle.',
     }))
     await setupProseChain(dataDir, storyId, ['pr-0001'])
 
     mockStreamWithToolCalls([
-      { toolName: 'updateSummary', args: { summary: 'Alice entered the castle.' } },
-      { toolName: 'reportMentions', args: { mentions: [{ fragmentId: 'ch-0001', text: 'Alice' }] } },
+      { toolName: 'reportAnalysis', args: { summary: 'Alice entered the castle.' } },
+      { toolName: 'reportAnalysis', args: { mentions: [{ fragmentId: 'ch-0001', text: 'Alice' }] } },
     ])
     await runLibrarian(dataDir, storyId, 'pr-0001')
 
     mockStreamWithToolCalls([
-      { toolName: 'updateSummary', args: { summary: 'Bob entered the castle.' } },
-      { toolName: 'reportMentions', args: { mentions: [{ fragmentId: 'ch-0002', text: 'Bob' }] } },
+      { toolName: 'reportAnalysis', args: { summary: 'Bob entered the castle.' } },
+      { toolName: 'reportAnalysis', args: { mentions: [{ fragmentId: 'ch-0002', text: 'Bob' }] } },
     ])
     await runLibrarian(dataDir, storyId, 'pr-0001')
 
@@ -642,7 +646,7 @@ describe('librarian agent', () => {
     expect(state.recentMentions['ch-0002']).toEqual(['pr-0001'])
 
     mockStreamWithToolCalls([
-      { toolName: 'updateSummary', args: { summary: 'The castle was empty.' } },
+      { toolName: 'reportAnalysis', args: { summary: 'The castle was empty.' } },
     ])
     await runLibrarian(dataDir, storyId, 'pr-0001')
 
@@ -659,9 +663,9 @@ describe('librarian agent', () => {
     await setupProseChain(dataDir, storyId, ['pr-0001'])
 
     mockStreamWithToolCalls([
-      { toolName: 'updateSummary', args: { summary: 'Alice stared at the stranger.' } },
+      { toolName: 'reportAnalysis', args: { summary: 'Alice stared at the stranger.' } },
       {
-        toolName: 'reportContradictions',
+        toolName: 'reportAnalysis',
         args: {
           contradictions: [{
             description: 'Alice was described as having blue eyes, but new prose says green eyes.',
@@ -676,7 +680,7 @@ describe('librarian agent', () => {
     expect(analysis.contradictions[0].description).toContain('blue eyes')
   })
 
-  it('extracts knowledge suggestions', async () => {
+  it('extracts knowledge proposals', async () => {
     await createStory(dataDir, makeStory())
     await createFragment(dataDir, storyId, makeFragment({
       id: 'pr-0001',
@@ -685,11 +689,12 @@ describe('librarian agent', () => {
     await setupProseChain(dataDir, storyId, ['pr-0001'])
 
     mockStreamWithToolCalls([
-      { toolName: 'updateSummary', args: { summary: 'An ancient city called Valdris was revealed.' } },
+      { toolName: 'reportAnalysis', args: { summary: 'An ancient city called Valdris was revealed.' } },
       {
-        toolName: 'suggestFragment',
+        toolName: 'proposeFragmentChanges',
         args: {
-          suggestions: [{
+          operations: [{
+            action: 'create_fragment',
             type: 'knowledge',
             name: 'Valdris',
             description: 'Ancient mountain city',
@@ -700,12 +705,15 @@ describe('librarian agent', () => {
     ])
 
     const analysis = await runLibrarian(dataDir, storyId, 'pr-0001')
-    expect(analysis.fragmentSuggestions).toHaveLength(1)
-    expect(analysis.fragmentSuggestions[0].name).toBe('Valdris')
-    expect(analysis.fragmentSuggestions[0].sourceFragmentId).toBe('pr-0001')
+    expect(analysis.fragmentChangeProposals).toHaveLength(1)
+    expect(analysis.fragmentChangeProposals[0].operations[0]).toMatchObject({
+      action: 'create_fragment',
+      name: 'Valdris',
+    })
+    expect(analysis.fragmentChangeProposals[0].sourceFragmentId).toBe('pr-0001')
   })
 
-  it('auto-applies suggestions and updates existing suggestion fragments', async () => {
+  it('auto-applies create and update proposals', async () => {
     await createStory(dataDir, makeStory({
       settings: {
         autoApplyLibrarianSuggestions: true,
@@ -723,11 +731,12 @@ describe('librarian agent', () => {
     await setupProseChain(dataDir, storyId, ['pr-0001', 'pr-0002'])
 
     mockStreamWithToolCalls([
-      { toolName: 'updateSummary', args: { summary: 'Valdris appears in old records.' } },
+      { toolName: 'reportAnalysis', args: { summary: 'Valdris appears in old records.' } },
       {
-        toolName: 'suggestFragment',
+        toolName: 'proposeFragmentChanges',
         args: {
-          suggestions: [{
+          operations: [{
+            action: 'create_fragment',
             type: 'knowledge',
             name: 'Valdris',
             description: 'Ancient city',
@@ -738,30 +747,35 @@ describe('librarian agent', () => {
     ])
 
     const first = await runLibrarian(dataDir, storyId, 'pr-0001')
-    expect(first.fragmentSuggestions[0].accepted).toBe(true)
-    expect(first.fragmentSuggestions[0].autoApplied).toBe(true)
-    const createdId = first.fragmentSuggestions[0].createdFragmentId
+    expect(first.fragmentChangeProposals[0].accepted).toBe(true)
+    expect(first.fragmentChangeProposals[0].autoApplied).toBe(true)
+    const createdId = first.fragmentChangeProposals[0].appliedResults?.[0]?.createdFragmentId
     expect(createdId).toBeTruthy()
+    const created = await getFragment(dataDir, storyId, createdId!)
+    expect(created).toBeTruthy()
 
     mockStreamWithToolCalls([
-      { toolName: 'updateSummary', args: { summary: 'Valdris defenses were revealed.' } },
+      { toolName: 'reportAnalysis', args: { summary: 'Valdris defenses were revealed.' } },
       {
-        toolName: 'suggestFragment',
+        toolName: 'proposeFragmentChanges',
         args: {
-          suggestions: [{
-            type: 'knowledge',
-            name: 'Valdris',
-            description: 'Ancient defended city',
-            content: 'Valdris is an ancient mountain city guarded by stone sentinels.',
+          operations: [{
+            action: 'set_fields',
+            fragmentId: createdId,
+            baseHash: fragmentBaseHash(created!),
+            fields: {
+              description: 'Ancient defended city',
+              content: 'Valdris is an ancient mountain city guarded by stone sentinels.',
+            },
           }],
         },
       },
     ])
 
     const second = await runLibrarian(dataDir, storyId, 'pr-0002')
-    expect(second.fragmentSuggestions[0].accepted).toBe(true)
-    expect(second.fragmentSuggestions[0].autoApplied).toBe(true)
-    expect(second.fragmentSuggestions[0].createdFragmentId).toBe(createdId)
+    expect(second.fragmentChangeProposals[0].accepted).toBe(true)
+    expect(second.fragmentChangeProposals[0].autoApplied).toBe(true)
+    expect(second.fragmentChangeProposals[0].appliedResults?.[0]?.target?.fragmentId).toBe(createdId)
 
     const suggestionFragment = await getFragment(dataDir, storyId, createdId!)
     expect(suggestionFragment).toBeTruthy()
@@ -789,31 +803,205 @@ describe('librarian agent', () => {
       content: 'Valdris is defended by sentinels made of stone.',
     }))
     await setupProseChain(dataDir, storyId, ['pr-0001'])
+    const existingKnowledge = await getFragment(dataDir, storyId, 'kn-0001')
+    expect(existingKnowledge).toBeTruthy()
+    const baseHash = fragmentBaseHash(existingKnowledge!)
 
     mockStreamWithToolCalls([
-      { toolName: 'updateSummary', args: { summary: 'Valdris defenses were revealed.' } },
+      { toolName: 'reportAnalysis', args: { summary: 'Valdris defenses were revealed.' } },
       {
-        toolName: 'suggestFragment',
+        toolName: 'proposeFragmentChanges',
         args: {
-          suggestions: [{
-            type: 'knowledge',
-            targetFragmentId: 'kn-0001',
-            name: 'Valdris',
-            description: 'Ancient defended city',
-            content: 'Valdris is an ancient city defended by stone sentinels.',
+          operations: [{
+            action: 'set_fields',
+            fragmentId: 'kn-0001',
+            baseHash,
+            fields: {
+              description: 'Ancient defended city',
+              content: 'Valdris is an ancient city defended by stone sentinels.',
+            },
           }],
         },
       },
     ])
 
     const analysis = await runLibrarian(dataDir, storyId, 'pr-0001')
-    expect(analysis.fragmentSuggestions[0].accepted).toBe(true)
-    expect(analysis.fragmentSuggestions[0].autoApplied).toBe(true)
-    expect(analysis.fragmentSuggestions[0].createdFragmentId).toBe('kn-0001')
+    expect(analysis.fragmentChangeProposals[0].accepted).toBe(true)
+    expect(analysis.fragmentChangeProposals[0].autoApplied).toBe(true)
+    expect(analysis.fragmentChangeProposals[0].appliedResults?.[0]?.target?.fragmentId).toBe('kn-0001')
 
     const updated = await getFragment(dataDir, storyId, 'kn-0001')
     expect(updated).toBeTruthy()
     expect(updated?.content).toContain('stone sentinels')
+    expect(updated?.refs).toContain('pr-0001')
+  })
+
+  it('auto-applies exact edit proposals to existing fragments', async () => {
+    await createStory(dataDir, makeStory({
+      settings: {
+        autoApplyLibrarianSuggestions: true,
+        summarizationThreshold: 0,
+      },
+    }))
+    await createFragment(dataDir, storyId, makeFragment({
+      id: 'ch-0001',
+      type: 'character',
+      name: 'Alice',
+      description: 'Captain of the guard',
+      content: 'Alice is captain of the guard and lives in Valdris.',
+    }))
+    await createFragment(dataDir, storyId, makeFragment({
+      id: 'pr-0001',
+      content: 'Alice resigned and became former captain of the guard.',
+    }))
+    await setupProseChain(dataDir, storyId, ['pr-0001'])
+
+    mockStreamWithToolCalls([
+      { toolName: 'reportAnalysis', args: { summary: 'Alice resigned from the guard.' } },
+      {
+        toolName: 'proposeFragmentChanges',
+        args: {
+          operations: [{
+            action: 'replace_text',
+            fragmentId: 'ch-0001',
+            field: 'content',
+            oldText: 'captain of the guard',
+            newText: 'former captain of the guard',
+            reason: 'The prose says Alice resigned.',
+          }],
+        },
+      },
+    ])
+
+    const analysis = await runLibrarian(dataDir, storyId, 'pr-0001')
+    expect(analysis.fragmentChangeProposals[0].accepted).toBe(true)
+    expect(analysis.fragmentChangeProposals[0].autoApplied).toBe(true)
+
+    const updated = await getFragment(dataDir, storyId, 'ch-0001')
+    expect(updated?.content).toContain('former captain of the guard')
+    expect(updated?.refs).toContain('pr-0001')
+  })
+
+  it('marks a proposal stale instead of leaving it pending when auto-apply validation fails', async () => {
+    await createStory(dataDir, makeStory({
+      settings: {
+        autoApplyLibrarianSuggestions: true,
+        summarizationThreshold: 0,
+      },
+    }))
+    await createFragment(dataDir, storyId, makeFragment({
+      id: 'ch-0001',
+      type: 'character',
+      name: 'Alice',
+      description: 'Captain of the guard',
+      content: 'Alice is captain of the guard and lives in Valdris.',
+    }))
+    await createFragment(dataDir, storyId, makeFragment({
+      id: 'pr-0001',
+      content: 'Alice resigned from the guard.',
+    }))
+    await setupProseChain(dataDir, storyId, ['pr-0001'])
+
+    // Two proposals rewriting the same span differently: both are valid at
+    // propose time (different replacements, so no dedupe), but only the first
+    // can apply — the second must end up stale, not pending.
+    mockStreamWithToolCalls([
+      { toolName: 'reportAnalysis', args: { summary: 'Alice resigned.' } },
+      {
+        toolName: 'proposeFragmentChanges',
+        args: {
+          operations: [{
+            action: 'replace_text',
+            fragmentId: 'ch-0001',
+            field: 'content',
+            oldText: 'captain of the guard',
+            newText: 'no longer with the guard',
+          }],
+        },
+      },
+      {
+        toolName: 'proposeFragmentChanges',
+        args: {
+          operations: [{
+            action: 'replace_text',
+            fragmentId: 'ch-0001',
+            field: 'content',
+            oldText: 'captain of the guard',
+            newText: 'a free blade',
+          }],
+        },
+      },
+    ])
+
+    const analysis = await runLibrarian(dataDir, storyId, 'pr-0001')
+    expect(analysis.fragmentChangeProposals).toHaveLength(2)
+    expect(analysis.fragmentChangeProposals[0].accepted).toBe(true)
+    expect(analysis.fragmentChangeProposals[1].accepted).toBeUndefined()
+    expect(analysis.fragmentChangeProposals[1]).toMatchObject({
+      stale: true,
+      dismissed: true,
+    })
+    expect(analysis.fragmentChangeProposals[1].staleReason).toContain('oldText was not found')
+
+    const updated = await getFragment(dataDir, storyId, 'ch-0001')
+    expect(updated?.content).toContain('no longer with the guard')
+  })
+
+  it('auto-applies batched edit proposals to existing fragments', async () => {
+    await createStory(dataDir, makeStory({
+      settings: {
+        autoApplyLibrarianSuggestions: true,
+        summarizationThreshold: 0,
+      },
+    }))
+    await createFragment(dataDir, storyId, makeFragment({
+      id: 'ch-0001',
+      type: 'character',
+      name: 'Alice',
+      description: 'Scout',
+      content: 'Alice waits at the gate.',
+    }))
+    await createFragment(dataDir, storyId, makeFragment({
+      id: 'pr-0001',
+      content: 'Alice left the gate and accepted command of the watch.',
+    }))
+    await setupProseChain(dataDir, storyId, ['pr-0001'])
+
+    mockStreamWithToolCalls([
+      { toolName: 'reportAnalysis', args: { summary: 'Alice left the gate and took command.' } },
+      {
+        toolName: 'proposeFragmentChanges',
+        args: {
+          operations: [
+            {
+              action: 'append_paragraph',
+              fragmentId: 'ch-0001',
+              field: 'content',
+              text: 'Status: Alice left the gate.',
+              reason: 'The prose changes Alice location.',
+            },
+            {
+              action: 'append_paragraph',
+              fragmentId: 'ch-0001',
+              field: 'content',
+              text: 'Role: Alice accepted command of the watch.',
+              reason: 'The prose changes Alice role.',
+            },
+          ],
+        },
+      },
+    ])
+
+    const analysis = await runLibrarian(dataDir, storyId, 'pr-0001')
+    expect(analysis.fragmentChangeProposals).toHaveLength(1)
+    expect(analysis.fragmentChangeProposals[0]).toMatchObject({
+      accepted: true,
+      autoApplied: true,
+    })
+    expect(analysis.fragmentChangeProposals[0].operations).toHaveLength(2)
+
+    const updated = await getFragment(dataDir, storyId, 'ch-0001')
+    expect(updated?.content).toBe('Alice waits at the gate.\n\nStatus: Alice left the gate.\n\nRole: Alice accepted command of the watch.')
     expect(updated?.refs).toContain('pr-0001')
   })
 
@@ -826,11 +1014,11 @@ describe('librarian agent', () => {
     await setupProseChain(dataDir, storyId, ['pr-0001'])
 
     mockStreamWithToolCalls([
-      { toolName: 'updateSummary', args: { summary: 'The hero defeated the dragon and the village celebrated.' } },
+      { toolName: 'reportAnalysis', args: { summary: 'The hero defeated the dragon and the village celebrated.' } },
       {
-        toolName: 'reportTimeline',
+        toolName: 'reportAnalysis',
         args: {
-          events: [
+          timelineEvents: [
             { event: 'Hero defeated the dragon', position: 'during' },
             { event: 'Village celebration', position: 'after' },
           ],
@@ -853,7 +1041,7 @@ describe('librarian agent', () => {
     await setupProseChain(dataDir, storyId, ['pr-0001'])
 
     mockStreamWithToolCalls([
-      { toolName: 'updateSummary', args: { summary: 'Something happened.' } },
+      { toolName: 'reportAnalysis', args: { summary: 'Something happened.' } },
     ])
 
     const analysis = await runLibrarian(dataDir, storyId, 'pr-0001')
@@ -903,7 +1091,7 @@ describe('librarian agent', () => {
     )
   })
 
-  it('falls back to text when no updateSummary tool is called', async () => {
+  it('falls back to text when no reportAnalysis summary is called', async () => {
     await createStory(dataDir, makeStory())
     await createFragment(dataDir, storyId, makeFragment({ id: 'pr-0001' }))
     await setupProseChain(dataDir, storyId, ['pr-0001'])
@@ -922,14 +1110,14 @@ describe('librarian agent', () => {
     expect(analysis.summaryUpdate).toBe('This is the summary from text.')
   })
 
-  it('derives summary from structured updateSummary payload when summary text is empty', async () => {
+  it('derives summary from structured reportAnalysis payload when summary text is empty', async () => {
     await createStory(dataDir, makeStory())
     await createFragment(dataDir, storyId, makeFragment({ id: 'pr-0001' }))
     await setupProseChain(dataDir, storyId, ['pr-0001'])
 
     mockStreamWithToolCalls([
       {
-        toolName: 'updateSummary',
+        toolName: 'reportAnalysis',
         args: {
           summary: ' ',
           events: ['Alice entered the vault'],
@@ -956,7 +1144,7 @@ describe('librarian agent', () => {
     await setupProseChain(dataDir, storyId, ['pr-0001'])
 
     mockStreamWithToolCalls([
-      { toolName: 'updateSummary', args: { summary: 'Prompt check.' } },
+      { toolName: 'reportAnalysis', args: { summary: 'Prompt check.' } },
     ])
 
     await runLibrarian(dataDir, storyId, 'pr-0001')

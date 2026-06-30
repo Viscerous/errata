@@ -13,6 +13,42 @@ export const AgentBlockConfigSchema = BlockConfigSchema.extend({
 
 export type AgentBlockConfig = z.infer<typeof AgentBlockConfigSchema>
 
+const DISABLED_TOOL_MIGRATIONS: Record<string, string[]> = {
+  getFragment: ['readFragments'],
+  searchFragments: ['findFragments'],
+  getStorySummary: ['readStorySummary'],
+  updateStorySummary: ['proposeFragmentChanges', 'applyProposedChanges'],
+  createFragment: ['proposeFragmentChanges', 'applyProposedChanges'],
+  updateFragment: ['proposeFragmentChanges', 'applyProposedChanges'],
+  editFragment: ['proposeFragmentChanges', 'applyProposedChanges'],
+  deleteFragment: ['proposeFragmentChanges', 'applyProposedChanges'],
+  editProse: ['proposeProseChanges', 'applyProposedChanges'],
+  suggestFragment: ['proposeFragmentChanges', 'applyProposedChanges'],
+  suggestEdit: ['proposeFragmentChanges', 'applyProposedChanges'],
+  updateSummary: ['reportAnalysis'],
+  reportMentions: ['reportAnalysis'],
+  reportContradictions: ['reportAnalysis'],
+  reportTimeline: ['reportAnalysis'],
+  suggestDirections: ['proposeDirections'],
+  askQuestions: ['askClarifyingQuestions'],
+  reanalyzeFragment: ['invokeAgent'],
+  optimizeCharacter: ['invokeAgent'],
+  inspectGeneration: ['inspectRun'],
+}
+
+function normalizeDisabledTools(disabledTools: string[]): string[] {
+  const normalized = new Set<string>()
+  for (const toolName of disabledTools) {
+    const replacement = DISABLED_TOOL_MIGRATIONS[toolName]
+    if (replacement) {
+      for (const migrated of replacement) normalized.add(migrated)
+    } else {
+      normalized.add(toolName)
+    }
+  }
+  return [...normalized]
+}
+
 async function agentBlockConfigPath(dataDir: string, storyId: string, agentName: string): Promise<string> {
   const root = await getContentRoot(dataDir, storyId)
   return join(root, 'agent-blocks', `${agentName}.json`)
@@ -28,7 +64,8 @@ export async function getAgentBlockConfig(dataDir: string, storyId: string, agen
 
   try {
     const raw = await readFile(path, 'utf-8')
-    return AgentBlockConfigSchema.parse(JSON.parse(raw))
+    const parsed = AgentBlockConfigSchema.parse(JSON.parse(raw))
+    return { ...parsed, disabledTools: normalizeDisabledTools(parsed.disabledTools) }
   } catch {
     return emptyConfig()
   }
@@ -37,7 +74,7 @@ export async function getAgentBlockConfig(dataDir: string, storyId: string, agen
 export async function saveAgentBlockConfig(dataDir: string, storyId: string, agentName: string, config: AgentBlockConfig): Promise<void> {
   const path = await agentBlockConfigPath(dataDir, storyId, agentName)
   await mkdir(dirname(path), { recursive: true })
-  await writeJsonAtomic(path, config)
+  await writeJsonAtomic(path, { ...config, disabledTools: normalizeDisabledTools(config.disabledTools) })
 }
 
 export async function addAgentCustomBlock(
@@ -108,7 +145,7 @@ export async function updateAgentDisabledTools(
   disabledTools: string[],
 ): Promise<AgentBlockConfig> {
   const config = await getAgentBlockConfig(dataDir, storyId, agentName)
-  config.disabledTools = disabledTools
+  config.disabledTools = normalizeDisabledTools(disabledTools)
   await saveAgentBlockConfig(dataDir, storyId, agentName, config)
   return config
 }

@@ -167,6 +167,9 @@ describe('Librarian Analyze Blocks', () => {
 
     const recent = blocks.find(b => b.id === 'character-recent')
     expect(recent).toBeDefined()
+    // Full sheet: the shared `id | name | desc` identity line as a heading (the
+    // description is kept so proposals can target it) followed by the content.
+    expect(recent!.content).toContain('### `ch-hero01` | Hero | A brave hero')
     expect(recent!.content).toContain('Hero full sheet body.')
 
     // The recent character is not duplicated into the summary shortlist; the
@@ -191,6 +194,7 @@ describe('Librarian Analyze Blocks', () => {
     const sticky = blocks.find(b => b.id === 'character-sticky')
     expect(sticky).toBeDefined()
     expect(sticky!.content).toContain('## Pinned Characters')
+    expect(sticky!.content).toContain('### `ch-pin01` | Mentor | A wise mentor')
     expect(sticky!.content).toContain('Mentor full sheet body.')
     const shortlist = blocks.find(b => b.id === 'character-shortlist')
     expect(shortlist!.content).toContain('ch-oth01')
@@ -217,7 +221,7 @@ describe('Librarian Analyze Blocks', () => {
     }))
     const knBlock = blocks.find(b => b.id === 'knowledge')
     expect(knBlock).toBeDefined()
-    expect(knBlock!.content).toContain('Magic System')
+    expect(knBlock!.content).toContain('### `kn-magic1` | Magic System')
     // Knowledge is delivered in full to analyze, not as a summary.
     expect(knBlock!.content).toContain('Elemental magic.')
   })
@@ -327,21 +331,22 @@ describe('Librarian Chat Blocks', () => {
     expect(guideline).toBeDefined()
     expect(guideline!.content).toContain('## Guidelines (Shortlist)')
     expect(guideline!.content).toContain('not the full fragment')
-    expect(guideline!.content).toContain('gl-stick1: Tone (pinned)')
-    expect(guideline!.content).toContain('gl-other1: Style')
+    expect(guideline!.content).not.toContain('| ID | Name | Description |')
+    expect(guideline!.content).toContain('`gl-stick1` | Tone (pinned) | Keep it dark')
+    expect(guideline!.content).toContain('`gl-other1` | Style | Gothic')
 
     const knowledge = blocks.find(b => b.id === 'knowledge-summary-index')
     expect(knowledge).toBeDefined()
     expect(knowledge!.content).toContain('## Knowledge (Shortlist)')
-    expect(knowledge!.content).toContain('kn-stick1: Treaty (pinned)')
-    expect(knowledge!.content).toContain('kn-recent1: Omen (recent)')
-    expect(knowledge!.content).toContain('kn-other1: Crown')
+    expect(knowledge!.content).toContain('`kn-stick1` | Treaty (pinned) | Binding lore')
+    expect(knowledge!.content).toContain('`kn-recent1` | Omen (recent) | Recently mentioned lore')
+    expect(knowledge!.content).toContain('`kn-other1` | Crown | Available lore')
 
     const locations = blocks.find(b => b.id === 'location-summary-index')
     expect(locations).toBeDefined()
     expect(locations!.content).toContain('## Locations (Shortlist)')
-    expect(locations!.content).toContain('loc-stick1: Library (pinned)')
-    expect(locations!.content).toContain('loc-other1: Bridge')
+    expect(locations!.content).toContain('`loc-stick1` | Library (pinned) | Pinned place')
+    expect(locations!.content).toContain('`loc-other1` | Bridge | Optional place')
     expect(locations!.fragmentContext).toEqual({
       mode: 'summary-index',
       scope: 'catalog',
@@ -358,7 +363,7 @@ describe('Librarian Refine Blocks', () => {
     expect(ids).toContain('instructions')
     expect(ids).toContain('story-info')
     const instructions = blocks.find(b => b.id === 'instructions')!
-    expect(instructions.content).toContain('read the target fragment using **getFragment**')
+    expect(instructions.content).toContain('read the target fragment using **readFragments**')
     expect(instructions.content).not.toContain('getCharacter')
   })
 
@@ -382,13 +387,12 @@ describe('Librarian Refine Blocks', () => {
     expect(blocks.find(b => b.id === 'prose-recent')).toBeDefined()
   })
 })
-
 describe('Librarian Analyze Prompt', () => {
-  it('reports named character references and excludes pronouns', () => {
+  it('reports named character references', () => {
     const prompt = buildAnalyzeSystemPrompt()
-    expect(prompt).toContain('Include direct names, nicknames, titles, roles')
-    expect(prompt).toContain('Report **EVERY** mention')
-    expect(prompt).toContain('Exclude pronouns')
+    expect(prompt).toContain('direct name, nickname, title, role')
+    expect(prompt).toContain('Scan the new prose against every fragment')
+    expect(prompt).toContain('ambiguous word refers to two entities')
   })
 
   it('includes custom fragment groups for mention detection', () => {
@@ -413,11 +417,11 @@ describe('Librarian Analyze Prompt', () => {
 })
 
 describe('Librarian Optimize Character Blocks', () => {
-  it('uses the generic getFragment tool in instructions', () => {
+  it('uses the generic readFragments tool in instructions', () => {
     const def = agentBlockRegistry.get('librarian.optimize-character')!
     const blocks = def.createDefaultBlocks(makeBaseContext())
     const instructions = blocks.find(b => b.id === 'instructions')!
-    expect(instructions.content).toContain('Read the target character fragment using getFragment')
+    expect(instructions.content).toContain('Read the target character fragment using readFragments')
     expect(instructions.content).not.toContain('getCharacter')
   })
 

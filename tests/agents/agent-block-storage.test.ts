@@ -57,12 +57,12 @@ describe('Agent Block Config Storage', () => {
       customBlocks: [],
       overrides: { instructions: { enabled: false } },
       blockOrder: ['instructions', 'story-summary'],
-      disabledTools: ['reportTimeline'],
+      disabledTools: ['reportAnalysis'],
     })
     const loaded = await getAgentBlockConfig(dataDir, STORY_ID, AGENT_NAME)
     expect(loaded.overrides.instructions?.enabled).toBe(false)
     expect(loaded.blockOrder).toEqual(['instructions', 'story-summary'])
-    expect(loaded.disabledTools).toEqual(['reportTimeline'])
+    expect(loaded.disabledTools).toEqual(['reportAnalysis'])
   })
 
   it('adds a custom block', async () => {
@@ -143,8 +143,27 @@ describe('Agent Block Config Storage', () => {
   })
 
   it('updates disabled tools', async () => {
-    const config = await updateAgentDisabledTools(dataDir, STORY_ID, AGENT_NAME, ['reportTimeline', 'reportContradictions'])
-    expect(config.disabledTools).toEqual(['reportTimeline', 'reportContradictions'])
+    const config = await updateAgentDisabledTools(dataDir, STORY_ID, AGENT_NAME, ['reportAnalysis', 'proposeFragmentChanges'])
+    expect(config.disabledTools).toEqual(['reportAnalysis', 'proposeFragmentChanges'])
+  })
+
+  it('migrates deprecated disabled tool names', async () => {
+    const config = await updateAgentDisabledTools(dataDir, STORY_ID, AGENT_NAME, [
+      'getFragment',
+      'editFragment',
+      'editProse',
+      'suggestDirections',
+      'reanalyzeFragment',
+    ])
+
+    expect(config.disabledTools).toEqual([
+      'readFragments',
+      'proposeFragmentChanges',
+      'applyProposedChanges',
+      'proposeProseChanges',
+      'proposeDirections',
+      'invokeAgent',
+    ])
   })
 
   it('isolates configs between agents', async () => {
@@ -152,7 +171,7 @@ describe('Agent Block Config Storage', () => {
       customBlocks: [],
       overrides: { instructions: { enabled: false } },
       blockOrder: [],
-      disabledTools: ['reportTimeline'],
+      disabledTools: ['reportAnalysis'],
     })
     await saveAgentBlockConfig(dataDir, STORY_ID, 'librarian.chat', {
       customBlocks: [],
@@ -165,7 +184,7 @@ describe('Agent Block Config Storage', () => {
     const chatConfig = await getAgentBlockConfig(dataDir, STORY_ID, 'librarian.chat')
 
     expect(analyzeConfig.overrides.instructions?.enabled).toBe(false)
-    expect(analyzeConfig.disabledTools).toEqual(['reportTimeline'])
+    expect(analyzeConfig.disabledTools).toEqual(['reportAnalysis'])
     expect(chatConfig.overrides.instructions).toBeUndefined()
     expect(chatConfig.blockOrder).toEqual(['instructions'])
   })

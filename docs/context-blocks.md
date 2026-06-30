@@ -43,7 +43,7 @@ Two marker formats are used:
 
 ```
 [@block=instructions]
-You are a creative writing assistant...
+You are a fiction writer continuing an ongoing story...
 
 [@block=tools]
 ## Available Tools
@@ -55,9 +55,9 @@ Write in present tense, third person limited.
 
 Other marker types used within block content:
 
-- `[@section=Label]` — sub-sections within a block (e.g. Guidelines/Knowledge/Characters groupings inside `system-fragments` or `user-fragments`)
-- `[@fragment=id]` — individual fragment content
 - `[@plugin=name]` — plugin-contributed tool descriptions
+
+Block *content* carries no markers beyond these: sub-sections inside `system-fragments`/`user-fragments` are plain `## Label` headings, and fragment content carries no per-fragment id marker — full renders are the literary form (name-first heading), and fragment ids appear only on the machine surface, the `` `id` | name | desc `` shortlist rows (or, for editing agents, `renderFullFragmentSheet`'s id-bearing headings).
 
 ## Default Blocks
 
@@ -89,9 +89,9 @@ cost bounded:
   relevant) and the **relevance set** — characters the writer actually worked from,
   rendered in `character-recent`. The relevance set comes from `writerContextIds`,
   a type-agnostic signal the writer records on each prose fragment's `meta`.
-- **Summary** — one line per fragment (`id: name — description`) via
+- **Summary** — one line per fragment (`` `id` | name | desc ``) via
   `fragmentSummaryBlock`. Used for the `*-shortlist` blocks (non-sticky, non-recent).
-- **On demand** — not in context at all; the agent fetches with `getFragment`.
+- **On demand** — not in context at all; the agent fetches with `readFragments`.
 
 A fragment's **full** render is `name + content` (per type's `registry.renderContext`);
 the `description` is dropped, since it's the fragment's *summary* form and would be a
@@ -527,7 +527,7 @@ AgentBlockContext → createDefaultBlocks() → applyBlockConfig() → compileBl
 
 1. The calling agent builds an `AgentBlockContext` with relevant story data.
 2. `compileAgentContext()` looks up the agent's registered block definitions, creates default blocks, applies per-story config overrides, and compiles into messages.
-3. The compiled system/user messages and filtered tools are passed to `createToolAgent()`.
+3. The compiled system/user messages and filtered tools are passed to the agent's `ToolLoopAgent` construction (via `createStreamingRunner` for factory-based agents, or the agent's own runner for bespoke ones).
 
 ## AgentBlockContext
 
@@ -595,7 +595,7 @@ generation           → ['generation']
 
 ### Resolution Flow
 
-`getModel(dataDir, storyId, { role })` in `src/server/llm/client.ts` resolves a model by walking the fallback chain:
+`getModel(dataDir, storyId, { role })` in `src/server/llm/client.ts` resolves a model by walking the fallback chain (agents call it through `resolveAgentRuntime()`, which bundles the story-level `disableThinking`/`generationLimits` knobs into the same resolution):
 
 1. **Story `modelOverrides` map** — For each key in the chain, check `story.settings.modelOverrides[key]` for a `providerId`/`modelId` pair.
 2. **Legacy field map** — If no override matched, check legacy per-field story settings (e.g. `librarianProviderId`, `characterChatModelId`). See backward compatibility below.
@@ -700,7 +700,8 @@ The **Agent Configure** panel is accessible from the sidebar under **Management 
 | `src/server/agents/agent-block-registry.ts` | Agent block definition registry |
 | `src/server/agents/agent-block-storage.ts` | Per-agent block config storage |
 | `src/server/agents/compile-agent-context.ts` | `compileAgentContext()` — assembles messages from blocks |
-| `src/server/agents/create-agent.ts` | `createToolAgent()` — shared `ToolLoopAgent` wrapper |
+| `src/server/agents/create-streaming-runner.ts` | `createStreamingRunner()` — standard pipeline factory (constructs the `ToolLoopAgent`) |
+| `src/server/agents/drain-agent-stream.ts` | `drainAgentStream()` — shared `fullStream` → `AgentStreamEvent` translator |
 | `src/server/agents/create-event-stream.ts` | `createEventStream()` — shared NDJSON stream builder |
 | `src/server/agents/stream-types.ts` | `AgentStreamEvent`, `AgentStreamResult`, `ChatResult` types |
 | `src/server/librarian/blocks.ts` | Block definitions for all librarian agents |

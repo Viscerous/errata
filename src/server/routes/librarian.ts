@@ -21,7 +21,17 @@ import {
   saveConversationHistory,
   getLatestAnalysisIdsByFragment,
 } from '../librarian/storage'
-import { applyFragmentSuggestion } from '../librarian/suggestions'
+import {
+  applyFragmentChangeProposal,
+  markFragmentChangeProposalApplied,
+  markFragmentChangeProposalReverted,
+  markFragmentChangeProposalStale,
+  ProposalApplyError,
+  ProposalValidationError,
+  ProposalRevertConflictError,
+  refreshPendingFragmentChangeProposals,
+  revertFragmentChangeProposal,
+} from '../librarian/suggestions'
 import { createLogger } from '../logging'
 import { encodeStream } from './encode-stream'
 
@@ -158,52 +168,135 @@ export function librarianRoutes(dataDir: string) {
       detail: { summary: 'Update an analysis summary (deprecated — edit the linked summary fragment instead)' },
     })
 
-    .post('/stories/:storyId/librarian/analyses/:analysisId/suggestions/:index/accept', async ({ params, set }) => {
+    .post('/stories/:storyId/librarian/analyses/:analysisId/change-proposals/:index/accept', async ({ params, set }) => {
       const analysis = await getLibrarianAnalysis(dataDir, params.storyId, params.analysisId)
       if (!analysis) {
         set.status = 404
         return { error: 'Analysis not found' }
       }
       const index = parseInt(params.index, 10)
-      if (isNaN(index) || index < 0 || index >= analysis.fragmentSuggestions.length) {
+      if (isNaN(index) || index < 0 || index >= analysis.fragmentChangeProposals.length) {
         set.status = 422
-        return { error: 'Invalid suggestion index' }
+        return { error: 'Invalid fragment change proposal index' }
       }
 
-      const result = await applyFragmentSuggestion({
-        dataDir,
-        storyId: params.storyId,
-        analysis,
-        suggestionIndex: index,
-        reason: 'manual-accept',
-      })
+      let result: Awaited<ReturnType<typeof applyFragmentChangeProposal>>
+      try {
+        result = await applyFragmentChangeProposal({
+          dataDir,
+          storyId: params.storyId,
+          analysis,
+          proposalIndex: index,
+          reason: 'manual-accept',
+        })
+      } catch (error) {
+        if (error instanceof ProposalApplyError) {
+          // Some operations wrote to disk before a later one failed. Record the
+          // partial application so it stays visible and revertible.
+          markFragmentChangeProposalApplied({
+            analysis,
+            proposalIndex: index,
+            result: error.partial,
+            autoApplied: false,
+          })
+          await saveLibrarianAnalysis(dataDir, params.storyId, analysis)
+        } else if (error instanceof ProposalValidationError) {
+          // Nothing was written; the proposal is stale against current fragment
+          // state (typically a sibling proposal already landed the same change).
+          // Mark it so the user is not offered an accept that can only fail again.
+          markFragmentChangeProposalStale({
+            analysis,
+            proposalIndex: index,
+            reason: error.message,
+            validation: error.results,
+          })
+          await saveLibrarianAnalysis(dataDir, params.storyId, analysis)
+        }
+        set.status = 422
+        return { error: error instanceof Error ? error.message : String(error), analysis }
+      }
 
-      analysis.fragmentSuggestions[index].accepted = true
-      analysis.fragmentSuggestions[index].autoApplied = false
-      analysis.fragmentSuggestions[index].createdFragmentId = result.fragmentId
+      markFragmentChangeProposalApplied({
+        analysis,
+        proposalIndex: index,
+        result,
+        autoApplied: false,
+      })
+      // A successful apply can invalidate sibling proposals that carry the same
+      // change; mark them stale now instead of letting their accept fail later.
+      await refreshPendingFragmentChangeProposals({ dataDir, storyId: params.storyId, analysis })
       await saveLibrarianAnalysis(dataDir, params.storyId, analysis)
       return {
         analysis,
-        createdFragmentId: result.fragmentId,
+        ...result,
       }
-    }, { detail: { summary: 'Accept a fragment suggestion' } })
+    }, { detail: { summary: 'Accept a fragment change proposal' } })
 
-    .post('/stories/:storyId/librarian/analyses/:analysisId/suggestions/:index/dismiss', async ({ params, set }) => {
+    .post('/stories/:storyId/librarian/analyses/:analysisId/change-proposals/:index/revert', async ({ params, set }) => {
       const analysis = await getLibrarianAnalysis(dataDir, params.storyId, params.analysisId)
       if (!analysis) {
         set.status = 404
         return { error: 'Analysis not found' }
       }
       const index = parseInt(params.index, 10)
-      if (isNaN(index) || index < 0 || index >= analysis.fragmentSuggestions.length) {
+      if (isNaN(index) || index < 0 || index >= analysis.fragmentChangeProposals.length) {
         set.status = 422
-        return { error: 'Invalid suggestion index' }
+        return { error: 'Invalid fragment change proposal index' }
       }
 
-      analysis.fragmentSuggestions[index].dismissed = true
+      let result: Awaited<ReturnType<typeof revertFragmentChangeProposal>>
+      try {
+        result = await revertFragmentChangeProposal({
+          dataDir,
+          storyId: params.storyId,
+          analysis,
+          proposalIndex: index,
+        })
+      } catch (error) {
+        if (error instanceof ProposalRevertConflictError) {
+          set.status = 409
+          return {
+            error: error.message,
+            ...(error.partial ? { partial: error.partial } : {}),
+          }
+        }
+        set.status = 422
+        return { error: error instanceof Error ? error.message : String(error) }
+      }
+
+      await markFragmentChangeProposalReverted({
+        dataDir,
+        storyId: params.storyId,
+        analysis,
+        proposalIndex: index,
+        result,
+      })
+      // Reverting can make sibling proposals valid again (their change is no
+      // longer duplicated); revive any that were auto-marked stale.
+      await refreshPendingFragmentChangeProposals({ dataDir, storyId: params.storyId, analysis })
+      await saveLibrarianAnalysis(dataDir, params.storyId, analysis)
+      return {
+        analysis,
+        ...result,
+      }
+    }, { detail: { summary: 'Revert an accepted fragment change proposal' } })
+
+    .post('/stories/:storyId/librarian/analyses/:analysisId/change-proposals/:index/dismiss', async ({ params, set }) => {
+      const analysis = await getLibrarianAnalysis(dataDir, params.storyId, params.analysisId)
+      if (!analysis) {
+        set.status = 404
+        return { error: 'Analysis not found' }
+      }
+      const index = parseInt(params.index, 10)
+      if (isNaN(index) || index < 0 || index >= analysis.fragmentChangeProposals.length) {
+        set.status = 422
+        return { error: 'Invalid fragment change proposal index' }
+      }
+
+      analysis.fragmentChangeProposals[index].dismissed = true
       await saveLibrarianAnalysis(dataDir, params.storyId, analysis)
       return { analysis }
-    }, { detail: { summary: 'Dismiss a fragment suggestion' } })
+    }, { detail: { summary: 'Dismiss a fragment change proposal' } })
 
     .delete('/stories/:storyId/librarian/analyses/:analysisId', async ({ params, set }) => {
       const { deleteAnalysis } = await import('../librarian/storage')

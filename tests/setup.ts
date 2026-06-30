@@ -1,6 +1,8 @@
 import { mkdtemp, rm, writeFile, mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { afterEach } from 'vitest'
+import { awaitPending, clearPending } from '../src/server/librarian/scheduler'
 import type { StoryMeta } from '../src/server/fragments/schema'
 
 type StorySettings = StoryMeta['settings']
@@ -71,3 +73,8 @@ export async function seedTestProvider(dataDir: string): Promise<void> {
   }
   await writeFile(join(dataDir, 'config.json'), JSON.stringify(config))
 }
+
+afterEach(async () => {
+  await awaitPending()
+  clearPending()
+})

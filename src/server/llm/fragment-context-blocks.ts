@@ -218,8 +218,95 @@ export function renderContextFragment(f: Fragment): string {
     : renderGenericFragmentContext(f)
 }
 
-export function renderFragmentWithMarker(f: Fragment): string {
-  return `[@fragment=${f.id}]\n${renderContextFragment(f)}`
+/** Collapse a value to a single pipe-table cell (no newlines, no pipe chars). */
+function summaryCell(value: string): string {
+  return value.replace(/\s+/g, ' ').replace(/\|/g, '/').trim()
+}
+
+/**
+ * The shared one-line identity for a fragment: `` `id` | name | desc ``. Used both
+ * for shortlist rows and as the heading of a full sheet, so the model reads the
+ * same `id | name | desc` grammar everywhere and distinguishes a full fragment
+ * (a `###` heading followed by content) from a summary (a bare row) at a glance.
+ */
+export function fragmentSummaryLine(
+  item: { id: string; name: string; description: string },
+  note?: string,
+): string {
+  const name = `${item.name}${note ? ` (${note})` : ''}`
+  return `\`${summaryCell(item.id)}\` | ${summaryCell(name)} | ${summaryCell(item.description)}`
+}
+
+/**
+ * A full fragment sheet: the shared identity line as a `###` heading, then the
+ * complete content. Distinct from a shortlist row (heading + body) yet cohesive
+ * with it (same `id | name | desc` grammar), and it keeps the description that
+ * proposals may target.
+ */
+export function renderFullFragmentSheet(f: Fragment): string {
+  return `### ${fragmentSummaryLine(f)}\n${f.content}`
+}
+
+// ─── Shared block builders — one source for the house context grammar ───
+
+/** The story header: the title as the prompt's single `#`, description beneath. */
+export function storyHeaderContent(story: StoryMeta): string {
+  return `# ${story.name}\n${story.description}`
+}
+
+/** Canonical heading for the rolling summary — one phrasing across every agent. */
+export const STORY_SUMMARY_HEADING = 'Story Summary So Far'
+
+export function storySummaryBlock(
+  summary: string | undefined,
+  opts: { order: number; id?: string; placeholder?: string },
+): ContextBlock | null {
+  const body = (summary?.trim() ? summary : opts.placeholder) ?? ''
+  if (!body) return null
+  return {
+    id: opts.id ?? 'summary',
+    role: 'user',
+    content: `## ${STORY_SUMMARY_HEADING}\n${body}`,
+    order: opts.order,
+    source: 'builtin',
+  }
+}
+
+/**
+ * The recent-prose window — sections join as continuous manuscript, the end
+ * marker fences prose off from whatever block follows — or, when no prose
+ * exists yet, the new-story guidance (omitted entirely if none is given).
+ */
+export function proseWindowBlock(
+  proseFragments: Fragment[],
+  opts: { order: number; newStoryGuidance?: string },
+): ContextBlock | null {
+  if (proseFragments.length === 0) {
+    if (!opts.newStoryGuidance) return null
+    return {
+      id: 'new-story',
+      role: 'user',
+      content: [
+        '## New Story',
+        'There is no existing prose yet. You are writing the very beginning of this story.',
+        opts.newStoryGuidance,
+        'Do NOT reference or continue from any prior narrative; start fresh.',
+      ].join('\n'),
+      order: opts.order,
+      source: 'builtin',
+    }
+  }
+  return {
+    id: 'prose-recent',
+    role: 'user',
+    content: [
+      '## Recent Prose',
+      ...proseFragments.map(renderContextFragment),
+      '## End of Recent Prose',
+    ].join('\n\n'),
+    order: opts.order,
+    source: 'builtin',
+  }
 }
 
 export function fragmentSummaryIndexHeading(label: string, scope?: FragmentContextScope | string): string {
@@ -230,21 +317,19 @@ export function fragmentSummaryIndexHeading(label: string, scope?: FragmentConte
   return `${normalized} (Shortlist)`
 }
 
-export function fragmentSummaryList(
+export function fragmentSummaryList<T extends { id: string; name: string; description: string }>(
   heading: string,
-  items: Array<{ id: string; name: string; description: string }>,
-  opts: { editable?: boolean; summaryNote?: (item: { id: string; name: string; description: string }) => string | undefined } = {},
+  items: T[],
+  opts: { editable?: boolean; summaryNote?: (item: T) => string | undefined } = {},
 ): string {
   const expand = opts.editable
-    ? 'Read the full fragment with getFragment(id) before editing it or relying on details.'
-    : 'Use getFragment(id) to read the full fragment before relying on details.'
+    ? 'Read full fragments with readFragments before editing them or relying on details.'
+    : 'Use readFragments to read the full fragment before relying on details.'
   return [
     `## ${heading}`,
-    `Each bullet is a one-line summary, not the full fragment. ${expand}`,
-    ...items.map((f) => {
-      const note = opts.summaryNote?.(f)
-      return `- ${f.id}: ${f.name}${note ? ` (${note})` : ''} - ${f.description}`
-    }),
+    `Each line is a one-line summary, not the full fragment. Format: \`id\` | name | desc. ${expand}`,
+    '',
+    ...items.map((f) => fragmentSummaryLine(f, opts.summaryNote?.(f))),
   ].join('\n')
 }
 
@@ -267,11 +352,17 @@ export function renderFragmentContextGroup(group: FragmentContextGroup): string 
     })
   }
 
-  const render = group.renderFragment ?? renderFragmentWithMarker
+  // Default full render is the literary form (name-first heading, no id): a
+  // fragment already in full needs no lookup key, and ids stay confined to the
+  // one machine surface — the `id | name | desc` shortlist rows. Agents that
+  // edit fragments opt into renderFullFragmentSheet for id-bearing headings.
+  // Blank-line separation is the default: with no per-fragment id markers,
+  // spacing alone marks where one fragment ends and the next begins.
+  const render = group.renderFragment ?? renderContextFragment
   return [
     `## ${heading}`,
     ...group.fragments.map(render),
-  ].join(group.separator ?? '\n')
+  ].join(group.separator ?? '\n\n')
 }
 
 export function fragmentContextBlock(group: FragmentContextGroup): ContextBlock | null {

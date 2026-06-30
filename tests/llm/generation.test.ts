@@ -276,7 +276,7 @@ describe('generation endpoint', () => {
     const callArgs = mockAgentStream.mock.calls[0][0] as any
     const systemText = extractMessageText(callArgs.messages, 'system')
     expect(systemText).toContain('You are a haiku-only writing engine.')
-    expect(systemText).not.toContain('You are a creative writing assistant. Your task is to write prose that continues the story based on the author\'s direction.')
+    expect(systemText).not.toContain('You are a fiction writer continuing an ongoing story. Write the next passage of prose following the author\'s direction.')
   })
 
   it('POST /stories/:storyId/generate applies writer instruction prepend and append from agent config', async () => {
@@ -344,6 +344,29 @@ describe('generation endpoint', () => {
     expect(callArgs.temperature).toBe(0.42)
   })
 
+  it('POST /stories/:storyId/generate caps the writer agent output tokens from generationLimits', async () => {
+    const story = makeStory({ generationLimits: { maxOutputTokens: 4096 } })
+    await updateStory(dataDir, story)
+
+    mockAgentStream.mockResolvedValue(
+      createMockStreamResult('Generated text.') as any,
+    )
+
+    const res = await api(`/stories/${storyId}/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        input: 'Write something',
+        saveResult: false,
+      }),
+    })
+
+    expect(res.status).toBe(200)
+
+    const callArgs = mockAgentCtor.mock.calls[0][0] as any
+    expect(callArgs.maxOutputTokens).toBe(4096)
+  })
+
   it('POST /stories/:storyId/generate includes fragment tools', async () => {
     mockAgentStream.mockResolvedValue(
       createMockStreamResult('Generated text.') as any,
@@ -385,9 +408,9 @@ describe('generation endpoint', () => {
 
     const callArgs = mockAgentCtor.mock.calls[0][0] as any
     expect(callArgs.tools).toHaveProperty('listFragmentTypes')
-    expect(callArgs.tools).toHaveProperty('getFragment')
+    expect(callArgs.tools).toHaveProperty('readFragments')
     expect(callArgs.tools).toHaveProperty('listFragments')
-    expect(callArgs.tools).toHaveProperty('searchFragments')
+    expect(callArgs.tools).toHaveProperty('findFragments')
   })
 
   it('POST /stories/:storyId/generate excludes tools listed in disabledTools', async () => {
@@ -395,7 +418,7 @@ describe('generation endpoint', () => {
       customBlocks: [],
       overrides: {},
       blockOrder: [],
-      disabledTools: ['listFragments', 'getFragment', 'searchFragments'],
+      disabledTools: ['listFragments', 'readFragments', 'findFragments'],
     })
 
     mockAgentStream.mockResolvedValue(
@@ -416,8 +439,8 @@ describe('generation endpoint', () => {
     const callArgs = mockAgentCtor.mock.calls[0][0] as any
     expect(callArgs.tools).toHaveProperty('listFragmentTypes')
     expect(callArgs.tools).not.toHaveProperty('listFragments')
-    expect(callArgs.tools).not.toHaveProperty('getFragment')
-    expect(callArgs.tools).not.toHaveProperty('searchFragments')
+    expect(callArgs.tools).not.toHaveProperty('readFragments')
+    expect(callArgs.tools).not.toHaveProperty('findFragments')
   })
 
   it('POST /stories/:storyId/generate saves result when saveResult=true', async () => {

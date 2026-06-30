@@ -1,29 +1,29 @@
 import { ToolLoopAgent, stepCountIs } from 'ai'
 import { z } from 'zod/v4'
-import { getModel, buildProviderOptions } from '../llm/client'
+import { resolveAgentRuntime } from '../llm/client'
 import { getStory, getFragment } from '../fragments/storage'
 import { buildContextState } from '../llm/context-builder'
 import { compileAgentContext } from '../agents/compile-agent-context'
 import { getFragmentsByTag } from '../fragments/associations'
 import { instructionRegistry } from '../instructions'
-import { reportUsage } from '../llm/token-tracker'
-import { normalizeTokenUsage } from '../llm/usage-normalizer'
+import { resolveAndReportUsage } from '../llm/usage-normalizer'
 import { createLogger } from '../logging'
 import { type AgentBlockContext, baseBlockContext } from '../agents/agent-block-context'
 import { loadSystemPromptFragments } from '../agents/block-helpers'
+import { drainAgentStream } from '../agents/drain-agent-stream'
 
 const logger = createLogger('directions-suggest')
 
-export const DEFAULT_SUGGEST_PROMPT = `Based on everything in the story so far, suggest exactly {{count}} possible directions the story could go next. Return ONLY a JSON array with no other text. Each element must have:
+export const DEFAULT_SUGGEST_PROMPT = `Based on everything in the story so far, suggest exactly {{count}} possible directions the story could go next as a JSON array. Each element must have:
 - "title": a short evocative title (3-6 words)
 - "description": 1-2 sentences describing this direction
 - "instruction": a detailed writing prompt (2-3 sentences) that could be given to a writer to produce this continuation
 
 Consider a mix of: advancing the main plot, exploring character relationships, introducing tension or conflict, quiet character moments, and unexpected developments. Make each suggestion meaningfully different from the others.
 
-Respond with ONLY the JSON array, no markdown fences or other text.`
+Respond with **only** the raw JSON array — your entire response must parse as JSON.`
 
-export interface SuggestDirectionsInput {
+export interface DirectionProposalInput {
   count?: number
 }
 
@@ -33,7 +33,7 @@ export interface SuggestionDirection {
   instruction: string
 }
 
-export interface SuggestDirectionsResult {
+export interface DirectionProposalResult {
   suggestions: SuggestionDirection[]
   modelId: string
   durationMs: number
@@ -60,21 +60,22 @@ export function parseSuggestionDirectionsResponse(text: string, count: number): 
   return validation.data
 }
 
-export async function suggestDirections(
+export async function proposeDirections(
   dataDir: string,
   storyId: string,
-  input: SuggestDirectionsInput,
-): Promise<SuggestDirectionsResult> {
+  input: DirectionProposalInput,
+): Promise<DirectionProposalResult> {
   const requestLogger = logger.child({ storyId })
   const count = input.count ?? 4
 
   // Load story to get custom prompt if configured
   const story = await getStory(dataDir, storyId)
+  if (!story) throw new Error(`Story not found: ${storyId}`)
 
-  const { model, modelId, temperature } = await getModel(dataDir, storyId, { role: 'directions.suggest' })
+  const { model, modelId, temperature, providerOptions, guards } = await resolveAgentRuntime(dataDir, storyId, 'directions.suggest', story)
 
   const resolvedTemplate = instructionRegistry.resolve('directions.suggest-template', modelId)
-  const promptTemplate = story?.settings.guidedSuggestPrompt || resolvedTemplate
+  const promptTemplate = story.settings.guidedSuggestPrompt || resolvedTemplate
   const prompt = promptTemplate.replace(/\{\{count\}\}/g, String(count))
 
   // Build context through the directions agent block system
@@ -94,7 +95,6 @@ export async function suggestDirections(
 
   requestLogger.info('Generating suggestions', { modelId, count })
 
-  const providerOptions = buildProviderOptions(story?.settings.disableThinking ?? false)
   const agent = new ToolLoopAgent({
     model,
     instructions: systemMsg?.content || instructionRegistry.resolve('directions.system', modelId),
@@ -103,10 +103,10 @@ export async function suggestDirections(
     stopWhen: stepCountIs(1),
     temperature,
     providerOptions,
+    maxOutputTokens: guards.maxOutputTokens,
   })
 
   const startTime = Date.now()
-  let fullText = ''
 
   const result = await agent.stream({
     messages: [
@@ -115,22 +115,10 @@ export async function suggestDirections(
     ],
   })
 
-  for await (const part of result.fullStream) {
-    if (part.type === 'text-delta') {
-      fullText += (part as Record<string, unknown>).text ?? ''
-    }
-  }
+  const { fullText } = await drainAgentStream(result.fullStream)
 
   // Track token usage
-  try {
-    const rawUsage = await result.totalUsage
-    const usage = normalizeTokenUsage(rawUsage)
-    if (usage) {
-      reportUsage(dataDir, storyId, 'directions.suggest', usage, modelId)
-    }
-  } catch {
-    // Some providers may not report usage
-  }
+  await resolveAndReportUsage(dataDir, storyId, 'directions.suggest', result.totalUsage, modelId)
 
   const durationMs = Date.now() - startTime
 

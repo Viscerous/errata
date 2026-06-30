@@ -1,5 +1,5 @@
 import type { ContextBlock } from '../llm/context-builder'
-import { renderFragmentContextGroup } from '../llm/fragment-context-blocks'
+import { renderFragmentContextGroup, storyHeaderContent, STORY_SUMMARY_HEADING } from '../llm/fragment-context-blocks'
 import type { AgentBlockContext } from '../agents/agent-block-context'
 import { instructionRegistry } from '../instructions'
 import { buildBasePreviewContext } from '../agents/block-helpers'
@@ -56,15 +56,14 @@ export function createCharacterChatBlocks(ctx: AgentBlockContext): ContextBlock[
 
   // Story context + instructions
   const storyContextParts: string[] = []
-  storyContextParts.push(`## Story: ${ctx.story.name}`)
-  storyContextParts.push(ctx.story.description)
+  storyContextParts.push(storyHeaderContent(ctx.story))
   if (ctx.story.summary) {
-    storyContextParts.push(`\n## Story Summary\n${ctx.story.summary}`)
+    storyContextParts.push(`\n## ${STORY_SUMMARY_HEADING}\n${ctx.story.summary}`)
   }
 
   // Prose summaries (inline — character chat bundles everything into one block)
   if (ctx.proseFragments.length > 0) {
-    storyContextParts.push('\n## Story Events (use getFragment to read full prose)')
+    storyContextParts.push('\n## Story Events (use readFragments or readProseChain to inspect full prose)')
     for (const p of ctx.proseFragments) {
       if ((p.meta._librarian as { summary?: string })?.summary) {
         storyContextParts.push(`- ${p.id}: ${(p.meta._librarian as { summary?: string }).summary}`)

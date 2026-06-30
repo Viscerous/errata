@@ -21,7 +21,7 @@ function makeAnalysis(overrides: Partial<LibrarianAnalysis> = {}): LibrarianAnal
     summaryUpdate: 'The hero entered the cave.',
     mentions: [{ fragmentId: 'ch-0001', text: 'hero' }],
     contradictions: [],
-    fragmentSuggestions: [],
+    fragmentChangeProposals: [],
     timelineEvents: [],
     ...overrides,
   }
@@ -88,8 +88,15 @@ describe('librarian storage', () => {
         contradictions: [
           { description: 'Eye color changed', fragmentIds: ['pr-0001', 'pr-0002'] },
         ],
-        fragmentSuggestions: [
-          { type: 'knowledge' as const, name: 'Cave', description: 'The dark cave', content: 'A cave in the mountains' },
+        fragmentChangeProposals: [
+          {
+            operations: [{ operationId: 'op-1', action: 'create_fragment', type: 'knowledge', name: 'Cave', description: 'The dark cave', content: 'A cave in the mountains' }],
+            validation: [{ operationId: 'op-1', action: 'create_fragment', status: 'valid' }],
+          },
+          {
+            operations: [{ operationId: 'op-2', action: 'replace_text', fragmentId: 'ch-0001', field: 'content', oldText: 'old', newText: 'new', replaceAll: false }],
+            validation: [{ operationId: 'op-2', action: 'replace_text', status: 'valid', target: { fragmentId: 'ch-0001', field: 'content' } }],
+          },
         ],
         timelineEvents: [
           { event: 'Entered cave', position: 'during' },
@@ -99,8 +106,8 @@ describe('librarian storage', () => {
 
       const summaries = await listAnalyses(dataDir, storyId)
       expect(summaries[0].contradictionCount).toBe(1)
-      expect(summaries[0].suggestionCount).toBe(1)
-      expect(summaries[0].pendingSuggestionCount).toBe(1)
+      expect(summaries[0].suggestionCount).toBe(2)
+      expect(summaries[0].pendingSuggestionCount).toBe(2)
       expect(summaries[0].timelineEventCount).toBe(2)
     })
 
