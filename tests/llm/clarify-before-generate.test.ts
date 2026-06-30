@@ -99,7 +99,7 @@ function makeProseFragment(id: string): Fragment {
   return { id, type: 'prose', name: id, description: '', content: 'Prior prose.', tags: [], refs: [], sticky: false, placement: 'user', createdAt: now, updatedAt: now, order: 0, meta: {}, archived: false }
 }
 
-describe('askQuestions input schema', () => {
+describe('askClarifyingQuestions input schema', () => {
   const one = (q: unknown) => ClarifyQuestionsInputSchema.safeParse({ questions: [q] })
 
   it('accepts a question with 2-4 options', () => {
@@ -178,7 +178,7 @@ describe('clarify-before-generate', () => {
       await cleanup()
     })
 
-    it('omits the askQuestions tool when clarify is disabled', async () => {
+    it('omits the askClarifyingQuestions tool when clarify is disabled', async () => {
       await createStory(dataDir, makeStory({ generationMode: 'prewriter', clarifyBeforeGenerate: false }))
       let n = 0
       mockAgentStream.mockImplementation(() => {
@@ -190,10 +190,10 @@ describe('clarify-before-generate', () => {
       expect(res.status).toBe(200)
       await res.text()
 
-      expect('askQuestions' in prewriterTools()).toBe(false)
+      expect('askClarifyingQuestions' in prewriterTools()).toBe(false)
     })
 
-    it('exposes the askQuestions tool to the prewriter when clarify is enabled', async () => {
+    it('exposes the askClarifyingQuestions tool to the prewriter when clarify is enabled', async () => {
       await createStory(dataDir, makeStory({ generationMode: 'prewriter', clarifyBeforeGenerate: true }))
       let n = 0
       mockAgentStream.mockImplementation(() => {
@@ -205,17 +205,17 @@ describe('clarify-before-generate', () => {
       expect(res.status).toBe(200)
       await res.text()
 
-      expect('askQuestions' in prewriterTools()).toBe(true)
+      expect('askClarifyingQuestions' in prewriterTools()).toBe(true)
     })
 
     it('emits clarify-questions and skips the writer when the prewriter asks', async () => {
       await createStory(dataDir, makeStory({ generationMode: 'prewriter', clarifyBeforeGenerate: true }))
 
-      // Simulate the model calling askQuestions during the prewriter step.
+      // Simulate the model calling askClarifyingQuestions during the prewriter step.
       mockAgentStream.mockImplementation(async () => {
-        const tools = lastAgentTools() as { askQuestions?: { execute: (a: unknown) => Promise<unknown> } }
-        if (tools.askQuestions) {
-          await tools.askQuestions.execute({ questions: [SAMPLE_QUESTION] })
+        const tools = lastAgentTools() as { askClarifyingQuestions?: { execute: (a: unknown) => Promise<unknown> } }
+        if (tools.askClarifyingQuestions) {
+          await tools.askClarifyingQuestions.execute({ questions: [SAMPLE_QUESTION] })
         }
         return createMockStreamResult('') as never
       })
@@ -238,8 +238,8 @@ describe('clarify-before-generate', () => {
     it('does not save a fragment when the prewriter asks questions', async () => {
       await createStory(dataDir, makeStory({ generationMode: 'prewriter', clarifyBeforeGenerate: true }))
       mockAgentStream.mockImplementation(async () => {
-        const tools = lastAgentTools() as { askQuestions?: { execute: (a: unknown) => Promise<unknown> } }
-        if (tools.askQuestions) await tools.askQuestions.execute({ questions: [SAMPLE_QUESTION] })
+        const tools = lastAgentTools() as { askClarifyingQuestions?: { execute: (a: unknown) => Promise<unknown> } }
+        if (tools.askClarifyingQuestions) await tools.askClarifyingQuestions.execute({ questions: [SAMPLE_QUESTION] })
         return createMockStreamResult('') as never
       })
 
@@ -255,7 +255,7 @@ describe('clarify-before-generate', () => {
     it('proceeds to the writer with prior answers when clarifications are supplied', async () => {
       await createStory(dataDir, makeStory({ generationMode: 'prewriter', clarifyBeforeGenerate: true }))
 
-      // Model writes a brief this round (does not call askQuestions).
+      // Model writes a brief this round (does not call askClarifyingQuestions).
       let n = 0
       mockAgentStream.mockImplementation(() => {
         n++
@@ -284,7 +284,7 @@ describe('clarify-before-generate', () => {
       expect(prewriterText).toContain('Already Answered')
     })
 
-    it('withholds the askQuestions tool once the round cap is reached', async () => {
+    it('withholds the askClarifyingQuestions tool once the round cap is reached', async () => {
       await createStory(dataDir, makeStory({ generationMode: 'prewriter', clarifyBeforeGenerate: true }))
       let n = 0
       mockAgentStream.mockImplementation(() => {
@@ -301,7 +301,7 @@ describe('clarify-before-generate', () => {
       expect(res.status).toBe(200)
       await res.text()
 
-      expect('askQuestions' in prewriterTools()).toBe(false)
+      expect('askClarifyingQuestions' in prewriterTools()).toBe(false)
     })
 
     it('ignores clarify in standard mode (no prewriter, no questions)', async () => {
@@ -314,7 +314,7 @@ describe('clarify-before-generate', () => {
 
       expect(events.some((e) => e.type === 'clarify-questions')).toBe(false)
       expect(mockAgentCtor).toHaveBeenCalledTimes(1)
-      expect('askQuestions' in lastAgentTools()).toBe(false)
+      expect('askClarifyingQuestions' in lastAgentTools()).toBe(false)
     })
 
     it('still offers the ask tool at the last allowed round (MAX-1)', async () => {
@@ -331,16 +331,16 @@ describe('clarify-before-generate', () => {
       expect(res.status).toBe(200)
       await res.text()
 
-      expect('askQuestions' in prewriterTools()).toBe(true)
+      expect('askClarifyingQuestions' in prewriterTools()).toBe(true)
     })
 
     it('lets the prewriter ask again on a later round (multi-round loop)', async () => {
       await createStory(dataDir, makeStory({ generationMode: 'prewriter', clarifyBeforeGenerate: true }))
       // Round 1: the prewriter asks a second time after the first answer.
       mockAgentStream.mockImplementation(async () => {
-        const tools = lastAgentTools() as { askQuestions?: { execute: (a: unknown) => Promise<unknown> } }
-        if (tools.askQuestions) {
-          await tools.askQuestions.execute({ questions: [{ ...SAMPLE_QUESTION, question: 'And the tone?', header: 'Tone' }] })
+        const tools = lastAgentTools() as { askClarifyingQuestions?: { execute: (a: unknown) => Promise<unknown> } }
+        if (tools.askClarifyingQuestions) {
+          await tools.askClarifyingQuestions.execute({ questions: [{ ...SAMPLE_QUESTION, question: 'And the tone?', header: 'Tone' }] })
         }
         return createMockStreamResult('') as never
       })
@@ -390,8 +390,8 @@ describe('clarify-before-generate', () => {
       await createFragment(dataDir, storyId, makeProseFragment('pr-existing'))
 
       mockAgentStream.mockImplementation(async () => {
-        const tools = lastAgentTools() as { askQuestions?: { execute: (a: unknown) => Promise<unknown> } }
-        if (tools.askQuestions) await tools.askQuestions.execute({ questions: [SAMPLE_QUESTION] })
+        const tools = lastAgentTools() as { askClarifyingQuestions?: { execute: (a: unknown) => Promise<unknown> } }
+        if (tools.askClarifyingQuestions) await tools.askClarifyingQuestions.execute({ questions: [SAMPLE_QUESTION] })
         return createMockStreamResult('') as never
       })
 
@@ -399,7 +399,7 @@ describe('clarify-before-generate', () => {
       expect(res.status).toBe(200)
       const events = await parseNDJSON(res)
 
-      expect('askQuestions' in prewriterTools()).toBe(true)
+      expect('askClarifyingQuestions' in prewriterTools()).toBe(true)
       expect(events.some((e) => e.type === 'clarify-questions')).toBe(true)
     })
   })

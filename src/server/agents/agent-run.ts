@@ -1,4 +1,4 @@
-import { recordAgentRun } from './traces'
+import { recordAgentRun, makeAgentRunId } from './traces'
 import { registerActiveAgent, unregisterActiveAgent } from './active-registry'
 import { getActivityBuffer, pushActivityEvent, type ActivityStreamEvent } from './activity-stream'
 import type { AgentTraceEntry } from './types'
@@ -20,11 +20,6 @@ export interface AgentRunHandle {
   finish(status: 'success' | 'error', detail?: AgentRunDetail): void
 }
 
-let counter = 0
-function makeRunId(): string {
-  return `ar-${Date.now().toString(36)}-${(++counter).toString(36)}`
-}
-
 /**
  * The single lifecycle owner for an agent run: registers it as active, captures
  * timing, and on finish() records it into the activity history and clears the
@@ -32,7 +27,7 @@ function makeRunId(): string {
  * writer/prewriter route) so they all surface in the same activity/history.
  */
 export function beginAgentRun(storyId: string, agentName: string, input?: Record<string, unknown>): AgentRunHandle {
-  const runId = makeRunId()
+  const runId = makeAgentRunId()
   const startedAt = new Date().toISOString()
   const startMs = Date.now()
   const activityId = registerActiveAgent(storyId, agentName)

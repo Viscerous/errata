@@ -33,7 +33,7 @@ For the optimize-character agent, the files are:
 | `src/server/librarian/agents.ts` | Registration (modified — shared with other librarian agents) |
 | `src/server/librarian/blocks.ts` | System prompt + block builder + preview context (modified) |
 | `src/server/librarian/optimize-character.ts` | Runtime logic (new) |
-| `src/components/agents/AgentContextPanel.tsx` | UI ordering (modified) |
+| `src/components/agents/AgentConfigurePanel.tsx` | UI ordering (modified) |
 
 If you're creating a brand new namespace (not adding to an existing one like `librarian`), you'd create a new directory under `src/server/`.
 
@@ -50,11 +50,11 @@ export const OPTIMIZE_CHARACTER_SYSTEM_PROMPT = `You are a character optimizatio
 ...
 
 ## Instructions
-1. Read the target character fragment using the appropriate get tool.
+1. Read the target character fragment using `readFragments`.
 2. Read relevant prose fragments to understand how the character behaves.
 3. Analyze gaps between the current sheet and the methodology.
 4. Rewrite the character sheet with depth and causality.
-5. Use updateFragment to save the improved version.
+5. Use `proposeFragmentChanges` with `set_fields` and the `baseHash`, then `applyProposedChanges`.
 6. Explain what you changed and why.`
 ```
 
@@ -66,25 +66,27 @@ Block builders assemble the context the agent receives. Each builder takes an `A
 
 ### Using composable block helpers
 
-Most agents can be composed from reusable block helpers in `src/server/agents/block-helpers.ts`. Each helper produces a single `ContextBlock` (or `null` when the data is empty). Use `compactBlocks()` to filter out nulls:
+Most agents can be composed from reusable helpers living in two files: single-block helpers in `src/server/agents/block-helpers.ts`, and fragment summary-index group helpers in `src/server/agents/fragment-summary-blocks.ts`. Single-block helpers produce one `ContextBlock` (or `null` when the data is empty — use `compactBlocks()` to filter); group helpers return `ContextBlock[]` to spread. The real optimize-character builder:
 
 ```ts
 import {
   instructionsBlock,
   storyInfoBlock,
   recentProseBlock,
-  stickyFragmentsBlock,
-  allCharactersBlock,
   targetFragmentBlock,
   compactBlocks,
 } from '../agents/block-helpers'
+import {
+  allCharactersBlock,
+  pinnedFragmentSummaryBlocks,
+} from '../agents/fragment-summary-blocks'
 
 export function createOptimizeCharacterBlocks(ctx: AgentBlockContext): ContextBlock[] {
   return compactBlocks([
     instructionsBlock('librarian.optimize-character.system', ctx),
     storyInfoBlock(ctx),
     recentProseBlock(ctx),
-    stickyFragmentsBlock(ctx),
+    ...pinnedFragmentSummaryBlocks(ctx, { includeCharacters: false }),
     allCharactersBlock(ctx),
     targetFragmentBlock(ctx,
       'character to optimize',
@@ -96,19 +98,20 @@ export function createOptimizeCharacterBlocks(ctx: AgentBlockContext): ContextBl
 
 This is equivalent to ~40 lines of manual block construction. Available helpers:
 
-| Helper | Block ID | Role | Order | Description |
+| Helper | Block ID(s) | Role | Order | Description |
 |---|---|---|---|---|
 | `instructionsBlock(key, ctx)` | `instructions` | system | 100 | Resolved from instruction registry |
 | `systemFragmentsBlock(ctx)` | `system-fragments` | system | 200 | Fragments tagged for system prompt |
-| `storyInfoBlock(ctx)` | `story-info` | user | 100 | Story name, description, summary |
+| `storyInfoBlock(ctx)` | `story-info` | user | 100 | Story title (`#`), description, summary |
 | `recentProseBlock(ctx)` | `prose-recent` | user | 200 | Full content of recent prose |
 | `proseSummariesBlock(ctx, header)` | `prose-summaries` | user | 200 | Truncated/summarized prose (for chat) |
-| `stickyFragmentsBlock(ctx)` | `sticky-fragments` | user | 300 | Sticky guidelines, knowledge, characters |
-| `allCharactersBlock(ctx)` | `all-characters` | user | 350 | All character IDs + names + descriptions |
-| `shortlistBlock(ctx)` | `shortlist` | user | 400 | Non-sticky relevant fragments |
 | `targetFragmentBlock(ctx, label, default)` | `target` | user | 400 | Target fragment + user instructions |
+| `pinnedFragmentSummaryBlocks(ctx, opts?)` | `<type>-pinned-summary-index` | user | 300+ | Pinned fragments as summary-index rows, one block per type; `opts` toggles types |
+| `fragmentSummaryCatalogBlocks(ctx, opts?)` | `<type>-summary-index` | user | 300+ | One catalog per type with pinned/recent inline notes (for tool-using agents like chat) |
+| `shortlistBlocks(ctx, opts?)` | `<type>-shortlist` | user | 400+ | Non-pinned, non-recent fragments as summary rows |
+| `allCharactersBlock(ctx)` | `character-shortlist` | user | 350 | Every character as a summary-index row |
 
-All conditional helpers (`recentProseBlock`, `stickyFragmentsBlock`, etc.) return `null` when their data is empty, so `compactBlocks` safely drops them.
+The last four live in `fragment-summary-blocks.ts` and return arrays (or, for `allCharactersBlock`, a single block). All conditional helpers return `null`/`[]` when their data is empty, so `compactBlocks` and spreads safely drop them.
 
 ### Manual block construction
 
@@ -160,7 +163,7 @@ Each block has:
 
 Define a `buildPreviewContext` function that returns a plausible `AgentBlockContext` with placeholder values. This powers the "Preview" button in the Agent Context panel.
 
-Use `buildBasePreviewContext()` to get the 8 common fields every preview context needs, then spread and add agent-specific extras:
+Use `buildBasePreviewContext()` to get the common story-context fields every preview context needs (the full `ContextBuildState` spread plus empty `systemPromptFragments`), then spread and add agent-specific extras:
 
 ```ts
 import { buildBasePreviewContext } from '../agents/block-helpers'
@@ -192,7 +195,7 @@ export async function buildChatPreviewContext(dataDir: string, storyId: string):
 
 ## Step 3: Write the Runtime Logic
 
-The runtime file is where the agent actually executes. Most streaming agents follow the same 14-step pipeline: validate story, resolve model, build context, compile blocks, create tools, stream result. The `createStreamingRunner` factory encodes this entire pipeline — you only provide the varying parts.
+The runtime file is where the agent actually executes. Most streaming agents follow the same pipeline: validate story, resolve model, build context, compile blocks, create tools, stream result. The `createStreamingRunner` factory encodes this entire pipeline — you only provide the varying parts.
 
 ### Using the runner factory (recommended)
 
@@ -243,7 +246,7 @@ That's it — 31 lines for a complete streaming agent that validates input, reso
 |---|---|---|---|
 | `name` | `string` | required | Agent name (used for logging, model role, block compilation) |
 | `role` | `string` | `name` | Model role key (override if different from agent name) |
-| `maxSteps` | `number` | `5` | Default max tool loop steps |
+| `maxSteps` | `number` | `10` | Default max tool loop steps |
 | `toolChoice` | `'auto' \| 'none'` | `'auto'` | Tool choice passed to the agent |
 | `buildContext` | `boolean` | `true` | Whether to call `buildContextState`. Set `false` for agents that don't need story context |
 | `readOnly` | `boolean \| 'none'` | `true` | `true` = read-only tools, `false` = read+write tools, `'none'` = no tools at all |
@@ -336,14 +339,14 @@ For these cases, write the pipeline manually. See `src/server/librarian/chat.ts`
 
 ### Manual pipeline reference
 
-For agents that need full manual control, the 14-step pipeline is:
+For agents that need full manual control, the pipeline is:
 
 ```ts
-import { getModel } from '../llm/client'
+import { ToolLoopAgent, stepCountIs } from 'ai'
+import { resolveAgentRuntime } from '../llm/client'
 import { getStory, getFragment } from '../fragments/storage'
 import { buildContextState } from '../llm/context-builder'
 import { createFragmentTools } from '../llm/tools'
-import { createToolAgent } from '../agents/create-agent'
 import { createEventStream } from '../agents/create-event-stream'
 import { compileAgentContext } from '../agents/compile-agent-context'
 import { withBranch } from '../fragments/branches'
@@ -358,8 +361,8 @@ export async function myAgent(dataDir, storyId, opts): Promise<AgentStreamResult
     const fragment = await getFragment(dataDir, storyId, opts.fragmentId)
     if (!fragment) throw new Error(`Fragment ${opts.fragmentId} not found`)
 
-    // 3. Resolve model early (modelId needed for instruction resolution)
-    const { model, modelId } = await getModel(dataDir, storyId, { role: 'my-agent' })
+    // 3. Resolve model + runtime knobs early (modelId needed for instruction resolution)
+    const { model, modelId, temperature, providerOptions, guards } = await resolveAgentRuntime(dataDir, storyId, 'my-agent', story)
 
     // 4. Build story context
     const ctxState = await buildContextState(dataDir, storyId, '', { excludeFragmentId: opts.fragmentId })
@@ -390,11 +393,15 @@ export async function myAgent(dataDir, storyId, opts): Promise<AgentStreamResult
     const userMessage = compiled.messages.find(m => m.role === 'user')
 
     // 9. Create agent
-    const agent = createToolAgent({
+    const agent = new ToolLoopAgent({
       model,
       instructions: systemMessage?.content ?? '',
       tools: compiled.tools,
-      maxSteps: opts.maxSteps ?? 5,
+      toolChoice: 'auto',
+      stopWhen: stepCountIs(opts.maxSteps ?? 5),
+      temperature,
+      providerOptions,
+      maxOutputTokens: guards.maxOutputTokens,
     })
 
     // 10. Stream
@@ -413,13 +420,18 @@ export async function myAgent(dataDir, storyId, opts): Promise<AgentStreamResult
 |---|---|
 | `withBranch()` | Wraps execution in branch isolation so fragment writes are tracked |
 | Model resolved early | `modelId` must be available when `compileAgentContext` calls `createDefaultBlocks`, which calls `instructionRegistry.resolve(key, modelId)` |
+| `resolveAgentRuntime` | One call for the role's model plus `disableThinking`/`generationLimits` — see `llm/client.ts` |
 | `excludeFragmentId` | Prevents the target fragment from appearing in context twice — the agent reads it via tools instead |
 | `compileAgentContext` | Handles the full block lifecycle: load block definition → `createDefaultBlocks()` → `applyBlockConfig()` (user overrides) → `compileBlocks()` → filter tools by `disabledTools` |
 | `createEventStream` | Converts the AI SDK's `fullStream` into an NDJSON `ReadableStream<string>` + a `completion` promise |
 
+### Observability comes free
+
+Don't call `beginAgentRun` (or anything from `agents/active-registry.ts`/`agents/traces.ts`) inside the runtime logic itself. Once the agent is registered as an `AgentDefinition` (Step 4 below), every real caller — `createAgentInstance` for HTTP routes, `runner.ts`'s `invokeAgent` for nested/scheduled calls — already registers it as active, mirrors its stream into a live activity trace, and records the outcome into run history. See `docs/agent-observability.md` for the full picture.
+
 ### Read-only vs write-enabled tools
 
-Pass `{ readOnly: true }` to `createFragmentTools()` (or `readOnly: true` in the factory config) for agents that only read data (analysis, suggestions). Pass `{ readOnly: false }` for agents that modify fragments (refine, optimize, chat). Write tools include `updateFragment`, `editFragment`, `createFragment`, `deleteFragment`, and `editProse`.
+Pass `{ readOnly: true }` to `createFragmentTools()` (or `readOnly: true` in the factory config) for agents that only read data. Pass `{ readOnly: false }` for agents that can propose or apply changes. Write-enabled tools add `proposeFragmentChanges`, `proposeProseChanges`, and `applyProposedChanges`; direct fragment mutation tools are not exposed to models.
 
 ### Return type
 
@@ -474,7 +486,7 @@ const optimizeCharacterDefinition: AgentDefinition<typeof OptimizeCharacterInput
 }
 ```
 
-The `allowedCalls` field controls which other agents this one can invoke via `ctx.invokeAgent()`. Omitting it means no sub-agent calls allowed.
+The `allowedCalls` field controls which other agents this one can invoke via `ctx.invokeAgent()`. **Omitting it leaves sub-agent calls unrestricted** (the runner only enforces the whitelist when the array is present); to forbid all sub-agent calls, set it to an empty array `[]`.
 
 ### 4c. Registration calls
 
@@ -496,17 +508,19 @@ export function registerMyAgents(): void {
   // 3. Model role (namespace-level, once per namespace — skip if namespace already exists)
   // modelRoleRegistry.register({ key: 'my-namespace', label: '...', description: '...' })
 
-  // 4. Block definition — context assembly + UI integration
+  // 4. Block definition — context assembly + UI integration. Tool names come
+  // from the canonical lists in llm/tools.ts (never hand-list them — they drift);
+  // resolveTools builds the actual ToolSet for context preview/compilation.
   agentBlockRegistry.register({
     agentName: 'librarian.optimize-character',
     displayName: 'Librarian Optimize Character',
     description: 'Optimizes character sheets using depth-focused writing methodology.',
     createDefaultBlocks: createOptimizeCharacterBlocks,
     availableTools: [
-      'getFragment', 'listFragments', 'searchFragments', 'listFragmentTypes',
-      'createFragment', 'updateFragment', 'editFragment', 'deleteFragment',
-      'editProse', 'getStorySummary', 'updateStorySummary',
+      ...coreReadToolNames(),
+      ...coreProposalToolNames(),
     ],
+    resolveTools: ({ dataDir, storyId }) => createFragmentTools(dataDir, storyId, { readOnly: false }),
     buildPreviewContext: buildOptimizeCharacterPreviewContext,
   })
 
@@ -528,34 +542,28 @@ No manual import or registration list needed.
 
 ## Step 5: Expose via Chat (Optional)
 
-If the agent should be callable from librarian chat (or any other conversational agent), add it as a tool in that agent's runtime:
+If the agent should be callable from librarian chat, register it as an allowed child agent and route through `invokeAgent` rather than adding a bespoke tool per agent:
 
 ```ts
-// In chat.ts
-const optimizeCharacterTool = tool({
-  description: 'Optimize a character sheet using depth-focused writing methodology.',
+const invokeAgentTool = tool({
+  description: 'Ask a specialist Librarian agent to inspect or improve a target.',
   inputSchema: z.object({
-    fragmentId: z.string().describe('The character fragment ID to optimize (e.g. ch-bakumo)'),
-    instructions: z.string().optional().describe('Optional specific instructions'),
+    agent: z.enum(['librarian.analyze', 'librarian.refine', 'librarian.optimize-character']),
+    fragmentId: z.string().optional(),
+    instructions: z.string().optional(),
   }),
-  execute: async ({ fragmentId, instructions }) => {
-    const result = await optimizeCharacter(dataDir, storyId, { fragmentId, instructions })
-    await result.completion
-    return { ok: true, fragmentId }
-  },
+  execute: async ({ agent, fragmentId, instructions }) => invokeAgent({ agent, fragmentId, instructions }),
 })
-
-const allTools = { ...fragmentTools, optimizeCharacter: optimizeCharacterTool }
 ```
 
 Also update the parent agent's registration:
 - Add the new agent name to the parent's `allowedCalls` array
-- Add the tool name to the parent's `availableTools` in its block definition
-- Mention the tool in the parent's system prompt so the LLM knows it exists
+- Keep `invokeAgent` in the parent's `availableTools`
+- Mention the child agent's capability in the parent's system prompt so the LLM knows when to delegate
 
 ## Step 6: UI Ordering
 
-The Agent Context panel groups agents by namespace prefix and sorts them within each group. Two arrays in `AgentContextPanel.tsx` control this:
+The Agent Context panel groups agents by namespace prefix and sorts them within each group. Two arrays in `AgentConfigurePanel.tsx` control this:
 
 ```ts
 // Hierarchical groups
@@ -672,7 +680,9 @@ describe('optimize-character blocks', () => {
     const def = agentBlockRegistry.get('librarian.optimize-character')
     const blocks = def!.createDefaultBlocks(ctx)
 
-    const charBlock = blocks.find(b => b.id === 'all-characters')
+    // allCharactersBlock renders every character as summary-index rows under
+    // the id 'character-shortlist'.
+    const charBlock = blocks.find(b => b.id === 'character-shortlist')
     expect(charBlock).toBeDefined()
     expect(charBlock!.content).toContain('ch-a')
     expect(charBlock!.content).toContain('ch-b')
@@ -722,7 +732,7 @@ When adding a new agent:
 - [ ] Register model role if this is a new namespace (skip if namespace already exists)
 - [ ] Export `register` from `agents.ts` (for auto-discovery, or modify existing `register`)
 - [ ] (Optional) Add as a tool in a parent agent (chat tool, `allowedCalls`, `availableTools`, system prompt mention)
-- [ ] Add to `AGENT_ORDER` in `AgentContextPanel.tsx`
+- [ ] Add to `AGENT_ORDER` in `AgentConfigurePanel.tsx`
 - [ ] Add to `AGENT_GROUPS` if new namespace
 - [ ] Write block builder tests
 - [ ] Update registry count assertion in `agent-blocks.test.ts`
@@ -738,19 +748,21 @@ When adding a new agent:
 | `src/server/agents/agent-block-context.ts` | `AgentBlockContext` superset type |
 | `src/server/agents/agent-block-storage.ts` | Per-agent block config persistence |
 | `src/server/agents/compile-agent-context.ts` | `compileAgentContext()` — full block lifecycle |
-| `src/server/agents/create-agent.ts` | `createToolAgent()` — AI SDK `ToolLoopAgent` wrapper |
 | `src/server/agents/create-event-stream.ts` | `createEventStream()` — NDJSON stream builder |
-| `src/server/agents/create-streaming-runner.ts` | `createStreamingRunner()` — standard pipeline factory |
-| `src/server/agents/block-helpers.ts` | Composable block helpers and preview context utilities |
+| `src/server/agents/drain-agent-stream.ts` | `drainAgentStream()` — shared `fullStream` → `AgentStreamEvent` translator |
+| `src/server/agents/create-streaming-runner.ts` | `createStreamingRunner()` — standard pipeline factory (constructs the `ToolLoopAgent`) |
+| `src/server/agents/block-helpers.ts` | Composable single-block helpers and preview context utilities |
+| `src/server/agents/fragment-summary-blocks.ts` | Summary-index group helpers (`pinnedFragmentSummaryBlocks`, `shortlistBlocks`, `allCharactersBlock`, catalogs) |
 | `src/server/agents/stream-types.ts` | `AgentStreamEvent`, `AgentStreamResult` types |
 | `src/server/agents/model-role-registry.ts` | Model role fallback chain registry |
 | `src/server/agents/register-core.ts` | Auto-discovery via `import.meta.glob` |
 | `src/server/agents/runner.ts` | Agent runner with depth/timeout/cycle enforcement |
 | `src/server/instructions/registry.ts` | Instruction registry for prompt management |
 | `src/server/llm/tools.ts` | `createFragmentTools()` — read/write tool generation |
-| `src/server/llm/client.ts` | `getModel()` — model resolution with fallback chain |
+| `src/server/llm/client.ts` | `resolveAgentRuntime()` — model resolution (fallback chain) plus `disableThinking`/`generationLimits` in one call |
 | `src/server/llm/context-builder.ts` | `buildContextState()` — story context assembly |
 | `src/server/fragments/branches.ts` | `withBranch()` — branch isolation wrapper |
-| `src/components/agents/AgentContextPanel.tsx` | Agent panel UI ordering |
+| `src/components/agents/AgentConfigurePanel.tsx` | Agent panel UI ordering |
 | `docs/context-blocks.md` | Agent block system reference (runtime details) |
 | `docs/instruction-registry.md` | Instruction override system |
+| `docs/agent-observability.md` | Active-registry/activity-stream/traces — who wires it and why you don't need to |

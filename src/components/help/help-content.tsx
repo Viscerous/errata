@@ -152,50 +152,39 @@ export const HELP_SECTIONS: HelpSection[] = [
             <div className="mt-3 mb-1">
               <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wider mb-2">Read tools</p>
               <ToolCard
-                name="getFragment(id)"
-                description="Retrieve full content of any fragment by its ID. Works across all types."
+                name="readFragments(ids)"
+                description="Batch-read full fragment content and base hashes before relying on details or proposing rewrites."
               />
               <ToolCard
-                name="listFragments(type?)"
-                description="List fragments with their ID, type, name, and description. Optionally filter by type."
+                name="listFragments(filters)"
+                description="List fragment summaries with optional type, query, archived, and limit filters."
               />
               <ToolCard
-                name="searchFragments(query, type?)"
-                description="Full-text search across all fragment content. Returns matching IDs and excerpts."
+                name="findFragments(query)"
+                description="Search fragment fields and return matching IDs, fields, excerpts, and base hashes."
+              />
+              <ToolCard
+                name="readProseChain()"
+                description="Inspect active prose in order, optionally including full content."
               />
               <ToolCard
                 name="listFragmentTypes()"
                 description="List all registered fragment types with their prefix and defaults."
               />
+              <ToolCard
+                name="readStorySummary()"
+                description="Read the current rolling summary and the summary fragments behind it."
+              />
             </div>
 
             <div className="mt-4 mb-1">
-              <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wider mb-2">Type-specific aliases</p>
+              <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wider mb-2">Proposal tools (librarian chat/refine)</p>
               <P>
-                Custom fragment types can expose dedicated aliases when their type enables LLM tools:
+                These are available in explicit librarian editing flows. They validate changes and show diffs before applying:
               </P>
-              <div className="rounded-md border border-border/25 bg-accent/15 px-3 py-2.5 mb-2">
-                <div className="space-y-1">
-                  <p className="text-[0.6875rem] font-mono text-foreground/55">
-                    <span className="text-primary/70">getLocation</span>(id), <span className="text-primary/70">listLocations</span>()
-                  </p>
-                  <p className="text-[0.6875rem] font-mono text-foreground/55">
-                    <span className="text-primary/70">getFaction</span>(id), <span className="text-primary/70">listFactions</span>()
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div className="mt-4 mb-1">
-              <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wider mb-2">Write tools (librarian only)</p>
-              <P>
-                These are available to the librarian agent but not during regular generation:
-              </P>
-              <ToolCard name="createFragment(type, name, description, content)" description="Create a new fragment of any type." />
-              <ToolCard name="updateFragment(id, content, description)" description="Overwrite a fragment's content entirely." />
-              <ToolCard name="editFragment(id, oldText, newText)" description="Search-and-replace within a fragment's content." />
-              <ToolCard name="editProse(oldText, newText)" description="Search-and-replace across all active prose in the chain." />
-              <ToolCard name="deleteFragment(id)" description="Permanently delete a fragment." />
+              <ToolCard name="proposeFragmentChanges(operations)" description="Batch create, exact-edit, append, whole-field rewrite, or archive fragment proposals." />
+              <ToolCard name="proposeProseChanges(edits)" description="Scan active prose and propose exact search/replace diffs." />
+              <ToolCard name="applyProposedChanges(proposalId)" description="Re-validate and apply proposals atomically per target fragment." />
             </div>
           </>
         ),
@@ -1001,7 +990,7 @@ return rules.map(r => r.content).join('\\n')`}</div>
             <P>
               <strong className="text-foreground/75">Analyses</strong> — each prose generation gets
               its own analysis entry. Expand one to see which characters appeared, any contradictions
-              found, fragment suggestions, and timeline events detected.
+              found, fragment change suggestions, and timeline events detected.
             </P>
             <P>
               <strong className="text-foreground/75">Characters</strong> — tracks which characters
@@ -1160,7 +1149,7 @@ return rules.map(r => r.content).join('\\n')`}</div>
               <strong className="text-foreground/75">Disable directions</strong> turns off story
               direction suggestions during analysis, while
               <strong className="text-foreground/75"> Disable suggestions</strong> turns off fragment
-              create/update suggestions. These let you keep summary and contradiction tracking while
+              create, update, and edit suggestions. These let you keep summary and contradiction tracking while
               reducing proactive librarian output.
             </P>
           </>

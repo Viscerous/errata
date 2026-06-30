@@ -1,7 +1,7 @@
 /**
  * Factory for standard streaming agent runners.
  *
- * Encodes the 14-step validate → resolve → build → compile → stream pipeline
+ * Encodes the standard validate → resolve → build → compile → stream pipeline
  * that all streaming agents share. Only the agent-specific "knobs" vary.
  */
 
@@ -10,12 +10,12 @@ import type { StoryMeta } from '../fragments/schema'
 import type { ContextBuildState } from '../llm/context-builder'
 import { type AgentBlockContext, baseBlockContext } from './agent-block-context'
 import type { AgentStreamResult } from './stream-types'
-import { getModel, buildProviderOptions } from '../llm/client'
+import { resolveAgentRuntime } from '../llm/client'
+import { MISSING_SYSTEM_PROMPT_FALLBACK } from '../instructions'
 import { getStory } from '../fragments/storage'
 import { buildContextState } from '../llm/context-builder'
 import { createFragmentTools } from '../llm/tools'
-import { reportUsage } from '../llm/token-tracker'
-import { normalizeTokenUsage } from '../llm/usage-normalizer'
+import { resolveAndReportUsage } from '../llm/usage-normalizer'
 import { createLogger } from '../logging'
 import { createEventStream } from './create-event-stream'
 import { holdLibrarianAnalysis } from '../librarian/scheduler'
@@ -29,7 +29,7 @@ export interface StreamingRunnerConfig<TOpts, TValidated = Record<string, unknow
   /** Model role key (defaults to `name`). */
   role?: string
 
-  /** Default maxSteps when opts doesn't specify one. Default: 5 */
+  /** Default maxSteps when opts doesn't specify one. Default: 10 */
   maxSteps?: number
 
   /** Tool choice passed to the agent. Default: 'auto' */
@@ -130,8 +130,7 @@ export function createStreamingRunner<TOpts extends object, TValidated = Record<
         : ({} as TValidated)
 
       // 3. Resolve model early (modelId needed for instruction resolution)
-      const { model, modelId, temperature } = await getModel(dataDir, storyId, { role })
-      const providerOptions = buildProviderOptions(story.settings.disableThinking ?? false)
+      const { model, modelId, temperature, providerOptions, guards } = await resolveAgentRuntime(dataDir, storyId, role, story)
       requestLogger.info('Resolved model', { modelId })
 
       // 4. Build story context (optional)
@@ -177,12 +176,13 @@ export function createStreamingRunner<TOpts extends object, TValidated = Record<
       const maxSteps = (opts as Record<string, unknown>).maxSteps as number | undefined
       const agent = new ToolLoopAgent({
         model,
-        instructions: systemMessage?.content || 'You are a helpful assistant.',
+        instructions: systemMessage?.content || MISSING_SYSTEM_PROMPT_FALLBACK,
         tools: compiled.tools,
         toolChoice: config.toolChoice ?? 'auto',
         stopWhen: stepCountIs(maxSteps ?? defaultMaxSteps),
         temperature,
         providerOptions,
+        maxOutputTokens: guards.maxOutputTokens,
       })
 
       // 10. Build messages
@@ -198,23 +198,20 @@ export function createStreamingRunner<TOpts extends object, TValidated = Record<
       const releaseAnalysis = config.readOnly === false
         ? holdLibrarianAnalysis(storyId)
         : () => {}
+      // Note: this run's active-marker/activity-trace/history are NOT registered
+      // here. Every caller of a createStreamingRunner agent goes through either
+      // createAgentInstance (HTTP routes) or runner.ts's invokeAgent (nested/
+      // scheduled calls) — both already wrap the whole call in beginAgentRun and
+      // tee the event stream into the trace. Registering here too would double it.
       const streamResult = createEventStream(result.fullStream, () => abortController.abort())
       void streamResult.completion.then(releaseAnalysis, releaseAnalysis)
 
       // 12. Track token usage after stream completes
-      streamResult.completion.then(async () => {
-        try {
-          const rawUsage = await result.totalUsage
-          const usage = normalizeTokenUsage(rawUsage)
-          if (usage) {
-            reportUsage(dataDir, storyId, config.name, usage, modelId)
-          }
-        } catch {
-          // Some providers may not report usage
-        }
-      }).catch(() => {
-        // Stream errored — skip usage tracking
-      })
+      streamResult.completion
+        .then(() => resolveAndReportUsage(dataDir, storyId, config.name, result.totalUsage, modelId))
+        .catch(() => {
+          // Stream errored — skip usage tracking
+        })
 
       // 13. Post-stream hook
       if (config.afterStream) {

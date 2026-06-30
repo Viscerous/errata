@@ -64,7 +64,6 @@ describe('findGenerationLogByFragment', () => {
     expect(log?.input).toBe('new')
   })
 })
-
 describe('inspectGenerationForFragment', () => {
   let dataDir: string
   let cleanup: () => Promise<void>
@@ -91,13 +90,13 @@ describe('inspectGenerationForFragment', () => {
   it('returns a summary overview by default', async () => {
     await saveGenerationLog(dataDir, storyId, makeLog({
       fragmentId: 'pr-abc',
-      toolCalls: [{ toolName: 'getFragment', args: { id: 'ch-a' }, result: { name: 'Alice' } }],
+      toolCalls: [{ toolName: 'readFragments', args: { fragmentIds: ['ch-a'] }, result: { name: 'Alice' } }],
       totalUsage: { inputTokens: 100, outputTokens: 50 },
     }))
     const res = await inspectGenerationForFragment(dataDir, storyId, 'pr-abc')
     expect(res.model).toBe('test-model')
     expect(res.input).toBe('Write a battle scene')
-    expect(res.toolsCalled).toEqual(['getFragment'])
+    expect(res.toolsCalled).toEqual(['readFragments'])
     expect(res.tokens).toEqual({ inputTokens: 100, outputTokens: 50 })
     expect(res.generatedPreview).toContain('blades met')
     // The full prompt is NOT dumped in the summary view.
@@ -114,11 +113,11 @@ describe('inspectGenerationForFragment', () => {
   it('returns tool calls for aspect=tools', async () => {
     await saveGenerationLog(dataDir, storyId, makeLog({
       fragmentId: 'pr-abc',
-      toolCalls: [{ toolName: 'searchFragments', args: { query: 'sword' }, result: ['kn-sword'] }],
+      toolCalls: [{ toolName: 'findFragments', args: { query: 'sword' }, result: ['kn-sword'] }],
     }))
     const res = await inspectGenerationForFragment(dataDir, storyId, 'pr-abc', 'tools') as any
     expect(res.toolCallCount).toBe(1)
-    expect(res.toolCalls[0].toolName).toBe('searchFragments')
+    expect(res.toolCalls[0].toolName).toBe('findFragments')
     expect(res.toolCalls[0].args).toEqual({ query: 'sword' })
   })
 

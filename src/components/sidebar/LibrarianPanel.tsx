@@ -10,6 +10,7 @@ import {
   type LibrarianAnalysisSummary,
   type LibrarianState,
 } from '@/lib/api'
+import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -32,6 +33,7 @@ import {
   BookOpen,
   Bookmark,
   Trash2,
+  Undo2,
   ArrowLeft,
   X,
 } from 'lucide-react'
@@ -56,6 +58,14 @@ interface LibrarianPanelProps {
 type TabValue = 'chat' | 'story' | 'summaries'
 type MentionEntry = [string, string[]]
 type MentionGroup = { type: string; visual: FragmentTypeVisual; entries: MentionEntry[] }
+type ProposalDiffItem = {
+  key: string
+  fieldLabel?: string
+  before: string
+  after: string
+}
+
+const DIFF_TEXT_LIMIT = 4000
 
 function mentionSourceCount(sourceFragmentIds: string[]): number {
   return new Set(sourceFragmentIds).size
@@ -63,6 +73,87 @@ function mentionSourceCount(sourceFragmentIds: string[]): number {
 
 function mentionLinkCount(entries: MentionEntry[]): number {
   return entries.reduce((sum, [, sourceFragmentIds]) => sum + mentionSourceCount(sourceFragmentIds), 0)
+}
+
+function operationActionLabel(action: string): string {
+  switch (action) {
+    case 'create_fragment':
+      return 'create'
+    case 'replace_text':
+      return 'replace'
+    case 'append_paragraph':
+      return 'append'
+    case 'set_fields':
+      return 'rewrite'
+    case 'archive_fragment':
+      return 'archive'
+    default:
+      return action
+  }
+}
+
+function clipDiffText(text: string): string {
+  if (text.length <= DIFF_TEXT_LIMIT) return text
+  return `${text.slice(0, DIFF_TEXT_LIMIT)}\n...`
+}
+
+
+
+function proposalOperationTarget(
+  operation: LibrarianAnalysis['fragmentChangeProposals'][number]['operations'][number],
+  validation: LibrarianAnalysis['fragmentChangeProposals'][number]['validation'][number] | undefined,
+  fragmentById: Map<string, Fragment>,
+): string {
+  if (operation.action === 'create_fragment') {
+    const name = operation.name
+    return typeof name === 'string' ? name : 'New fragment'
+  }
+
+  const fragmentId = typeof operation.fragmentId === 'string'
+    ? operation.fragmentId
+    : validation?.target?.fragmentId
+  if (!fragmentId) return 'Fragment'
+  return fragmentById.get(fragmentId)?.name ?? fragmentId
+}
+
+function proposalOperationDiffItems(
+  proposal: LibrarianAnalysis['fragmentChangeProposals'][number],
+): Map<number, ProposalDiffItem[]> {
+  const byOperation = new Map<number, ProposalDiffItem[]>()
+  const validations = proposal.appliedResults?.length ? proposal.appliedResults : proposal.validation
+
+  validations.forEach((validation, validationIndex) => {
+    const operation = proposal.operations.find((candidate) =>
+      candidate.operationId && candidate.operationId === validation.operationId,
+    ) ?? proposal.operations[validationIndex]
+    const operationIndex = operation
+      ? proposal.operations.indexOf(operation)
+      : validationIndex
+    const items = byOperation.get(operationIndex) ?? []
+
+    if (validation.action === 'archive_fragment' && validation.status !== 'invalid') {
+      items.push({
+        key: `${validation.operationId}-${validationIndex}-archive`,
+        fieldLabel: 'state',
+        before: 'Active fragment',
+        after: 'Archived fragment',
+      })
+      byOperation.set(operationIndex, items)
+      return
+    }
+
+    for (const [diffIndex, diff] of (validation.diffs ?? []).entries()) {
+      items.push({
+        key: `${validation.operationId}-${diff.field}-${diffIndex}`,
+        fieldLabel: diff.field,
+        before: diff.before,
+        after: diff.after,
+      })
+    }
+    if (items.length > 0) byOperation.set(operationIndex, items)
+  })
+
+  return byOperation
 }
 
 function tabStorageKey(storyId: string): string {
@@ -141,7 +232,7 @@ export function LibrarianPanel({ storyId, askFragmentId, askPrefill, onAskFragme
     >
       {/* Tab bar */}
       <div className="shrink-0 px-4 pt-3">
-        <TabsList variant="line" className="w-full h-8 gap-0">
+        <TabsList variant="line" className="w-full h-8 gap-0 relative z-20">
           <TabsTrigger value="chat" className="text-[0.6875rem] gap-1.5 flex-1 px-1" data-component-id="librarian-tab-chat">
             <MessageSquare className="size-3" />
             Chat
@@ -348,6 +439,144 @@ function buildMentionGroups(
 
   return [...groups.values()].sort((a, b) =>
     compareFragmentTypeVisuals(a.visual, b.visual),
+  )
+}
+
+function DiffTextBlock({
+  label,
+  lines,
+  tone,
+  lineKeyPrefix,
+}: {
+  label: 'removed' | 'added'
+  lines: string[]
+  tone: 'removed' | 'added'
+  lineKeyPrefix: string
+}) {
+  const removed = tone === 'removed'
+  return (
+    <div className={cn(
+      '-mx-2 min-w-0 overflow-hidden text-[0.625rem] leading-4',
+      removed ? 'bg-red-500/10' : 'bg-emerald-500/10',
+    )}>
+      <div className={cn(
+        'px-2 py-0.5 text-[0.5rem] uppercase tracking-wide border-b border-border/10',
+        removed ? 'text-red-400/70' : 'text-emerald-400/70',
+      )}>
+        {label}
+      </div>
+      <pre className={cn(
+        'px-2 py-1.5 whitespace-pre-wrap break-words',
+        removed ? 'text-red-400' : 'text-emerald-400',
+      )}>
+        {lines.map((line, i) => (
+          <div key={`${lineKeyPrefix}-${i}`}>{line}</div>
+        ))}
+      </pre>
+    </div>
+  )
+}
+
+export function computeLineDiff(before: string, after: string): { beforeLines: string[]; afterLines: string[] } {
+  const beforeClipped = clipDiffText(before)
+  const afterClipped = clipDiffText(after)
+
+  if (!beforeClipped.length && !afterClipped.length) {
+    return { beforeLines: [], afterLines: [] }
+  }
+
+  const beforeLines = beforeClipped.split('\n')
+  const afterLines = afterClipped.split('\n')
+
+  const n = beforeLines.length
+  const m = afterLines.length
+  const dp: number[][] = Array.from({ length: n + 1 }, () => Array(m + 1).fill(0))
+
+  for (let i = 1; i <= n; i++) {
+    for (let j = 1; j <= m; j++) {
+      if (beforeLines[i - 1] === afterLines[j - 1]) {
+        dp[i][j] = dp[i - 1][j - 1] + 1
+      } else {
+        dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1])
+      }
+    }
+  }
+
+  const unchangedBeforeIndices = new Set<number>()
+  const unchangedAfterIndices = new Set<number>()
+  let i = n, j = m
+  while (i > 0 && j > 0) {
+    if (beforeLines[i - 1] === afterLines[j - 1]) {
+      unchangedBeforeIndices.add(i - 1)
+      unchangedAfterIndices.add(j - 1)
+      i--
+      j--
+    } else if (dp[i - 1][j] >= dp[i][j - 1]) {
+      i--
+    } else {
+      j--
+    }
+  }
+
+  const removed: string[] = []
+  if (beforeClipped.length > 0) {
+    for (let idx = 0; idx < n; idx++) {
+      if (!unchangedBeforeIndices.has(idx)) {
+        removed.push(beforeLines[idx])
+      }
+    }
+  }
+
+  const added: string[] = []
+  if (afterClipped.length > 0) {
+    for (let idx = 0; idx < m; idx++) {
+      if (!unchangedAfterIndices.has(idx)) {
+        added.push(afterLines[idx])
+      }
+    }
+  }
+
+  return { beforeLines: removed, afterLines: added }
+}
+
+function OperationDiffPreview({ items }: { items: ProposalDiffItem[] }) {
+  return (
+    <div className="mt-1.5 space-y-2 border-t border-border/20 pt-1.5">
+      {items.map((item) => {
+        const { beforeLines, afterLines } = computeLineDiff(item.before, item.after)
+        const showBefore = beforeLines.length > 0
+        const showAfter = afterLines.length > 0
+        if (!showBefore && !showAfter) return null
+
+        return (
+          <div key={item.key} className="space-y-1">
+            {items.length > 1 && item.fieldLabel && (
+              <p className="text-[0.5rem] uppercase tracking-wide text-muted-foreground/70">
+                {item.fieldLabel}
+              </p>
+            )}
+            <div className="space-y-0">
+              {showBefore && (
+                <DiffTextBlock
+                  label="removed"
+                  lines={beforeLines}
+                  tone="removed"
+                  lineKeyPrefix={`${item.key}-before`}
+                />
+              )}
+              {showAfter && (
+                <DiffTextBlock
+                  label="added"
+                  lines={afterLines}
+                  tone="added"
+                  lineKeyPrefix={`${item.key}-after`}
+                />
+              )}
+            </div>
+          </div>
+        )
+      })}
+    </div>
   )
 }
 
@@ -606,7 +835,7 @@ function MentionGroupsSummary({
   return (
     <>
       {groups.map((group, index) => {
-        const expanded = expandedByType[group.type] ?? group.type === 'character'
+        const expanded = expandedByType[group.type] ?? false
         const mentionCount = mentionLinkCount(group.entries)
 
         return (
@@ -675,6 +904,7 @@ function AnalysisItem({
   const queryClient = useQueryClient()
   const [editingSummary, setEditingSummary] = useState(false)
   const [summaryDraft, setSummaryDraft] = useState('')
+  const [expandedProposalDiffs, setExpandedProposalDiffs] = useState<Record<number, boolean>>({})
   const date = new Date(summary.createdAt)
   const timeStr = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 
@@ -682,19 +912,37 @@ function AnalysisItem({
     setSummaryDraft(analysis?.summaryUpdate ?? '')
   }, [analysis?.summaryUpdate])
 
-  const acceptMutation = useMutation({
+  useEffect(() => {
+    setExpandedProposalDiffs({})
+  }, [summary.id])
+
+  const acceptProposalMutation = useMutation({
     mutationFn: (index: number) =>
-      api.librarian.acceptSuggestion(storyId, summary.id, index),
+      api.librarian.acceptChangeProposal(storyId, summary.id, index),
+    // Invalidate on failure too: a failed accept marks the proposal stale
+    // server-side, so the panel must refetch to stop offering it.
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['librarian-analyses', storyId] })
+      queryClient.invalidateQueries({ queryKey: ['librarian-analysis', storyId, summary.id] })
+      queryClient.invalidateQueries({ queryKey: ['fragments', storyId] })
+      queryClient.invalidateQueries({ queryKey: ['fragments-archived', storyId] })
+    },
+  })
+
+  const revertProposalMutation = useMutation({
+    mutationFn: (index: number) =>
+      api.librarian.revertChangeProposal(storyId, summary.id, index),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['librarian-analyses', storyId] })
       queryClient.invalidateQueries({ queryKey: ['librarian-analysis', storyId, summary.id] })
       queryClient.invalidateQueries({ queryKey: ['fragments', storyId] })
+      queryClient.invalidateQueries({ queryKey: ['fragments-archived', storyId] })
     },
   })
 
-  const dismissMutation = useMutation({
+  const dismissProposalMutation = useMutation({
     mutationFn: (index: number) =>
-      api.librarian.dismissSuggestion(storyId, summary.id, index),
+      api.librarian.dismissChangeProposal(storyId, summary.id, index),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['librarian-analyses', storyId] })
       queryClient.invalidateQueries({ queryKey: ['librarian-analysis', storyId, summary.id] })
@@ -720,9 +968,13 @@ function AnalysisItem({
     },
   })
 
-  const handleAcceptSuggestion = (_suggestion: LibrarianAnalysis['fragmentSuggestions'][number], index: number) => {
-    acceptMutation.mutate(index)
+  const handleAcceptProposal = (_proposal: LibrarianAnalysis['fragmentChangeProposals'][number], index: number) => {
+    acceptProposalMutation.mutate(index)
   }
+
+  const proposalMutationError = acceptProposalMutation.error
+    ?? revertProposalMutation.error
+    ?? dismissProposalMutation.error
 
   const pendingSuggestions = summary.pendingSuggestionCount
   const mentionGroups = useMemo(
@@ -917,81 +1169,170 @@ function AnalysisItem({
             </div>
           )}
 
-          {analysis.fragmentSuggestions.length > 0 && (
+          {analysis.fragmentChangeProposals.length > 0 && (
             <div className="space-y-1.5">
               <span className="text-primary/70 text-[0.625rem] font-medium">Suggestions</span>
-              {analysis.fragmentSuggestions.map((s, i) => (
-                <div
-                  key={`${s.type ?? 'knowledge'}-${s.name}`}
-                  className={`rounded-md p-2 flex items-start justify-between gap-1 ${
-                    s.accepted
-                      ? 'bg-emerald-500/5 border border-emerald-500/10 opacity-60'
-                      : 'bg-primary/5 border border-primary/10'
-                  }`}
-                >
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-1 flex-wrap">
-                      <Badge variant="outline" className="text-[0.5625rem] h-3.5 px-1">{s.type ?? 'knowledge'}</Badge>
-                      <span className="font-medium text-foreground/70">{s.name}</span>
-                      {s.accepted && (
-                        <Badge variant="secondary" className="text-[0.5625rem] h-3.5 gap-0.5 px-1">
-                          <Check className="size-2" />
-                          {s.targetFragmentId ? 'Updated' : 'Added'}
-                        </Badge>
-                      )}
-                      {!s.accepted && s.targetFragmentId && (
-                        <Badge variant="outline" className="text-[0.5625rem] h-3.5 px-1">
-                          Update
-                        </Badge>
-                      )}
-                      {s.accepted && s.autoApplied && (
-                        <Badge variant="outline" className="text-[0.5625rem] h-3.5 px-1">
-                          Auto
-                        </Badge>
+              {analysis.fragmentChangeProposals.map((proposal, i) => {
+                const title = proposal.title?.trim()
+                  || `${proposal.operations.length} fragment change${proposal.operations.length === 1 ? '' : 's'}`
+                const validationResults = proposal.appliedResults?.length ? proposal.appliedResults : proposal.validation
+                const diffItemsByOperation = proposalOperationDiffItems(proposal)
+                const diffCount = [...diffItemsByOperation.values()].reduce((count, items) => count + items.length, 0)
+                const diffExpanded = expandedProposalDiffs[i] === true
+                const canRevert = proposal.accepted === true
+                  && (proposal.appliedChanges?.length ?? 0) > 0
+                return (
+                  <div
+                    key={`proposal-${summary.id}-${i}`}
+                    className={cn(
+                      'rounded-md p-2',
+                      proposal.accepted
+                        ? 'bg-emerald-500/5 border border-emerald-500/10'
+                        : 'bg-primary/5 border border-primary/10',
+                    )}
+                  >
+                    <div className="flex items-start justify-between gap-1">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1 flex-wrap">
+                          <Badge variant="outline" className="text-[0.5625rem] h-3.5 gap-0.5 px-1">
+                            <Wrench className="size-2" />
+                            proposal
+                          </Badge>
+                          <span className="font-medium text-foreground/70">{title}</span>
+                          <Badge variant="outline" className="text-[0.5625rem] h-3.5 px-1">
+                            {proposal.operations.length} op{proposal.operations.length === 1 ? '' : 's'}
+                          </Badge>
+                          {proposal.accepted && (
+                            <Badge variant="secondary" className="text-[0.5625rem] h-3.5 gap-0.5 px-1">
+                              <Check className="size-2" />
+                              Applied
+                            </Badge>
+                          )}
+                          {proposal.accepted && proposal.autoApplied && (
+                            <Badge variant="outline" className="text-[0.5625rem] h-3.5 px-1">
+                              Auto
+                            </Badge>
+                          )}
+                          {diffCount > 0 && (
+                            <button
+                              type="button"
+                              className="inline-flex items-center gap-0.5 h-3.5 px-1 text-[0.5625rem] text-muted-foreground hover:text-foreground rounded-sm hover:bg-muted/40 transition-colors"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setExpandedProposalDiffs((current) => ({
+                                  ...current,
+                                  [i]: !diffExpanded,
+                                }))
+                              }}
+                            >
+                              {diffExpanded ? <ChevronDown className="size-2" /> : <ChevronRight className="size-2" />}
+                              Diff
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      {proposal.dismissed ? (
+                        <span
+                          className="text-[0.5625rem] text-muted-foreground italic shrink-0"
+                          title={proposal.stale ? proposal.staleReason : undefined}
+                        >
+                          {proposal.stale ? 'no longer applicable' : 'dismissed'}
+                        </span>
+                      ) : (!proposal.accepted || canRevert) && (
+                        <div className="flex gap-0.5 shrink-0">
+                          {!proposal.accepted && (
+                            <>
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="size-5 text-muted-foreground hover:text-foreground"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  handleAcceptProposal(proposal, i)
+                                }}
+                                disabled={acceptProposalMutation.isPending}
+                                title="Apply suggestion"
+                              >
+                                <Plus className="size-3" />
+                              </Button>
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="size-5 text-muted-foreground hover:text-destructive"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  dismissProposalMutation.mutate(i)
+                                }}
+                                disabled={dismissProposalMutation.isPending}
+                                title="Dismiss suggestion"
+                              >
+                                <X className="size-3" />
+                              </Button>
+                            </>
+                          )}
+                          {canRevert && (
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="size-5 text-muted-foreground hover:text-destructive"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                revertProposalMutation.mutate(i)
+                              }}
+                              disabled={revertProposalMutation.isPending}
+                              title="Revert suggestion"
+                            >
+                              <Undo2 className="size-3" />
+                            </Button>
+                          )}
+                        </div>
                       )}
                     </div>
-                    <p className="text-muted-foreground mt-0.5">{s.description}</p>
-                    {s.targetFragmentId && (
-                      <p className="text-[0.5625rem] text-muted-foreground mt-0.5 font-mono">
-                        updates {s.targetFragmentId}
-                      </p>
+                    {proposal.rationale && (
+                      <p className="text-muted-foreground mt-0.5 break-words">{proposal.rationale}</p>
                     )}
-                    {s.sourceFragmentId && (
+                    <div className="mt-1 space-y-0.5">
+                      {proposal.operations.slice(0, 5).map((operation, operationIndex) => {
+                        const validation = validationResults.find((result) => result.operationId === operation.operationId)
+                          ?? validationResults[operationIndex]
+                        const field = validation?.target?.field
+                        const operationDiffItems = diffItemsByOperation.get(operationIndex) ?? []
+                        return (
+                          <div key={`${operation.operationId ?? operationIndex}`} className="min-w-0">
+                            <div className="flex items-center gap-1 min-w-0 text-[0.5625rem] text-muted-foreground">
+                              <Badge variant="outline" className="h-3.5 px-1 text-[0.5rem] shrink-0">
+                                {operationActionLabel(operation.action)}
+                              </Badge>
+                              <span className="truncate">
+                                {proposalOperationTarget(operation, validation, fragmentById)}
+                                {field ? `.${field}` : ''}
+                              </span>
+                            </div>
+                            {diffExpanded && operationDiffItems.length > 0 && (
+                              <OperationDiffPreview items={operationDiffItems} />
+                            )}
+                          </div>
+                        )
+                      })}
+                      {proposal.operations.length > 5 && (
+                        <p className="text-[0.5625rem] text-muted-foreground">
+                          +{proposal.operations.length - 5} more
+                        </p>
+                      )}
+                    </div>
+                    {proposal.sourceFragmentId && (
                       <p className="text-[0.5625rem] text-muted-foreground mt-0.5 font-mono">
-                        from {s.sourceFragmentId}
+                        from {proposal.sourceFragmentId}
                       </p>
                     )}
                   </div>
-                  {s.dismissed ? (
-                    <span className="text-[0.5625rem] text-muted-foreground italic shrink-0">dismissed</span>
-                  ) : !s.accepted && (
-                    <div className="flex gap-0.5 shrink-0">
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="size-5 text-muted-foreground hover:text-foreground"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          handleAcceptSuggestion(s, i)
-                        }}
-                      >
-                        <Plus className="size-3" />
-                      </Button>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="size-5 text-muted-foreground hover:text-destructive"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          dismissMutation.mutate(i)
-                        }}
-                      >
-                        <X className="size-3" />
-                      </Button>
-                    </div>
-                  )}
-                </div>
-              ))}
+                )
+              })}
+              {proposalMutationError && (
+                <p className="rounded-md border border-destructive/10 bg-destructive/5 px-2 py-1 text-[0.5625rem] text-destructive/80 leading-relaxed">
+                  {proposalMutationError instanceof Error ? proposalMutationError.message : 'Suggestion action failed.'}
+                </p>
+              )}
             </div>
           )}
 

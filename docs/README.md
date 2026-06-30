@@ -6,6 +6,10 @@
   - Context block system: structured LLM prompt blocks, the `beforeBlocks` plugin hook, Block Editor UI, custom blocks (simple + script), and block configuration API.
 - `docs/summarization-and-memory.md`
   - Technical reference for rolling story memory: deferred summary application, latest-analysis dedupe for reanalysis safety, structured summary signals, compaction thresholds, settings/API wiring, and test coverage.
+- `docs/analyze-context-design.md`
+  - Analyze context strategy: character working-set tiering, edit-safety via proposals against preloaded sheets, and the history of the superseded mid-loop body-delivery plan.
+- `docs/timelines.md`
+  - Timelines (branches): isolated story copies, forking, switching, storage layout, and API.
 - `docs/character-chat.md`
   - Character Chat architecture and API: conversation storage model, NDJSON streaming chat endpoint, persona modes, model/provider resolution, and frontend integration points.
 - `docs/prose-writing-panel.md`
@@ -26,6 +30,8 @@
   - Generation pipeline: standard and prewriter modes, context assembly, streaming events, generation logs, and mode-specific behavior.
 - `docs/adding-agents.md`
   - Contributor guide for adding new agents: file structure, system prompts, block builders, runtime logic, registration, model resolution, UI integration, testing checklist.
+- `docs/agent-observability.md`
+  - Agent observability: active registry, live activity stream, run traces, and the persistent librarian analyses/generation logs — which system answers which question, and who wires them (you don't).
 - `docs/commit-doc-sync.md`
   - Auto-generated commit-driven documentation sync report with baseline detection and follow-up suggestions.
 - `docs/documentation-sync-skill.md`

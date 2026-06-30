@@ -1,13 +1,22 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { createTempDir, makeTestSettings } from '../setup'
 import { createApp } from '@/server/api'
-import { createStory, createFragment, getFragment, getStory, updateStory, listFragments } from '@/server/fragments/storage'
+import {
+  createStory,
+  createFragment,
+  getFragment,
+  getStory,
+  updateStory,
+  listFragments,
+  updateFragmentVersioned,
+} from '@/server/fragments/storage'
 import {
   saveAnalysis,
   saveState,
   type LibrarianAnalysis,
   type LibrarianState,
 } from '@/server/librarian/storage'
+import { fragmentBaseHash } from '@/server/fragments/change-operations'
 
 // Mock the AI SDK to prevent real LLM calls
 vi.mock('ai', () => ({
@@ -44,7 +53,7 @@ function makeAnalysis(overrides: Partial<LibrarianAnalysis> = {}): LibrarianAnal
     summaryUpdate: 'Something happened.',
     mentions: [{ fragmentId: 'ch-0001', text: 'hero' }],
     contradictions: [],
-    fragmentSuggestions: [],
+    fragmentChangeProposals: [],
     timelineEvents: [],
     ...overrides,
   }
@@ -256,29 +265,36 @@ describe('librarian API routes', () => {
     })
   })
 
-  describe('POST /stories/:storyId/librarian/analyses/:analysisId/suggestions/:index/accept', () => {
-    it('marks a suggestion as accepted and creates a fragment', async () => {
+  describe('POST /stories/:storyId/librarian/analyses/:analysisId/change-proposals/:index/accept', () => {
+    it('marks a proposal as accepted and creates a fragment', async () => {
       await saveAnalysis(dataDir, storyId, makeAnalysis({
         id: 'analysis-accept',
-        fragmentSuggestions: [
-          { type: 'knowledge', name: 'Dragon Lore', description: 'Dragons breathe fire', content: 'Full details about dragons.' },
-          { type: 'character', name: 'Hero', description: 'Main character', content: 'Hero backstory.' },
+        fragmentChangeProposals: [
+          {
+            title: 'Add dragon lore',
+            operations: [{ operationId: 'op-1', action: 'create_fragment', type: 'knowledge', name: 'Dragon Lore', description: 'Dragons breathe fire', content: 'Full details about dragons.' }],
+            validation: [{ operationId: 'op-1', action: 'create_fragment', status: 'valid' }],
+          },
+          {
+            operations: [{ operationId: 'op-1', action: 'create_fragment', type: 'character', name: 'Hero', description: 'Main character', content: 'Hero backstory.' }],
+            validation: [{ operationId: 'op-1', action: 'create_fragment', status: 'valid' }],
+          },
         ],
       }))
 
       const res = await app.fetch(
-        new Request(`http://localhost/api/stories/${storyId}/librarian/analyses/analysis-accept/suggestions/0/accept`, {
+        new Request(`http://localhost/api/stories/${storyId}/librarian/analyses/analysis-accept/change-proposals/0/accept`, {
           method: 'POST',
         }),
       )
       expect(res.status).toBe(200)
       const data = await res.json()
-      expect(data.analysis.fragmentSuggestions[0].accepted).toBe(true)
-      expect(data.analysis.fragmentSuggestions[0].autoApplied).toBe(false)
-      expect(data.analysis.fragmentSuggestions[1].accepted).toBeUndefined()
-      expect(data.createdFragmentId).toBeTruthy()
+      expect(data.analysis.fragmentChangeProposals[0].accepted).toBe(true)
+      expect(data.analysis.fragmentChangeProposals[0].autoApplied).toBe(false)
+      expect(data.analysis.fragmentChangeProposals[1].accepted).toBeUndefined()
+      expect(data.createdFragmentIds[0]).toBeTruthy()
 
-      const created = await getFragment(dataDir, storyId, data.createdFragmentId)
+      const created = await getFragment(dataDir, storyId, data.createdFragmentIds[0])
       expect(created).toBeTruthy()
       expect(created?.name).toBe('Dragon Lore')
       expect(created?.type).toBe('knowledge')
@@ -286,7 +302,43 @@ describe('librarian API routes', () => {
       expect(created?.meta?.sourceFragmentId).toBe('pr-0001')
     })
 
-    it('updates an existing targeted fragment when suggestion has targetFragmentId', async () => {
+    it('reverts an accepted create proposal by archiving the created fragment', async () => {
+      await saveAnalysis(dataDir, storyId, makeAnalysis({
+        id: 'analysis-revert-create',
+        fragmentChangeProposals: [{
+          operations: [{ operationId: 'op-1', action: 'create_fragment', type: 'knowledge', name: 'Dragon Lore', description: 'Dragons breathe fire', content: 'Full details about dragons.' }],
+          validation: [{ operationId: 'op-1', action: 'create_fragment', status: 'valid' }],
+        }],
+      }))
+
+      const acceptRes = await app.fetch(
+        new Request(`http://localhost/api/stories/${storyId}/librarian/analyses/analysis-revert-create/change-proposals/0/accept`, {
+          method: 'POST',
+        }),
+      )
+      expect(acceptRes.status).toBe(200)
+      const accepted = await acceptRes.json()
+      const createdId = accepted.createdFragmentIds[0]
+      expect(createdId).toBeTruthy()
+      expect(accepted.appliedChanges[0]).toMatchObject({ kind: 'create', fragmentId: createdId })
+
+      const revertRes = await app.fetch(
+        new Request(`http://localhost/api/stories/${storyId}/librarian/analyses/analysis-revert-create/change-proposals/0/revert`, {
+          method: 'POST',
+        }),
+      )
+      expect(revertRes.status).toBe(200)
+      const revertedData = await revertRes.json()
+      expect(revertedData.archivedFragmentIds).toEqual([createdId])
+      expect(revertedData.analysis.fragmentChangeProposals[0].accepted).toBe(false)
+      expect(revertedData.analysis.fragmentChangeProposals[0].appliedChanges).toBeUndefined()
+      expect(revertedData.analysis.fragmentChangeProposals[0].revertedAt).toBeTruthy()
+
+      const reverted = await getFragment(dataDir, storyId, createdId)
+      expect(reverted?.archived).toBe(true)
+    })
+
+    it('updates an existing targeted fragment with set_fields', async () => {
       const now = new Date().toISOString()
       await createFragment(dataDir, storyId, {
         id: 'kn-0001',
@@ -303,33 +355,126 @@ describe('librarian API routes', () => {
         order: 0,
         meta: {},
       })
+      const target = await getFragment(dataDir, storyId, 'kn-0001')
 
       await saveAnalysis(dataDir, storyId, makeAnalysis({
         id: 'analysis-target-update',
-        fragmentSuggestions: [
-          {
-            type: 'knowledge',
-            targetFragmentId: 'kn-0001',
-            name: 'Valdris',
-            description: 'Ancient defended city',
-            content: 'Valdris is an ancient city defended by stone sentinels.',
-          },
-        ],
+        fragmentChangeProposals: [{
+          operations: [{
+            operationId: 'op-1',
+            action: 'set_fields',
+            fragmentId: 'kn-0001',
+            baseHash: fragmentBaseHash(target!),
+            fields: {
+              description: 'Ancient defended city',
+              content: 'Valdris is an ancient city defended by stone sentinels.',
+            },
+          }],
+          validation: [{ operationId: 'op-1', action: 'set_fields', status: 'valid', target: { fragmentId: 'kn-0001' } }],
+        }],
       }))
 
       const res = await app.fetch(
-        new Request(`http://localhost/api/stories/${storyId}/librarian/analyses/analysis-target-update/suggestions/0/accept`, {
+        new Request(`http://localhost/api/stories/${storyId}/librarian/analyses/analysis-target-update/change-proposals/0/accept`, {
           method: 'POST',
         }),
       )
       expect(res.status).toBe(200)
       const data = await res.json()
-      expect(data.createdFragmentId).toBe('kn-0001')
+      expect(data.updatedFragmentIds).toEqual(['kn-0001'])
 
       const updated = await getFragment(dataDir, storyId, 'kn-0001')
       expect(updated).toBeTruthy()
       expect(updated?.description).toBe('Ancient defended city')
       expect(updated?.content).toContain('stone sentinels')
+    })
+
+    it('records applied changes and reverts an accepted update proposal', async () => {
+      const now = new Date().toISOString()
+      await createFragment(dataDir, storyId, {
+        id: 'kn-revert',
+        type: 'knowledge',
+        name: 'Valdris',
+        description: 'Ancient city',
+        content: 'Valdris is an ancient city.',
+        tags: [],
+        refs: [],
+        sticky: false,
+        placement: 'user',
+        createdAt: now,
+        updatedAt: now,
+        order: 0,
+        meta: {},
+      })
+      const target = await getFragment(dataDir, storyId, 'kn-revert')
+
+      await saveAnalysis(dataDir, storyId, makeAnalysis({
+        id: 'analysis-revert-update',
+        fragmentChangeProposals: [{
+          operations: [{
+            operationId: 'op-1',
+            action: 'set_fields',
+            fragmentId: 'kn-revert',
+            baseHash: fragmentBaseHash(target!),
+            fields: {
+              description: 'Ancient defended city',
+              content: 'Valdris is an ancient city defended by stone sentinels.',
+            },
+          }],
+          validation: [{ operationId: 'op-1', action: 'set_fields', status: 'valid', target: { fragmentId: 'kn-revert' } }],
+        }],
+      }))
+
+      const acceptRes = await app.fetch(
+        new Request(`http://localhost/api/stories/${storyId}/librarian/analyses/analysis-revert-update/change-proposals/0/accept`, {
+          method: 'POST',
+        }),
+      )
+      expect(acceptRes.status).toBe(200)
+      const accepted = await acceptRes.json()
+      expect(accepted.appliedChanges[0]).toMatchObject({
+        kind: 'update',
+        fragmentId: 'kn-revert',
+        addedRefs: ['pr-0001'],
+        fields: {
+          description: {
+            before: 'Ancient city',
+            after: 'Ancient defended city',
+          },
+        },
+      })
+
+      const revertRes = await app.fetch(
+        new Request(`http://localhost/api/stories/${storyId}/librarian/analyses/analysis-revert-update/change-proposals/0/revert`, {
+          method: 'POST',
+        }),
+      )
+      expect(revertRes.status).toBe(200)
+      const revertedData = await revertRes.json()
+      expect(revertedData.updatedFragmentIds).toEqual(['kn-revert'])
+      expect(revertedData.analysis.fragmentChangeProposals[0].accepted).toBe(false)
+      expect(revertedData.analysis.fragmentChangeProposals[0].appliedChanges).toBeUndefined()
+      expect(revertedData.analysis.fragmentChangeProposals[0].revertedAt).toBeTruthy()
+
+      const reverted = await getFragment(dataDir, storyId, 'kn-revert')
+      expect(reverted?.description).toBe('Ancient city')
+      expect(reverted?.content).toBe('Valdris is an ancient city.')
+      expect(reverted?.refs).not.toContain('pr-0001')
+      expect(reverted?.meta.lastLibrarianChangeProposal).toBeUndefined()
+
+      const reapplyRes = await app.fetch(
+        new Request(`http://localhost/api/stories/${storyId}/librarian/analyses/analysis-revert-update/change-proposals/0/accept`, {
+          method: 'POST',
+        }),
+      )
+      expect(reapplyRes.status).toBe(200)
+      const reappliedData = await reapplyRes.json()
+      expect(reappliedData.analysis.fragmentChangeProposals[0].accepted).toBe(true)
+      expect(reappliedData.analysis.fragmentChangeProposals[0].revertedAt).toBeUndefined()
+
+      const reapplied = await getFragment(dataDir, storyId, 'kn-revert')
+      expect(reapplied?.description).toBe('Ancient defended city')
+      expect(reapplied?.content).toContain('stone sentinels')
     })
 
     it('updates an existing targeted custom fragment without creating a duplicate', async () => {
@@ -364,28 +509,34 @@ describe('librarian API routes', () => {
         order: 0,
         meta: {},
       })
+      const target = await getFragment(dataDir, storyId, 'loc-0001')
 
       await saveAnalysis(dataDir, storyId, makeAnalysis({
         id: 'analysis-target-custom-update',
-        fragmentSuggestions: [
-          {
-            type: 'location',
-            targetFragmentId: 'loc-0001',
-            name: 'Ash Market Gate',
-            description: 'The debt market entrance',
-            content: 'The Ash Market Gate admits only debtors and oathkeepers.',
-          },
-        ],
+        fragmentChangeProposals: [{
+          operations: [{
+            operationId: 'op-1',
+            action: 'set_fields',
+            fragmentId: 'loc-0001',
+            baseHash: fragmentBaseHash(target!),
+            fields: {
+              name: 'Ash Market Gate',
+              description: 'The debt market entrance',
+              content: 'The Ash Market Gate admits only debtors and oathkeepers.',
+            },
+          }],
+          validation: [{ operationId: 'op-1', action: 'set_fields', status: 'valid', target: { fragmentId: 'loc-0001' } }],
+        }],
       }))
 
       const res = await app.fetch(
-        new Request(`http://localhost/api/stories/${storyId}/librarian/analyses/analysis-target-custom-update/suggestions/0/accept`, {
+        new Request(`http://localhost/api/stories/${storyId}/librarian/analyses/analysis-target-custom-update/change-proposals/0/accept`, {
           method: 'POST',
         }),
       )
       expect(res.status).toBe(200)
       const data = await res.json()
-      expect(data.createdFragmentId).toBe('loc-0001')
+      expect(data.updatedFragmentIds).toEqual(['loc-0001'])
 
       const updated = await getFragment(dataDir, storyId, 'loc-0001')
       expect(updated?.name).toBe('Ash Market Gate')
@@ -394,43 +545,271 @@ describe('librarian API routes', () => {
       expect(locations.map((fragment) => fragment.id)).toEqual(['loc-0001'])
     })
 
+    it('accepts a localized edit proposal and applies an exact text replacement', async () => {
+      const now = new Date().toISOString()
+      await createFragment(dataDir, storyId, {
+        id: 'ch-0001',
+        type: 'character',
+        name: 'Alice',
+        description: 'Captain of the guard',
+        content: 'Alice is captain of the guard and lives in Valdris.',
+        tags: [],
+        refs: [],
+        sticky: false,
+        placement: 'user',
+        createdAt: now,
+        updatedAt: now,
+        order: 0,
+        meta: {},
+      })
+
+      await saveAnalysis(dataDir, storyId, makeAnalysis({
+        id: 'analysis-edit-proposal',
+        fragmentChangeProposals: [{
+          operations: [{
+            operationId: 'op-1',
+            action: 'replace_text',
+            fragmentId: 'ch-0001',
+            field: 'content',
+            oldText: 'captain of the guard',
+            newText: 'former captain of the guard',
+            replaceAll: false,
+            reason: 'Alice resigned.',
+          }],
+          validation: [{ operationId: 'op-1', action: 'replace_text', status: 'valid', target: { fragmentId: 'ch-0001', field: 'content' } }],
+        }],
+      }))
+
+      const res = await app.fetch(
+        new Request(`http://localhost/api/stories/${storyId}/librarian/analyses/analysis-edit-proposal/change-proposals/0/accept`, {
+          method: 'POST',
+        }),
+      )
+      expect(res.status).toBe(200)
+      const data = await res.json()
+      expect(data.updatedFragmentIds).toEqual(['ch-0001'])
+      expect(data.analysis.fragmentChangeProposals[0].accepted).toBe(true)
+      expect(data.analysis.fragmentChangeProposals[0].autoApplied).toBe(false)
+
+      const updated = await getFragment(dataDir, storyId, 'ch-0001')
+      expect(updated?.content).toContain('former captain of the guard')
+      expect(updated?.refs).toContain('pr-0001')
+    })
+
+    it('returns operation-specific errors when accepting a stale proposal', async () => {
+      const now = new Date().toISOString()
+      await createFragment(dataDir, storyId, {
+        id: 'ch-0001',
+        type: 'character',
+        name: 'Alice',
+        description: 'Captain of the guard',
+        content: 'Alice already resigned.',
+        tags: [],
+        refs: [],
+        sticky: false,
+        placement: 'user',
+        createdAt: now,
+        updatedAt: now,
+        order: 0,
+        meta: {},
+      })
+
+      await saveAnalysis(dataDir, storyId, makeAnalysis({
+        id: 'analysis-stale-proposal',
+        fragmentChangeProposals: [{
+          operations: [{
+            operationId: 'op-stale',
+            action: 'replace_text',
+            fragmentId: 'ch-0001',
+            field: 'content',
+            oldText: 'captain of the guard',
+            newText: 'former captain of the guard',
+            replaceAll: false,
+          }],
+          validation: [{ operationId: 'op-stale', action: 'replace_text', status: 'valid', target: { fragmentId: 'ch-0001', field: 'content' } }],
+        }],
+      }))
+
+      const res = await app.fetch(
+        new Request(`http://localhost/api/stories/${storyId}/librarian/analyses/analysis-stale-proposal/change-proposals/0/accept`, {
+          method: 'POST',
+        }),
+      )
+      expect(res.status).toBe(422)
+      const data = await res.json()
+      expect(data.error).toContain('op-stale')
+      expect(data.error).toContain('oldText was not found')
+      expect(data.error).toContain('Read first: ch-0001')
+
+      // The failure is deterministic against current state, so the proposal is
+      // marked stale (renders as dismissed) instead of staying pending to fail again.
+      expect(data.analysis.fragmentChangeProposals[0]).toMatchObject({
+        stale: true,
+        dismissed: true,
+      })
+      expect(data.analysis.fragmentChangeProposals[0].staleReason).toContain('oldText was not found')
+    })
+
+    it('marks a duplicated sibling proposal stale on accept and revives it on revert', async () => {
+      const now = new Date().toISOString()
+      await createFragment(dataDir, storyId, {
+        id: 'kn-dup',
+        type: 'knowledge',
+        name: 'Harbor District',
+        description: 'Smuggling hub',
+        content: 'The harbor district hosts the story\'s smuggling operation.',
+        tags: [],
+        refs: [],
+        sticky: false,
+        placement: 'user',
+        createdAt: now,
+        updatedAt: now,
+        order: 0,
+        meta: {},
+      })
+
+      // Two proposals carrying the same fact — the shape a propose-retry used to
+      // leave behind. Accepting one must not leave the other pending, because its
+      // accept can only fail with a repeated-paragraph error.
+      const paragraph = 'The Maritime Heritage Initiative branding is now serving as a cover for the smuggling operation across the harbor district.'
+      const appendProposal = (operationId: string) => ({
+        operations: [{
+          operationId,
+          action: 'append_paragraph' as const,
+          fragmentId: 'kn-dup',
+          field: 'content' as const,
+          text: paragraph,
+        }],
+        validation: [{ operationId, action: 'append_paragraph' as const, status: 'valid' as const, target: { fragmentId: 'kn-dup', field: 'content' as const } }],
+      })
+      await saveAnalysis(dataDir, storyId, makeAnalysis({
+        id: 'analysis-dup-sibling',
+        fragmentChangeProposals: [appendProposal('op-a'), appendProposal('op-b')],
+      }))
+
+      const acceptRes = await app.fetch(
+        new Request(`http://localhost/api/stories/${storyId}/librarian/analyses/analysis-dup-sibling/change-proposals/0/accept`, {
+          method: 'POST',
+        }),
+      )
+      expect(acceptRes.status).toBe(200)
+      const accepted = await acceptRes.json()
+      expect(accepted.analysis.fragmentChangeProposals[0].accepted).toBe(true)
+      expect(accepted.analysis.fragmentChangeProposals[1]).toMatchObject({
+        stale: true,
+        dismissed: true,
+      })
+      expect(accepted.analysis.fragmentChangeProposals[1].staleReason).toContain('repeat the same paragraph')
+
+      // Reverting removes the duplication, so the sibling becomes applicable again.
+      const revertRes = await app.fetch(
+        new Request(`http://localhost/api/stories/${storyId}/librarian/analyses/analysis-dup-sibling/change-proposals/0/revert`, {
+          method: 'POST',
+        }),
+      )
+      expect(revertRes.status).toBe(200)
+      const reverted = await revertRes.json()
+      expect(reverted.analysis.fragmentChangeProposals[1].stale).toBeUndefined()
+      expect(reverted.analysis.fragmentChangeProposals[1].dismissed).toBe(false)
+    })
+
+    it('returns 409 when reverting an accepted update after the fragment changed', async () => {
+      const now = new Date().toISOString()
+      await createFragment(dataDir, storyId, {
+        id: 'ch-drift',
+        type: 'character',
+        name: 'Alice',
+        description: 'Captain of the guard',
+        content: 'Alice is captain of the guard.',
+        tags: [],
+        refs: [],
+        sticky: false,
+        placement: 'user',
+        createdAt: now,
+        updatedAt: now,
+        order: 0,
+        meta: {},
+      })
+
+      await saveAnalysis(dataDir, storyId, makeAnalysis({
+        id: 'analysis-revert-drift',
+        fragmentChangeProposals: [{
+          operations: [{
+            operationId: 'op-1',
+            action: 'replace_text',
+            fragmentId: 'ch-drift',
+            field: 'content',
+            oldText: 'captain of the guard',
+            newText: 'former captain of the guard',
+            replaceAll: false,
+          }],
+          validation: [{ operationId: 'op-1', action: 'replace_text', status: 'valid', target: { fragmentId: 'ch-drift', field: 'content' } }],
+        }],
+      }))
+
+      const acceptRes = await app.fetch(
+        new Request(`http://localhost/api/stories/${storyId}/librarian/analyses/analysis-revert-drift/change-proposals/0/accept`, {
+          method: 'POST',
+        }),
+      )
+      expect(acceptRes.status).toBe(200)
+
+      await updateFragmentVersioned(dataDir, storyId, 'ch-drift', {
+        content: 'Alice left the guard entirely.',
+      })
+
+      const revertRes = await app.fetch(
+        new Request(`http://localhost/api/stories/${storyId}/librarian/analyses/analysis-revert-drift/change-proposals/0/revert`, {
+          method: 'POST',
+        }),
+      )
+      expect(revertRes.status).toBe(409)
+      const data = await revertRes.json()
+      expect(data.error).toContain('ch-drift changed since this proposal was applied')
+
+      const drifted = await getFragment(dataDir, storyId, 'ch-drift')
+      expect(drifted?.content).toBe('Alice left the guard entirely.')
+    })
+
     it('returns 404 for non-existent analysis', async () => {
       const res = await app.fetch(
-        new Request(`http://localhost/api/stories/${storyId}/librarian/analyses/nonexistent/suggestions/0/accept`, {
+        new Request(`http://localhost/api/stories/${storyId}/librarian/analyses/nonexistent/change-proposals/0/accept`, {
           method: 'POST',
         }),
       )
       expect(res.status).toBe(404)
     })
 
-    it('returns 422 for invalid suggestion index', async () => {
+    it('returns 422 for invalid proposal index', async () => {
       await saveAnalysis(dataDir, storyId, makeAnalysis({
         id: 'analysis-badidx',
-        fragmentSuggestions: [
-          { type: 'knowledge', name: 'Test', description: 'Test', content: 'Test' },
-        ],
+        fragmentChangeProposals: [{
+          operations: [{ operationId: 'op-1', action: 'create_fragment', type: 'knowledge', name: 'Test', description: 'Test', content: 'Test' }],
+          validation: [{ operationId: 'op-1', action: 'create_fragment', status: 'valid' }],
+        }],
       }))
 
       const res = await app.fetch(
-        new Request(`http://localhost/api/stories/${storyId}/librarian/analyses/analysis-badidx/suggestions/5/accept`, {
+        new Request(`http://localhost/api/stories/${storyId}/librarian/analyses/analysis-badidx/change-proposals/5/accept`, {
           method: 'POST',
         }),
       )
       expect(res.status).toBe(422)
       const data = await res.json()
-      expect(data.error).toContain('Invalid suggestion index')
+      expect(data.error).toContain('Invalid fragment change proposal index')
     })
 
     it('returns 422 for negative index', async () => {
       await saveAnalysis(dataDir, storyId, makeAnalysis({
         id: 'analysis-negidx',
-        fragmentSuggestions: [
-          { type: 'knowledge', name: 'Test', description: 'Test', content: 'Test' },
-        ],
+        fragmentChangeProposals: [{
+          operations: [{ operationId: 'op-1', action: 'create_fragment', type: 'knowledge', name: 'Test', description: 'Test', content: 'Test' }],
+          validation: [{ operationId: 'op-1', action: 'create_fragment', status: 'valid' }],
+        }],
       }))
 
       const res = await app.fetch(
-        new Request(`http://localhost/api/stories/${storyId}/librarian/analyses/analysis-negidx/suggestions/-1/accept`, {
+        new Request(`http://localhost/api/stories/${storyId}/librarian/analyses/analysis-negidx/change-proposals/-1/accept`, {
           method: 'POST',
         }),
       )

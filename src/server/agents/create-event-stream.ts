@@ -1,4 +1,5 @@
 import type { AgentStreamEvent, AgentStreamCompletion, AgentStreamResult } from './stream-types'
+import { drainAgentStream } from './drain-agent-stream'
 
 /**
  * Converts an AI SDK v6 fullStream into an NDJSON event stream + completion promise.
@@ -19,89 +20,28 @@ export function createEventStream(
     completionReject = reject
   })
 
-  let fullText = ''
-  let fullReasoning = ''
-  const toolCalls: Array<{ toolName: string; args: Record<string, unknown>; result: unknown }> = []
-  // Correlate a tool-result back to the args from its tool-call event.
-  const toolCallArgs = new Map<string, Record<string, unknown>>()
-  let lastFinishReason = 'unknown'
-  let stepCount = 0
-
   const eventStream = new ReadableStream<string>({
     async start(controller) {
       try {
-        for await (const part of fullStream) {
-          let event: AgentStreamEvent | null = null
-          const p = part as Record<string, unknown>
-          const type = (p as { type?: string }).type
-
-          switch (type) {
-            case 'text-delta': {
-              const text = (p.text ?? '') as string
-              fullText += text
-              event = { type: 'text', text }
-              break
-            }
-            case 'reasoning-delta': {
-              const text = (p.text ?? '') as string
-              fullReasoning += text
-              event = { type: 'reasoning', text }
-              break
-            }
-            case 'tool-call': {
-              const input = (p.input ?? {}) as Record<string, unknown>
-              const toolCallId = p.toolCallId as string
-              toolCallArgs.set(toolCallId, input)
-              event = {
-                type: 'tool-call',
-                id: toolCallId,
-                toolName: p.toolName as string,
-                args: input,
-              }
-              break
-            }
-            case 'tool-result': {
-              const toolCallId = p.toolCallId as string
-              const toolName = (p.toolName as string) ?? ''
-              toolCalls.push({ toolName, args: toolCallArgs.get(toolCallId) ?? {}, result: p.output })
-              event = {
-                type: 'tool-result',
-                id: toolCallId,
-                toolName,
-                result: p.output,
-              }
-              break
-            }
-            // `finish-step` fires once per LLM step; `finish` fires once for the
-            // whole generation. Count steps, capture the final reason.
-            case 'finish-step':
-              stepCount++
-              break
-            case 'finish':
-              lastFinishReason = (p.finishReason as string) ?? 'unknown'
-              break
-          }
-
-          if (event) {
-            controller.enqueue(JSON.stringify(event) + '\n')
-          }
-        }
+        const drained = await drainAgentStream(fullStream, (event) => {
+          controller.enqueue(JSON.stringify(event) + '\n')
+        })
 
         // Emit final finish event
         const finishEvent: AgentStreamEvent = {
           type: 'finish',
-          finishReason: lastFinishReason,
-          stepCount,
+          finishReason: drained.finishReason,
+          stepCount: drained.stepCount,
         }
         controller.enqueue(JSON.stringify(finishEvent) + '\n')
         controller.close()
 
         completionResolve!({
-          text: fullText,
-          reasoning: fullReasoning,
-          toolCalls,
-          stepCount,
-          finishReason: lastFinishReason,
+          text: drained.fullText,
+          reasoning: drained.fullReasoning,
+          toolCalls: drained.toolCalls,
+          stepCount: drained.stepCount,
+          finishReason: drained.finishReason,
         })
       } catch (err) {
         controller.error(err)

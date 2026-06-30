@@ -370,7 +370,7 @@ Deletion requires the fragment to be archived first (422 error otherwise).
 | Method | Path | Body | Response |
 |---|---|---|---|
 | `POST` | `/stories/:storyId/generate` | `{ input, saveResult?, mode?, fragmentId? }` | Streaming NDJSON/text response with `text`, `reasoning`, `tool-call`, `tool-result`, `phase`, `finish`, and optional prewriter events |
-| `POST` | `/stories/:storyId/suggest-directions` | `{ count? }` | `{ suggestions }` |
+| `POST` | `/stories/:storyId/propose-directions` | `{ count? }` | `{ suggestions }` |
 
 Generation modes:
 

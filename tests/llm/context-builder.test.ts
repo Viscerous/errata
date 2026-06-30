@@ -490,7 +490,7 @@ describe('context-builder', () => {
     expect(sysMsg.content).not.toContain('listCharacters')
     expect(sysMsg.content).not.toContain('listFragmentTypes')
     expect(sysMsg.content).toContain('retrieve the full details')
-    expect(sysMsg.content).toContain('creative writing assistant')
+    expect(sysMsg.content).toContain('fiction writer')
   })
 
   it('includes only prose before target fragment when proseBeforeFragmentId is set', async () => {

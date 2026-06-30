@@ -2,7 +2,11 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { createTempDir, makeTestSettings } from '../setup'
 import { createStory } from '@/server/fragments/storage'
 import { saveGlobalConfig } from '@/server/config/storage'
-import { getModel } from '@/server/llm/client'
+import {
+  getModel,
+  resolveGenerationGuards,
+  DEFAULT_MAX_OUTPUT_TOKENS,
+} from '@/server/llm/client'
 import type { StoryMeta } from '@/server/fragments/schema'
 
 function makeStory(): StoryMeta {
@@ -18,6 +22,20 @@ function makeStory(): StoryMeta {
     settings: makeTestSettings({ librarianProviderId: null, librarianModelId: null }),
   }
 }
+
+describe('resolveGenerationGuards', () => {
+  it('applies the default token cap when unset', () => {
+    expect(resolveGenerationGuards(undefined)).toEqual({
+      maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
+    })
+  })
+
+  it('lets story settings override the token cap', () => {
+    expect(resolveGenerationGuards({ maxOutputTokens: 2048 })).toEqual({
+      maxOutputTokens: 2048,
+    })
+  })
+})
 
 describe('llm client model resolution', () => {
   let dataDir: string

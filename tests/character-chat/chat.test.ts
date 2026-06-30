@@ -131,6 +131,8 @@ describe('character chat endpoints', () => {
   })
 
   afterEach(async () => {
+    // Allow background conversation writes to finish before removing the directory
+    await new Promise((resolve) => setTimeout(resolve, 50))
     await cleanup()
   })
 
@@ -364,11 +366,13 @@ describe('character chat endpoints', () => {
       const config = mockAgentCtor.mock.calls[0][0]
       const toolNames = Object.keys(config.tools)
 
-      // Should have read tools but NOT write tools
-      expect(toolNames.some((n: string) => n.startsWith('get') || n.startsWith('list') || n.startsWith('search'))).toBe(true)
+      // Should have read tools but NOT write/proposal tools
+      expect(toolNames).toContain('readFragments')
+      expect(toolNames).toContain('findFragments')
       expect(toolNames).not.toContain('editProse')
       expect(toolNames).not.toContain('createFragment')
       expect(toolNames).not.toContain('deleteFragment')
+      expect(toolNames).not.toContain('applyProposedChanges')
     })
 
     it('keeps character instructions in system prompt and sends character details as user context', async () => {

@@ -245,34 +245,24 @@ export async function renameFragmentIdAcrossStory(
               analysisModified = true
             }
           }
-          if (analysis.fragmentSuggestions) {
-            for (const s of analysis.fragmentSuggestions) {
-              if (s.targetFragmentId === oldId) {
-                s.targetFragmentId = newId
-                analysisModified = true
-              }
-              if (s.sourceFragmentId === oldId) {
-                s.sourceFragmentId = newId
-                analysisModified = true
-              }
-              if (s.createdFragmentId === oldId) {
-                s.createdFragmentId = newId
+          for (const proposal of analysis.fragmentChangeProposals) {
+            if (proposal.sourceFragmentId === oldId) {
+              proposal.sourceFragmentId = newId
+              analysisModified = true
+            }
+            for (const operation of proposal.operations) {
+              if (operation.action !== 'create_fragment' && operation.fragmentId === oldId) {
+                operation.fragmentId = newId
                 analysisModified = true
               }
             }
-          }
-          if (analysis.knowledgeSuggestions) {
-            for (const s of analysis.knowledgeSuggestions) {
-              if (s.targetFragmentId === oldId) {
-                s.targetFragmentId = newId
+            for (const result of [...proposal.validation, ...(proposal.appliedResults ?? [])]) {
+              if (result.target?.fragmentId === oldId) {
+                result.target.fragmentId = newId
                 analysisModified = true
               }
-              if (s.sourceFragmentId === oldId) {
-                s.sourceFragmentId = newId
-                analysisModified = true
-              }
-              if (s.createdFragmentId === oldId) {
-                s.createdFragmentId = newId
+              if (result.createdFragmentId === oldId) {
+                result.createdFragmentId = newId
                 analysisModified = true
               }
             }

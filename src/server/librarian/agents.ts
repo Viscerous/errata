@@ -4,7 +4,7 @@ import { agentBlockRegistry } from '../agents/agent-block-registry'
 import { modelRoleRegistry } from '../agents/model-role-registry'
 import { instructionRegistry } from '../instructions'
 import type { AgentDefinition } from '../agents/types'
-import { createFragmentTools } from '../llm/tools'
+import { coreProposalToolNames, coreReadToolNames, createFragmentTools } from '../llm/tools'
 import { getStory } from '../fragments/storage'
 import { createEmptyCollector, createLibrarianAnalyzeTools, listLibrarianAnalyzeToolNames } from './analysis-tools'
 import { runLibrarian } from './agent'
@@ -169,9 +169,10 @@ export function registerLibrarianAgents(): void {
     description: 'Conversational librarian assistant with write-enabled fragment tools.',
     createDefaultBlocks: createLibrarianChatBlocks,
     availableTools: [
-      'getFragment', 'listFragments', 'searchFragments', 'listFragmentTypes',
-      'createFragment', 'updateFragment', 'editFragment', 'deleteFragment',
-      'editProse', 'getStorySummary', 'updateStorySummary', 'reanalyzeFragment', 'optimizeCharacter',
+      ...coreReadToolNames(),
+      ...coreProposalToolNames(),
+      'invokeAgent',
+      'inspectRun',
     ],
     resolveTools: ({ dataDir, storyId }) => ({
       ...createFragmentTools(dataDir, storyId, { readOnly: false }),
@@ -186,9 +187,8 @@ export function registerLibrarianAgents(): void {
     description: 'Refines non-prose fragments using story context and fragment tools.',
     createDefaultBlocks: createLibrarianRefineBlocks,
     availableTools: [
-      'getFragment', 'listFragments', 'searchFragments', 'listFragmentTypes',
-      'createFragment', 'updateFragment', 'editFragment', 'deleteFragment',
-      'editProse', 'getStorySummary', 'updateStorySummary',
+      ...coreReadToolNames(),
+      ...coreProposalToolNames(),
     ],
     resolveTools: ({ dataDir, storyId }) => createFragmentTools(dataDir, storyId, { readOnly: false }),
     buildPreviewContext: buildRefinePreviewContext,
@@ -200,9 +200,8 @@ export function registerLibrarianAgents(): void {
     description: 'Optimizes character sheets using depth-focused writing methodology (causality, Egri dimensions, friction, contrast).',
     createDefaultBlocks: createOptimizeCharacterBlocks,
     availableTools: [
-      'getFragment', 'listFragments', 'searchFragments', 'listFragmentTypes',
-      'createFragment', 'updateFragment', 'editFragment', 'deleteFragment',
-      'editProse', 'getStorySummary', 'updateStorySummary',
+      ...coreReadToolNames(),
+      ...coreProposalToolNames(),
     ],
     resolveTools: ({ dataDir, storyId }) => createFragmentTools(dataDir, storyId, { readOnly: false }),
     buildPreviewContext: buildOptimizeCharacterPreviewContext,

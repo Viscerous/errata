@@ -1,5 +1,17 @@
 import type { AgentTraceEntry } from './types'
 
+let runIdCounter = 0
+
+/**
+ * The one run-id generator for every agent-execution path (`runner.ts`'s
+ * recursive `invokeAgent`, `agent-run.ts`'s `beginAgentRun`). A counter beats
+ * `Math.random()` for uniqueness within a process — both paths used to roll
+ * their own, in two different formats.
+ */
+export function makeAgentRunId(): string {
+  return `ar-${Date.now().toString(36)}-${(++runIdCounter).toString(36)}`
+}
+
 export interface AgentRunTraceRecord {
   rootRunId: string
   runId: string

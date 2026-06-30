@@ -1,596 +1,687 @@
-import { describe, it, expect, vi } from 'vitest'
-import { createEmptyCollector, createAnalysisTools, mentionInputSchema, updateSummaryInputSchema } from '@/server/librarian/analysis-tools'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+import {
+  createAnalysisTools,
+  createEmptyCollector,
+  createLibrarianAnalyzeTools,
+  listLibrarianAnalyzeToolNames,
+  mentionInputSchema,
+  reportAnalysisInputSchema,
+} from '@/server/librarian/analysis-tools'
 import { getFragment } from '@/server/fragments/storage'
+import { fragmentBaseHash } from '@/server/fragments/change-operations'
 
 vi.mock('@/server/fragments/storage', () => ({
   getFragment: vi.fn().mockResolvedValue(null),
+  getStory: vi.fn().mockResolvedValue({ settings: { customFragmentTypes: [] } }),
+  listFragments: vi.fn().mockResolvedValue([]),
+  createFragment: vi.fn(),
+  updateFragment: vi.fn(),
   updateFragmentVersioned: vi.fn().mockResolvedValue(null),
+  migrateStoryToSummaryFragments: vi.fn().mockResolvedValue({ migrated: false }),
 }))
 
+function mockFragment(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'ch-0001',
+    type: 'character',
+    name: 'Alice',
+    description: 'A warrior',
+    content: 'Alice is a brave warrior with blue eyes. Currently twenty years old.',
+    tags: [],
+    refs: [],
+    sticky: false,
+    placement: 'user',
+    createdAt: '',
+    updatedAt: '',
+    order: 0,
+    meta: {},
+    archived: false,
+    version: 1,
+    versions: [],
+    ...overrides,
+  } as never
+}
+
 describe('analysis-tools', () => {
-  describe('createEmptyCollector', () => {
-    it('creates a collector with empty fields', () => {
-      const collector = createEmptyCollector()
-      expect(collector.summaryUpdate).toBe('')
-      expect(collector.structuredSummary).toEqual({
-        events: [],
-        stateChanges: [],
-        openThreads: [],
-      })
-      expect(collector.mentions).toEqual([])
-      expect(collector.contradictions).toEqual([])
-      expect(collector.fragmentSuggestions).toEqual([])
-      expect(collector.timelineEvents).toEqual([])
+  beforeEach(() => {
+    vi.mocked(getFragment).mockResolvedValue(null)
+  })
+
+  it('creates a collector with empty fields', () => {
+    const collector = createEmptyCollector()
+    expect(collector.summaryUpdate).toBe('')
+    expect(collector.structuredSummary).toEqual({ events: [], stateChanges: [], openThreads: [] })
+    expect(collector.mentions).toEqual([])
+    expect(collector.contradictions).toEqual([])
+    expect(collector.fragmentChangeProposals).toEqual([])
+    expect(collector.timelineEvents).toEqual([])
+    expect(collector.directions).toEqual([])
+  })
+
+  it('exposes the new analysis tool names', () => {
+    const tools = createAnalysisTools(createEmptyCollector())
+    expect(Object.keys(tools)).toEqual([
+      'reportAnalysis',
+      'proposeFragmentChanges',
+      'proposeDirections',
+    ])
+
+    const analyzeTools = createLibrarianAnalyzeTools(createEmptyCollector(), { dataDir: '/tmp', storyId: 'story-test' })
+    expect(Object.keys(analyzeTools)).toContain('readFragments')
+    expect(Object.keys(analyzeTools)).toContain('reportAnalysis')
+    expect(listLibrarianAnalyzeToolNames()).toContain('reportAnalysis')
+  })
+
+  it('omits suggestion and direction tools when disabled', () => {
+    const tools = createAnalysisTools(createEmptyCollector(), {
+      dataDir: '/tmp',
+      storyId: 'story-test',
+      disableSuggestions: true,
+      disableDirections: true,
+    })
+
+    expect(Object.keys(tools)).toContain('reportAnalysis')
+    expect(Object.keys(tools)).toContain('readFragments')
+    expect(tools).not.toHaveProperty('proposeFragmentChanges')
+    expect(tools).not.toHaveProperty('proposeDirections')
+  })
+
+  it('reportAnalysis sets summary, structured signals, mentions, contradictions, and timeline events', async () => {
+    const collector = createEmptyCollector()
+    const tools = createAnalysisTools(collector)
+
+    const result = await tools.reportAnalysis.execute!({
+      summary: 'Alice drew her sword.',
+      events: ['Alice drew her sword', 'Alice drew her sword'],
+      stateChanges: ['Alice is armed'],
+      openThreads: ['Who follows her?'],
+      mentions: [
+        { fragmentId: 'ch-0001', text: 'Alice' },
+        { fragmentId: 'ch-0001', text: 'alice' },
+        { fragmentId: 'kn-0001', text: 'Silver ash' },
+      ],
+      contradictions: [{ description: 'Eye color mismatch', fragmentIds: ['ch-0001'] }],
+      timelineEvents: [{ event: 'Alice arms herself', position: 'during' }],
+    }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
+
+    expect(result).toMatchObject({ ok: true, mentionCount: 2, contradictionCount: 1, timelineEventCount: 1 })
+    expect(collector.summaryUpdate).toBe('Alice drew her sword.')
+    expect(collector.structuredSummary.events).toEqual(['Alice drew her sword'])
+    expect(collector.mentions).toEqual([
+      { fragmentId: 'ch-0001', text: 'Alice' },
+      { fragmentId: 'kn-0001', text: 'Silver ash' },
+    ])
+    expect(collector.contradictions[0].description).toBe('Eye color mismatch')
+    expect(collector.timelineEvents[0]).toEqual({ event: 'Alice arms herself', position: 'during' })
+  })
+
+  it('reportAnalysis derives a summary from structured signals when summary text is empty', async () => {
+    const collector = createEmptyCollector()
+    const tools = createAnalysisTools(collector)
+
+    await tools.reportAnalysis.execute!({
+      summary: '   ',
+      events: ['Found the map', 'Met the guide'],
+      stateChanges: ['Trust increased'],
+      openThreads: ['Who sent the letter?'],
+    }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
+
+    expect(collector.summaryUpdate).toContain('Events: Found the map; Met the guide.')
+    expect(collector.summaryUpdate).toContain('State changes: Trust increased.')
+    expect(collector.summaryUpdate).toContain('Open threads: Who sent the letter?.')
+  })
+
+  it('reportAnalysis accepts an empty payload with a nudge instead of a schema error', async () => {
+    // A schema-level rejection makes small models loop on resubmitting; an
+    // empty report is acknowledged and nudged instead.
+    await expect(reportAnalysisInputSchema.parseAsync({
+      summary: '  ',
+      events: [],
+      stateChanges: [],
+      openThreads: [],
+    })).resolves.toBeTruthy()
+
+    const collector = createEmptyCollector()
+    const tools = createAnalysisTools(collector)
+    const result = await tools.reportAnalysis.execute!(
+      { summary: '  ' },
+      { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal },
+    )
+    expect(result).toMatchObject({ ok: true })
+    expect(result.note).toContain('Empty report')
+    expect(collector.summaryUpdate).toBe('')
+  })
+
+  it('mention schema requires a valid fragment id and non-empty text', async () => {
+    await expect(mentionInputSchema.parseAsync({ fragmentId: 'ch-0001', text: ' Alice ' }))
+      .resolves.toEqual({ fragmentId: 'ch-0001', text: 'Alice' })
+    await expect(mentionInputSchema.parseAsync({ fragmentId: 'bad-id', text: 'Alice' })).rejects.toThrow()
+    await expect(mentionInputSchema.parseAsync({ fragmentId: 'ch-0001', text: '   ' })).rejects.toThrow()
+  })
+
+  it('mentions have a wide schema ceiling for degenerate loops and a working clip in execute', async () => {
+    const mention = { fragmentId: 'ch-0001', text: 'Alice' }
+    // Two-tier limits: a verbose-but-sane list (here 150, the ceiling) passes
+    // validation and is clipped in execute, so the batched call is never lost
+    // over enthusiasm...
+    await expect(reportAnalysisInputSchema.parseAsync({
+      summary: 'Something happened.',
+      mentions: Array.from({ length: 150 }, () => mention),
+    })).resolves.toBeTruthy()
+    // ...while a degenerate 400+-entry repeat (the failure seen in the wild) is
+    // still rejected with a clean validation error.
+    await expect(reportAnalysisInputSchema.parseAsync({
+      summary: 'Something happened.',
+      mentions: Array.from({ length: 401 }, () => mention),
+    })).rejects.toThrow()
+    await expect(reportAnalysisInputSchema.parseAsync({
+      summary: 'Something happened.',
+      mentions: Array.from({ length: 151 }, () => mention),
+    })).rejects.toThrow()
+  })
+
+  it('reportAnalysis anchors mentions to the prose: salvages quote-wrapping, skips paraphrases', async () => {
+    const collector = createEmptyCollector()
+    const prose = mockFragment({
+      id: 'pr-0001',
+      type: 'prose',
+      content: 'Alice studied the Silver ash by the gate.',
+    })
+    vi.mocked(getFragment).mockImplementation(async (_d: string, _s: string, id: string) => {
+      if (id === 'pr-0001') return prose
+      if (id === 'ch-0001' || id === 'kn-0001') return mockFragment({ id })
+      return null
+    })
+    const tools = createAnalysisTools(collector, { dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001' })
+
+    const result = await tools.reportAnalysis.execute!({
+      summary: 'Alice inspects the ash.',
+      mentions: [
+        { fragmentId: 'ch-0001', text: 'Alice' },
+        { fragmentId: 'kn-0001', text: '"Silver ash"' },
+        { fragmentId: 'ch-0001', text: 'her quiet menace' },
+      ],
+    }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
+
+    expect(collector.mentions).toEqual([
+      { fragmentId: 'ch-0001', text: 'Alice' },
+      { fragmentId: 'kn-0001', text: 'Silver ash' },
+    ])
+    expect(result).toMatchObject({
+      ok: true,
+      mentionCount: 2,
+      skippedMentions: [{ fragmentId: 'ch-0001', text: 'her quiet menace' }],
     })
   })
 
-  describe('createAnalysisTools', () => {
-    it('returns all available analysis tools in declaration order', () => {
-      const collector = createEmptyCollector()
-      const tools = createAnalysisTools(collector)
-      expect(Object.keys(tools)).toEqual([
-        'updateSummary',
-        'reportMentions',
-        'reportContradictions',
-        'reportTimeline',
-        'getFragment',
-        'editFragment',
-        'updateFragment',
-        'suggestFragment',
-        'suggestDirections',
-      ])
-    })
+  it('reportAnalysis clips verbose payloads in execute instead of failing the call', async () => {
+    const collector = createEmptyCollector()
+    const tools = createAnalysisTools(collector)
 
-    it('updateSummary sets summary (last call wins)', async () => {
-      const collector = createEmptyCollector()
-      const tools = createAnalysisTools(collector)
-      const result1 = await tools.updateSummary.execute!({ summary: 'First summary' }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
-      expect(result1).toEqual({ ok: true })
-      expect(collector.summaryUpdate).toBe('First summary')
+    await tools.reportAnalysis.execute!({
+      summary: 'S'.repeat(2400),
+      // 15 distinct events, one over-long — kept set clips to 8, items to 200 chars.
+      events: Array.from({ length: 15 }, (_, i) => i === 0 ? 'E'.repeat(400) : `Event ${i}`),
+      // 80 distinct mentions — working cap keeps 60.
+      mentions: Array.from({ length: 80 }, (_, i) => ({ fragmentId: 'ch-0001', text: `Term ${i}` })),
+      contradictions: Array.from({ length: 20 }, (_, i) => ({ description: `C${i}`, fragmentIds: ['ch-0001'] })),
+      timelineEvents: Array.from({ length: 20 }, (_, i) => ({ event: `T${i}`, position: 'during' as const })),
+    }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
 
-      await tools.updateSummary.execute!({ summary: 'Second summary' }, { toolCallId: 'b', messages: [], abortSignal: undefined as unknown as AbortSignal })
-      expect(collector.summaryUpdate).toBe('Second summary')
-    })
+    expect(collector.summaryUpdate).toHaveLength(1200)
+    expect(collector.structuredSummary.events).toHaveLength(8)
+    expect(collector.structuredSummary.events[0]).toHaveLength(200)
+    expect(collector.mentions).toHaveLength(60)
+    expect(collector.contradictions).toHaveLength(12)
+    expect(collector.timelineEvents).toHaveLength(12)
+  })
 
-    it('updateSummary accepts structured signals and derives canonical summary when summary is empty', async () => {
-      const collector = createEmptyCollector()
-      const tools = createAnalysisTools(collector)
+  it('proposeFragmentChanges records create_fragment proposals', async () => {
+    const collector = createEmptyCollector()
+    const tools = createAnalysisTools(collector)
 
-      await tools.updateSummary.execute!({
-        summary: '   ',
-        events: ['Found the map', 'Found the map', 'Met the guide'],
-        stateChanges: ['Trust in the guide increased'],
-        openThreads: ['Who sent the letter?'],
-      }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
-
-      expect(collector.structuredSummary).toEqual({
-        events: ['Found the map', 'Met the guide'],
-        stateChanges: ['Trust in the guide increased'],
-        openThreads: ['Who sent the letter?'],
-      })
-      expect(collector.summaryUpdate).toContain('Events: Found the map; Met the guide.')
-      expect(collector.summaryUpdate).toContain('State changes: Trust in the guide increased.')
-      expect(collector.summaryUpdate).toContain('Open threads: Who sent the letter?.')
-    })
-
-    it('updateSummary rejects empty payload with no summary and no structured signals', async () => {
-      await expect(
-        updateSummaryInputSchema.parseAsync({
-          summary: '  ',
-          events: [],
-          stateChanges: [],
-          openThreads: [],
-        }),
-      ).rejects.toThrow()
-    })
-
-    it('reportMentions keeps multiple terms for one fragment and deduplicates exact repeats', async () => {
-      const collector = createEmptyCollector()
-      const tools = createAnalysisTools(collector)
-      await tools.reportMentions.execute!({
-        mentions: [
-          { fragmentId: 'ch-0001', text: 'Alice' },
-          { fragmentId: 'ch-0002', text: 'Bob' },
-        ],
-      }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
-      expect(collector.mentions).toHaveLength(2)
-
-      // Repeating the same surface text for the same fragment is ignored.
-      await tools.reportMentions.execute!({
-        mentions: [{ fragmentId: 'ch-0001', text: 'alice' }],
-      }, { toolCallId: 'b', messages: [], abortSignal: undefined as unknown as AbortSignal })
-      expect(collector.mentions).toHaveLength(2)
-      expect(collector.mentions[0].text).toBe('Alice')
-
-      // A different term for the same fragment is preserved for highlighting.
-      await tools.reportMentions.execute!({
-        mentions: [{ fragmentId: 'ch-0001', text: 'Detective' }],
-      }, { toolCallId: 'c', messages: [], abortSignal: undefined as unknown as AbortSignal })
-      expect(collector.mentions).toHaveLength(3)
-
-      // New fragment is still added.
-      await tools.reportMentions.execute!({
-        mentions: [{ fragmentId: 'ch-0003', text: 'Carol' }],
-      }, { toolCallId: 'd', messages: [], abortSignal: undefined as unknown as AbortSignal })
-      expect(collector.mentions).toHaveLength(4)
-    })
-
-    it('reportMentions keeps multiple terms across fragment types without typed fields', async () => {
-      const collector = createEmptyCollector()
-      const tools = createAnalysisTools(collector)
-      await tools.reportMentions.execute!({
-        mentions: [
-          { fragmentId: 'kn-0001', text: 'Necronomicon' },
-          { fragmentId: 'kn-0002', text: 'Arkham' },
-        ],
-      }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
-      expect(collector.mentions).toHaveLength(2)
-
-      // Exact repeat for the same fragment is ignored.
-      await tools.reportMentions.execute!({
-        mentions: [{ fragmentId: 'kn-0001', text: 'necronomicon' }],
-      }, { toolCallId: 'b', messages: [], abortSignal: undefined as unknown as AbortSignal })
-      expect(collector.mentions).toHaveLength(2)
-      expect(collector.mentions[0].text).toBe('Necronomicon')
-
-      // A distinct term for the same fragment is preserved.
-      await tools.reportMentions.execute!({
-        mentions: [{ fragmentId: 'kn-0001', text: 'Spellbook' }],
-      }, { toolCallId: 'c', messages: [], abortSignal: undefined as unknown as AbortSignal })
-      expect(collector.mentions).toHaveLength(3)
-
-      // Mixed fragment types still use the same input shape.
-      await tools.reportMentions.execute!({
-        mentions: [{ fragmentId: 'ch-0001', text: 'Alice' }],
-      }, { toolCallId: 'd', messages: [], abortSignal: undefined as unknown as AbortSignal })
-      expect(collector.mentions).toHaveLength(4)
-    })
-
-    it('reportMentions accepts custom fragment IDs and deduplicates exact repeats', async () => {
-      const collector = createEmptyCollector()
-      const tools = createAnalysisTools(collector)
-
-      await tools.reportMentions.execute!({
-        mentions: [
-          { fragmentId: 'loc-0001', text: 'Ash Market' },
-          { fragmentId: 'loc-0002', text: 'Crystal Library' },
-        ],
-      }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
-      expect(collector.mentions).toHaveLength(2)
-
-      await tools.reportMentions.execute!({
-        mentions: [{ fragmentId: 'loc-0001', text: 'ash market' }],
-      }, { toolCallId: 'b', messages: [], abortSignal: undefined as unknown as AbortSignal })
-      expect(collector.mentions).toHaveLength(2)
-      expect(collector.mentions[0].text).toBe('Ash Market')
-    })
-
-    it('reportMentions schema requires a fragment id and non-empty text', async () => {
-      await expect(mentionInputSchema.parseAsync({ fragmentId: 'ch-0001', text: 'Alice' }))
-        .resolves.toEqual({ fragmentId: 'ch-0001', text: 'Alice' })
-      await expect(mentionInputSchema.parseAsync({ fragmentId: 'kn-0001', text: '  Spellbook  ' }))
-        .resolves.toEqual({ fragmentId: 'kn-0001', text: 'Spellbook' })
-      await expect(mentionInputSchema.parseAsync({ fragmentId: 'loc-0001', text: 'Ash Market' }))
-        .resolves.toEqual({ fragmentId: 'loc-0001', text: 'Ash Market' })
-      await expect(mentionInputSchema.parseAsync({ text: 'No ID' })).rejects.toThrow()
-      await expect(mentionInputSchema.parseAsync({ characterId: 'ch-0001', text: 'Wrong field' })).rejects.toThrow()
-      await expect(mentionInputSchema.parseAsync({ knowledgeId: 'kn-0001', text: 'Wrong field' })).rejects.toThrow()
-      await expect(mentionInputSchema.parseAsync({ fragmentId: 'bad-id', text: 'Wrong id' })).rejects.toThrow()
-      await expect(mentionInputSchema.parseAsync({ fragmentId: 'kn-0001', text: '   ' })).rejects.toThrow()
-    })
-
-    it('getFragment reads a fragment in full by ID', async () => {
-      vi.mocked(getFragment).mockImplementation(async (_d, _s, id) =>
-        id === 'ch-001'
-          ? { id: 'ch-001', type: 'character', name: 'Alice', description: 'A knight', content: 'Full sheet for Alice.' } as never
-          : null,
-      )
-      const collector = createEmptyCollector()
-      const tools = createAnalysisTools(collector, { dataDir: '/d', storyId: 's' })
-
-      const result = await tools.getFragment.execute!({
-        fragmentId: 'ch-001',
-      }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal }) as { id: string; name: string; content: string }
-
-      expect(result).toEqual({ id: 'ch-001', name: 'Alice', description: 'A knight', content: 'Full sheet for Alice.', type: 'character' })
-      vi.mocked(getFragment).mockResolvedValue(null)
-    })
-
-    it('reportContradictions accumulates contradictions', async () => {
-      const collector = createEmptyCollector()
-      const tools = createAnalysisTools(collector)
-      await tools.reportContradictions.execute!({
-        contradictions: [{
-          description: 'Eye color mismatch',
-          fragmentIds: ['pr-001'],
-        }],
-      }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
-      expect(collector.contradictions).toHaveLength(1)
-      expect(collector.contradictions[0].description).toBe('Eye color mismatch')
-    })
-
-    it('suggestFragment accumulates suggestions', async () => {
-      const collector = createEmptyCollector()
-      const tools = createAnalysisTools(collector)
-      await tools.suggestFragment.execute!({
-        suggestions: [{
-          type: 'knowledge',
-          name: 'Valdris',
-          description: 'Ancient city',
-          content: 'Valdris is ancient.',
-        }],
-      }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
-      expect(collector.fragmentSuggestions).toHaveLength(1)
-      expect(collector.fragmentSuggestions[0].name).toBe('Valdris')
-    })
-
-    it('suggestFragment handles targetFragmentId', async () => {
-      const collector = createEmptyCollector()
-      const tools = createAnalysisTools(collector)
-      await tools.suggestFragment.execute!({
-        suggestions: [{
-          type: 'character',
-          targetFragmentId: 'ch-001',
-          name: 'Alice',
-          description: 'Updated',
-          content: 'Alice is now a warrior.',
-        }],
-      }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
-      expect(collector.fragmentSuggestions[0].targetFragmentId).toBe('ch-001')
-      expect(collector.fragmentSuggestions[0].type).toBe('character')
-    })
-
-    it('suggestFragment skips targeted suggestions when target type does not match', async () => {
-      vi.mocked(getFragment).mockResolvedValueOnce({
-        id: 'kn-001',
+    const result = await tools.proposeFragmentChanges.execute!({
+      operations: [{
+        action: 'create_fragment',
         type: 'knowledge',
-        name: 'Treaty',
+        name: 'Valdris',
+        description: 'Ancient city',
+        content: 'Valdris is ancient.',
+      }],
+    }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
+
+    expect(result).toMatchObject({ ok: true, proposalCount: 1, queuedOperationCount: 1 })
+    expect(collector.fragmentChangeProposals[0].operations[0]).toMatchObject({
+      action: 'create_fragment',
+      type: 'knowledge',
+      name: 'Valdris',
+      content: 'Valdris is ancient.',
+    })
+    expect(collector.fragmentChangeProposals[0].validation[0]).toMatchObject({
+      operationId: 'op-1',
+      action: 'create_fragment',
+      status: 'valid',
+    })
+  })
+
+  it('proposeFragmentChanges skips unavailable create_fragment types', async () => {
+    const collector = createEmptyCollector()
+    const tools = createAnalysisTools(collector)
+
+    const result = await tools.proposeFragmentChanges.execute!({
+      operations: [{
+        action: 'create_fragment',
+        type: 'location',
+        name: 'Ash Market',
         description: '',
-        content: 'Original content',
-        tags: [],
-        refs: [],
-        sticky: false,
-        placement: 'user',
-        createdAt: '',
-        updatedAt: '',
-        order: 0,
-        meta: {},
-        version: 1,
-        versions: [],
-      })
+        content: 'A night market.',
+      }],
+    }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
 
-      const collector = createEmptyCollector()
-      const tools = createAnalysisTools(collector, { dataDir: '/tmp', storyId: 'test-story' })
-      const result = await tools.suggestFragment.execute!({
-        suggestions: [{
-          type: 'character',
-          targetFragmentId: 'kn-001',
-          name: 'Treaty',
-          description: 'Wrong target type',
-          content: 'New content',
-        }],
-      }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
+    expect(collector.fragmentChangeProposals).toHaveLength(0)
+    expect(result.skipped[0].reason).toContain('not available')
+  })
 
-      expect(collector.fragmentSuggestions).toHaveLength(0)
-      expect((result as any).skipped[0].reason).toContain('not "character"')
-    })
+  it('proposeFragmentChanges skips create_fragment names copied from fragment ids', async () => {
+    const collector = createEmptyCollector()
+    const tools = createAnalysisTools(collector)
 
-    it('reportTimeline accumulates timeline events', async () => {
-      const collector = createEmptyCollector()
-      const tools = createAnalysisTools(collector)
-      await tools.reportTimeline.execute!({
-        events: [
-          { event: 'Battle started', position: 'during' },
-          { event: 'Flashback', position: 'before' },
-        ],
-      }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
-      expect(collector.timelineEvents).toHaveLength(2)
-      expect(collector.timelineEvents[0].position).toBe('during')
-      expect(collector.timelineEvents[1].position).toBe('before')
-    })
-
-    it('suggestDirections records directions', async () => {
-      const collector = createEmptyCollector()
-      const tools = createAnalysisTools(collector)
-      await tools.suggestDirections.execute!({
-        directions: [
-          { title: 'Into the forest', description: 'The hero enters the dark forest.', instruction: 'Write a scene where the hero enters the dark forest.' },
-          { title: 'A stranger arrives', description: 'A mysterious stranger appears.', instruction: 'Introduce a mysterious stranger who approaches the hero.' },
-          { title: 'Inner reflection', description: 'The hero reflects on past choices.', instruction: 'Write an introspective passage about the hero reflecting on their past.' },
-        ],
-      }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
-      expect(collector.directions).toHaveLength(3)
-      expect(collector.directions[0].title).toBe('Into the forest')
-      expect(collector.directions[2].instruction).toContain('introspective')
-    })
-
-    it('suggestFragment skips suggestions targeting a locked fragment', async () => {
-      const { getFragment } = await import('@/server/fragments/storage')
-      vi.mocked(getFragment).mockResolvedValueOnce({
-        id: 'ch-locked',
+    const result = await tools.proposeFragmentChanges.execute!({
+      operations: [{
+        action: 'create_fragment',
         type: 'character',
-        name: 'Locked Char',
-        description: '',
-        content: 'Original content',
-        tags: [],
-        refs: [],
-        sticky: false,
-        placement: 'user',
-        createdAt: '',
-        updatedAt: '',
-        order: 0,
-        meta: { locked: true },
-        version: 1,
-        versions: [],
-      })
+        name: 'ch-thorne: Elias Thorne',
+        description: 'Rival patron',
+        content: 'Elias Thorne is a rival patron.',
+      }],
+    }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
 
-      const collector = createEmptyCollector()
-      const tools = createAnalysisTools(collector, { dataDir: '/tmp', storyId: 'test-story' })
-      const result = await tools.suggestFragment.execute!({
-        suggestions: [{
-          type: 'character',
-          targetFragmentId: 'ch-locked',
-          name: 'Locked Char',
-          description: 'Updated',
-          content: 'New content',
-        }],
-      }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
+    expect(collector.fragmentChangeProposals).toHaveLength(0)
+    expect(result.skipped[0].reason).toContain('human-readable name')
+  })
 
-      expect(collector.fragmentSuggestions).toHaveLength(0)
-      expect(result).toHaveProperty('skipped')
-      expect((result as any).skipped).toHaveLength(1)
-      expect((result as any).skipped[0].name).toBe('Locked Char')
-    })
+  it('proposeFragmentChanges records exact replace_text proposals', async () => {
+    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) =>
+      id === 'ch-0001' ? mockFragment({ id }) : null,
+    )
+    const collector = createEmptyCollector()
+    const tools = createAnalysisTools(collector, { dataDir: '/tmp', storyId: 'story-test' })
 
-    it('suggestFragment skips suggestions that violate frozen sections', async () => {
-      const { getFragment } = await import('@/server/fragments/storage')
-      vi.mocked(getFragment).mockResolvedValueOnce({
-        id: 'kn-frozen',
-        type: 'knowledge',
-        name: 'Frozen Entry',
-        description: '',
-        content: 'The ancient city of Valdris stands eternal.',
-        tags: [],
-        refs: [],
-        sticky: false,
-        placement: 'user',
-        createdAt: '',
-        updatedAt: '',
-        order: 0,
-        meta: {
-          frozenSections: [{ id: 'fs-1', text: 'The ancient city of Valdris stands eternal.' }],
-        },
-        version: 1,
-        versions: [],
-      })
-
-      const collector = createEmptyCollector()
-      const tools = createAnalysisTools(collector, { dataDir: '/tmp', storyId: 'test-story' })
-      const result = await tools.suggestFragment.execute!({
-        suggestions: [{
-          type: 'knowledge',
-          targetFragmentId: 'kn-frozen',
-          name: 'Frozen Entry',
-          description: 'Updated',
-          content: 'Valdris was destroyed long ago.',
-        }],
-      }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
-
-      expect(collector.fragmentSuggestions).toHaveLength(0)
-      expect((result as any).skipped).toHaveLength(1)
-      expect((result as any).skipped[0].reason).toContain('Frozen section')
-    })
-
-    it('suggestFragment allows suggestions that preserve frozen sections', async () => {
-      const { getFragment } = await import('@/server/fragments/storage')
-      vi.mocked(getFragment).mockResolvedValueOnce({
-        id: 'kn-frozen',
-        type: 'knowledge',
-        name: 'Frozen Entry',
-        description: '',
-        content: 'The ancient city of Valdris stands eternal.',
-        tags: [],
-        refs: [],
-        sticky: false,
-        placement: 'user',
-        createdAt: '',
-        updatedAt: '',
-        order: 0,
-        meta: {
-          frozenSections: [{ id: 'fs-1', text: 'The ancient city of Valdris stands eternal.' }],
-        },
-        version: 1,
-        versions: [],
-      })
-
-      const collector = createEmptyCollector()
-      const tools = createAnalysisTools(collector, { dataDir: '/tmp', storyId: 'test-story' })
-      const result = await tools.suggestFragment.execute!({
-        suggestions: [{
-          type: 'knowledge',
-          targetFragmentId: 'kn-frozen',
-          name: 'Frozen Entry',
-          description: 'Updated with more detail',
-          content: 'The ancient city of Valdris stands eternal. It was founded in the First Age.',
-        }],
-      }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
-
-      expect(collector.fragmentSuggestions).toHaveLength(1)
-      expect(result).toEqual({ ok: true })
-    })
-
-    it('editFragment replaces only the named span and preserves the rest of the body', async () => {
-      const { getFragment, updateFragmentVersioned } = await import('@/server/fragments/storage')
-      vi.mocked(getFragment).mockResolvedValueOnce({
-        id: 'ch-001',
-        type: 'character',
-        name: 'Alice',
-        description: 'A warrior',
-        content: 'Alice is a brave warrior with blue eyes. Currently twenty years old, captain of the city guard.',
-        tags: [],
-        refs: [],
-        sticky: false,
-        placement: 'user',
-        createdAt: '',
-        updatedAt: '',
-        order: 0,
-        meta: {},
-        version: 1,
-        versions: [],
-      })
-      vi.mocked(updateFragmentVersioned).mockResolvedValueOnce({ id: 'ch-001' } as any)
-
-      const collector = createEmptyCollector()
-      const tools = createAnalysisTools(collector, { dataDir: '/tmp', storyId: 'test-story' })
-      const result = await tools.editFragment.execute!({
-        fragmentId: 'ch-001',
+    const result = await tools.proposeFragmentChanges.execute!({
+      operations: [{
+        action: 'replace_text',
+        fragmentId: 'ch-0001',
+        field: 'content',
         oldText: 'twenty years old',
         newText: 'twenty-one years old',
-      }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
+        reason: 'The prose says Alice had a birthday.',
+      }],
+    }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
 
-      expect(result).toEqual({ ok: true, fragmentId: 'ch-001', field: 'content' })
-      // The whole body is rewritten with only the span changed; the rest is preserved,
-      // and the analysis provenance stamp is retained.
-      expect(updateFragmentVersioned).toHaveBeenCalledWith(
-        '/tmp',
-        'test-story',
-        'ch-001',
-        { content: 'Alice is a brave warrior with blue eyes. Currently twenty-one years old, captain of the city guard.' },
-        { reason: 'librarian-analysis' },
-      )
+    expect(result).toMatchObject({ ok: true, proposalCount: 1, queuedOperationCount: 1 })
+    expect(collector.fragmentChangeProposals[0].operations[0]).toMatchObject({
+      action: 'replace_text',
+      fragmentId: 'ch-0001',
+      field: 'content',
+      oldText: 'twenty years old',
+      newText: 'twenty-one years old',
+      reason: 'The prose says Alice had a birthday.',
+    })
+    expect(collector.fragmentChangeProposals[0].validation[0]).toMatchObject({
+      status: 'valid',
+      target: { fragmentId: 'ch-0001', field: 'content' },
+    })
+  })
+
+  it('proposeFragmentChanges records append_paragraph proposals', async () => {
+    const originalContent = 'Alice is a brave warrior with blue eyes. Currently twenty years old.'
+    const target = mockFragment({ id: 'ch-0001', content: originalContent })
+    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) =>
+      id === 'ch-0001' ? target : null,
+    )
+    const collector = createEmptyCollector()
+    const tools = createAnalysisTools(collector, { dataDir: '/tmp', storyId: 'story-test' })
+
+    const result = await tools.proposeFragmentChanges.execute!({
+      operations: [{
+        action: 'append_paragraph',
+        fragmentId: 'ch-0001',
+        field: 'content',
+        text: 'Status: Alice has entered the western gate.',
+        reason: 'The prose establishes her current location.',
+      }],
+    }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
+
+    expect(result).toMatchObject({ ok: true, proposalCount: 1, queuedOperationCount: 1 })
+    expect(collector.fragmentChangeProposals[0].operations[0]).toMatchObject({
+      action: 'append_paragraph',
+      fragmentId: 'ch-0001',
+      field: 'content',
+      text: 'Status: Alice has entered the western gate.',
+      reason: 'The prose establishes her current location.',
+    })
+    expect(collector.fragmentChangeProposals[0].validation[0].diffs?.[0]).toMatchObject({
+      field: 'content',
+      before: '',
+      after: 'Status: Alice has entered the western gate.',
+    })
+  })
+
+  it('proposeFragmentChanges records archive_fragment proposals', async () => {
+    const target = mockFragment({ id: 'ch-0001' })
+    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) =>
+      id === 'ch-0001' ? target : null,
+    )
+    const collector = createEmptyCollector()
+    const tools = createAnalysisTools(collector, { dataDir: '/tmp', storyId: 'story-test' })
+
+    const result = await tools.proposeFragmentChanges.execute!({
+      operations: [{
+        action: 'archive_fragment',
+        fragmentId: 'ch-0001',
+        reason: 'The prose retires this fragment.',
+      }],
+    }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
+
+    expect(result).toMatchObject({ ok: true, proposalCount: 1, queuedOperationCount: 1 })
+    expect(collector.fragmentChangeProposals[0].operations[0]).toMatchObject({
+      action: 'archive_fragment',
+      fragmentId: 'ch-0001',
+    })
+    expect(collector.fragmentChangeProposals[0].validation[0]).toMatchObject({
+      action: 'archive_fragment',
+      status: 'valid',
+      target: { fragmentId: 'ch-0001' },
+    })
+  })
+
+  it('proposeFragmentChanges keeps multiple localized edits in one proposal', async () => {
+    const originalContent = 'Alice is a brave warrior with blue eyes. Currently twenty years old.'
+    const target = mockFragment({ id: 'ch-0001', content: originalContent })
+    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) =>
+      id === 'ch-0001' ? target : null,
+    )
+    const collector = createEmptyCollector()
+    const tools = createAnalysisTools(collector, { dataDir: '/tmp', storyId: 'story-test' })
+
+    const result = await tools.proposeFragmentChanges.execute!({
+      operations: [
+        {
+          action: 'replace_text',
+          fragmentId: 'ch-0001',
+          field: 'content',
+          oldText: 'blue eyes',
+          newText: 'hazel eyes',
+          reason: 'The prose changes Alice eye color.',
+        },
+        {
+          action: 'append_paragraph',
+          fragmentId: 'ch-0001',
+          field: 'content',
+          text: 'Status: Alice has entered the western gate.',
+          reason: 'The prose establishes her current location.',
+        },
+      ],
+    }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
+
+    expect(result).toMatchObject({ ok: true, proposalCount: 1, queuedOperationCount: 2 })
+    expect(collector.fragmentChangeProposals).toHaveLength(1)
+    expect(collector.fragmentChangeProposals[0].operations).toHaveLength(2)
+    expect(collector.fragmentChangeProposals[0].operations.map((operation) => operation.action)).toEqual([
+      'replace_text',
+      'append_paragraph',
+    ])
+    expect(collector.fragmentChangeProposals[0].validation).toHaveLength(2)
+    expect(collector.fragmentChangeProposals[0].validation.every((result) => result.status === 'valid')).toBe(true)
+  })
+
+  it('proposeFragmentChanges skips exact edits when oldText is absent, target is prose, or target is locked', async () => {
+    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => {
+      if (id === 'ch-0001') return mockFragment({ id })
+      if (id === 'pr-0001') return mockFragment({ id, type: 'prose', content: 'Once.' })
+      if (id === 'ch-locked') return mockFragment({ id, meta: { locked: true } })
+      return null
     })
 
-    it('editFragment edits the description field when the span lives there', async () => {
-      const { getFragment, updateFragmentVersioned } = await import('@/server/fragments/storage')
-      vi.mocked(getFragment).mockResolvedValueOnce({
-        id: 'ch-001',
-        type: 'character',
-        name: 'Alice',
-        description: 'A warrior, captain of the guard.',
-        content: 'Alice is brave.',
-        tags: [],
-        refs: [],
-        sticky: false,
-        placement: 'user',
-        createdAt: '',
-        updatedAt: '',
-        order: 0,
-        meta: {},
-        version: 1,
-        versions: [],
-      } as never)
-      vi.mocked(updateFragmentVersioned).mockResolvedValueOnce({ id: 'ch-001' } as never)
+    const collector = createEmptyCollector()
+    const tools = createAnalysisTools(collector, { dataDir: '/tmp', storyId: 'story-test' })
 
-      const collector = createEmptyCollector()
-      const tools = createAnalysisTools(collector, { dataDir: '/tmp', storyId: 'test-story' })
-      const result = await tools.editFragment.execute!({
-        fragmentId: 'ch-001',
-        oldText: 'captain of the guard.',
-        newText: 'former captain of the guard. Deceased.',
-      }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
+    const result = await tools.proposeFragmentChanges.execute!({
+      operations: [
+        { action: 'replace_text', fragmentId: 'ch-0001', field: 'content', oldText: 'green eyes', newText: 'hazel eyes' },
+        { action: 'replace_text', fragmentId: 'pr-0001', field: 'content', oldText: 'Once', newText: 'Twice' },
+        { action: 'replace_text', fragmentId: 'ch-locked', field: 'content', oldText: 'Alice', newText: 'Alicia' },
+      ],
+    }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
 
-      expect(result).toEqual({ ok: true, fragmentId: 'ch-001', field: 'description' })
-      expect(updateFragmentVersioned).toHaveBeenCalledWith(
-        '/tmp',
-        'test-story',
-        'ch-001',
-        { description: 'A warrior, former captain of the guard. Deceased.' },
-        { reason: 'librarian-analysis' },
-      )
+    expect(collector.fragmentChangeProposals).toHaveLength(0)
+    expect(result.readFragmentIds).toEqual(['ch-0001'])
+    expect(result.operations[0].errors[0].nextAction).toBe('readFragments')
+    expect(result.skipped.map((s: { reason: string }) => s.reason).join('\n')).toContain('oldText was not found')
+    expect(result.skipped.map((s: { reason: string }) => s.reason).join('\n')).toContain('Use proposeProseChanges')
+    expect(result.skipped.map((s: { reason: string }) => s.reason).join('\n')).toContain('locked')
+  })
+
+  it('proposeFragmentChanges records set_fields as a whole-field proposal', async () => {
+    const target = mockFragment({ id: 'ch-0001' })
+    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) =>
+      id === 'ch-0001' ? target : null,
+    )
+    const collector = createEmptyCollector()
+    const tools = createAnalysisTools(collector, { dataDir: '/tmp', storyId: 'story-test' })
+    const baseHash = fragmentBaseHash(target)
+
+    const result = await tools.proposeFragmentChanges.execute!({
+      operations: [{
+        action: 'set_fields',
+        fragmentId: 'ch-0001',
+        baseHash,
+        fields: {
+          description: 'Updated',
+          content: 'Alice is a brave warrior with hazel eyes. Currently twenty-one years old.',
+        },
+      }],
+    }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
+
+    expect(result.proposalCount).toBe(1)
+    expect(collector.fragmentChangeProposals[0].operations[0]).toMatchObject({
+      action: 'set_fields',
+      fragmentId: 'ch-0001',
+      baseHash,
+      fields: {
+        description: 'Updated',
+        content: 'Alice is a brave warrior with hazel eyes. Currently twenty-one years old.',
+      },
     })
-
-    it('editFragment returns an error when oldText is not present', async () => {
-      const { getFragment } = await import('@/server/fragments/storage')
-      vi.mocked(getFragment).mockResolvedValueOnce({
-        id: 'ch-001',
-        type: 'character',
-        name: 'Alice',
-        description: 'A warrior',
-        content: 'Alice is a brave warrior with blue eyes.',
-        tags: [],
-        refs: [],
-        sticky: false,
-        placement: 'user',
-        createdAt: '',
-        updatedAt: '',
-        order: 0,
-        meta: {},
-        version: 1,
-        versions: [],
-      })
-
-      const collector = createEmptyCollector()
-      const tools = createAnalysisTools(collector, { dataDir: '/tmp', storyId: 'test-story' })
-      const result = await tools.editFragment.execute!({
-        fragmentId: 'ch-001',
-        oldText: 'green eyes',
-        newText: 'hazel eyes',
-      }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
-
-      expect(result).toHaveProperty('error')
-      expect((result as any).error).toContain('Text not found')
+    expect(collector.fragmentChangeProposals[0].validation[0]).toMatchObject({
+      status: 'valid',
+      target: { fragmentId: 'ch-0001' },
     })
+  })
 
-    it('editFragment refuses to edit prose fragments', async () => {
-      const { getFragment } = await import('@/server/fragments/storage')
-      vi.mocked(getFragment).mockResolvedValueOnce({
-        id: 'pr-001',
-        type: 'prose',
-        name: 'Chapter 1',
-        description: '',
-        content: 'Once upon a time.',
-        tags: [],
-        refs: [],
-        sticky: false,
-        placement: 'user',
-        createdAt: '',
-        updatedAt: '',
-        order: 0,
-        meta: {},
-        version: 1,
-        versions: [],
-      })
+  it('proposeFragmentChanges rejects mixed exact edits and set_fields for the same target', async () => {
+    const target = mockFragment({ id: 'ch-0001' })
+    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) =>
+      id === 'ch-0001' ? target : null,
+    )
+    const collector = createEmptyCollector()
+    const tools = createAnalysisTools(collector, { dataDir: '/tmp', storyId: 'story-test' })
+    const baseHash = fragmentBaseHash(target)
 
-      const collector = createEmptyCollector()
-      const tools = createAnalysisTools(collector, { dataDir: '/tmp', storyId: 'test-story' })
-      const result = await tools.editFragment.execute!({
-        fragmentId: 'pr-001',
-        oldText: 'Once',
-        newText: 'Twice',
-      }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
+    const result = await tools.proposeFragmentChanges.execute!({
+      operations: [
+        {
+          action: 'replace_text',
+          fragmentId: 'ch-0001',
+          field: 'content',
+          oldText: 'twenty years old',
+          newText: 'twenty-one years old',
+        },
+        {
+          action: 'set_fields',
+          fragmentId: 'ch-0001',
+          baseHash,
+          fields: {
+            content: 'Alice is a brave warrior with blue eyes. Currently twenty-one years old.',
+          },
+        },
+      ],
+    }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
 
-      expect((result as any).error).toContain('Cannot edit prose')
+    expect(result).toMatchObject({ ok: false, proposalCount: 0, queuedOperationCount: 0 })
+    expect(collector.fragmentChangeProposals).toHaveLength(0)
+    expect(result.skipped.map((s: { reason: string }) => s.reason).join('\n')).toContain('Submit set_fields and localized span edits')
+  })
+
+  it('treats a resubmitted identical proposal as a success, not an error', async () => {
+    const target = mockFragment({ id: 'ch-0001' })
+    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) =>
+      id === 'ch-0001' ? target : null,
+    )
+    const collector = createEmptyCollector()
+    const tools = createAnalysisTools(collector, { dataDir: '/tmp', storyId: 'story-test' })
+
+    const operations = [{
+      action: 'replace_text' as const,
+      fragmentId: 'ch-0001',
+      field: 'content' as const,
+      oldText: 'twenty years old',
+      newText: 'twenty-one years old',
+    }]
+
+    const first = await tools.proposeFragmentChanges.execute!({ operations }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
+    expect(first).toMatchObject({ ok: true, proposalCount: 1 })
+
+    const second = await tools.proposeFragmentChanges.execute!({ operations }, { toolCallId: 'b', messages: [], abortSignal: undefined as unknown as AbortSignal })
+    // A duplicate does not queue a second proposal, but it is not an error and
+    // does not count against `ok`/`invalid` — it just acknowledges the dedupe.
+    expect(second).toMatchObject({ ok: true, proposalCount: 1, invalid: 0, duplicate: true })
+    expect(collector.fragmentChangeProposals).toHaveLength(1)
+  })
+
+  it('a retried batch queues only the operations not already queued', async () => {
+    const target = mockFragment({ id: 'ch-0001' })
+    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) =>
+      id === 'ch-0001' ? target : null,
+    )
+    const collector = createEmptyCollector()
+    const tools = createAnalysisTools(collector, { dataDir: '/tmp', storyId: 'story-test' })
+
+    const createOperation = {
+      action: 'create_fragment' as const,
+      type: 'knowledge',
+      name: 'Valdris',
+      description: 'Ancient city',
+      content: 'Valdris is an ancient mountain city.',
+    }
+
+    // First batch: the create is valid and queues; the edit has a bad anchor.
+    const first = await tools.proposeFragmentChanges.execute!({
+      operations: [
+        createOperation,
+        {
+          action: 'replace_text' as const,
+          fragmentId: 'ch-0001',
+          field: 'content' as const,
+          oldText: 'text that does not exist',
+          newText: 'former captain',
+        },
+      ],
+    }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
+    expect(first).toMatchObject({ ok: false, proposalCount: 1, queuedOperationCount: 1, invalid: 1 })
+
+    // Retry resubmits the whole batch with the edit fixed. The create must not
+    // queue a second time — otherwise accepting both proposals creates the
+    // fragment twice.
+    const second = await tools.proposeFragmentChanges.execute!({
+      operations: [
+        createOperation,
+        {
+          action: 'replace_text' as const,
+          fragmentId: 'ch-0001',
+          field: 'content' as const,
+          oldText: 'twenty years old',
+          newText: 'twenty-one years old',
+        },
+      ],
+    }, { toolCallId: 'b', messages: [], abortSignal: undefined as unknown as AbortSignal })
+
+    expect(second).toMatchObject({ ok: true, proposalCount: 2, queuedOperationCount: 1, invalid: 0 })
+    expect(second.alreadyQueuedOperationIds).toHaveLength(1)
+    expect(collector.fragmentChangeProposals).toHaveLength(2)
+    expect(collector.fragmentChangeProposals[0].operations.map((op: { action: string }) => op.action)).toEqual(['create_fragment'])
+    expect(collector.fragmentChangeProposals[1].operations.map((op: { action: string }) => op.action)).toEqual(['replace_text'])
+  })
+
+  it('a lightly reworded resubmission of a queued append is treated as a duplicate', async () => {
+    const target = mockFragment({ id: 'kn-0001', type: 'knowledge' })
+    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) =>
+      id === 'kn-0001' ? target : null,
+    )
+    const collector = createEmptyCollector()
+    const tools = createAnalysisTools(collector, { dataDir: '/tmp', storyId: 'story-test' })
+
+    const paragraph = 'The Maritime Heritage Initiative branding is now serving as a cover for the smuggling operation across the harbor district.'
+    const first = await tools.proposeFragmentChanges.execute!({
+      operations: [{ action: 'append_paragraph' as const, fragmentId: 'kn-0001', field: 'content' as const, text: paragraph }],
+    }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
+    expect(first).toMatchObject({ ok: true, proposalCount: 1 })
+
+    // Same fact, different whitespace and casing — must not queue a second
+    // proposal that can only fail on apply with a repeated-paragraph error.
+    const second = await tools.proposeFragmentChanges.execute!({
+      operations: [{
+        action: 'append_paragraph' as const,
+        fragmentId: 'kn-0001',
+        field: 'content' as const,
+        text: 'the maritime heritage initiative  branding is now serving as a cover for the smuggling operation across   the harbor district.',
+      }],
+    }, { toolCallId: 'b', messages: [], abortSignal: undefined as unknown as AbortSignal })
+
+    expect(second).toMatchObject({ ok: true, proposalCount: 1, duplicate: true, queuedOperationCount: 0 })
+    expect(collector.fragmentChangeProposals).toHaveLength(1)
+  })
+
+  it('proposeFragmentChanges skips set_fields without baseHash and frozen-section violations', async () => {
+    const frozen = mockFragment({
+      id: 'kn-frozen',
+      type: 'knowledge',
+      content: 'The ancient city of Valdris stands eternal.',
+      meta: { frozenSections: [{ id: 'fs-1', text: 'The ancient city of Valdris stands eternal.' }] },
     })
-
-    it('editFragment refuses to edit a locked fragment', async () => {
-      const { getFragment } = await import('@/server/fragments/storage')
-      vi.mocked(getFragment).mockResolvedValueOnce({
-        id: 'ch-locked',
-        type: 'character',
-        name: 'Locked Char',
-        description: '',
-        content: 'Original content with a name inside.',
-        tags: [],
-        refs: [],
-        sticky: false,
-        placement: 'user',
-        createdAt: '',
-        updatedAt: '',
-        order: 0,
-        meta: { locked: true },
-        version: 1,
-        versions: [],
-      })
-
-      const collector = createEmptyCollector()
-      const tools = createAnalysisTools(collector, { dataDir: '/tmp', storyId: 'test-story' })
-      const result = await tools.editFragment.execute!({
-        fragmentId: 'ch-locked',
-        oldText: 'a name',
-        newText: 'another name',
-      }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
-
-      expect(result).toHaveProperty('error')
+    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => {
+      if (id === 'ch-0001') return mockFragment({ id })
+      if (id === 'kn-frozen') return frozen
+      return null
     })
+    const collector = createEmptyCollector()
+    const tools = createAnalysisTools(collector, { dataDir: '/tmp', storyId: 'story-test' })
+
+    const result = await tools.proposeFragmentChanges.execute!({
+      operations: [
+        { action: 'set_fields', fragmentId: 'ch-0001', fields: { description: 'Updated' } },
+        { action: 'set_fields', fragmentId: 'kn-frozen', baseHash: fragmentBaseHash(frozen), fields: { content: 'Valdris was destroyed.' } },
+      ],
+    }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
+
+    expect(collector.fragmentChangeProposals).toHaveLength(0)
+    expect(result.skipped.map((s: { reason: string }) => s.reason).join('\n')).toContain('requires baseHash')
+    expect(result.skipped.map((s: { reason: string }) => s.reason).join('\n')).toContain('Frozen section')
+  })
+
+  it('proposeDirections records directions', async () => {
+    const collector = createEmptyCollector()
+    const tools = createAnalysisTools(collector)
+
+    await tools.proposeDirections.execute!({
+      directions: [
+        { title: 'Into the forest', description: 'The hero enters the dark forest.', instruction: 'Write the hero entering the forest.' },
+        { title: 'A stranger arrives', description: 'A stranger appears.', instruction: 'Introduce a stranger.' },
+        { title: 'Inner reflection', description: 'The hero reflects.', instruction: 'Write an introspective passage.' },
+      ],
+    }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
+
+    expect(collector.directions).toHaveLength(3)
+    expect(collector.directions[0].title).toBe('Into the forest')
   })
 })

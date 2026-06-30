@@ -10,6 +10,8 @@ import {
   findFragmentContextLane,
   fragmentContextBlock,
   isBuiltinContextFragmentType,
+  renderFullFragmentSheet,
+  storySummaryBlock,
 } from '../llm/fragment-context-blocks'
 import { baseBlockContext, type AgentBlockContext } from '../agents/agent-block-context'
 import type { Fragment, StoryMeta } from '../fragments/schema'
@@ -17,6 +19,7 @@ import { getStory, listFragments, getFragment } from '../fragments/storage'
 import { getActiveProseIds } from '../fragments/prose-chain'
 import { getFragmentsByTag } from '../fragments/associations'
 import { instructionRegistry } from '../instructions'
+import { OPERATION_GUIDANCE } from '../fragments/change-operations'
 import {
   instructionsBlock,
   systemFragmentsBlock,
@@ -46,30 +49,26 @@ export function buildAnalyzeSystemPrompt(opts?: {
   // drift). Steps for disabled tools are omitted and the rest renumber, so the
   // prompt never names a tool the model wasn't given.
   const steps: string[] = [
-    '**Scan the new prose word-by-word** against the listed fragments. Report **EVERY** mention of any listed fragment by its exact ID and the exact text used in the prose by calling reportMentions. Be exhaustive. Include direct names, nicknames, titles, roles, or synonymous key terms. Include minor, passing, or indirect references. **Exclude pronouns** like I, he, she, it, or they (never map the pronoun "I" to the narrator\'s character ID). If an ambiguous word or title refers to two different entities in the same passage, do not report the bare word; instead, report a longer, unique surrounding phrase to distinguish them (e.g., "Captain of the guard" and "Captain of the ship" instead of just "Captain").',
-    'Summarize what happened by calling updateSummary.',
-    'Record contradictions with established facts by calling reportContradictions, and log significant events by calling reportTimeline when the prose has them.',
-    'Update a fragment if the prose changes a lasting fact about it, such as its state, allegiance, title, location, or relationships. The fragment is the record of current state and feeds later writing, so the change must land on the fragment, not only the summary or timeline. When writing updates, you must provide the complete updated text; never use ellipses, truncated text, or placeholders. If you only need to modify a small portion, prefer editFragment to replace a specific text span, or updateFragment to set entire fields with complete text.',
+    'Scan the new prose against every fragment in your context and call **reportAnalysis** once with everything you find. Report each mention as the fragment\'s exact ID plus the exact text used in the prose — a direct name, nickname, title, role, or distinctive key term. When an ambiguous word refers to two entities, report a longer, unique surrounding phrase for each.',
   ]
   if (!opts?.disableSuggestions) {
     const customTypes = opts?.customFragmentTypes ?? []
     const typeNamesList = ['characters', 'knowledge', ...customTypes.map(t => t.name.toLowerCase())].join(', ')
-    steps.push(`Suggest genuinely new ${typeNamesList} with suggestFragment, but only suggest ones that do not exist yet.`)
+    steps.push(`Use **proposeFragmentChanges** to update existing fragments when the prose changes a lasting fact (state, allegiance, title, location, relationships) — keep edits minimal — and to create genuinely new ${typeNamesList} with create_fragment operations using plain fragment names; IDs are assigned by the system.`)
   }
   if (!opts?.disableDirections) {
-    steps.push('Suggest 3-5 next directions for the story with suggestDirections.')
+    steps.push('Call **proposeDirections** with next directions for the story.')
   }
+  steps.push('Finish with the exact text "Analysis complete" and nothing else.')
   const numbered = steps.map((s, i) => `${i + 1}. ${s}`).join('\n')
 
   return `
-You are the Librarian agent for a collaborative storytelling system. Your job is to analyze a new prose fragment and maintain story continuity.
+You are the Librarian: you keep the records of an ongoing story accurate and its continuity intact. Analyze the new prose fragment against the story context provided.
 
 ## Steps
 
 Work through these steps in order:
 ${numbered}
-
-Return 'Analysis complete' as your only final output.
 `
 }
 
@@ -150,19 +149,16 @@ export function createLibrarianAnalyzeBlocks(ctx: AgentBlockContext): ContextBlo
   const sysFrags = systemFragmentsBlock(ctx)
   if (sysFrags) blocks.push(sysFrags)
 
-  blocks.push({
+  pushFragmentBlock(storySummaryBlock(ctx.story.summary, {
     id: 'story-summary',
-    role: 'user',
-    content: ['## Story Summary So Far', ctx.story.summary || STORY_SUMMARY_PLACEHOLDER].join('\n'),
     order: 100,
-    source: 'builtin',
-  })
+    placeholder: STORY_SUMMARY_PLACEHOLDER,
+  }))
 
   // Pinned and recent characters are preloaded in full so edits land on the
-  // current sheet; everyone else stays a one-line summary (getFragment reads any
+  // current sheet; everyone else stays a one-line summary (readFragments reads any
   // in full). Each character lands in exactly one block: pinned takes precedence,
   // then recent, then the shortlist.
-  const renderSheet = (c: Fragment) => `### ${c.id}: ${c.name}\n${c.description}\n\n${c.content}`
   const lanes = buildFragmentContextLanes(ctx)
   const characterLane = findFragmentContextLane(lanes, 'character')
   const sticky = characterLane?.sticky ?? []
@@ -182,7 +178,7 @@ export function createLibrarianAnalyzeBlocks(ctx: AgentBlockContext): ContextBlo
       scope: 'pinned',
       order: 195,
       heading: 'Pinned Characters',
-      renderFragment: renderSheet,
+      renderFragment: renderFullFragmentSheet,
       separator: '\n\n',
     }))
   }
@@ -197,7 +193,7 @@ export function createLibrarianAnalyzeBlocks(ctx: AgentBlockContext): ContextBlo
       mode: 'full',
       scope: 'recent',
       order: 200,
-      renderFragment: renderSheet,
+      renderFragment: renderFullFragmentSheet,
       separator: '\n\n',
     }))
   }
@@ -226,7 +222,7 @@ export function createLibrarianAnalyzeBlocks(ctx: AgentBlockContext): ContextBlo
       mode: 'full',
       scope: 'all',
       order: 300,
-      renderFragment: (k) => `### ${k.id}: ${k.name}\n${k.content}`,
+      renderFragment: renderFullFragmentSheet,
       separator: '\n\n',
     }))
   }
@@ -282,29 +278,28 @@ export async function buildAnalyzePreviewContext(dataDir: string, storyId: strin
 // ─── Librarian Chat ───
 
 export const CHAT_SYSTEM_PROMPT = `
-You are a conversational librarian assistant for a collaborative writing app. Your job is to help the author maintain story continuity by answering questions and performing fragment edits through tools.
+You are the Librarian, the author's story continuity assistant. Answer the author's questions and edit story fragments through tools.
 
-## Instructions
+## Reading
 
-1. Your context includes a story summary and fragment summaries (IDs, names, descriptions) — not full content. Use **getFragment(id)** to read the full content of any fragment you need.
-2. For prose edits, first read the relevant prose fragment with **getFragment**, then use **editProse(oldText, newText)** — it scans active prose automatically.
-3. For character, guideline, knowledge, or other fragment types, use **editFragment** or **updateFragment** with the fragment ID.
-3b. When the author asks to add new characters, knowledge, guidelines, or other fragment types, use **createFragment**.
-4. When the author asks for sweeping changes (e.g., "update all characters to reflect the time skip"), use **listFragments** and **getFragment** to find relevant fragments, then update each one.
-5. Explain what you changed and why after making edits.
-6. Ask clarifying questions when the request is ambiguous.
-7. You can make multiple tool calls in sequence to accomplish complex tasks.
-8. Keep fragment descriptions within the 250 character limit.
-9. Be concise but thorough in your responses.
-10. CRITICAL: When using updateFragment or createFragment, you must provide the content in full. Do NOT truncate the text, use ellipses, or write placeholders. To modify a specific sentence or paragraph without rewriting the entire content, prefer editFragment.
+- Your context holds the story summary and fragment summaries (IDs, names, descriptions) — the full content stays on disk. Use **readFragments** to batch-read full content before relying on details or proposing whole-field rewrites.
+- For sweeping requests (e.g., "update all characters to reflect the time skip"), survey first with **listFragments**, **findFragments**, and **readFragments**, then propose one batch.
 
-## Fragment ID Prefixes
+## Editing
 
-* **pr-**: Prose fragments
-* **ch-**: Character fragments
-* **gl-**: Guideline fragments
-* **kn-**: Knowledge fragments
-* Other fragment types use their type slice prefix (e.g., **loca-** for location, **orga-** for organisation, **prot-** for protocol)
+- Prose edits: **proposeProseChanges** — it scans active prose automatically and returns exact diffs.
+- Character, guideline, knowledge, summary, or custom fragments: **proposeFragmentChanges**. ${OPERATION_GUIDANCE} A whole-field rewrite must contain the complete final field text from the fragment you read.
+- New fragments: **proposeFragmentChanges** with create_fragment operations and plain fragment names; the system assigns IDs.
+- Apply with **applyProposedChanges** only when the author asked for the change, and only after the proposal validates.
+- Keep fragment descriptions within the 250 character limit.
+
+## Conduct
+
+- Batch related reads and proposals into one tool call.
+- Ask a clarifying question when the request is ambiguous.
+- After applying edits, tell the author what changed and why.
+- For specialist workflows use **invokeAgent**; for generation debugging use **inspectRun**.
+
 `
 
 export function createLibrarianChatBlocks(ctx: AgentBlockContext): ContextBlock[] {
@@ -334,7 +329,7 @@ export function createLibrarianChatBlocks(ctx: AgentBlockContext): ContextBlock[
 
   blocks.push(storyInfoBlock(ctx))
 
-  const prose = proseSummariesBlock(ctx, '## Prose Fragments (use getFragment to read/edit)')
+  const prose = proseSummariesBlock(ctx, '## Prose Fragments (use readFragments or readProseChain to inspect)')
   if (prose) blocks.push(prose)
 
   blocks.push(...fragmentSummaryCatalogBlocks(ctx, { includeCustomFragments: true }))
@@ -350,24 +345,22 @@ export async function buildChatPreviewContext(dataDir: string, storyId: string):
 
 // ─── Librarian Refine ───
 
-export const REFINE_SYSTEM_PROMPT = `You are a fragment refinement agent for a collaborative writing app. Your job is to improve a specific fragment (character, guideline, knowledge, or other fragment types) based on the story context.
+export const REFINE_SYSTEM_PROMPT = `You are a story editor refining a single fragment of an ongoing story. Improve the target fragment based on the story context. Your scope is character, guideline, knowledge, and custom fragments only — prose fragments stay untouched, and archiving requires an explicit request from the author.
 
 ## Instructions
 
-1. First, read the target fragment using **getFragment**.
+1. First, read the target fragment using **readFragments** so you have its baseHash.
 2. Analyze the story context provided: prose, summary, and other fragments.
-3. Use the **updateFragment** or **editFragment** tool to improve the target fragment.
+3. Use **proposeFragmentChanges** to prepare edits. ${OPERATION_GUIDANCE} Then **applyProposedChanges** with the returned proposalId when the proposal is valid.
 4. Explain what you changed and why in your text response.
 
 ## Guidelines for Refinement
 
-- If the user provides specific instructions, follow them precisely.
-- If no instructions are given, improve the fragment for consistency, clarity, and depth based on story events.
+- When the author gives specific instructions, follow them precisely.
+- When no instructions are given, improve the fragment for consistency, clarity, and depth based on story events.
 - Preserve the fragment's existing voice and style unless asked otherwise.
-- Update descriptions to stay within the 250 character limit.
-- **Do NOT** delete fragments unless explicitly asked.
-- **Do NOT** modify prose fragments — refine only characters, guidelines, knowledge, and other fragment types.
-- **CRITICAL:** When using updateFragment, you must write the content in full. Never truncate the text, use ellipses, or include placeholders. If you only want to modify a specific text span, prefer editFragment.`
+- Keep descriptions within the 250 character limit.
+- For set_fields, include baseHash and write each changed field as the complete final value. Prefer localized operations for specific sentences, paragraphs, insertions, or end appends.`
 
 export function createLibrarianRefineBlocks(ctx: AgentBlockContext): ContextBlock[] {
   return compactBlocks([
@@ -393,13 +386,12 @@ export async function buildRefinePreviewContext(dataDir: string, storyId: string
 
 // ─── Prose Transform ───
 
-export const PROSE_TRANSFORM_SYSTEM_PROMPT = `You transform selected prose spans for an author in a writing app.
+export const PROSE_TRANSFORM_SYSTEM_PROMPT = `You transform selected spans of an author's prose.
 
 Rules:
 - Follow the requested operation exactly.
 - Preserve story facts, continuity, tense, and point of view.
-- Do not add metadata, explanations, markdown, quotes, or labels.
-- Return only the transformed replacement text for the selected span.`
+- Return only the transformed replacement text for the selected span — no metadata, explanations, markdown, quotes, or labels.`
 
 export function createProseTransformBlocks(ctx: AgentBlockContext): ContextBlock[] {
   const blocks: ContextBlock[] = []
@@ -470,14 +462,7 @@ export async function buildProseTransformPreviewContext(dataDir: string, storyId
   if (!story) throw new Error(`Story ${storyId} not found`)
 
   return {
-    story,
-    proseFragments: [],
-    stickyGuidelines: [],
-    stickyKnowledge: [],
-    stickyCharacters: [],
-    guidelineShortlist: [],
-    knowledgeShortlist: [],
-    characterShortlist: [],
+    ...baseBlockContext(undefined, story),
     systemPromptFragments: [],
     operation: 'rewrite',
     guidance: 'Rewrite the selected span for clarity and flow while preserving the original meaning and voice.',
@@ -490,7 +475,7 @@ export async function buildProseTransformPreviewContext(dataDir: string, storyId
 
 // ─── Optimize Character ───
 
-export const OPTIMIZE_CHARACTER_SYSTEM_PROMPT = `You are a character optimization agent for a collaborative writing app. Your job is to rewrite a character fragment so it has genuine depth, causality, and texture — following a specific creative writing methodology.
+export const OPTIMIZE_CHARACTER_SYSTEM_PROMPT = `You are a character development specialist. Rewrite the target character fragment so it has genuine depth, causality, and texture, following the methodology below.
 
 ## Methodology
 
@@ -513,14 +498,14 @@ export const OPTIMIZE_CHARACTER_SYSTEM_PROMPT = `You are a character optimizatio
 
 ## Instructions
 
-1. Read the target character fragment using getFragment.
-2. Read relevant prose fragments using getFragment to understand how the character actually behaves in the story — not just how they're described on paper.
+1. Read the target character fragment using readFragments so you have its baseHash.
+2. Read relevant prose fragments using readFragments or readProseChain to understand how the character actually behaves in the story — not just how they're described on paper.
 3. Analyze gaps between the current fragment and the methodology above. Where are there bare adjectives without cause? Where is friction missing? Which of Egri's dimensions are underdeveloped?
 4. Rewrite the character fragment with depth and causality. Build the ramp of how this person grew up and why they think the way they do. Preserve existing voice and any details that already have depth — improve, don't replace what works.
-5. Use updateFragment to save the improved version. You must write out the complete updated character sheet in full — never truncate the sheet, use ellipses, or write placeholders. Keep descriptions within the 250 character limit.
+5. Use proposeFragmentChanges with set_fields and the baseHash, then applyProposedChanges after validation. Write the full final character sheet as the content field. Keep descriptions within the 250 character limit.
 6. Explain what you changed and why — which dimensions you developed, what friction you introduced, what causal chains you built.
 
-Do NOT delete the fragment. Do NOT modify prose fragments. Focus entirely on deepening the character fragment.`
+Your scope is the character fragment alone: deepen it, leave prose fragments untouched, and keep it active (archiving is out of scope).`
 
 export function createOptimizeCharacterBlocks(ctx: AgentBlockContext): ContextBlock[] {
   return compactBlocks([

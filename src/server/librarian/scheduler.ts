@@ -55,6 +55,34 @@ function setRuntimeStatus(storyId: string, patch: Partial<LibrarianRuntimeStatus
  * run starts immediately when the story is idle. Triggers arriving while a run is in
  * flight or held are coalesced to the latest fragment and run once the story settles.
  */
+interface ActiveRun {
+  promise: Promise<void>
+  resolve: () => void
+}
+
+const activeRuns = new Set<ActiveRun>()
+
+function trackRun(promise: Promise<void>): void {
+  let resolveExternal!: () => void
+  const wrapper = new Promise<void>((resolve) => {
+    resolveExternal = resolve
+    promise.then(() => resolve(), () => resolve())
+  })
+
+  const runObj = { promise: wrapper, resolve: resolveExternal }
+  activeRuns.add(runObj)
+  wrapper.finally(() => {
+    activeRuns.delete(runObj)
+  })
+}
+
+/** Wait for all currently executing analyses to finish (useful for tests to avoid race conditions). */
+export async function awaitPending(): Promise<void> {
+  while (activeRuns.size > 0) {
+    await Promise.all(Array.from(activeRuns).map((r) => r.promise))
+  }
+}
+
 export async function triggerLibrarian(
   dataDir: string,
   storyId: string,
@@ -80,7 +108,7 @@ export async function triggerLibrarian(
   }
 
   state.running = true
-  void runAnalysis(dataDir, storyId, fragment, branchId)
+  trackRun(runAnalysis(dataDir, storyId, fragment, branchId))
 }
 
 async function runAnalysis(
@@ -123,7 +151,7 @@ async function runAnalysis(
   if (state?.queued && !held) {
     const next = state.queued
     state.queued = null
-    void runAnalysis(next.dataDir, storyId, next.fragment, next.branchId)
+    trackRun(runAnalysis(next.dataDir, storyId, next.fragment, next.branchId))
     return
   }
   if (state) state.running = false
@@ -158,7 +186,7 @@ export function holdLibrarianAnalysis(storyId: string): () => void {
       const next = state.queued
       state.queued = null
       state.running = true
-      void runAnalysis(next.dataDir, storyId, next.fragment, next.branchId)
+      trackRun(runAnalysis(next.dataDir, storyId, next.fragment, next.branchId))
     }
   }
 }
@@ -203,6 +231,11 @@ export function clearPending(): void {
   }
   scheduler.clear()
   holds.clear()
+
+  for (const run of activeRuns) {
+    run.resolve()
+  }
+  activeRuns.clear()
 }
 
 /** Number of stories with a running or queued analysis (useful for tests). */

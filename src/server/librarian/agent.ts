@@ -1,4 +1,5 @@
-import { getModel, buildProviderOptions } from '../llm/client'
+import { resolveAgentRuntime } from '../llm/client'
+import { MISSING_SYSTEM_PROMPT_FALLBACK } from '../instructions'
 import { ToolLoopAgent, stepCountIs } from 'ai'
 import {
   getStory,
@@ -22,14 +23,20 @@ import {
   saveState,
   type LibrarianAnalysis,
 } from './storage'
-import { applyFragmentSuggestion } from './suggestions'
-import { reportUsage } from '../llm/token-tracker'
-import { normalizeTokenUsage } from '../llm/usage-normalizer'
+import {
+  applyFragmentChangeProposal,
+  markFragmentChangeProposalApplied,
+  markFragmentChangeProposalStale,
+  ProposalApplyError,
+  ProposalValidationError,
+} from './suggestions'
+import { resolveAndReportUsage } from '../llm/usage-normalizer'
 import { createLogger } from '../logging'
 import { compileAgentContext } from '../agents/compile-agent-context'
 import { createEmptyCollector, createLibrarianAnalyzeTools, toMentionAnnotations } from './analysis-tools'
 import { buildAnalyzeContext } from './blocks'
 import { getActivityBuffer, pushActivityEvent, type ActivityStreamEvent } from '../agents/activity-stream'
+import { drainAgentStream } from '../agents/drain-agent-stream'
 
 const logger = createLogger('librarian-agent')
 
@@ -110,7 +117,7 @@ async function runLibrarianInner(
   const state = await getState(dataDir, storyId)
 
   // Resolve model early so modelId is available for instruction resolution
-  const { model, modelId, providerId, config, temperature } = await getModel(dataDir, storyId, { role: 'librarian.analyze' })
+  const { model, modelId, providerId, config, temperature, providerOptions, guards } = await resolveAgentRuntime(dataDir, storyId, 'librarian.analyze', story)
 
   // Build agent block context (the run and the preview share this builder, so the
   // context preview can't drift from what a run actually sees).
@@ -160,16 +167,15 @@ async function runLibrarianInner(
   const systemMessage = compiled.messages.find(m => m.role === 'system')
   const userMessage = compiled.messages.find(m => m.role === 'user')
 
-  const providerOptions = buildProviderOptions(story.settings.disableThinking ?? false)
-
   const agent = new ToolLoopAgent({
     model,
-    instructions: systemMessage?.content || 'You are a helpful assistant.',
+    instructions: systemMessage?.content || MISSING_SYSTEM_PROMPT_FALLBACK,
     tools: compiled.tools,
     toolChoice: 'auto',
     stopWhen: stepCountIs(6),
     temperature,
     providerOptions,
+    maxOutputTokens: guards.maxOutputTokens,
   })
 
   let fullText = ''
@@ -181,59 +187,13 @@ async function runLibrarianInner(
       prompt: userMessage?.content ?? '',
     })
 
-    for await (const part of result.fullStream) {
-      const p = part as Record<string, unknown>
-
-      switch (part.type) {
-        case 'text-delta': {
-          const text = (p.text ?? '') as string
-          fullText += text
-          emit({ type: 'text', text })
-          break
-        }
-        case 'reasoning-delta': {
-          const text = (p.text ?? '') as string
-          emit({ type: 'reasoning', text })
-          break
-        }
-        case 'tool-call': {
-          const input = (p.input ?? {}) as Record<string, unknown>
-          emit({
-            type: 'tool-call',
-            id: p.toolCallId as string,
-            toolName: p.toolName as string,
-            args: input,
-          })
-          break
-        }
-        case 'tool-result': {
-          emit({
-            type: 'tool-result',
-            id: p.toolCallId as string,
-            toolName: (p.toolName as string) ?? '',
-            result: p.output,
-          })
-          break
-        }
-        case 'finish-step':
-          stepCount++
-          break
-        case 'finish':
-          lastFinishReason = (p.finishReason as string) ?? 'unknown'
-          break
-      }
-    }
+    const drained = await drainAgentStream(result.fullStream, emit)
+    fullText = drained.fullText
+    stepCount = drained.stepCount
+    lastFinishReason = drained.finishReason
 
     // Track token usage for librarian analysis
-    try {
-      const rawUsage = await result.totalUsage
-      const usage = normalizeTokenUsage(rawUsage)
-      if (usage) {
-        reportUsage(dataDir, storyId, 'librarian.analyze', usage, modelId)
-      }
-    } catch {
-      // Some providers may not report usage
-    }
+    await resolveAndReportUsage(dataDir, storyId, 'librarian.analyze', result.totalUsage, modelId)
 
     // Emit final finish event
     emit({
@@ -268,7 +228,7 @@ async function runLibrarianInner(
     mentions: collector.mentions.length,
     mentionedFragments: mentionedFragmentIds.length,
     contradictions: collector.contradictions.length,
-    fragmentSuggestions: collector.fragmentSuggestions.length,
+    fragmentChangeProposals: collector.fragmentChangeProposals.length,
     timelineEvents: collector.timelineEvents.length,
   })
 
@@ -283,8 +243,8 @@ async function runLibrarianInner(
     mentions: collector.mentions,
     contradictions: collector.contradictions,
     timelineEvents: collector.timelineEvents,
-    fragmentSuggestions: collector.fragmentSuggestions.map((suggestion) => ({
-      ...suggestion,
+    fragmentChangeProposals: collector.fragmentChangeProposals.map((proposal) => ({
+      ...proposal,
       sourceFragmentId: fragmentId,
     })),
     directions: collector.directions,
@@ -292,25 +252,47 @@ async function runLibrarianInner(
   }
 
   const autoApplySuggestions = story.settings?.autoApplyLibrarianSuggestions === true && !disableSuggestions
-  if (autoApplySuggestions && analysis.fragmentSuggestions.length > 0) {
+  if (autoApplySuggestions && analysis.fragmentChangeProposals.length > 0) {
     requestLogger.info('Auto-applying librarian suggestions', {
-      suggestionCount: analysis.fragmentSuggestions.length,
+      proposalCount: analysis.fragmentChangeProposals.length,
     })
-    for (let index = 0; index < analysis.fragmentSuggestions.length; index += 1) {
+    for (let index = 0; index < analysis.fragmentChangeProposals.length; index += 1) {
       try {
-        const result = await applyFragmentSuggestion({
+        const result = await applyFragmentChangeProposal({
           dataDir,
           storyId,
           analysis,
-          suggestionIndex: index,
+          proposalIndex: index,
           reason: 'auto-apply',
         })
-        analysis.fragmentSuggestions[index].accepted = true
-        analysis.fragmentSuggestions[index].autoApplied = true
-        analysis.fragmentSuggestions[index].createdFragmentId = result.fragmentId
+        markFragmentChangeProposalApplied({
+          analysis,
+          proposalIndex: index,
+          result,
+          autoApplied: true,
+        })
       } catch (error) {
-        requestLogger.error('Failed to auto-apply suggestion', {
-          suggestionIndex: index,
+        if (error instanceof ProposalApplyError) {
+          // Record the partial application so it stays visible and revertible.
+          markFragmentChangeProposalApplied({
+            analysis,
+            proposalIndex: index,
+            result: error.partial,
+            autoApplied: true,
+          })
+        } else if (error instanceof ProposalValidationError) {
+          // Nothing was written; an earlier proposal in this run typically
+          // already landed the same change. Mark stale so the user is not
+          // shown a pending proposal whose accept can only fail.
+          markFragmentChangeProposalStale({
+            analysis,
+            proposalIndex: index,
+            reason: error.message,
+            validation: error.results,
+          })
+        }
+        requestLogger.error('Failed to auto-apply fragment change proposal', {
+          proposalIndex: index,
           error: error instanceof Error ? error.message : String(error),
         })
       }

@@ -52,7 +52,7 @@ function analysisResult() {
       summaryUpdate: '',
       mentions: [],
       contradictions: [],
-      fragmentSuggestions: [],
+      fragmentChangeProposals: [],
       timelineEvents: [],
     },
     trace: [],

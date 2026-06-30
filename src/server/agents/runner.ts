@@ -1,7 +1,7 @@
 import { createLogger } from '../logging'
 import { agentRegistry } from './registry'
 import { ensureCoreAgentsRegistered } from './register-core'
-import { recordAgentRun } from './traces'
+import { recordAgentRun, makeAgentRunId } from './traces'
 import { registerActiveAgent, unregisterActiveAgent } from './active-registry'
 import type {
   AgentCallOptions,
@@ -27,10 +27,6 @@ interface RuntimeState {
 }
 
 const runnerLogger = createLogger('agent-runner')
-
-function makeRunId(): string {
-  return `ar-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
-}
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, agentName: string): Promise<T> {
   if (timeoutMs <= 0) return promise
@@ -84,7 +80,7 @@ async function invokeInternal<TOutput>(args: {
   args.runtime.callCount += 1
   args.runtime.stack.push(args.agentName)
 
-  const runId = makeRunId()
+  const runId = makeAgentRunId()
   const startedAt = new Date().toISOString()
   const startedMs = Date.now()
   const logger = runnerLogger.child({ storyId: args.storyId })
@@ -197,7 +193,7 @@ export async function invokeAgent<TOutput = unknown>(args: {
   }
 
   const runtime: RuntimeState = {
-    rootRunId: makeRunId(),
+    rootRunId: makeAgentRunId(),
     trace: [],
     stack: [],
     callCount: 0,

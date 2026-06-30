@@ -10,8 +10,11 @@ import {
   fragmentContextBlock,
   isBuiltinContextFragmentType,
   fragmentTypeLabel,
+  proseWindowBlock,
   renderContextFragment,
-  renderFragmentWithMarker,
+  renderFragmentContextGroup,
+  storyHeaderContent,
+  storySummaryBlock,
   type FragmentContextLane,
   type FragmentContextMetadata,
 } from './fragment-context-blocks'
@@ -28,9 +31,12 @@ export {
   fragmentTypeLabel,
   groupFragmentsByType,
   isBuiltinContextFragmentType,
+  proseWindowBlock,
   renderContextFragment,
   renderFragmentContextGroup,
-  renderFragmentWithMarker,
+  storyHeaderContent,
+  storySummaryBlock,
+  STORY_SUMMARY_HEADING,
   type FragmentContextGroup,
   type FragmentContextLane,
   type FragmentContextMetadata,
@@ -495,17 +501,9 @@ export async function buildContextState(
 }
 
 /**
- * Renders sticky fragments grouped by type into content parts.
+ * Renders sticky fragments grouped by type, one `## <Type>` group per type,
+ * through the shared group renderer so the writer and the agents cannot drift.
  */
-function renderTypeGrouped(fragments: Fragment[], label: string): string[] {
-  if (fragments.length === 0) return []
-  const parts: string[] = [`\n[@section=${label}]\n## ${label}`]
-  for (const f of fragments) {
-    parts.push(renderFragmentWithMarker(f))
-  }
-  return parts
-}
-
 function renderFragmentGroups(fragments: Fragment[], story: StoryMeta): string[] {
   const groups = new Map<string, Fragment[]>()
   for (const fragment of fragments) {
@@ -519,7 +517,15 @@ function renderFragmentGroups(fragments: Fragment[], story: StoryMeta): string[]
 
   const parts: string[] = []
   for (const [type, group] of groups) {
-    parts.push(...renderTypeGrouped(group, fragmentTypeLabel(story, type)))
+    parts.push(renderFragmentContextGroup({
+      id: `sticky-${type}`,
+      type,
+      label: fragmentTypeLabel(story, type),
+      fragments: group,
+      mode: 'full',
+      scope: 'all',
+      order: 0,
+    }))
   }
   return parts
 }
@@ -549,11 +555,16 @@ function renderAdvancedOrder(fragments: Fragment[], fragmentOrder: string[]): st
     }
   }
 
-  const parts: string[] = ['\n[@section=Context]\n## Context']
-  for (const f of ordered) {
-    parts.push(renderFragmentWithMarker(f))
-  }
-  return parts
+  return [renderFragmentContextGroup({
+    id: 'sticky-ordered',
+    type: 'mixed',
+    label: 'Context',
+    heading: 'Context',
+    fragments: ordered,
+    mode: 'full',
+    scope: 'all',
+    order: 0,
+  })]
 }
 
 /**
@@ -614,7 +625,9 @@ export function createDefaultBlocks(state: ContextBuildState): ContextBlock[] {
     blocks.push({
       id: 'system-fragments',
       role: 'system',
-      content: parts.join('\n').replace(/^\n+/, ''),
+      // Blank lines separate fragments — the id markers that used to double as
+      // visual boundaries are gone, so the spacing must carry the separation.
+      content: parts.join('\n\n'),
       order: 300,
       source: 'builtin',
     })
@@ -625,22 +638,16 @@ export function createDefaultBlocks(state: ContextBuildState): ContextBlock[] {
   blocks.push({
     id: 'story-info',
     role: 'user',
-    content: [
-      `## Story: ${story.name}`,
-      `${story.description}`,
-    ].join('\n'),
+    // The story title is the one h1 in the prompt — the document the writer is
+    // continuing; every section beneath it is `##`.
+    content: storyHeaderContent(story),
     order: 100,
     source: 'builtin',
   })
 
-  if (story.summary) {
-    blocks.push({
-      id: 'summary',
-      role: 'user',
-      content: `## Story Summary So Far\n${story.summary}`,
-      order: 400,
-      source: 'builtin',
-    })
+  {
+    const summary = storySummaryBlock(story.summary, { order: 400 })
+    if (summary) blocks.push(summary)
   }
 
   if (chapterSummaries.length > 0) {
@@ -649,7 +656,7 @@ export function createDefaultBlocks(state: ContextBuildState): ContextBlock[] {
       role: 'user',
       content: [
         '## Chapter/Arc Summaries',
-        ...chapterSummaries.map((c) => `[@chapter=${c.markerId}]\n### ${c.name}\n${c.summary}`),
+        ...chapterSummaries.map((c) => `### ${c.name}\n${c.summary}`),
       ].join('\n\n'),
       order: 410,
       source: 'builtin',
@@ -666,7 +673,7 @@ export function createDefaultBlocks(state: ContextBuildState): ContextBlock[] {
     blocks.push({
       id: 'user-fragments',
       role: 'user',
-      content: parts.join('\n').replace(/^\n+/, ''),
+      content: parts.join('\n\n'),
       order: 200,
       source: 'builtin',
     })
@@ -756,31 +763,12 @@ export function createDefaultBlocks(state: ContextBuildState): ContextBlock[] {
     }
   }
 
-  if (proseFragments.length > 0) {
-    blocks.push({
-      id: 'prose-recent',
-      role: 'user',
-      content: [
-        '## Recent Prose',
-        ...proseFragments.map(p => renderFragmentWithMarker(p)),
-        '\n## End of Recent Prose',
-      ].join('\n'),
+  {
+    const prose = proseWindowBlock(proseFragments, {
       order: 500,
-      source: 'builtin',
+      newStoryGuidance: 'Establish the opening scene — setting, tone, and any initial characters — based on the author\'s direction below.',
     })
-  } else {
-    blocks.push({
-      id: 'new-story',
-      role: 'user',
-      content: [
-        '## New Story',
-        'There is no existing prose yet. You are writing the very beginning of this story.',
-        'Establish the opening scene — setting, tone, and any initial characters — based on the author\'s direction below.',
-        'Do NOT reference or continue from any prior narrative; start fresh.',
-      ].join('\n'),
-      order: 500,
-      source: 'builtin',
-    })
+    if (prose) blocks.push(prose)
   }
 
   // Only frame an explicit direction when the author gave one; a bare "continue"

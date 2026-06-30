@@ -196,10 +196,12 @@ For regenerate and refine, the context builder receives `excludeFragmentId`, `pr
 
 | File | Purpose |
 |---|---|
+| `src/server/generation/run-generation.ts` | `runGeneration()` — the orchestrator: validation, context build, prewriter phase, writer stream, save. Returns a result the route translates to HTTP; callable directly without going through HTTP (tests do). |
+| `src/server/routes/generation.ts` | `POST /stories/:storyId/generate` and `/propose-directions` — transport only: maps `runGeneration()`'s result to an HTTP status/response. |
 | `src/server/llm/prewriter.ts` | `runPrewriter()`, `createPrewriterBlocks()`, `createWriterBriefBlocks()` |
 | `src/server/llm/agents.ts` | Generation agent registration (writer + prewriter blocks, instruction defaults) |
 | `src/server/llm/instruction-texts.ts` | Prompt text constants for generation instructions |
-| `src/server/routes/generation.ts` | `POST /stories/:storyId/generate` endpoint |
+| `src/server/llm/client.ts` | `resolveAgentRuntime()` — resolves a role's model plus `disableThinking`/`generationLimits` in one call |
 | `src/server/llm/context-builder.ts` | `buildContextState()`, `createDefaultBlocks()`, `compileBlocks()`, `addCacheBreakpoints()` |
-| `src/server/llm/writer-agent.ts` | `createWriterAgent()` — `ToolLoopAgent` wrapper |
+| `src/server/agents/drain-agent-stream.ts` | `drainAgentStream()` — the shared `fullStream` → `AgentStreamEvent` translator every streaming agent uses |
 | `src/server/llm/generation-logs.ts` | `GenerationLog` interface, `saveGenerationLog()`, `listGenerationLogs()` |

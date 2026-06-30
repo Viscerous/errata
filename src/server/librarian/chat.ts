@@ -1,6 +1,8 @@
 import { tool, ToolLoopAgent, stepCountIs, type ToolSet } from 'ai'
 import { z } from 'zod/v4'
-import { getModel } from '../llm/client'
+import { resolveAgentRuntime } from '../llm/client'
+import { resolveAndReportUsage } from '../llm/usage-normalizer'
+import { MISSING_SYSTEM_PROMPT_FALLBACK } from '../instructions'
 import { getFragment, getStory } from '../fragments/storage'
 import { buildContextState } from '../llm/context-builder'
 import { createFragmentTools } from '../llm/tools'
@@ -41,23 +43,37 @@ export interface ChatOptions {
 export function createLibrarianChatBespokeTools(dataDir: string, storyId: string): ToolSet {
   const log = logger.child({ storyId })
 
-  const reanalyzeFragment = tool({
-    description: 'Re-run librarian analysis on a prose fragment. Updates its summary, detects mentions, flags contradictions, and suggests knowledge.',
+  const invokeAgent = tool({
+    description: 'Invoke a specialized librarian agent for a focused task. Use this instead of hand-running a specialized workflow when analysis, refinement, or character optimization is requested.',
     inputSchema: z.object({
-      fragmentId: z.string().describe('The prose fragment ID to reanalyze (e.g. pr-bakumo)'),
+      agent: z.enum(['librarian.analyze', 'librarian.refine', 'librarian.optimize-character']),
+      fragmentId: z.string().describe('The target fragment ID. analyze expects prose; optimize-character expects character; refine expects a non-prose fragment.'),
+      instructions: z.string().optional().describe('Optional instructions for refine or optimize-character.'),
     }),
-    execute: async ({ fragmentId }: { fragmentId: string }) => {
-      log.info('Reanalyzing fragment via chat tool', { fragmentId })
+    execute: async ({ agent, fragmentId, instructions }: { agent: 'librarian.analyze' | 'librarian.refine' | 'librarian.optimize-character'; fragmentId: string; instructions?: string }) => {
+      log.info('Invoking librarian agent via chat tool', { agent, fragmentId })
       try {
-        const analysis = await runLibrarian(dataDir, storyId, fragmentId)
+        if (agent === 'librarian.analyze') {
+          const analysis = await runLibrarian(dataDir, storyId, fragmentId)
+          return {
+            ok: true,
+            agent,
+            analysisId: analysis.id,
+            summary: analysis.summaryUpdate,
+            mentionCount: analysis.mentions.length,
+            contradictionCount: analysis.contradictions.length,
+            suggestionCount: analysis.fragmentChangeProposals.length,
+            timelineEventCount: analysis.timelineEvents.length,
+          }
+        }
+
+        const instance = createAgentInstance(agent, { dataDir, storyId })
+        const result = await instance.execute({ fragmentId, instructions })
+        await result.completion
         return {
           ok: true,
-          analysisId: analysis.id,
-          summary: analysis.summaryUpdate,
-          mentionCount: analysis.mentions.length,
-          contradictionCount: analysis.contradictions.length,
-          suggestionCount: analysis.fragmentSuggestions.length,
-          timelineEventCount: analysis.timelineEvents.length,
+          agent,
+          fragmentId,
         }
       } catch (err) {
         return { error: err instanceof Error ? err.message : String(err) }
@@ -65,29 +81,9 @@ export function createLibrarianChatBespokeTools(dataDir: string, storyId: string
     },
   })
 
-  const optimizeCharacter = tool({
-    description: 'Optimize a character sheet using depth-focused writing methodology. Rewrites the character with causality, Egri dimensions, friction, and contrast.',
-    inputSchema: z.object({
-      fragmentId: z.string().describe('The character fragment ID to optimize (e.g. ch-bakumo)'),
-      instructions: z.string().optional().describe('Optional specific instructions for the optimization'),
-    }),
-    execute: async ({ fragmentId, instructions }: { fragmentId: string; instructions?: string }) => {
-      log.info('Optimizing character via chat tool', { fragmentId })
-      const agent = createAgentInstance('librarian.optimize-character', { dataDir, storyId })
-      try {
-        const result = await agent.execute({ fragmentId, instructions })
-        await result.completion
-        return { ok: true, fragmentId }
-      } catch (err) {
-        agent.fail(err)
-        return { error: err instanceof Error ? err.message : String(err) }
-      }
-    },
-  })
-
-  const inspectGeneration = tool({
+  const inspectRun = tool({
     description:
-      "Inspect the generation (debug) details behind a generated prose fragment: the model used, the exact prompt/context it was given, the tools it called, token usage, the model's reasoning, and the prewriter brief. Use this to explain why a passage came out the way it did, or to trace a continuity issue back to what the model actually saw.",
+      "Inspect run/debug details behind a generated prose fragment: model, prompt/context, tools, token usage, reasoning, and prewriter brief. Use this to explain why a passage came out the way it did, or to trace a continuity issue.",
     inputSchema: z.object({
       fragmentId: z.string().describe('The generated prose fragment ID to inspect (e.g. pr-bakumo)'),
       aspect: z
@@ -98,12 +94,12 @@ export function createLibrarianChatBespokeTools(dataDir: string, storyId: string
         ),
     }),
     execute: async ({ fragmentId, aspect }: { fragmentId: string; aspect?: InspectAspect }) => {
-      log.info('Inspecting generation via chat tool', { fragmentId, aspect: aspect ?? 'summary' })
+      log.info('Inspecting run via chat tool', { fragmentId, aspect: aspect ?? 'summary' })
       return inspectGenerationForFragment(dataDir, storyId, fragmentId, aspect ?? 'summary')
     },
   })
 
-  return { reanalyzeFragment, optimizeCharacter, inspectGeneration }
+  return { invokeAgent, inspectRun }
 }
 
 export async function librarianChat(
@@ -135,7 +131,7 @@ async function librarianChatInner(
   const systemPromptFragments = await loadSystemPromptFragments(dataDir, storyId, getFragmentsByTag, getFragment)
 
   // Resolve model early so modelId is available for instruction resolution
-  const { model, modelId, temperature } = await getModel(dataDir, storyId, { role: 'librarian.chat' })
+  const { model, modelId, temperature, providerOptions, guards } = await resolveAgentRuntime(dataDir, storyId, 'librarian.chat', story)
   requestLogger.info('Resolved model', { modelId })
 
   // Create write-enabled fragment tools + enabled plugin tools
@@ -176,11 +172,13 @@ async function librarianChatInner(
 
   const chatAgent = new ToolLoopAgent({
     model,
-    instructions: systemMessage?.content || 'You are a helpful assistant.',
+    instructions: systemMessage?.content || MISSING_SYSTEM_PROMPT_FALLBACK,
     tools: compiled.tools,
     toolChoice: 'auto',
     stopWhen: stepCountIs(opts.maxSteps ?? 10),
     temperature,
+    providerOptions,
+    maxOutputTokens: guards.maxOutputTokens,
   })
 
   // Build messages: context as first user message, then conversation history
@@ -199,7 +197,15 @@ async function librarianChatInner(
     messages: aiMessages,
   })
   const releaseAnalysis = holdLibrarianAnalysis(storyId)
+  // Active-marker/activity-trace/history for this run come from createAgentInstance
+  // (the only caller — routes/librarian.ts), which wraps this whole call in
+  // beginAgentRun and tees the event stream into the trace. Not duplicated here.
   const stream = createEventStream(result.fullStream)
   void stream.completion.then(releaseAnalysis, releaseAnalysis)
+  stream.completion
+    .then(() => resolveAndReportUsage(dataDir, storyId, 'librarian.chat', result.totalUsage, modelId))
+    .catch(() => {
+      // Stream errored — skip usage tracking
+    })
   return stream
 }

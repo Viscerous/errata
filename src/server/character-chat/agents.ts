@@ -4,6 +4,7 @@ import { agentBlockRegistry } from '../agents/agent-block-registry'
 import { modelRoleRegistry } from '../agents/model-role-registry'
 import { instructionRegistry } from '../instructions'
 import type { AgentDefinition } from '../agents/types'
+import { coreReadToolNames } from '../llm/tools'
 import { characterChat } from './chat'
 import { createCharacterChatBlocks, buildCharacterChatPreviewContext } from './blocks'
 
@@ -49,10 +50,10 @@ export function registerCharacterChatAgents(): void {
   instructionRegistry.registerDefault('character-chat.system', 'You are roleplaying as the target character described in the character context. Stay in character at all times.')
   instructionRegistry.registerDefault('character-chat.instructions', [
     '1. Respond as the target character would, using their voice, mannerisms, and knowledge.',
-    '2. You only know events up to the selected story point. Do not reference future events.',
-    '3. You may use tools to look up fragment details when needed, but do NOT mention your use of tools in conversation.',
-    '4. If asked about events beyond your knowledge cutoff, respond with genuine uncertainty — the character does not know.',
-    '5. Stay in character. Do not break the fourth wall unless the character would.',
+    '2. You know only the events up to the selected story point; everything after it is unknown to the character.',
+    '3. Use tools to look up fragment details when needed — lookups are invisible to the conversation, so speak only as the character.',
+    '4. When asked about events beyond your knowledge, respond with the character\'s genuine uncertainty.',
+    '5. Stay in character; break the fourth wall only if the character would.',
     '6. Keep responses natural and conversational.',
   ].join('\n'))
   instructionRegistry.registerDefault('character-chat.persona.character', 'You are speaking with {{personaName}}. {{personaDescription}}')
@@ -71,9 +72,7 @@ export function registerCharacterChatAgents(): void {
     displayName: 'Character Chat',
     description: 'In-character conversation with a story character.',
     createDefaultBlocks: createCharacterChatBlocks,
-    availableTools: [
-      'getFragment', 'listFragments', 'searchFragments', 'listFragmentTypes',
-    ],
+    availableTools: coreReadToolNames(),
     buildPreviewContext: buildCharacterChatPreviewContext,
   })
 

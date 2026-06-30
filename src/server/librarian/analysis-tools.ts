@@ -1,17 +1,42 @@
 import { tool, type ToolSet } from 'ai'
 import { z } from 'zod/v4'
-import { getFragment, updateFragment, updateFragmentVersioned } from '../fragments/storage'
-import { checkFragmentWrite } from '../fragments/protection'
+import { getFragment, updateFragment } from '../fragments/storage'
 import { FragmentIdSchema } from '../fragments/schema'
-import type { LibrarianMention } from './storage'
-import { validateSuggestionTargetWrite } from './suggestions'
+import type { LibrarianFragmentChangeProposal, LibrarianMention } from './storage'
+import { createFragmentTools } from '../llm/tools'
+import {
+  type FragmentChangeOperation,
+  type OperationValidation,
+  OPERATION_GUIDANCE,
+  operationEchoFields,
+  proposeFragmentChangesSchema,
+  unknownFragmentIdsMessage,
+  validateOperations,
+} from '../fragments/change-operations'
 
-const mentionTextSchema = z.string().trim().min(1).describe('The exact non-empty name, title, or key term used in the prose')
+const mentionTextSchema = z.string().trim().min(1).describe('The exact name, title, or key term as it appears in the prose, copied verbatim — no added quotes, no paraphrase')
+
+// Wrapping quotes and edge punctuation a model habitually adds around a term.
+const MENTION_EDGE_TRIM_RE = /^["'‚„“”«»`‘’]+|["'‚„“”«»`‘’.,!?;:]+$/g
+
+/**
+ * Anchor a reported mention to the prose it annotates: the highlight regex can
+ * only bind text that actually occurs in the passage (case-insensitive). Returns
+ * the verbatim-usable text — salvaging quote-wrapped reports — or null when the
+ * text does not occur (a paraphrase), which the caller echoes back as feedback.
+ */
+export function anchorMentionText(text: string, proseLower: string): string | null {
+  const raw = text.trim()
+  if (raw && proseLower.includes(raw.toLowerCase())) return raw
+  const stripped = raw.replace(MENTION_EDGE_TRIM_RE, '').trim()
+  if (stripped && proseLower.includes(stripped.toLowerCase())) return stripped
+  return null
+}
 
 export const mentionInputSchema = z.object({
   fragmentId: FragmentIdSchema.describe('The ID of the mentioned fragment'),
   text: mentionTextSchema,
-}).strict()
+})
 
 function mentionKey(mention: LibrarianMention): string {
   return `${mention.fragmentId}\u0000${mention.text.trim().toLowerCase()}`
@@ -24,8 +49,8 @@ export function toMentionAnnotations(mentions: LibrarianMention[]) {
 
 /**
  * Write mention annotations onto the prose fragment immediately (meta-only, so it
- * creates no version). Called from reportMentions so highlights appear as soon as
- * mentions resolve, rather than waiting for the whole analysis run to finish.
+ * creates no version). Called from reportAnalysis so highlights appear as soon
+ * as mentions resolve, rather than waiting for the whole analysis run to finish.
  */
 async function persistMentionAnnotations(
   dataDir: string,
@@ -52,13 +77,7 @@ export interface AnalysisCollector {
   }
   mentions: LibrarianMention[]
   contradictions: Array<{ description: string; fragmentIds: string[] }>
-  fragmentSuggestions: Array<{
-    type: string
-    targetFragmentId?: string
-    name: string
-    description: string
-    content: string
-  }>
+  fragmentChangeProposals: LibrarianFragmentChangeProposal[]
   timelineEvents: Array<{ event: string; position: 'before' | 'during' | 'after' }>
   directions: Array<{ title: string; description: string; instruction: string }>
 }
@@ -73,17 +92,17 @@ export function createEmptyCollector(): AnalysisCollector {
     },
     mentions: [],
     contradictions: [],
-    fragmentSuggestions: [],
+    fragmentChangeProposals: [],
     timelineEvents: [],
     directions: [],
   }
 }
 
-function normalizeUniqueLines(values: string[] | undefined, maxItems: number): string[] {
+function normalizeUniqueLines(values: string[] | undefined, maxItems: number, maxItemChars = 200): string[] {
   const out: string[] = []
   const seen = new Set<string>()
   for (const value of values ?? []) {
-    const trimmed = value.trim()
+    const trimmed = value.trim().slice(0, maxItemChars)
     if (!trimmed) continue
     const key = trimmed.toLowerCase()
     if (seen.has(key)) continue
@@ -117,24 +136,134 @@ export function renderStructuredSummary(structured: {
   return sentenceJoin(parts).trim()
 }
 
-export const updateSummaryInputSchema = z.object({
-  summary: z.string().max(1200).describe('A concise summary of what happened in the new prose fragment'),
-  events: z.array(z.string().max(200)).max(12).optional()
-    .describe('Bullet-like event statements from the prose fragment'),
-  stateChanges: z.array(z.string().max(200)).max(12).optional()
-    .describe('What changed in goals, relationships, world state, or character condition'),
-  openThreads: z.array(z.string().max(200)).max(12).optional()
-    .describe('Unresolved questions or threads introduced/advanced by this prose'),
-}).superRefine((value, ctx) => {
-  const hasSummary = value.summary.trim().length > 0
-  const signalCount = (value.events?.length ?? 0) + (value.stateChanges?.length ?? 0) + (value.openThreads?.length ?? 0)
-  if (!hasSummary && signalCount === 0) {
-    ctx.addIssue({
-      code: 'custom',
-      message: 'Provide either summary text or at least one structured summary signal.',
-    })
-  }
+// Two-tier limits: the schema `.max()` is a wide ceiling that rejects only
+// degenerate output (a looping model repeating an array entry hundreds of times)
+// with a clean validation error; the execute path CLIPS anything between the
+// working target and that ceiling, so a merely verbose report never loses the
+// whole batched call over a few extra items. Targets live in execute
+// (normalizeUniqueLines / collector caps); aim guidance lives in `.describe`.
+
+/**
+ * Small models sometimes confuse the string[] signal arrays with the
+ * contradictions shape ({description, fragmentIds}), or pad arrays with
+ * hallucinated `true` values.  This schema coerces recoverable items to
+ * strings and silently drops junk so a mostly-correct report isn't lost.
+ */
+const coercedStringItem = z.union([
+  z.string().max(400),
+  z.object({ description: z.string() }).transform((obj) => obj.description),
+]).catch(undefined as unknown as string)
+
+const coercedStringArray = z.array(coercedStringItem).max(200).default([])
+  .transform((arr) => arr.filter((item): item is string => typeof item === 'string' && item.length > 0))
+
+export const reportAnalysisInputSchema = z.object({
+  summary: z.string().max(2400).default('').describe('A concise summary of what happened in the new prose fragment — a paragraph or two'),
+  events: coercedStringArray
+    .describe('Bullet-like event statements from the prose fragment — the few that matter, at most 8 are kept'),
+  stateChanges: coercedStringArray
+    .describe('What changed in goals, relationships, world state, or character condition — at most 8 are kept'),
+  openThreads: coercedStringArray
+    .describe('Unresolved questions or threads introduced/advanced by this prose — at most 8 are kept'),
+  mentions: z.array(mentionInputSchema).max(150).default([])
+    .describe('Distinct mentions of listed fragments in the new prose — at most one entry per fragment/text pair; a single mention highlights every occurrence of that text. Use exact prose text; exclude bare pronouns (a possessive phrase that identifies an entity, like "her father", is valid).'),
+  contradictions: z.array(z.object({
+    description: z.string().describe('What the contradiction is'),
+    fragmentIds: z.array(z.string()).describe('IDs of the fragments involved'),
+  })).max(32).default([]),
+  timelineEvents: z.array(z.object({
+    event: z.string().describe('Description of the significant event'),
+    position: z.union([z.literal('before'), z.literal('during'), z.literal('after')])
+      .describe('"before" for flashback, "during" for concurrent, "after" for sequential'),
+  })).max(32).default([]),
 })
+
+type AnalysisProposalSkipped = {
+  operationId: string
+  action: FragmentChangeOperation['action']
+  target?: OperationValidation['target']
+  reason: string
+  errors?: string[]
+}
+
+function validationMessage(result: OperationValidation): string {
+  return result.errors?.map((error) => error.message).join('; ') || 'Operation was not valid.'
+}
+
+function skippedOperation(
+  result: OperationValidation,
+  reason = validationMessage(result),
+): AnalysisProposalSkipped {
+  return {
+    operationId: result.operationId,
+    action: result.action,
+    target: result.target,
+    reason,
+    errors: result.errors?.map((error) => error.message),
+  }
+}
+
+function normalizeForDedupe(text: string): string {
+  return text.trim().replace(/\s+/g, ' ').toLowerCase()
+}
+
+/**
+ * Identity of an operation for cross-proposal dedup. A retried batch usually
+ * resubmits already-queued operations alongside the fixed one; anything whose
+ * key is already queued must not queue again, or the user sees two proposals
+ * carrying the same create/append and the second one fails on apply (or worse,
+ * a create applies twice). Keys ignore whitespace and case so a lightly
+ * reworded resubmission still matches.
+ */
+function operationDedupeKey(operation: FragmentChangeOperation): string {
+  switch (operation.action) {
+    case 'create_fragment':
+      return `create|${operation.type}|${normalizeForDedupe(operation.name)}`
+    case 'append_paragraph':
+      return `add|${operation.fragmentId}|${operation.field}|${normalizeForDedupe(operation.text)}`
+    case 'replace_text':
+      return `replace|${operation.fragmentId}|${operation.field}|${normalizeForDedupe(operation.oldText)}|${normalizeForDedupe(operation.newText)}`
+    case 'set_fields':
+      return `set|${operation.fragmentId}|${JSON.stringify(operation.fields)}`
+    case 'archive_fragment':
+      return `archive|${operation.fragmentId}`
+  }
+}
+
+function queueFragmentChangeProposal(params: {
+  collector: AnalysisCollector
+  title?: string
+  rationale?: string
+  operations: FragmentChangeOperation[]
+  validation: OperationValidation[]
+}): { queued: FragmentChangeOperation[]; alreadyQueued: FragmentChangeOperation[] } {
+  const queuedKeys = new Set(
+    params.collector.fragmentChangeProposals.flatMap((proposal) =>
+      proposal.operations.map(operationDedupeKey),
+    ),
+  )
+  const queued: FragmentChangeOperation[] = []
+  const alreadyQueued: FragmentChangeOperation[] = []
+  for (const operation of params.operations) {
+    const key = operationDedupeKey(operation)
+    if (queuedKeys.has(key)) {
+      alreadyQueued.push(operation)
+      continue
+    }
+    queuedKeys.add(key)
+    queued.push(operation)
+  }
+  if (queued.length === 0) return { queued, alreadyQueued }
+
+  const queuedIds = new Set(queued.map((operation) => operation.operationId ?? ''))
+  params.collector.fragmentChangeProposals.push({
+    ...(params.title?.trim() ? { title: params.title.trim() } : {}),
+    ...(params.rationale?.trim() ? { rationale: params.rationale.trim() } : {}),
+    operations: queued,
+    validation: params.validation.filter((result) => queuedIds.has(result.operationId)),
+  })
+  return { queued, alreadyQueued }
+}
 
 // --- Tools ---
 
@@ -151,35 +280,99 @@ export function createAnalysisTools(
 ) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const tools: Record<string, any> = {
-    updateSummary: tool({
-      description: 'Set or update the summary for this prose fragment. Describes what happened in the new prose. Last call wins.',
-      inputSchema: updateSummaryInputSchema,
-      execute: async ({ summary, events, stateChanges, openThreads }) => {
-        const normalized = {
-          events: normalizeUniqueLines(events, 8),
-          stateChanges: normalizeUniqueLines(stateChanges, 8),
-          openThreads: normalizeUniqueLines(openThreads, 8),
+    reportAnalysis: tool({
+      description: 'Report the prose analysis in one batch: summary, structured signals, mentions, contradictions, and timeline events. Call once with everything you found.',
+      inputSchema: reportAnalysisInputSchema,
+      execute: async ({
+        summary = '',
+        events = [],
+        stateChanges = [],
+        openThreads = [],
+        mentions = [],
+        contradictions = [],
+        timelineEvents = [],
+      }) => {
+        // An empty report is not an error — schema-level rejection makes small
+        // models loop on resubmitting. Acknowledge it and nudge instead.
+        const signalCount =
+          Number(summary.trim().length > 0) +
+          events.length +
+          stateChanges.length +
+          openThreads.length +
+          mentions.length +
+          contradictions.length +
+          timelineEvents.length
+        if (signalCount === 0) {
+          return {
+            ok: true,
+            note: 'Empty report: nothing was recorded. Call again with at least a summary if the prose contains anything noteworthy.',
+          }
         }
-        collector.structuredSummary = normalized
 
-        const trimmedSummary = summary.trim()
-        collector.summaryUpdate = trimmedSummary.length > 0
-          ? trimmedSummary
-          : renderStructuredSummary(normalized)
-        return { ok: true }
-      },
-    }),
+        if (opts) {
+          const uniqueIds = [...new Set<string>([
+            ...mentions.map(m => m.fragmentId),
+            ...contradictions.flatMap(c => c.fragmentIds),
+          ].filter((id): id is string => typeof id === 'string'))]
 
-    reportMentions: tool({
-      description: 'Report mentions of listed fragments in the new prose by fragment ID and exact prose text. Include characters, knowledge, and story-defined custom fragments when referenced by name, title, or key term. Call once with all mentions.',
-      inputSchema: z.object({
-        mentions: z.array(mentionInputSchema),
-      }),
-      execute: async ({ mentions }) => {
-        // Deduplicate by fragment+surface text. Multiple terms can resolve to
-        // the same fragment and should all highlight.
+          const checks = await Promise.all(
+            uniqueIds.map(async (fid) => ({
+              fid,
+              exists: Boolean(await getFragment(opts.dataDir, opts.storyId, fid)),
+            })),
+          )
+          const invalidIds = checks.filter((check) => !check.exists).map((check) => check.fid)
+          if (invalidIds.length > 0) {
+            throw new Error(unknownFragmentIdsMessage(invalidIds))
+          }
+        }
+
+        const trimmedSummary = summary.trim().slice(0, 1200)
+        const hasSummarySignal =
+          trimmedSummary.length > 0 ||
+          events.length > 0 ||
+          stateChanges.length > 0 ||
+          openThreads.length > 0
+        if (hasSummarySignal) {
+          const normalized = {
+            events: normalizeUniqueLines(events, 8),
+            stateChanges: normalizeUniqueLines(stateChanges, 8),
+            openThreads: normalizeUniqueLines(openThreads, 8),
+          }
+          collector.structuredSummary = normalized
+          collector.summaryUpdate = trimmedSummary.length > 0
+            ? trimmedSummary
+            : renderStructuredSummary(normalized)
+        }
+
+        // Anchor mentions to the prose: a highlight can only bind text that
+        // actually occurs in the passage. Quote-wrapped reports are salvaged by
+        // stripping; paraphrases are skipped and echoed back so the model can
+        // re-report the exact wording in a later step.
+        const skippedMentions: Array<{ fragmentId: string; text: string }> = []
+        let anchoredMentions = mentions
+        if (opts?.proseFragmentId) {
+          const prose = await getFragment(opts.dataDir, opts.storyId, opts.proseFragmentId)
+          const proseLower = prose?.content.toLowerCase()
+          if (proseLower) {
+            anchoredMentions = []
+            for (const m of mentions) {
+              const anchored = anchorMentionText(m.text, proseLower)
+              if (anchored == null) {
+                skippedMentions.push({ fragmentId: m.fragmentId, text: m.text })
+              } else {
+                anchoredMentions.push({ ...m, text: anchored })
+              }
+            }
+          }
+        }
+
+        // Deduplicate by fragment+surface text (multiple terms can resolve to
+        // the same fragment and should all highlight), clipped at the working
+        // cap — dedup first so repeats never crowd out distinct mentions.
         const seen = new Set(collector.mentions.map(mentionKey))
-        for (const m of mentions) {
+        for (const m of anchoredMentions) {
+          if (collector.mentions.length >= 60) break
           const key = mentionKey(m)
           if (seen.has(key)) continue
           seen.add(key)
@@ -190,162 +383,103 @@ export function createAnalysisTools(
         if (opts?.proseFragmentId && collector.mentions.length > 0) {
           await persistMentionAnnotations(opts.dataDir, opts.storyId, opts.proseFragmentId, collector.mentions)
         }
-        return { ok: true }
-      },
-    }),
-
-    reportContradictions: tool({
-      description: 'Report contradictions between the new prose and established facts in the summary, character descriptions, or knowledge. Only flag clear contradictions, not ambiguities.',
-      inputSchema: z.object({
-        contradictions: z.array(z.object({
-          description: z.string().describe('What the contradiction is'),
-          fragmentIds: z.array(z.string()).describe('IDs of the fragments involved'),
-        })),
-      }),
-      execute: async ({ contradictions }) => {
-        collector.contradictions.push(...contradictions)
-        return { ok: true }
-      },
-    }),
-
-    reportTimeline: tool({
-      description: 'Report significant timeline events from the new prose.',
-      inputSchema: z.object({
-        events: z.array(z.object({
-          event: z.string().describe('Description of the event'),
-          position: z.union([z.literal('before'), z.literal('during'), z.literal('after')]).describe('"before" for flashback, "during" for concurrent, "after" for sequential'),
-        })),
-      }),
-      execute: async ({ events }) => {
-        collector.timelineEvents.push(...events)
-        return { ok: true }
-      },
-    }),
-
-    getFragment: tool({
-      description: 'Read a fragment in full by ID. The characters in the recent prose are already shown in full; use this only to read another fragment before editing it.',
-      inputSchema: z.object({
-        fragmentId: z.string().describe('The fragment ID to read (e.g. ch-abc, kn-xyz)'),
-      }),
-      execute: async ({ fragmentId }) => {
-        if (!opts) return { error: 'getFragment not available in this context' }
-        const frag = await getFragment(opts.dataDir, opts.storyId, fragmentId)
-        if (!frag) return { error: `Fragment ${fragmentId} not found` }
-        return { id: frag.id, name: frag.name, description: frag.description, content: frag.content, type: frag.type }
-      },
-    }),
-
-    editFragment: tool({
-      description: 'Replace an exact text span (oldText) with newText in a non-prose fragment. Searches the name, description, and content, and changes only the matched span. oldText must match the current text exactly.',
-      inputSchema: z.object({
-        fragmentId: z.string().describe('The ID of the fragment to edit (e.g. ch-abc, kn-xyz)'),
-        oldText: z.string().describe('The exact text span to find and replace, from the name, description, or content'),
-        newText: z.string().describe('The replacement text'),
-      }),
-      execute: async ({ fragmentId, oldText, newText }) => {
-        if (!opts) return { error: 'editFragment not available in this context' }
-        const existing = await getFragment(opts.dataDir, opts.storyId, fragmentId)
-        if (!existing) return { error: `Fragment ${fragmentId} not found` }
-        if (existing.type === 'prose') return { error: 'Cannot edit prose fragments via this tool' }
-        // Locate oldText across the editable fields, in priority order.
-        const field = (['content', 'description', 'name'] as const).find(f => existing[f].includes(oldText))
-        if (!field) {
-          return { error: `Text not found in the name, description, or content of ${fragmentId}: "${oldText}". Match it exactly against the current sheet.` }
+        collector.contradictions.push(...contradictions.slice(0, Math.max(0, 12 - collector.contradictions.length)))
+        collector.timelineEvents.push(...timelineEvents.slice(0, Math.max(0, 12 - collector.timelineEvents.length)))
+        return {
+          ok: true,
+          mentionCount: collector.mentions.length,
+          contradictionCount: collector.contradictions.length,
+          timelineEventCount: collector.timelineEvents.length,
+          ...(skippedMentions.length > 0 ? {
+            skippedMentions,
+            skippedMentionNote: 'These texts do not appear verbatim in the prose, so they cannot be highlighted. Report the exact wording the prose uses.',
+          } : {}),
         }
-        const newValue = existing[field].replace(oldText, newText)
-        // Frozen-section protection only applies to content; locked applies to all.
-        const protection = checkFragmentWrite(existing, field === 'content' ? { content: newValue } : {})
-        if (!protection.allowed) return { error: protection.reason }
-        const updated = await updateFragmentVersioned(opts.dataDir, opts.storyId, fragmentId, { [field]: newValue }, { reason: 'librarian-analysis' })
-        if (!updated) return { error: `Failed to edit fragment ${fragmentId}` }
-        return { ok: true, fragmentId: updated.id, field }
       },
     }),
-
-    updateFragment: tool({
-      description: 'Replace whole fields on a fragment by ID. Only the fields you pass change; the rest are left untouched. Setting content replaces the entire body, so provide complete new text built from the fragment\'s current sheet.',
-      inputSchema: z.object({
-        fragmentId: z.string().describe('The ID of the fragment to update (e.g. ch-abc, kn-xyz)'),
-        name: z.string().optional().describe('New name for the fragment'),
-        description: z.string().max(250).optional().describe('New description (max 250 chars)'),
-        content: z.string().optional().describe('The complete new body; it replaces the existing content in full. Build it from the fragment\'s current text, not from the one-line summary.'),
-      }),
-      execute: async ({ fragmentId, name, description, content }) => {
-        if (!opts) return { error: 'updateFragment not available in this context' }
-        const existing = await getFragment(opts.dataDir, opts.storyId, fragmentId)
-        if (!existing) return { error: `Fragment ${fragmentId} not found` }
-        if (existing.type === 'prose') return { error: 'Cannot update prose fragments via this tool' }
-        const protection = checkFragmentWrite(existing, { content })
-        if (!protection.allowed) return { error: protection.reason }
-        const updates: Record<string, string> = {}
-        if (name !== undefined) updates.name = name
-        if (description !== undefined) updates.description = description
-        if (content !== undefined) updates.content = content
-        if (Object.keys(updates).length === 0) return { error: 'No fields to update' }
-        const updated = await updateFragmentVersioned(opts.dataDir, opts.storyId, fragmentId, updates, { reason: 'librarian-analysis' })
-        if (!updated) return { error: `Failed to update fragment ${fragmentId}` }
-        return { ok: true, fragmentId: updated.id }
-      },
-    }),
+    ...(opts ? createFragmentTools(opts.dataDir, opts.storyId, { readOnly: true }) : {}),
   }
 
   if (!opts?.disableSuggestions) {
     const customTypes = opts?.customFragmentTypes ?? []
     const allowedTypes = ['character', 'knowledge', ...customTypes.map(t => t.type)]
-    const typeSchema = allowedTypes.length > 1
-      ? z.union(allowedTypes.map(t => z.literal(t)) as unknown as [z.ZodTypeAny, z.ZodTypeAny, ...z.ZodTypeAny[]])
-      : z.literal('character')
 
-    const typeDesc = customTypes.length > 0
-      ? `"character" for characters, "knowledge" for world-building, or other types: ${customTypes.map(t => t.type).join(', ')}`
-      : '"character" for characters, "knowledge" for world-building, locations, items, facts'
+    tools.proposeFragmentChanges = tool({
+      description: `Propose memory-fragment changes from the new prose in \`operations\`. ${OPERATION_GUIDANCE} Does not apply changes.`,
+      inputSchema: proposeFragmentChangesSchema,
+      execute: async ({ title, rationale, operations }) => {
+        const skipped: AnalysisProposalSkipped[] = []
+        const executableOperations = opts
+          ? operations
+          : operations.filter((operation) => operation.action === 'create_fragment')
 
-    tools.suggestFragment = tool({
-      description: 'Suggest creating or updating fragments based on new information in the prose. Each entry should appear only once. If updating an existing fragment, respect locked/frozen protections — locked fragments cannot be modified, and frozen sections must be preserved verbatim in the new content.',
-      inputSchema: z.object({
-        suggestions: z.array(z.object({
-          type: typeSchema.describe(typeDesc),
-          targetFragmentId: z.string().optional().describe('If updating an existing fragment, its ID. Omit for new fragments.'),
-          name: z.string().describe('Name of the fragment entry'),
-          description: z.string().describe('Short description (max 250 chars)'),
-          content: z.string().describe('Full content. Retain important established facts when updating.'),
-        })),
-      }),
-      execute: async ({ suggestions }) => {
-        // Deduplicate by type+name (case-insensitive), keeping the last (most complete) entry
-        const seen = new Set(
-          collector.fragmentSuggestions.map(s => `${s.type}:${s.name.trim().toLowerCase()}`),
+        if (!opts) {
+          for (const operation of operations) {
+            if (operation.action === 'create_fragment') continue
+            skipped.push({
+              operationId: operation.operationId ?? '',
+              action: operation.action,
+              reason: 'Fragment edit proposals are not available without story storage context.',
+            })
+          }
+        }
+
+        const validation = await validateOperations(opts?.dataDir ?? '', opts?.storyId ?? '', executableOperations, {
+          allowedCreateTypes: allowedTypes,
+          createTypeScopeDescription: 'librarian analysis proposals',
+        })
+        for (const result of validation.results) {
+          if (result.status !== 'valid') skipped.push(skippedOperation(result))
+        }
+
+        const validOperationIds = new Set(
+          validation.results
+            .filter((result) => result.status === 'valid')
+            .map((result) => result.operationId),
         )
-        const skipped: Array<{ name: string; reason: string }> = []
-        for (const s of suggestions) {
-          const key = `${s.type}:${s.name.trim().toLowerCase()}`
-          if (seen.has(key)) continue
+        const queuedOperations = validation.operations.filter((operation) =>
+          validOperationIds.has(operation.operationId ?? '')
+        )
+        const queuedValidation = validation.results.filter((result) =>
+          validOperationIds.has(result.operationId)
+        )
 
-          if (s.targetFragmentId && opts) {
-            const validation = await validateSuggestionTargetWrite(opts.dataDir, opts.storyId, s)
-            if (validation.error) {
-              skipped.push({ name: s.name, reason: validation.error })
-              continue
-            }
-          }
+        // A duplicate is a success from the model's perspective (the change is
+        // already queued), so it does not count against `ok` or `invalid` — it
+        // only earns an acknowledging note so the model doesn't resubmit. A
+        // retried batch typically resubmits already-queued operations alongside
+        // the fixed one; only the genuinely new operations queue.
+        let queuedResult: ReturnType<typeof queueFragmentChangeProposal> = { queued: [], alreadyQueued: [] }
+        if (queuedOperations.length > 0) {
+          queuedResult = queueFragmentChangeProposal({
+            collector,
+            title,
+            rationale,
+            operations: queuedOperations,
+            validation: queuedValidation,
+          })
+        }
+        const duplicate = queuedOperations.length > 0 && queuedResult.queued.length === 0
 
-          seen.add(key)
-          collector.fragmentSuggestions.push(s)
+        return {
+          ok: skipped.length === 0,
+          proposalCount: collector.fragmentChangeProposals.length,
+          queuedOperationCount: queuedResult.queued.length,
+          invalid: skipped.length,
+          ...(duplicate ? { duplicate: true, note: 'An identical fragment change proposal was already queued; not queued again.' } : {}),
+          ...(!duplicate && queuedResult.alreadyQueued.length > 0 ? {
+            alreadyQueuedOperationIds: queuedResult.alreadyQueued.map((operation) => operation.operationId ?? ''),
+            note: 'Some operations were already queued by an earlier proposal and were not queued again.',
+          } : {}),
+          ...operationEchoFields(validation.results),
+          skipped,
         }
-        if (skipped.length > 0) {
-          return {
-            ok: true,
-            skipped,
-            message: `${skipped.length} suggestion(s) skipped due to fragment protection. Locked fragments cannot be modified and frozen sections must be preserved verbatim.`,
-          }
-        }
-        return { ok: true }
       },
     })
   }
 
   if (!opts?.disableDirections) {
-    tools.suggestDirections = tool({
+    tools.proposeDirections = tool({
       description: 'Suggest 3-5 possible directions the story could go next.',
       inputSchema: z.object({
         directions: z.array(z.object({
@@ -369,9 +503,9 @@ export function createAnalysisTools(
  * available-tools list, so the toggle path and the model stay in sync.
  *
  * The characters in the recent prose are preloaded into context in full, and
- * knowledge sits in context in full, so the pass edits directly against the
- * sheets it already holds. getFragment is the fallback for reading any other
- * fragment before editing it.
+ * knowledge sits in context in full, so the pass proposes changes against the
+ * sheets it already holds. readFragments is the fallback for reading any other
+ * fragment before proposing an edit.
  */
 export function createLibrarianAnalyzeTools(
   collector: AnalysisCollector,

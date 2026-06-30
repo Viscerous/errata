@@ -4,7 +4,7 @@ import { agentBlockRegistry } from '../agents/agent-block-registry'
 import { modelRoleRegistry } from '../agents/model-role-registry'
 import { instructionRegistry } from '../instructions'
 import type { AgentDefinition } from '../agents/types'
-import { suggestDirections, DEFAULT_SUGGEST_PROMPT } from './suggest'
+import { proposeDirections, DEFAULT_SUGGEST_PROMPT } from './suggest'
 import { DIRECTIONS_SYSTEM_PROMPT, createDirectionsSuggestBlocks, buildDirectionsPreviewContext } from './blocks'
 
 const SuggestInputSchema = z.object({
@@ -22,7 +22,7 @@ const suggestDefinition: AgentDefinition<typeof SuggestInputSchema> = {
   description: 'Suggest possible story directions based on current context.',
   inputSchema: SuggestInputSchema,
   run: async (ctx, input) => {
-    return suggestDirections(ctx.dataDir, ctx.storyId, input)
+    return proposeDirections(ctx.dataDir, ctx.storyId, input)
   },
 }
 

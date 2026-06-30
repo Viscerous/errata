@@ -84,9 +84,9 @@ function mockSummary(summary: string) {
     tools: Record<string, { execute: (args: unknown) => Promise<unknown> }>,
   ) => ({
     fullStream: (async function* () {
-      yield { type: 'tool-call' as const, toolCallId: 'call-0', toolName: 'updateSummary', input: { summary } }
-      const output = await tools.updateSummary.execute({ summary })
-      yield { type: 'tool-result' as const, toolCallId: 'call-0', toolName: 'updateSummary', output }
+      yield { type: 'tool-call' as const, toolCallId: 'call-0', toolName: 'reportAnalysis', input: { summary } }
+      const output = await tools.reportAnalysis.execute({ summary })
+      yield { type: 'tool-result' as const, toolCallId: 'call-0', toolName: 'reportAnalysis', output }
       yield { type: 'finish' as const, finishReason: 'stop' }
     })(),
   }))

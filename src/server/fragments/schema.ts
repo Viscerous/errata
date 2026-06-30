@@ -1,6 +1,8 @@
 import { z } from 'zod/v4'
 
-export const FragmentIdSchema = z.string().regex(/^[a-z]{2,4}-[a-z0-9]{4,12}$/)
+export const FragmentIdSchema = z.string().regex(/^[a-z]{2,4}-[a-z0-9]{4,12}$/, {
+  message: "Invalid fragment ID format. Must consist of a lowercase type prefix (2-4 letters), a hyphen, and 4-12 lowercase alphanumeric characters (e.g., 'ch-nezeze', 'loca-thehague'). No uppercase letters, spaces, or hyphens inside the suffix are allowed.",
+})
 
 export const FRAGMENT_TYPES = ['prose', 'character', 'guideline', 'knowledge', 'image', 'icon', 'marker', 'summary'] as const
 
@@ -96,6 +98,13 @@ export const StoryMetaSchema = z.object({
       enabledPlugins: z.array(z.string()).default([]),
       summarizationThreshold: z.int().min(0).default(4),
       maxSteps: z.int().min(1).max(50).default(10),
+      // Per-generation safety limits for the agent LLM calls. Optional; code
+      // applies a sensible default cap (see resolveGenerationGuards) when unset.
+      // The cap bounds a runaway/looping generation so it fails fast instead of
+      // streaming until the request timeout.
+      generationLimits: z.object({
+        maxOutputTokens: z.int().min(256).max(32768).optional(),
+      }).optional(),
       // Canonical model overrides map: { [roleKey]: { providerId?, modelId? } }
       modelOverrides: z.record(z.string(), z.object({
         providerId: z.string().nullable().optional(),

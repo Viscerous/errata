@@ -3,7 +3,9 @@ import {
   buildFragmentContextLanes,
   findFragmentContextLane,
   isBuiltinContextFragmentType,
-  renderFragmentWithMarker,
+  proseWindowBlock,
+  renderContextFragment,
+  storySummaryBlock,
 } from '../llm/fragment-context-blocks'
 import type { AgentBlockContext } from '../agents/agent-block-context'
 import { getFragment } from '../fragments/storage'
@@ -15,7 +17,7 @@ import {
   loadSystemPromptFragments,
 } from '../agents/block-helpers'
 
-export const DIRECTIONS_SYSTEM_PROMPT = `You are a creative writing assistant that suggests possible story directions. Propose distinct and compelling directions the narrative could take. Each suggestion should have a short evocative title, a brief description, and a detailed instruction prompt suitable for a writer.`
+export const DIRECTIONS_SYSTEM_PROMPT = `You are a story development editor. Propose distinct, compelling directions the narrative could take next. Give each direction a short evocative title, a brief description, and a detailed instruction prompt a prose writer could follow directly.`
 
 export function createDirectionsSuggestBlocks(ctx: AgentBlockContext): ContextBlock[] {
   const blocks: ContextBlock[] = []
@@ -28,13 +30,11 @@ export function createDirectionsSuggestBlocks(ctx: AgentBlockContext): ContextBl
   const sysFrags = systemFragmentsBlock(ctx)
   if (sysFrags) blocks.push(sysFrags)
 
-  blocks.push({
+  blocks.push(storySummaryBlock(ctx.story.summary, {
     id: 'story-summary',
-    role: 'user',
-    content: `## Story Summary\n${ctx.story.summary || STORY_SUMMARY_PLACEHOLDER}`,
     order: 100,
-    source: 'builtin',
-  })
+    placeholder: STORY_SUMMARY_PLACEHOLDER,
+  })!)
 
   // Sticky guidelines are the story's binding rules (tone, POV, boundaries);
   // suggested directions should stay within them.
@@ -42,7 +42,7 @@ export function createDirectionsSuggestBlocks(ctx: AgentBlockContext): ContextBl
     blocks.push({
       id: 'guidelines',
       role: 'user',
-      content: `## Guidelines\n${ctx.stickyGuidelines.map(g => `### ${g.name}\n${g.content}`).join('\n\n')}`,
+      content: ['## Guidelines', ...ctx.stickyGuidelines.map(renderContextFragment)].join('\n\n'),
       order: 150,
       source: 'builtin',
     })
@@ -55,7 +55,7 @@ export function createDirectionsSuggestBlocks(ctx: AgentBlockContext): ContextBl
       blocks.push({
         id: 'characters',
         role: 'user',
-        content: `## Characters\n${unique.map(c => `### ${c.name}\n${c.content}`).join('\n\n')}`,
+        content: ['## Characters', ...unique.map(renderContextFragment)].join('\n\n'),
         order: 200,
         source: 'builtin',
       })
@@ -66,7 +66,7 @@ export function createDirectionsSuggestBlocks(ctx: AgentBlockContext): ContextBl
     blocks.push({
       id: 'knowledge-sticky',
       role: 'user',
-      content: `## Pinned Knowledge\n${knowledgeLane!.sticky.map(k => `### ${k.name}\n${k.content}`).join('\n\n')}`,
+      content: ['## Pinned Knowledge', ...knowledgeLane!.sticky.map(renderContextFragment)].join('\n\n'),
       order: 245,
       source: 'builtin',
     })
@@ -76,7 +76,7 @@ export function createDirectionsSuggestBlocks(ctx: AgentBlockContext): ContextBl
     blocks.push({
       id: 'knowledge-recent',
       role: 'user',
-      content: `## Knowledge in Recent Prose\n${knowledgeLane!.recent.map(k => `### ${k.name}\n${k.content}`).join('\n\n')}`,
+      content: ['## Knowledge in Recent Prose', ...knowledgeLane!.recent.map(renderContextFragment)].join('\n\n'),
       order: 248,
       source: 'builtin',
     })
@@ -90,7 +90,7 @@ export function createDirectionsSuggestBlocks(ctx: AgentBlockContext): ContextBl
       role: 'user',
       content: [
         '## Pinned Custom Context',
-        ...stickyCustomFragments.map(renderFragmentWithMarker),
+        ...stickyCustomFragments.map(renderContextFragment),
       ].join('\n\n'),
       order: 250,
       source: 'builtin',
@@ -105,22 +105,16 @@ export function createDirectionsSuggestBlocks(ctx: AgentBlockContext): ContextBl
       role: 'user',
       content: [
         `## ${lane.label} in Recent Prose`,
-        ...lane.recent.map(renderFragmentWithMarker),
+        ...lane.recent.map(renderContextFragment),
       ].join('\n\n'),
       order: customOrder++,
       source: 'builtin',
     })
   }
 
-  if (ctx.proseFragments.length > 0) {
-    const recentProse = ctx.proseFragments.slice(-3)
-    blocks.push({
-      id: 'prose-recent',
-      role: 'user',
-      content: `## Recent Prose\n${recentProse.map(f => f.content).join('\n\n---\n\n')}`,
-      order: 300,
-      source: 'builtin',
-    })
+  {
+    const prose = proseWindowBlock(ctx.proseFragments.slice(-3), { order: 300 })
+    if (prose) blocks.push(prose)
   }
 
   return blocks

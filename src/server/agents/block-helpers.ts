@@ -9,6 +9,7 @@ import type { ContextBlock } from '../llm/context-builder'
 import { type AgentBlockContext, baseBlockContext } from './agent-block-context'
 import type { Fragment } from '../fragments/schema'
 import { buildContextState } from '../llm/context-builder'
+import { storyHeaderContent, STORY_SUMMARY_HEADING } from '../llm/fragment-context-blocks'
 import { instructionRegistry } from '../instructions'
 
 // ─── Block helpers ───
@@ -38,9 +39,9 @@ export function systemFragmentsBlock(ctx: AgentBlockContext): ContextBlock | nul
 
 /** Story name, description, and summary. */
 export function storyInfoBlock(ctx: AgentBlockContext): ContextBlock {
-  const parts = [`## Story: ${ctx.story.name}`, ctx.story.description]
+  const parts = [storyHeaderContent(ctx.story)]
   if (ctx.story.summary) {
-    parts.push(`\n## Story Summary\n${ctx.story.summary}`)
+    parts.push(`\n## ${STORY_SUMMARY_HEADING}\n${ctx.story.summary}`)
   }
   return {
     id: 'story-info',

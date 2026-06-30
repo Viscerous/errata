@@ -30,10 +30,10 @@ export const generation = {
   /** Refine an existing fragment with instructions */
   refine: (storyId: string, fragmentId: string, input: string, signal?: AbortSignal, opts?: ClarifyOpts) =>
     fetchEventStream(`/stories/${storyId}/generate`, { input, saveResult: true, mode: 'refine', fragmentId, ...clarifyBody(opts) }, signal),
-  /** Get AI-generated story direction suggestions */
-  suggestDirections: (storyId: string, count?: number) =>
+  /** Get AI-generated story direction proposals */
+  proposeDirections: (storyId: string, count?: number) =>
     apiFetch<{ suggestions: SuggestionDirection[] }>(
-      `/stories/${storyId}/suggest-directions`,
+      `/stories/${storyId}/propose-directions`,
       { method: 'POST', body: JSON.stringify({ count }) },
     ),
   /** List generation log summaries (newest first) */

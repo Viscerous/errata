@@ -78,8 +78,9 @@ export class FragmentTypeRegistry {
       type: 'character',
       prefix: 'ch',
       stickyByDefault: false,
+      // One level below the `## <Type>` section heading, like every fragment.
       contextRenderer: (f) =>
-        `## ${f.name}\n${f.content}`,
+        `### ${f.name}\n${f.content}`,
       llmTools: false,
     })
 
@@ -87,8 +88,11 @@ export class FragmentTypeRegistry {
       type: 'guideline',
       prefix: 'gl',
       stickyByDefault: true,
+      // A `###` heading like every fragment: bold stays reserved for the rule
+      // labels *inside* guideline bodies (house style: one bold = one rule), so
+      // the name doesn't compete with them.
       contextRenderer: (f) =>
-        `**${f.name}**: ${f.content}`,
+        `### ${f.name}\n${f.content}`,
       shortlistFields: ['id', 'name', 'description'],
       llmTools: false,
     })

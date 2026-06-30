@@ -115,7 +115,7 @@ function createMockPrewriterToolLoopResult(firstText: string, secondText: string
     yield {
       type: 'tool-call' as const,
       toolCallId: 'call-directions',
-      toolName: 'suggestDirections',
+      toolName: 'proposeDirections',
       input: {
         directions: [
           { pacing: 'linger', title: 'Linger', description: 'Stay here.', instruction: 'Stay here.' },
@@ -127,7 +127,7 @@ function createMockPrewriterToolLoopResult(firstText: string, secondText: string
     yield {
       type: 'tool-result' as const,
       toolCallId: 'call-directions',
-      toolName: 'suggestDirections',
+      toolName: 'proposeDirections',
       output: { ok: true },
     }
     yield { type: 'finish' as const, finishReason: 'tool-calls' }
@@ -143,7 +143,7 @@ function createMockPrewriterToolLoopResult(firstText: string, secondText: string
 
 /**
  * Prewriter stream where the model writes the brief in one step, then re-emits
- * it in a second step before calling suggestDirections (a common multi-step
+ * it in a second step before calling proposeDirections (a common multi-step
  * pattern). Uses finish-step boundaries like a real AI SDK v6 stream.
  */
 function createMockPrewriterDuplicateBriefAcrossSteps(brief: string) {
@@ -151,12 +151,12 @@ function createMockPrewriterDuplicateBriefAcrossSteps(brief: string) {
     // Step 1: writes the brief, no terminal tool yet.
     yield { type: 'text-delta' as const, text: brief }
     yield { type: 'finish-step' as const }
-    // Step 2: re-writes the same brief, then calls suggestDirections.
+    // Step 2: re-writes the same brief, then calls proposeDirections.
     yield { type: 'text-delta' as const, text: brief }
     yield {
       type: 'tool-call' as const,
       toolCallId: 'call-directions',
-      toolName: 'suggestDirections',
+      toolName: 'proposeDirections',
       input: {
         directions: [
           { pacing: 'linger', title: 'Linger', description: 'Stay.', instruction: 'Stay.' },
@@ -168,7 +168,7 @@ function createMockPrewriterDuplicateBriefAcrossSteps(brief: string) {
     yield {
       type: 'tool-result' as const,
       toolCallId: 'call-directions',
-      toolName: 'suggestDirections',
+      toolName: 'proposeDirections',
       output: { ok: true },
     }
     yield { type: 'finish-step' as const }
@@ -185,14 +185,14 @@ function createMockPrewriterLookupThenBrief(fragmentId: string, brief: string) {
     yield {
       type: 'tool-call' as const,
       toolCallId: 'call-lookup',
-      toolName: 'getFragment',
-      input: { id: fragmentId },
+      toolName: 'readFragments',
+      input: { fragmentIds: [fragmentId] },
     }
     yield {
       type: 'tool-result' as const,
       toolCallId: 'call-lookup',
-      toolName: 'getFragment',
-      output: { id: fragmentId, type: 'character', name: 'Looked Up', content: 'Looked-up sheet.' },
+      toolName: 'readFragments',
+      output: { fragments: [{ id: fragmentId, type: 'character', name: 'Looked Up', content: 'Looked-up sheet.' }] },
     }
     yield { type: 'finish-step' as const }
     yield { type: 'text-delta' as const, text: brief }
@@ -355,6 +355,7 @@ describe('prewriter', () => {
 
     afterEach(async () => {
       pluginRegistry.unregister('prewriter-final-hook')
+      await new Promise((resolve) => setTimeout(resolve, 50))
       await cleanup()
     })
 
@@ -426,6 +427,11 @@ describe('prewriter', () => {
       // Writer agent should have toolChoice='auto'
       const writerConfig = mockAgentCtor.mock.calls[1][0] as any
       expect(writerConfig.toolChoice).toBe('auto')
+
+      // Both agents must carry the per-generation output-token cap so a looping
+      // small model fails fast instead of streaming to the request timeout.
+      expect(prewriterConfig.maxOutputTokens).toBeGreaterThan(0)
+      expect(writerConfig.maxOutputTokens).toBeGreaterThan(0)
     })
 
     it('prewriter mode passes stripped context to writer', async () => {
@@ -803,7 +809,7 @@ describe('prewriter', () => {
         customBlocks: [],
         overrides: {},
         blockOrder: [],
-        disabledTools: ['getFragment'],
+        disabledTools: ['readFragments'],
         disableAutoAnalysis: false,
       })
 
@@ -824,8 +830,8 @@ describe('prewriter', () => {
 
       const prewriterConfig = mockAgentCtor.mock.calls[0][0] as any
       const writerConfig = mockAgentCtor.mock.calls[1][0] as any
-      expect(prewriterConfig.tools).not.toHaveProperty('getFragment')
-      expect(writerConfig.tools).toHaveProperty('getFragment')
+      expect(prewriterConfig.tools).not.toHaveProperty('readFragments')
+      expect(writerConfig.tools).toHaveProperty('readFragments')
     })
 
     it('evaluates prewriter custom script blocks with the real generation context', async () => {
