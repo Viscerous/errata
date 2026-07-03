@@ -22,6 +22,7 @@ import {
   getBackRefs,
 } from '../fragments/associations'
 import { generateFragmentId } from '@/lib/fragment-ids'
+import { withBranch } from '../fragments/branches'
 import { renameFragmentIdAcrossStory } from '../fragments/rename'
 import { registry } from '../fragments/registry'
 import { reanalyzeAfterProseChange } from '../librarian/scheduler'
@@ -116,21 +117,40 @@ export function fragmentRoutes(dataDir: string) {
     .get('/stories/:storyId/fragments', async ({ params, query }) => {
       const type = query.type as string | undefined
       const includeArchived = (query as Record<string, string>).includeArchived === 'true'
-      return listFragments(dataDir, params.storyId, type, { includeArchived })
-    }, { detail: { summary: 'List fragments, optionally filtered by type' } })
-
-    .get('/stories/:storyId/fragments/:fragmentId', async ({ params, set }) => {
-      const fragment = await getFragment(
+      // `branch` pins the read to a specific timeline so the client can cache the
+      // list per branch (branches share fragment IDs, so an active-branch read
+      // would otherwise poison another timeline's cache). Omitted → active branch.
+      return withBranch(
         dataDir,
         params.storyId,
-        params.fragmentId
+        () => listFragments(dataDir, params.storyId, type, { includeArchived }),
+        query.branch,
+      )
+    }, {
+      query: t.Object({
+        type: t.Optional(t.String()),
+        includeArchived: t.Optional(t.String()),
+        branch: t.Optional(t.String()),
+      }),
+      detail: { summary: 'List fragments, optionally filtered by type' },
+    })
+
+    .get('/stories/:storyId/fragments/:fragmentId', async ({ params, query, set }) => {
+      const fragment = await withBranch(
+        dataDir,
+        params.storyId,
+        () => getFragment(dataDir, params.storyId, params.fragmentId),
+        query.branch,
       )
       if (!fragment) {
         set.status = 404
         return { error: 'Fragment not found' }
       }
       return fragment
-    }, { detail: { summary: 'Get a fragment by ID' } })
+    }, {
+      query: t.Object({ branch: t.Optional(t.String()) }),
+      detail: { summary: 'Get a fragment by ID' },
+    })
 
     .put('/stories/:storyId/fragments/:fragmentId', async ({ params, body, set }) => {
       const existing = await getFragment(
@@ -244,14 +264,22 @@ export function fragmentRoutes(dataDir: string) {
       return { ok: true }
     }, { detail: { summary: 'Permanently delete an archived fragment' } })
 
-    .get('/stories/:storyId/fragments/:fragmentId/versions', async ({ params, set }) => {
-      const versions = await listFragmentVersions(dataDir, params.storyId, params.fragmentId)
+    .get('/stories/:storyId/fragments/:fragmentId/versions', async ({ params, query, set }) => {
+      const versions = await withBranch(
+        dataDir,
+        params.storyId,
+        () => listFragmentVersions(dataDir, params.storyId, params.fragmentId),
+        query.branch,
+      )
       if (!versions) {
         set.status = 404
         return { error: 'Fragment not found' }
       }
       return { versions }
-    }, { detail: { summary: 'List version history' } })
+    }, {
+      query: t.Object({ branch: t.Optional(t.String()) }),
+      detail: { summary: 'List version history' },
+    })
 
     .post('/stories/:storyId/fragments/:fragmentId/versions/:version/revert', async ({ params, set }) => {
       const story = await getStory(dataDir, params.storyId)

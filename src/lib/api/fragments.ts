@@ -2,10 +2,18 @@ import { apiFetch } from './client'
 import type { Fragment, FragmentVersion } from './types'
 
 export const fragments = {
-  list: (storyId: string, type?: string) =>
-    apiFetch<Fragment[]>(`/stories/${storyId}/fragments${type ? `?type=${type}` : ''}`),
-  get: (storyId: string, fragmentId: string) =>
-    apiFetch<Fragment>(`/stories/${storyId}/fragments/${fragmentId}`),
+  // `branchId` addresses a specific timeline; pass the same branchId the query is
+  // keyed under so the cache entry holds that branch's fragments (branches share
+  // fragment IDs, so an active-branch read would poison another branch — see `qk`).
+  list: (storyId: string, type?: string, branchId?: string) => {
+    const params = new URLSearchParams()
+    if (type) params.set('type', type)
+    if (branchId) params.set('branch', branchId)
+    const qs = params.toString()
+    return apiFetch<Fragment[]>(`/stories/${storyId}/fragments${qs ? `?${qs}` : ''}`)
+  },
+  get: (storyId: string, fragmentId: string, branchId?: string) =>
+    apiFetch<Fragment>(`/stories/${storyId}/fragments/${fragmentId}${branchId ? `?branch=${encodeURIComponent(branchId)}` : ''}`),
   create: (storyId: string, data: { type: string; name: string; description: string; content: string; id?: string; tags?: string[]; meta?: Record<string, unknown> }) =>
     apiFetch<Fragment>(`/stories/${storyId}/fragments`, { method: 'POST', body: JSON.stringify(data) }),
   update: (storyId: string, fragmentId: string, data: { type?: string; name: string; description: string; content: string; sticky?: boolean; order?: number; placement?: 'system' | 'user'; meta?: Record<string, unknown> }) =>
@@ -46,8 +54,8 @@ export const fragments = {
   // Revert
   revert: (storyId: string, fragmentId: string) =>
     apiFetch<Fragment>(`/stories/${storyId}/fragments/${fragmentId}/revert`, { method: 'POST' }),
-  listVersions: (storyId: string, fragmentId: string) =>
-    apiFetch<{ versions: FragmentVersion[] }>(`/stories/${storyId}/fragments/${fragmentId}/versions`),
+  listVersions: (storyId: string, fragmentId: string, branchId?: string) =>
+    apiFetch<{ versions: FragmentVersion[] }>(`/stories/${storyId}/fragments/${fragmentId}/versions${branchId ? `?branch=${encodeURIComponent(branchId)}` : ''}`),
   revertToVersion: (storyId: string, fragmentId: string, version: number) =>
     apiFetch<Fragment>(`/stories/${storyId}/fragments/${fragmentId}/versions/${version}/revert`, { method: 'POST' }),
   deleteVersion: (storyId: string, fragmentId: string, version: number) =>
@@ -69,8 +77,8 @@ export const fragments = {
     apiFetch<Fragment>(`/stories/${storyId}/fragments/${fragmentId}/archive`, { method: 'POST' }),
   restore: (storyId: string, fragmentId: string) =>
     apiFetch<Fragment>(`/stories/${storyId}/fragments/${fragmentId}/restore`, { method: 'POST' }),
-  listArchived: async (storyId: string) => {
-    const all = await apiFetch<Fragment[]>(`/stories/${storyId}/fragments?includeArchived=true`)
+  listArchived: async (storyId: string, branchId?: string) => {
+    const all = await apiFetch<Fragment[]>(`/stories/${storyId}/fragments?includeArchived=true${branchId ? `&branch=${encodeURIComponent(branchId)}` : ''}`)
     return all.filter((f) => f.archived)
   },
 }

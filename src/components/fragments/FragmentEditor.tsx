@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, type Fragment, type FragmentVersion } from '@/lib/api'
-import { qk, useActiveBranchId } from '@/lib/query-keys'
+import { qk, q, useActiveBranchId } from '@/lib/query-keys'
 import { componentId, fragmentComponentId } from '@/lib/dom-ids'
 import { cn } from '@/lib/utils'
 import { parseVisualRefs, readImageUrl, type BoundaryBox } from '@/lib/fragment-visuals'
@@ -76,8 +76,7 @@ export function FragmentEditor({
   // initialDataUpdatedAt prevents TanStack Query from treating initialData as immediately
   // stale and firing a background refetch on every fragment selection.
   const { data: liveFragment } = useQuery({
-    queryKey: qk.fragment(storyId, branchId, fragmentProp?.id),
-    queryFn: () => api.fragments.get(storyId, fragmentProp!.id),
+    ...q.fragment(storyId, branchId, fragmentProp?.id),
     enabled: !!fragmentProp?.id,
     initialData: fragmentProp ?? undefined,
     initialDataUpdatedAt: fragmentProp ? Date.now() : undefined,
@@ -87,16 +86,8 @@ export function FragmentEditor({
   const isVersionedType = !!fragment && ['prose', 'character', 'guideline', 'knowledge'].includes(fragment.type)
 
   // Media queries for clipboard copy (embed attached images)
-  const { data: _imageFragments } = useQuery({
-    queryKey: qk.fragments(storyId, branchId, 'image'),
-    queryFn: () => api.fragments.list(storyId, 'image'),
-    staleTime: 10_000,
-  })
-  const { data: _iconFragments } = useQuery({
-    queryKey: qk.fragments(storyId, branchId, 'icon'),
-    queryFn: () => api.fragments.list(storyId, 'icon'),
-    staleTime: 10_000,
-  })
+  const { data: _imageFragments } = useQuery({ ...q.fragments(storyId, branchId, 'image'), staleTime: 10_000 })
+  const { data: _iconFragments } = useQuery({ ...q.fragments(storyId, branchId, 'icon'), staleTime: 10_000 })
   const mediaById = useMemo(() => {
     const map = new Map<string, Fragment>()
     for (const f of _imageFragments ?? []) map.set(f.id, f)
@@ -105,8 +96,7 @@ export function FragmentEditor({
   }, [_imageFragments, _iconFragments])
 
   const { data: versionData } = useQuery({
-    queryKey: qk.fragmentVersions(storyId, branchId, fragment?.id),
-    queryFn: () => api.fragments.listVersions(storyId, fragment!.id),
+    ...q.fragmentVersions(storyId, branchId, fragment?.id),
     enabled: !!fragment?.id && isVersionedType,
   })
 
@@ -1072,20 +1062,9 @@ function VisualRefsSection({ storyId, fragmentId }: { storyId: string; fragmentI
     boundary?: BoundaryBox
   } | null>(null)
 
-  const { data: currentFragment } = useQuery({
-    queryKey: qk.fragment(storyId, branchId, fragmentId),
-    queryFn: () => api.fragments.get(storyId, fragmentId),
-  })
-
-  const { data: imageFragments } = useQuery({
-    queryKey: qk.fragments(storyId, branchId, 'image'),
-    queryFn: () => api.fragments.list(storyId, 'image'),
-  })
-
-  const { data: iconFragments } = useQuery({
-    queryKey: qk.fragments(storyId, branchId, 'icon'),
-    queryFn: () => api.fragments.list(storyId, 'icon'),
-  })
+  const { data: currentFragment } = useQuery(q.fragment(storyId, branchId, fragmentId))
+  const { data: imageFragments } = useQuery(q.fragments(storyId, branchId, 'image'))
+  const { data: iconFragments } = useQuery(q.fragments(storyId, branchId, 'icon'))
 
   const media = [...(iconFragments ?? []), ...(imageFragments ?? [])]
   const visualRefs = parseVisualRefs(currentFragment?.meta)

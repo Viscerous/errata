@@ -15,7 +15,7 @@ import {
 import { CharacterAvatar } from '@/components/shared/CharacterAvatar'
 import { ChatConfig } from './ChatConfig'
 import { ConversationList } from './ConversationList'
-import { qk, useActiveBranchId } from '@/lib/query-keys'
+import { q, useActiveBranchId } from '@/lib/query-keys'
 
 interface CharacterChatViewProps {
   storyId: string
@@ -44,15 +44,9 @@ export function CharacterChatView({ storyId, initialCharacterId, onClose }: Char
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   // Data queries
-  const { data: allFragments } = useQuery({
-    queryKey: qk.fragments(storyId, branchId),
-    queryFn: () => api.fragments.list(storyId),
-  })
+  const { data: allFragments } = useQuery(q.fragments(storyId, branchId))
 
-  const { data: proseChain } = useQuery({
-    queryKey: qk.proseChain(storyId, branchId),
-    queryFn: () => api.proseChain.get(storyId),
-  })
+  const { data: proseChain } = useQuery(q.proseChain(storyId, branchId))
 
   const characters = (allFragments ?? []).filter((f) => f.type === 'character')
   const proseFragments = (allFragments ?? []).filter((f) => f.type === 'prose')

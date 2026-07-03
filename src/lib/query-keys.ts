@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, queryOptions } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 
 /**
@@ -88,4 +88,50 @@ export const qk = {
 
   generationLog: (storyId: string | undefined, branchId: BranchId, logId: string | null) =>
     ['generation-log', storyId, branchId, logId] as const,
+} as const
+
+/**
+ * Branch-scoped *read* queries, with the fetch bound to the key so the branch is
+ * stated exactly once. Because the content endpoints are branch-addressed (they
+ * take `?branch=`), a cache key is only sound if its `queryFn` fetches that same
+ * branch — pairing them here makes it impossible to key one timeline and fetch
+ * another (the poisoning class this whole system had to be reworked to kill).
+ *
+ * Use `q.*` at `useQuery`/`useQueries` sites (spread extra options in:
+ * `useQuery({ ...q.fragments(storyId, branchId, 'image'), enabled })`). Keep
+ * `qk.*` for invalidations / `getQueryData`, which only need the key.
+ */
+export const q = {
+  proseChain: (storyId: string | undefined, branchId: BranchId) =>
+    queryOptions({
+      queryKey: qk.proseChain(storyId, branchId),
+      queryFn: () => api.proseChain.get(storyId!, branchId),
+    }),
+
+  /** All fragments, or a single type when `type` is given. */
+  fragments: (storyId: string | undefined, branchId: BranchId, type?: string) =>
+    queryOptions({
+      queryKey: qk.fragments(storyId, branchId, type),
+      queryFn: () => api.fragments.list(storyId!, type, branchId),
+    }),
+
+  fragmentsArchived: (storyId: string | undefined, branchId: BranchId) =>
+    queryOptions({
+      queryKey: qk.fragmentsArchived(storyId, branchId),
+      queryFn: () => api.fragments.listArchived(storyId!, branchId),
+    }),
+
+  fragment: (storyId: string | undefined, branchId: BranchId, fragmentId: string | undefined | null) =>
+    queryOptions({
+      queryKey: qk.fragment(storyId, branchId, fragmentId),
+      // Only observed when a fragmentId is present (call sites gate with `enabled`).
+      queryFn: () => api.fragments.get(storyId!, fragmentId!, branchId),
+    }),
+
+  fragmentVersions: (storyId: string | undefined, branchId: BranchId, fragmentId: string | undefined | null) =>
+    queryOptions({
+      queryKey: qk.fragmentVersions(storyId, branchId, fragmentId),
+      // Only observed when a fragmentId is present (call sites gate with `enabled`).
+      queryFn: () => api.fragments.listVersions(storyId!, fragmentId!, branchId),
+    }),
 } as const

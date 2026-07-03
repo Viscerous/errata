@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { EditorContent, useEditor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import { api, type Fragment } from '@/lib/api'
-import { qk, useActiveBranchId } from '@/lib/query-keys'
+import { q, useActiveBranchId } from '@/lib/query-keys'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
@@ -193,20 +193,11 @@ export function ProseWritingPanel({
   const transformUndoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Queries
-  const { data: proseChain } = useQuery({
-    queryKey: qk.proseChain(storyId, branchId),
-    queryFn: () => api.proseChain.get(storyId),
-  })
+  const { data: proseChain } = useQuery(q.proseChain(storyId, branchId))
 
-  const { data: proseFragments = [] } = useQuery({
-    queryKey: qk.fragments(storyId, branchId, 'prose'),
-    queryFn: () => api.fragments.list(storyId, 'prose'),
-  })
+  const { data: proseFragments = [] } = useQuery(q.fragments(storyId, branchId, 'prose'))
 
-  const { data: markerFragments = [] } = useQuery({
-    queryKey: qk.fragments(storyId, branchId, 'marker'),
-    queryFn: () => api.fragments.list(storyId, 'marker'),
-  })
+  const { data: markerFragments = [] } = useQuery(q.fragments(storyId, branchId, 'marker'))
 
   // Build combined fragment map
   const allFragmentsMap = useMemo(() => {

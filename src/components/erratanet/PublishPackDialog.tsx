@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api, type Fragment } from '@/lib/api'
-import { qk, useActiveBranchId } from '@/lib/query-keys'
+import { q, useActiveBranchId } from '@/lib/query-keys'
 import type { ErratapackManifest } from '@/lib/erratanet/pack-schema'
 import { GLOBAL_PACK_ID_REGEX, packPageUrl } from '@/lib/erratanet/pack-schema'
 import { slugify, bumpVersion, type BumpKind } from '@/lib/erratanet/publish-utils'
@@ -161,13 +161,11 @@ export function PublishPackDialog({
   // and emit a chapter for every marker it passes, so the list matches what a
   // reader sees, in order, and excludes markers no longer in the chain.
   const { data: markerFragments } = useQuery({
-    queryKey: qk.fragments(storyId, branchId, 'marker'),
-    queryFn: () => api.fragments.list(storyId!, 'marker'),
+    ...q.fragments(storyId, branchId, 'marker'),
     enabled: open && isStory && !!storyId,
   })
   const { data: chain } = useQuery({
-    queryKey: qk.proseChain(storyId, branchId),
-    queryFn: () => api.proseChain.get(storyId!),
+    ...q.proseChain(storyId, branchId),
     enabled: open && isStory && !!storyId,
   })
   const chapters = useMemo(() => {
