@@ -27,7 +27,7 @@ export const SET_FIELDS_DESCRIPTION = 'Whole replacement values for editable fie
  * site — edit here.
  */
 export const OPERATION_GUIDANCE =
-  '`replace_text` for localized edits (to splice detail, replace the anchor sentence with anchor + addition); `append_paragraph` for a new topic at the end; `set_fields` only for whole-field rewrites (requires `baseHash`); `archive_fragment` only to retire. Group related facts in cohesive paragraphs; change only the affected span, never restate existing content.'
+  '`replace_text` for localized edits — to insert detail, set `oldText` to an existing sentence and `newText` to that sentence plus the addition; `append_paragraph` for a new topic at the end; `set_fields` only for whole-field rewrites (requires `baseHash`); `archive_fragment` only to retire. Group related facts in cohesive paragraphs; change only the affected span, never restate existing content.'
 
 /** Tool description for `proposeFragmentChanges`, shared by the chat and analysis tools. */
 export const PROPOSE_FRAGMENT_CHANGES_DESCRIPTION =

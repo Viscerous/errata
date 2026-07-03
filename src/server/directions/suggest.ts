@@ -53,11 +53,13 @@ export function parseSuggestionDirectionsResponse(text: string, count: number): 
   } catch (error) {
     throw new Error(`Model response is not valid JSON: ${error instanceof Error ? error.message : String(error)}`)
   }
-  const validation = z.array(suggestionDirectionSchema).length(count).safeParse(parsed)
+  // Small models miss "exactly N" by one; extra directions are sliced off
+  // rather than failing the whole run. Too few is still an error.
+  const validation = z.array(suggestionDirectionSchema).min(count).safeParse(parsed)
   if (!validation.success) {
-    throw new Error(`Model response must be a JSON array of exactly ${count} directions with title, description, and instruction`)
+    throw new Error(`Model response must be a JSON array of at least ${count} directions with title, description, and instruction`)
   }
-  return validation.data
+  return validation.data.slice(0, count)
 }
 
 export async function proposeDirections(

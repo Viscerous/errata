@@ -12,9 +12,14 @@ describe('parseSuggestionDirectionsResponse', () => {
       .toEqual(directions)
   })
 
-  it('rejects the wrong number of directions', () => {
+  it('rejects too few directions', () => {
     expect(() => parseSuggestionDirectionsResponse(JSON.stringify(directions), 3))
-      .toThrow('exactly 3 directions')
+      .toThrow('at least 3 directions')
+  })
+
+  it('slices extra directions instead of failing the run', () => {
+    expect(parseSuggestionDirectionsResponse(JSON.stringify(directions), 1))
+      .toEqual([directions[0]])
   })
 
   it('rejects directions missing required fields', () => {

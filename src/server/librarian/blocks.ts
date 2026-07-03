@@ -49,7 +49,7 @@ export function buildAnalyzeSystemPrompt(opts?: {
   // drift). Steps for disabled tools are omitted and the rest renumber, so the
   // prompt never names a tool the model wasn't given.
   const steps: string[] = [
-    'Scan the new prose against every fragment in your context and call **reportAnalysis** once with everything you find. Report each mention as the fragment\'s exact ID plus the exact text used in the prose — a direct name, nickname, title, role, or distinctive key term. When an ambiguous word refers to two entities, report a longer, unique surrounding phrase for each.',
+    'Scan the new prose against every fragment in your context and call **reportAnalysis** once with everything you find. Report each mention as the fragment\'s exact ID plus the exact text used in the prose — a direct name, nickname, title, role, or distinctive key term. When an ambiguous word refers to two entities, report a longer, unique surrounding phrase for each. Never report a bare pronoun ("I", "she", "they") as mention text — an entity the passage refers to only by pronoun gets no mention.',
   ]
   if (!opts?.disableSuggestions) {
     const customTypes = opts?.customFragmentTypes ?? []
