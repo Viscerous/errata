@@ -166,7 +166,7 @@ export const reportAnalysisInputSchema = z.object({
   openThreads: coercedStringArray
     .describe('Unresolved questions or threads introduced/advanced by this prose — at most 8 are kept'),
   mentions: z.array(mentionInputSchema).max(150).default([])
-    .describe('Distinct mentions of listed fragments in the new prose — at most one entry per fragment/text pair; a single mention highlights every occurrence of that text. Use exact prose text; exclude bare pronouns (a possessive phrase that identifies an entity, like "her father", is valid).'),
+    .describe('Distinct mentions of listed fragments in the new prose — at most one entry per fragment/text pair; a single mention highlights every occurrence of that text. Use exact prose text; never a bare pronoun.'),
   contradictions: z.array(z.object({
     description: z.string().describe('What the contradiction is'),
     fragmentIds: z.array(z.string()).describe('IDs of the fragments involved'),
