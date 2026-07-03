@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api, type Fragment, type StoryMeta } from '@/lib/api'
+import { qk, useActiveBranchId } from '@/lib/query-keys'
 import type { ErratanetAccount, ErratanetConfigResponse } from '@/lib/api/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -47,6 +48,7 @@ interface ErratanetPanelProps {
  */
 export function ErratanetPanel({ storyId, story, onExport }: ErratanetPanelProps) {
   const qc = useQueryClient()
+  const branchId = useActiveBranchId(storyId)
 
   const { data: config } = useQuery({
     queryKey: ['erratanet-config'],
@@ -75,17 +77,17 @@ export function ErratanetPanel({ storyId, story, onExport }: ErratanetPanelProps
   // when this story has packs to sync (the query keys are shared/cached).
   const needFragments = connected && fragmentPacks.length > 0
   const { data: allFragments = [] } = useQuery({
-    queryKey: ['fragments', storyId],
+    queryKey: qk.fragments(storyId, branchId),
     queryFn: () => api.fragments.list(storyId),
     enabled: needFragments,
   })
   const { data: imageFrags = [] } = useQuery({
-    queryKey: ['fragments', storyId, 'image'],
+    queryKey: qk.fragments(storyId, branchId, 'image'),
     queryFn: () => api.fragments.list(storyId, 'image'),
     enabled: needFragments,
   })
   const { data: iconFrags = [] } = useQuery({
-    queryKey: ['fragments', storyId, 'icon'],
+    queryKey: qk.fragments(storyId, branchId, 'icon'),
     queryFn: () => api.fragments.list(storyId, 'icon'),
     enabled: needFragments,
   })

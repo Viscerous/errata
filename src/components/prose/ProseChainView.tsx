@@ -15,6 +15,8 @@ import { GenerationThoughts } from './GenerationThoughts'
 import { ProseOutlinePanel } from './ProseOutlinePanel'
 import { MentionProvider } from './MentionContext'
 import { formatDialogue } from '@/lib/fragment-mentions'
+import { onActiveBranchChanged, invalidateStoryContent } from '@/lib/branch-cache'
+import { qk, useActiveBranchId } from '@/lib/query-keys'
 
 interface ProseChainViewProps {
   storyId: string
@@ -144,10 +146,7 @@ const InsertChapterDivider = memo(function InsertChapterDivider({
         name: `Chapter ${position + 1}`,
         position,
       }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['fragments', storyId] })
-      queryClient.invalidateQueries({ queryKey: ['proseChain', storyId] })
-    },
+    onSuccess: () => invalidateStoryContent(queryClient, storyId),
   })
 
   return (
@@ -259,6 +258,7 @@ export function ProseChainView({
   const [proseWidth] = useProseWidth()
   const [enabledMentionTypesList] = useMentionTypes()
   const queryClient = useQueryClient()
+  const branchId = useActiveBranchId(storyId)
 
   const setActiveIndexIfChanged = useCallback((nextIndex: number) => {
     if (activeIndexRef.current === nextIndex) return
@@ -289,7 +289,7 @@ export function ProseChainView({
   // soon as it writes mention annotations (it persists them at the start of the
   // run). Only relevant when mention highlights are on.
   const { data: librarianStatus } = useQuery({
-    queryKey: ['librarian-status', storyId],
+    queryKey: qk.librarianStatus(storyId, branchId),
     queryFn: () => api.librarian.getStatus(storyId),
     enabled: mentionHighlightsEnabled,
     refetchInterval: mentionHighlightsEnabled ? 2_000 : false,
@@ -300,25 +300,25 @@ export function ProseChainView({
   // desync after regeneration where the chain points to a fragment the stale
   // prop hadn't included yet.
   const { data: proseChain } = useQuery({
-    queryKey: ['proseChain', storyId],
+    queryKey: qk.proseChain(storyId, branchId),
     queryFn: () => api.proseChain.get(storyId),
   })
 
   const { data: fragments = [] } = useQuery({
-    queryKey: ['fragments', storyId, 'prose'],
+    queryKey: qk.fragments(storyId, branchId, 'prose'),
     queryFn: () => api.fragments.list(storyId, 'prose'),
     // Pick up mention annotations mid-run; idle = no extra polling.
     refetchInterval: mentionHighlightsEnabled && isAnalyzing ? 2_000 : false,
   })
 
   const { data: markerFragments = [] } = useQuery({
-    queryKey: ['fragments', storyId, 'marker'],
+    queryKey: qk.fragments(storyId, branchId, 'marker'),
     queryFn: () => api.fragments.list(storyId, 'marker'),
   })
 
   const mentionFragmentQueries = useQueries({
     queries: mentionFragmentTypes.map((type) => ({
-      queryKey: ['fragments', storyId, type],
+      queryKey: qk.fragments(storyId, branchId, type),
       queryFn: () => api.fragments.list(storyId, type),
       enabled: mentionHighlightsEnabled,
     })),
@@ -342,19 +342,19 @@ export function ProseChainView({
   )
 
   const { data: imageFragments = [] } = useQuery({
-    queryKey: ['fragments', storyId, 'image'],
+    queryKey: qk.fragments(storyId, branchId, 'image'),
     queryFn: () => api.fragments.list(storyId, 'image'),
     enabled: mentionHighlightsEnabled || anyProseHasImage,
   })
 
   const { data: iconFragments = [] } = useQuery({
-    queryKey: ['fragments', storyId, 'icon'],
+    queryKey: qk.fragments(storyId, branchId, 'icon'),
     queryFn: () => api.fragments.list(storyId, 'icon'),
     enabled: mentionHighlightsEnabled,
   })
 
   const { data: analysisIndex } = useQuery({
-    queryKey: ['librarian-analysis-index', storyId],
+    queryKey: qk.librarianAnalysisIndex(storyId, branchId),
     queryFn: () => api.librarian.getAnalysisIndex(storyId),
     refetchInterval: 10_000,
   })
@@ -526,8 +526,7 @@ export function ProseChainView({
 
   const handleDeleteSection = useCallback((sectionIndex: number) => {
     api.proseChain.removeSection(storyId, sectionIndex).then(() => {
-      queryClient.invalidateQueries({ queryKey: ['fragments', storyId] })
-      queryClient.invalidateQueries({ queryKey: ['proseChain', storyId] })
+      invalidateStoryContent(queryClient, storyId)
     })
   }, [storyId, queryClient])
 
@@ -1014,11 +1013,8 @@ export function ProseChainView({
         forkAfterIndex: sectionIndex,
       })
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['branches', storyId] })
-      queryClient.invalidateQueries({ queryKey: ['proseChain', storyId] })
-      queryClient.invalidateQueries({ queryKey: ['fragments', storyId] })
-    },
+    // create-from-section auto-switches to the new branch on the server
+    onSuccess: () => onActiveBranchChanged(queryClient, storyId),
   })
 
   const handleBranchFrom = useCallback((sectionIndex: number) => {
@@ -1218,6 +1214,7 @@ export function ProseChainView({
             <InlineGenerationInput
               storyId={storyId}
               isGenerating={isGenerating}
+              latestFragmentId={lastProseFragment?.id}
               onGenerationStart={(prompt) => {
                 followRef.current = true
                 generationAnchorTopRef.current = null

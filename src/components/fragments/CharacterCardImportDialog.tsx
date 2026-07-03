@@ -226,7 +226,7 @@ export function CharacterCardImportDialog({
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['fragments', storyId] })
-      queryClient.invalidateQueries({ queryKey: ['prose-chain', storyId] })
+      queryClient.invalidateQueries({ queryKey: ['proseChain', storyId] })
       onOpenChange(false)
       onImported?.()
     },

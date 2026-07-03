@@ -62,7 +62,7 @@ export function RefinementPanel({
 
       // Invalidate fragment queries to show updated content
       await queryClient.invalidateQueries({ queryKey: ['fragments', storyId] })
-      await queryClient.invalidateQueries({ queryKey: ['fragment', storyId, fragmentId] })
+      await queryClient.invalidateQueries({ queryKey: ['fragment', storyId] })
       setDone(true)
       onComplete?.()
     } catch (err) {

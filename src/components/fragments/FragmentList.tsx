@@ -1,6 +1,7 @@
 import { useState, useMemo, useRef, useCallback, memo, useEffect } from 'react'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 import { api, type Fragment, type Folder } from '@/lib/api'
+import { qk, useActiveBranchId } from '@/lib/query-keys'
 import { componentId, fragmentComponentId } from '@/lib/dom-ids'
 import { resolveFragmentVisual, generateBubbles, hexagonPoints, diamondPoints, type Bubble } from '@/lib/fragment-visuals'
 import { Badge } from '@/components/ui/badge'
@@ -448,15 +449,21 @@ export function FragmentList({
   const [renameValue, setRenameValue] = useState('')
   const [newFolderId, setNewFolderId] = useState<string | null>(null)
   const [typeFilter, setTypeFilter] = useState('all')
+  const branchId = useActiveBranchId(storyId)
+
+  // Branch-scoped and shaped `['fragments', storyId, branchId, type, scope]` so
+  // `type` stays at index 3 for the invalidation predicates below (it may be
+  // undefined for an all-types list — keep the slot explicit).
+  const fragmentsQueryKey = ['fragments', storyId, branchId, type, allowedTypes?.join(',') ?? 'all']
 
   const { data: fragments, isLoading } = useQuery({
-    queryKey: ['fragments', storyId, type, allowedTypes?.join(',') ?? 'all'],
+    queryKey: fragmentsQueryKey,
     queryFn: () => api.fragments.list(storyId, type),
     staleTime: 2_000,
   })
 
   const { data: foldersData } = useQuery({
-    queryKey: ['folders', storyId],
+    queryKey: qk.folders(storyId, branchId),
     queryFn: () => api.folders.list(storyId),
     staleTime: 5_000,
   })
@@ -464,13 +471,13 @@ export function FragmentList({
   const folderAssignments = foldersData?.assignments ?? {}
 
   const { data: imageFragments } = useQuery({
-    queryKey: ['fragments', storyId, 'image'],
+    queryKey: qk.fragments(storyId, branchId, 'image'),
     queryFn: () => api.fragments.list(storyId, 'image'),
     staleTime: 10_000,
   })
 
   const { data: iconFragments } = useQuery({
-    queryKey: ['fragments', storyId, 'icon'],
+    queryKey: qk.fragments(storyId, branchId, 'icon'),
     queryFn: () => api.fragments.list(storyId, 'icon'),
     staleTime: 10_000,
   })
@@ -487,15 +494,13 @@ export function FragmentList({
       queryClient.invalidateQueries({
         queryKey: ['fragments', storyId],
         predicate: (q) => {
-          const typeSlot = q.queryKey[2]
+          const typeSlot = q.queryKey[3]
           return typeSlot === undefined || typeSlot === fragment.type
         },
       })
-      queryClient.invalidateQueries({ queryKey: ['fragment', storyId, fragment.id] })
+      queryClient.invalidateQueries({ queryKey: ['fragment', storyId] })
     },
   })
-
-  const fragmentsQueryKey = ['fragments', storyId, type, allowedTypes?.join(',') ?? 'all']
 
   const reorderMutation = useMutation({
     mutationFn: (items: Array<{ id: string; order: number }>) =>
@@ -521,7 +526,7 @@ export function FragmentList({
       queryClient.invalidateQueries({
         queryKey: ['fragments', storyId],
         predicate: (q) => {
-          const typeSlot = q.queryKey[2]
+          const typeSlot = q.queryKey[3]
           return typeSlot === undefined || typeSlot === type
         },
       })
@@ -579,8 +584,8 @@ export function FragmentList({
       api.folders.reorder(storyId, items),
     onMutate: async (items) => {
       await queryClient.cancelQueries({ queryKey: ['folders', storyId] })
-      const previous = queryClient.getQueryData<Folder[]>(['folders', storyId])
-      queryClient.setQueryData<Folder[]>(['folders', storyId], (old) => {
+      const previous = queryClient.getQueryData<Folder[]>(qk.folders(storyId, branchId))
+      queryClient.setQueryData<Folder[]>(qk.folders(storyId, branchId), (old) => {
         if (!old) return old
         const orderMap = new Map(items.map((item) => [item.id, item.order]))
         return old
@@ -591,7 +596,7 @@ export function FragmentList({
     },
     onError: (_err, _items, context) => {
       if (context?.previous) {
-        queryClient.setQueryData(['folders', storyId], context.previous)
+        queryClient.setQueryData(qk.folders(storyId, branchId), context.previous)
       }
     },
     onSettled: () => {
