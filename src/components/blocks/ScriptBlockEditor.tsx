@@ -2,7 +2,7 @@ import { useState, useRef, useCallback, useMemo, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
-import { qk, useActiveBranchId } from '@/lib/query-keys'
+import { q, useActiveBranchId } from '@/lib/query-keys'
 import type { BlockPreviewResponse } from '@/lib/api/types'
 import { ScriptEditor } from './ScriptEditor'
 import { BlockContentView } from './BlockContentView'
@@ -65,11 +65,7 @@ export function ScriptBlockEditor({
 
   // Fragment hints — fed to the editor's completion system so `ctx.getFragment('...'`
   // suggests real IDs and `ctx.getFragments('...'` suggests real type names.
-  const { data: fragments } = useQuery({
-    queryKey: qk.fragments(storyId, branchId),
-    queryFn: () => api.fragments.list(storyId),
-    staleTime: 30_000,
-  })
+  const { data: fragments } = useQuery({ ...q.fragments(storyId, branchId), staleTime: 30_000 })
   const fragmentHints = useMemo(
     () => (fragments ?? []).map(f => ({ id: f.id, name: f.name, type: f.type })),
     [fragments],
@@ -498,11 +494,7 @@ export function FragmentReference({ storyId }: { storyId: string }) {
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const branchId = useActiveBranchId(storyId)
 
-  const { data: fragments } = useQuery({
-    queryKey: qk.fragments(storyId, branchId),
-    queryFn: () => api.fragments.list(storyId),
-    enabled: open,
-  })
+  const { data: fragments } = useQuery({ ...q.fragments(storyId, branchId), enabled: open })
 
   const grouped = useMemo(() => {
     if (!fragments) return new Map<string, Array<{ id: string; name: string }>>()

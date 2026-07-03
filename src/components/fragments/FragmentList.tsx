@@ -1,7 +1,7 @@
 import { useState, useMemo, useRef, useCallback, memo, useEffect } from 'react'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 import { api, type Fragment, type Folder } from '@/lib/api'
-import { qk, useActiveBranchId } from '@/lib/query-keys'
+import { qk, q, useActiveBranchId } from '@/lib/query-keys'
 import { componentId, fragmentComponentId } from '@/lib/dom-ids'
 import { resolveFragmentVisual, generateBubbles, hexagonPoints, diamondPoints, type Bubble } from '@/lib/fragment-visuals'
 import { Badge } from '@/components/ui/badge'
@@ -458,7 +458,7 @@ export function FragmentList({
 
   const { data: fragments, isLoading } = useQuery({
     queryKey: fragmentsQueryKey,
-    queryFn: () => api.fragments.list(storyId, type),
+    queryFn: () => api.fragments.list(storyId, type, branchId),
     staleTime: 2_000,
   })
 
@@ -470,17 +470,8 @@ export function FragmentList({
   const folders = foldersData?.folders
   const folderAssignments = foldersData?.assignments ?? {}
 
-  const { data: imageFragments } = useQuery({
-    queryKey: qk.fragments(storyId, branchId, 'image'),
-    queryFn: () => api.fragments.list(storyId, 'image'),
-    staleTime: 10_000,
-  })
-
-  const { data: iconFragments } = useQuery({
-    queryKey: qk.fragments(storyId, branchId, 'icon'),
-    queryFn: () => api.fragments.list(storyId, 'icon'),
-    staleTime: 10_000,
-  })
+  const { data: imageFragments } = useQuery({ ...q.fragments(storyId, branchId, 'image'), staleTime: 10_000 })
+  const { data: iconFragments } = useQuery({ ...q.fragments(storyId, branchId, 'icon'), staleTime: 10_000 })
 
   const pinMutation = useMutation({
     mutationFn: (fragment: Fragment) =>

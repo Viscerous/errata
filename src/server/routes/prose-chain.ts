@@ -14,47 +14,53 @@ import {
   reorderProseSections,
 } from '../fragments/prose-chain'
 import { generateFragmentId } from '@/lib/fragment-ids'
+import { withBranch } from '../fragments/branches'
 import { invokeAgent } from '../agents'
 
 export function proseChainRoutes(dataDir: string) {
   return new Elysia({ detail: { tags: ['Prose Chain'] } })
-    .get('/stories/:storyId/prose-chain', async ({ params, set }) => {
+    .get('/stories/:storyId/prose-chain', async ({ params, query, set }) => {
       const story = await getStory(dataDir, params.storyId)
       if (!story) {
         set.status = 404
         return { error: 'Story not found' }
       }
 
-      const chain = await getProseChain(dataDir, params.storyId)
-      if (!chain) {
-        return { entries: [] }
-      }
+      // `branch` pins the read to a specific timeline so the client can cache the
+      // chain per branch. Omitted → the active branch (back-compat).
+      return withBranch(dataDir, params.storyId, async () => {
+        const chain = await getProseChain(dataDir, params.storyId)
+        if (!chain) {
+          return { entries: [] }
+        }
 
-      // Load the actual fragments for each variation
-      const entriesWithFragments = await Promise.all(
-        chain.entries.map(async (entry) => {
-          const fragments = await Promise.all(
-            entry.proseFragments.map(async (id) => {
-              const fragment = await getFragment(dataDir, params.storyId, id)
-              return fragment ? {
-                id: fragment.id,
-                type: fragment.type,
-                name: fragment.name,
-                description: fragment.description,
-                createdAt: fragment.createdAt,
-                generationMode: fragment.meta?.generationMode,
-              } : null
-            })
-          )
-          return {
-            proseFragments: fragments.filter(Boolean),
-            active: entry.active,
-          }
-        })
-      )
+        // Load the actual fragments for each variation
+        const entriesWithFragments = await Promise.all(
+          chain.entries.map(async (entry) => {
+            const fragments = await Promise.all(
+              entry.proseFragments.map(async (id) => {
+                const fragment = await getFragment(dataDir, params.storyId, id)
+                return fragment ? {
+                  id: fragment.id,
+                  type: fragment.type,
+                  name: fragment.name,
+                  description: fragment.description,
+                  createdAt: fragment.createdAt,
+                  generationMode: fragment.meta?.generationMode,
+                } : null
+              })
+            )
+            return {
+              proseFragments: fragments.filter(Boolean),
+              active: entry.active,
+            }
+          })
+        )
 
-      return { entries: entriesWithFragments }
+        return { entries: entriesWithFragments }
+      }, query.branch)
     }, {
+      query: t.Object({ branch: t.Optional(t.String()) }),
       detail: { summary: 'Get the full prose chain with variations' },
     })
 

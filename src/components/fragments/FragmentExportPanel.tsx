@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api, type Fragment } from '@/lib/api'
-import { qk, useActiveBranchId } from '@/lib/query-keys'
+import { q, useActiveBranchId } from '@/lib/query-keys'
 import { resolveFragmentVisual, generateBubbles, hexagonPoints, diamondPoints, type Bubble } from '@/lib/fragment-visuals'
 import { serializeFragment, serializeBundle, downloadExportFile } from '@/lib/fragment-clipboard'
 import { PublishPackDialog } from '@/components/erratanet/PublishPackDialog'
@@ -60,10 +60,7 @@ export function FragmentExportPanel({ storyId, storyName, onClose }: FragmentExp
   const [publishMode, setPublishMode] = useState<null | 'fragments' | 'story'>(null)
   const branchId = useActiveBranchId(storyId)
 
-  const { data: allFragments } = useQuery({
-    queryKey: qk.fragments(storyId, branchId),
-    queryFn: () => api.fragments.list(storyId),
-  })
+  const { data: allFragments } = useQuery(q.fragments(storyId, branchId))
 
   const { data: exportedConfigs } = useQuery({
     queryKey: ['blocks', storyId, 'export-configs'],
@@ -81,15 +78,8 @@ export function FragmentExportPanel({ storyId, storyName, onClose }: FragmentExp
     return { customBlockCount, overrideCount, agentCount, hasBlockConfig }
   }, [exportedConfigs])
 
-  const { data: imageFragments } = useQuery({
-    queryKey: qk.fragments(storyId, branchId, 'image'),
-    queryFn: () => api.fragments.list(storyId, 'image'),
-  })
-
-  const { data: iconFragments } = useQuery({
-    queryKey: qk.fragments(storyId, branchId, 'icon'),
-    queryFn: () => api.fragments.list(storyId, 'icon'),
-  })
+  const { data: imageFragments } = useQuery(q.fragments(storyId, branchId, 'image'))
+  const { data: iconFragments } = useQuery(q.fragments(storyId, branchId, 'icon'))
 
   const mediaById = useMemo(() => {
     const map = new Map<string, Fragment>()

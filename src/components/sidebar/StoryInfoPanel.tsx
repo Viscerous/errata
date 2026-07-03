@@ -1,7 +1,7 @@
 import { useState, useRef, useMemo, useEffect, useCallback } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, type StoryMeta } from '@/lib/api'
-import { qk, useActiveBranchId } from '@/lib/query-keys'
+import { qk, q, useActiveBranchId } from '@/lib/query-keys'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -58,15 +58,9 @@ export function StoryInfoPanel({ storyId, story, onLaunchWizard, onExport, onDow
   const coverInputRef = useRef<HTMLInputElement>(null)
 
   // Data queries for stats
-  const allFragmentsQuery = useQuery({
-    queryKey: qk.fragments(storyId, branchId),
-    queryFn: () => api.fragments.list(storyId),
-  })
+  const allFragmentsQuery = useQuery(q.fragments(storyId, branchId))
 
-  const proseChainQuery = useQuery({
-    queryKey: qk.proseChain(storyId, branchId),
-    queryFn: () => api.proseChain.get(storyId),
-  })
+  const proseChainQuery = useQuery(q.proseChain(storyId, branchId))
 
   const genLogsQuery = useQuery({
     queryKey: qk.generationLogs(storyId, branchId),

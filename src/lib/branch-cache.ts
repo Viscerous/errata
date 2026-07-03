@@ -5,15 +5,16 @@ import type { QueryClient } from '@tanstack/react-query'
  * to another timeline, or a create that auto-switches to the new one.
  *
  * Branch-scoped queries are keyed by `branchId` (see `qk.*` in
- * `lib/query-keys.ts`), so once the `['branches']` index refetches and reports
- * the new active branch, every content key changes and React Query serves or
- * fetches the correct timeline on its own. That makes switching back to a
- * previously-viewed timeline instant (its cache is still there) and means we no
- * longer need to blow away content caches by hand.
+ * `lib/query-keys.ts`), so once the `['branches']` index reports the new active
+ * branch, every content key changes and React Query serves the correct timeline.
  *
- * A deleted branch's cached queries simply become unobserved and are garbage
- * collected; `main` (the auto-switch target) is unmodified by the delete, so its
- * cache is still valid to show immediately.
+ * This works only because the content endpoints are branch-addressed: each
+ * branch-scoped query fetches with an explicit `?branch=` param, so a cache key
+ * genuinely holds that branch's data. (They used to resolve "the active branch"
+ * server-side, which made the keys unsound — a refetch returned whatever was
+ * active, so keys ended up holding other timelines' prose, and switching served
+ * that stale content until the view was remounted.) With addressed content,
+ * poking the index is enough: keys flip and React Query fetches per branch.
  */
 export function onActiveBranchChanged(queryClient: QueryClient, storyId: string): void {
   queryClient.invalidateQueries({ queryKey: ['branches', storyId] })

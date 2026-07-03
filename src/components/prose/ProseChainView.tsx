@@ -16,7 +16,7 @@ import { ProseOutlinePanel } from './ProseOutlinePanel'
 import { MentionProvider } from './MentionContext'
 import { formatDialogue } from '@/lib/fragment-mentions'
 import { onActiveBranchChanged, invalidateStoryContent } from '@/lib/branch-cache'
-import { qk, useActiveBranchId } from '@/lib/query-keys'
+import { qk, q, useActiveBranchId } from '@/lib/query-keys'
 
 interface ProseChainViewProps {
   storyId: string
@@ -299,27 +299,19 @@ export function ProseChainView({
   // Co-locate both queries so they settle in the same component — prevents
   // desync after regeneration where the chain points to a fragment the stale
   // prop hadn't included yet.
-  const { data: proseChain } = useQuery({
-    queryKey: qk.proseChain(storyId, branchId),
-    queryFn: () => api.proseChain.get(storyId),
-  })
+  const { data: proseChain } = useQuery(q.proseChain(storyId, branchId))
 
   const { data: fragments = [] } = useQuery({
-    queryKey: qk.fragments(storyId, branchId, 'prose'),
-    queryFn: () => api.fragments.list(storyId, 'prose'),
+    ...q.fragments(storyId, branchId, 'prose'),
     // Pick up mention annotations mid-run; idle = no extra polling.
     refetchInterval: mentionHighlightsEnabled && isAnalyzing ? 2_000 : false,
   })
 
-  const { data: markerFragments = [] } = useQuery({
-    queryKey: qk.fragments(storyId, branchId, 'marker'),
-    queryFn: () => api.fragments.list(storyId, 'marker'),
-  })
+  const { data: markerFragments = [] } = useQuery(q.fragments(storyId, branchId, 'marker'))
 
   const mentionFragmentQueries = useQueries({
     queries: mentionFragmentTypes.map((type) => ({
-      queryKey: qk.fragments(storyId, branchId, type),
-      queryFn: () => api.fragments.list(storyId, type),
+      ...q.fragments(storyId, branchId, type),
       enabled: mentionHighlightsEnabled,
     })),
   })
@@ -342,14 +334,12 @@ export function ProseChainView({
   )
 
   const { data: imageFragments = [] } = useQuery({
-    queryKey: qk.fragments(storyId, branchId, 'image'),
-    queryFn: () => api.fragments.list(storyId, 'image'),
+    ...q.fragments(storyId, branchId, 'image'),
     enabled: mentionHighlightsEnabled || anyProseHasImage,
   })
 
   const { data: iconFragments = [] } = useQuery({
-    queryKey: qk.fragments(storyId, branchId, 'icon'),
-    queryFn: () => api.fragments.list(storyId, 'icon'),
+    ...q.fragments(storyId, branchId, 'icon'),
     enabled: mentionHighlightsEnabled,
   })
 

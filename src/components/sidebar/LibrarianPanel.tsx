@@ -10,7 +10,7 @@ import {
   type LibrarianAnalysisSummary,
   type LibrarianState,
 } from '@/lib/api'
-import { qk, useActiveBranchId } from '@/lib/query-keys'
+import { qk, q, useActiveBranchId } from '@/lib/query-keys'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -590,25 +590,10 @@ function StoryContent({ storyId, status, onOpenChat }: LibrarianPanelProps & { s
   const [showAllAnalyses, setShowAllAnalyses] = useState(false)
   const branchId = useActiveBranchId(storyId)
 
-  const { data: characters } = useQuery({
-    queryKey: qk.fragments(storyId, branchId, 'character'),
-    queryFn: () => api.fragments.list(storyId, 'character'),
-  })
-
-  const { data: guidelines } = useQuery({
-    queryKey: qk.fragments(storyId, branchId, 'guideline'),
-    queryFn: () => api.fragments.list(storyId, 'guideline'),
-  })
-
-  const { data: knowledge } = useQuery({
-    queryKey: qk.fragments(storyId, branchId, 'knowledge'),
-    queryFn: () => api.fragments.list(storyId, 'knowledge'),
-  })
-
-  const { data: allFragments } = useQuery({
-    queryKey: qk.fragments(storyId, branchId),
-    queryFn: () => api.fragments.list(storyId),
-  })
+  const { data: characters } = useQuery(q.fragments(storyId, branchId, 'character'))
+  const { data: guidelines } = useQuery(q.fragments(storyId, branchId, 'guideline'))
+  const { data: knowledge } = useQuery(q.fragments(storyId, branchId, 'knowledge'))
+  const { data: allFragments } = useQuery(q.fragments(storyId, branchId))
 
   const { data: story } = useQuery({
     queryKey: ['story', storyId],
@@ -1501,15 +1486,14 @@ function SummariesTab({ storyId }: { storyId: string }) {
   const branchId = useActiveBranchId(storyId)
 
   const { data: summaries } = useQuery({
-    queryKey: qk.fragments(storyId, branchId, 'summary'),
-    queryFn: () => api.fragments.list(storyId, 'summary'),
+    ...q.fragments(storyId, branchId, 'summary'),
     refetchInterval: 5000,
   })
 
   const { data: archivedSummaries } = useQuery({
     queryKey: qk.fragmentsArchived(storyId, branchId, 'summary'),
     queryFn: async () => {
-      const all = await api.fragments.listArchived(storyId)
+      const all = await api.fragments.listArchived(storyId, branchId)
       return all.filter(f => f.type === 'summary')
     },
     enabled: showArchived,
