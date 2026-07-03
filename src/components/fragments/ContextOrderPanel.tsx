@@ -146,7 +146,7 @@ export function ContextOrderPanel({ storyId, story }: ContextOrderPanelProps) {
         </p>
       </div>
 
-      <ScrollArea className="flex-1 [&>[data-slot=scroll-area-viewport]>div]:!block">
+      <ScrollArea className="flex-1 min-h-0 [&>[data-slot=scroll-area-viewport]>div]:!block">
         <div className="px-2 py-3 space-y-1">
           {stickyFragments.map((fragment, index) => (
             <div

@@ -61,7 +61,7 @@ export function ArchivePanel({ storyId, onSelect }: ArchivePanelProps) {
         />
       </div>
 
-      <ScrollArea className="flex-1" data-component-id="archive-scroll">
+      <ScrollArea className="flex-1 min-h-0" data-component-id="archive-scroll">
         <div className="px-3 pb-3 space-y-1">
           {isLoading && (
             <div className="flex items-center justify-center py-8">
