@@ -4,15 +4,25 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 vi.mock('@/server/agents', () => ({
   invokeAgent: vi.fn(),
 }))
+vi.mock('../../src/server/agents', () => ({
+  invokeAgent: vi.fn(),
+}))
 
 // Mock the branches module — scheduler resolves the active branch before running
 vi.mock('@/server/fragments/branches', () => ({
   getActiveBranchId: vi.fn().mockResolvedValue('main'),
   withBranch: vi.fn((_dataDir: string, _storyId: string, fn: () => Promise<unknown>, _branchId?: string) => fn()),
 }))
+vi.mock('../../src/server/fragments/branches', () => ({
+  getActiveBranchId: vi.fn().mockResolvedValue('main'),
+  withBranch: vi.fn((_dataDir: string, _storyId: string, fn: () => Promise<unknown>, _branchId?: string) => fn()),
+}))
 
 // Mock librarian storage so reanalyzeAfterProseChange's index clear doesn't touch disk
 vi.mock('@/server/librarian/storage', () => ({
+  clearAnalysisIndexEntry: vi.fn(() => Promise.resolve()),
+}))
+vi.mock('../../src/server/librarian/storage', () => ({
   clearAnalysisIndexEntry: vi.fn(() => Promise.resolve()),
 }))
 
