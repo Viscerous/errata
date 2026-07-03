@@ -1,6 +1,7 @@
 import { useState, useRef, useMemo, useEffect, useCallback } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, type StoryMeta } from '@/lib/api'
+import { qk, useActiveBranchId } from '@/lib/query-keys'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -48,6 +49,7 @@ function timeAgo(dateStr: string): string {
 
 export function StoryInfoPanel({ storyId, story, onLaunchWizard, onExport, onDownloadStory, onExportProse }: StoryInfoPanelProps) {
   const queryClient = useQueryClient()
+  const branchId = useActiveBranchId(storyId)
   const [editing, setEditing] = useState(false)
   const [name, setName] = useState(story.name)
   const [description, setDescription] = useState(story.description)
@@ -57,17 +59,17 @@ export function StoryInfoPanel({ storyId, story, onLaunchWizard, onExport, onDow
 
   // Data queries for stats
   const allFragmentsQuery = useQuery({
-    queryKey: ['fragments', storyId],
+    queryKey: qk.fragments(storyId, branchId),
     queryFn: () => api.fragments.list(storyId),
   })
 
   const proseChainQuery = useQuery({
-    queryKey: ['proseChain', storyId],
+    queryKey: qk.proseChain(storyId, branchId),
     queryFn: () => api.proseChain.get(storyId),
   })
 
   const genLogsQuery = useQuery({
-    queryKey: ['generation-logs', storyId],
+    queryKey: qk.generationLogs(storyId, branchId),
     queryFn: () => api.generation.listLogs(storyId),
   })
 

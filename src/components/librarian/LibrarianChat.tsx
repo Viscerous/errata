@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, type ChatEvent } from '@/lib/api'
+import { useActiveBranchId } from '@/lib/query-keys'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -20,6 +21,7 @@ interface LibrarianChatProps {
 
 export function LibrarianChat({ storyId, conversationId, initialInput }: LibrarianChatProps) {
   const queryClient = useQueryClient()
+  const branchId = useActiveBranchId(storyId)
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
   const [isStreaming, setIsStreaming] = useState(false)
@@ -52,10 +54,11 @@ export function LibrarianChat({ storyId, conversationId, initialInput }: Librari
     }
   })
 
-  // Query key depends on whether we're in a conversation or legacy chat
+  // Query key depends on whether we're in a conversation or legacy chat.
+  // Branch-scoped so switching timelines doesn't surface another branch's chat.
   const historyQueryKey = conversationId
     ? ['librarian-conversation-history', storyId, conversationId]
-    : ['librarian-chat-history', storyId]
+    : ['librarian-chat-history', storyId, branchId]
 
   // Load persisted chat history on mount
   const { data: chatHistory } = useQuery({

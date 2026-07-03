@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo, memo } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, type Fragment, type ProseChainEntry } from '@/lib/api'
+import { invalidateStoryContent } from '@/lib/branch-cache'
 import { Button } from '@/components/ui/button'
 import { StreamMarkdown } from '@/components/ui/stream-markdown'
 import { ChevronRail } from './ChevronRail'
@@ -177,19 +178,12 @@ export const ProseBlock = memo(function ProseBlock({
   const switchMutation = useMutation({
     mutationFn: (fragmentId: string) =>
       api.proseChain.switchVariation(storyId, sectionIndex, fragmentId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['fragments', storyId] })
-      queryClient.invalidateQueries({ queryKey: ['proseChain', storyId] })
-    },
+    onSuccess: () => invalidateStoryContent(queryClient, storyId),
   })
 
   const deleteMutation = useMutation({
     mutationFn: () => api.proseChain.removeSection(storyId, sectionIndex),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['fragments', storyId, 'prose'] })
-      queryClient.invalidateQueries({ queryKey: ['fragments', storyId] })
-      queryClient.invalidateQueries({ queryKey: ['proseChain', storyId] })
-    },
+    onSuccess: () => invalidateStoryContent(queryClient, storyId),
   })
 
   const variationCount = chainEntry?.proseFragments.length ?? 0
@@ -264,8 +258,7 @@ export const ProseBlock = memo(function ProseBlock({
 
       setStreamedActionText(accumulated)
       if (steps.length > 0) setActionThoughtSteps([...steps])
-      await queryClient.invalidateQueries({ queryKey: ['fragments', storyId] })
-      await queryClient.invalidateQueries({ queryKey: ['proseChain', storyId] })
+      await invalidateStoryContent(queryClient, storyId)
       handleActionComplete()
     } catch {
       setIsStreamingAction(false)
@@ -330,8 +323,7 @@ export const ProseBlock = memo(function ProseBlock({
 
       setStreamedActionText(accumulated)
       if (steps.length > 0) setActionThoughtSteps([...steps])
-      await queryClient.invalidateQueries({ queryKey: ['fragments', storyId] })
-      await queryClient.invalidateQueries({ queryKey: ['proseChain', storyId] })
+      await invalidateStoryContent(queryClient, storyId)
       handleActionComplete()
     } catch {
       setIsStreamingAction(false)
@@ -405,8 +397,7 @@ export const ProseBlock = memo(function ProseBlock({
 
       setStreamedActionText(accumulated)
       if (steps.length > 0) setActionThoughtSteps([...steps])
-      await queryClient.invalidateQueries({ queryKey: ['fragments', storyId] })
-      await queryClient.invalidateQueries({ queryKey: ['proseChain', storyId] })
+      await invalidateStoryContent(queryClient, storyId)
       handleActionComplete()
     } catch {
       setIsStreamingAction(false)

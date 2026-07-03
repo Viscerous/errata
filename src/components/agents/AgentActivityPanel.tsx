@@ -7,6 +7,7 @@ import {
   type LibrarianState,
 } from '@/lib/api'
 import type { ActiveAgent } from '@/lib/api/agents'
+import { qk, useActiveBranchId } from '@/lib/query-keys'
 import { getAgentMeta } from '@/components/agents/agent-meta'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -26,8 +27,9 @@ interface AgentActivityPanelProps {
 }
 
 export function AgentActivityPanel({ storyId }: AgentActivityPanelProps) {
+  const branchId = useActiveBranchId(storyId)
   const { data: status } = useQuery({
-    queryKey: ['librarian-status', storyId],
+    queryKey: qk.librarianStatus(storyId, branchId),
     queryFn: () => api.librarian.getStatus(storyId),
     refetchInterval: 5000,
   })
@@ -144,9 +146,10 @@ function StatusStrip({ status, runStatus, active }: StatusStripProps) {
 
 function ActivityContent({ storyId }: { storyId: string }) {
   const [expandedRunId, setExpandedRunId] = useState<string | null>(null)
+  const branchId = useActiveBranchId(storyId)
 
   const { data: agentRuns } = useQuery({
-    queryKey: ['librarian-agent-runs', storyId],
+    queryKey: qk.librarianAgentRuns(storyId, branchId),
     queryFn: () => api.librarian.listAgentRuns(storyId),
     refetchInterval: 3000,
   })

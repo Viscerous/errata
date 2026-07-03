@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, type Fragment, type FragmentVersion } from '@/lib/api'
+import { qk, useActiveBranchId } from '@/lib/query-keys'
 import { componentId, fragmentComponentId } from '@/lib/dom-ids'
 import { cn } from '@/lib/utils'
 import { parseVisualRefs, readImageUrl, type BoundaryBox } from '@/lib/fragment-visuals'
@@ -51,6 +52,7 @@ export function FragmentEditor({
   onFragmentChange,
 }: FragmentEditorProps) {
   const queryClient = useQueryClient()
+  const branchId = useActiveBranchId(storyId)
   const confirm = useConfirm()
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
@@ -74,7 +76,7 @@ export function FragmentEditor({
   // initialDataUpdatedAt prevents TanStack Query from treating initialData as immediately
   // stale and firing a background refetch on every fragment selection.
   const { data: liveFragment } = useQuery({
-    queryKey: ['fragment', storyId, fragmentProp?.id],
+    queryKey: qk.fragment(storyId, branchId, fragmentProp?.id),
     queryFn: () => api.fragments.get(storyId, fragmentProp!.id),
     enabled: !!fragmentProp?.id,
     initialData: fragmentProp ?? undefined,
@@ -86,12 +88,12 @@ export function FragmentEditor({
 
   // Media queries for clipboard copy (embed attached images)
   const { data: _imageFragments } = useQuery({
-    queryKey: ['fragments', storyId, 'image'],
+    queryKey: qk.fragments(storyId, branchId, 'image'),
     queryFn: () => api.fragments.list(storyId, 'image'),
     staleTime: 10_000,
   })
   const { data: _iconFragments } = useQuery({
-    queryKey: ['fragments', storyId, 'icon'],
+    queryKey: qk.fragments(storyId, branchId, 'icon'),
     queryFn: () => api.fragments.list(storyId, 'icon'),
     staleTime: 10_000,
   })
@@ -103,7 +105,7 @@ export function FragmentEditor({
   }, [_imageFragments, _iconFragments])
 
   const { data: versionData } = useQuery({
-    queryKey: ['fragment-versions', storyId, fragment?.id],
+    queryKey: qk.fragmentVersions(storyId, branchId, fragment?.id),
     queryFn: () => api.fragments.listVersions(storyId, fragment!.id),
     enabled: !!fragment?.id && isVersionedType,
   })
@@ -163,7 +165,7 @@ export function FragmentEditor({
     queryClient.invalidateQueries({
       queryKey: ['fragments', storyId],
       predicate: (q) => {
-        const typeSlot = q.queryKey[2]
+        const typeSlot = q.queryKey[3]
         return typeSlot === undefined || typeSlot === fType
       },
     })
@@ -173,7 +175,7 @@ export function FragmentEditor({
       promises.push(queryClient.invalidateQueries({ queryKey: ['librarian-analysis-index', storyId] }))
     }
     if (fragment?.id) {
-      promises.push(queryClient.invalidateQueries({ queryKey: ['fragment', storyId, fragment.id] }))
+      promises.push(queryClient.invalidateQueries({ queryKey: qk.fragment(storyId, branchId, fragment.id) }))
     }
     await Promise.all(promises)
   }
@@ -239,7 +241,7 @@ export function FragmentEditor({
       queryClient.invalidateQueries({
         queryKey: ['fragments', storyId],
         predicate: (q) => {
-          const typeSlot = q.queryKey[2]
+          const typeSlot = q.queryKey[3]
           return typeSlot === undefined || typeSlot === fType
         },
       })
@@ -394,7 +396,7 @@ export function FragmentEditor({
     onSuccess: () => {
       invalidate()
       if (fragment?.id) {
-        queryClient.invalidateQueries({ queryKey: ['fragment-versions', storyId, fragment.id] })
+        queryClient.invalidateQueries({ queryKey: qk.fragmentVersions(storyId, branchId, fragment.id) })
       }
     },
   })
@@ -404,7 +406,7 @@ export function FragmentEditor({
     onSuccess: (_data, version) => {
       if (previewVersion?.version === version) setPreviewVersion(null)
       if (fragment?.id) {
-        queryClient.invalidateQueries({ queryKey: ['fragment-versions', storyId, fragment.id] })
+        queryClient.invalidateQueries({ queryKey: qk.fragmentVersions(storyId, branchId, fragment.id) })
       }
     },
   })
@@ -1061,6 +1063,7 @@ export function FragmentEditor({
 
 function VisualRefsSection({ storyId, fragmentId }: { storyId: string; fragmentId: string }) {
   const queryClient = useQueryClient()
+  const branchId = useActiveBranchId(storyId)
   const [cropTarget, setCropTarget] = useState<{
     fragmentId: string
     kind: 'icon' | 'image'
@@ -1070,17 +1073,17 @@ function VisualRefsSection({ storyId, fragmentId }: { storyId: string; fragmentI
   } | null>(null)
 
   const { data: currentFragment } = useQuery({
-    queryKey: ['fragment', storyId, fragmentId],
+    queryKey: qk.fragment(storyId, branchId, fragmentId),
     queryFn: () => api.fragments.get(storyId, fragmentId),
   })
 
   const { data: imageFragments } = useQuery({
-    queryKey: ['fragments', storyId, 'image'],
+    queryKey: qk.fragments(storyId, branchId, 'image'),
     queryFn: () => api.fragments.list(storyId, 'image'),
   })
 
   const { data: iconFragments } = useQuery({
-    queryKey: ['fragments', storyId, 'icon'],
+    queryKey: qk.fragments(storyId, branchId, 'icon'),
     queryFn: () => api.fragments.list(storyId, 'icon'),
   })
 
@@ -1105,7 +1108,7 @@ function VisualRefsSection({ storyId, fragmentId }: { storyId: string; fragmentI
       })
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['fragment', storyId, fragmentId] })
+      queryClient.invalidateQueries({ queryKey: qk.fragment(storyId, branchId, fragmentId) })
       queryClient.invalidateQueries({ queryKey: ['fragments', storyId] })
     },
   })
@@ -1141,7 +1144,7 @@ function VisualRefsSection({ storyId, fragmentId }: { storyId: string; fragmentI
         placement: currentFragment.placement,
         meta: { ...currentFragment.meta, visualRefs: nextRefs },
       })
-      queryClient.invalidateQueries({ queryKey: ['fragment', storyId, fragmentId] })
+      queryClient.invalidateQueries({ queryKey: qk.fragment(storyId, branchId, fragmentId) })
       queryClient.invalidateQueries({ queryKey: ['fragments', storyId] })
     } catch {
       // silently ignored
@@ -1333,18 +1336,19 @@ function VisualRefsSection({ storyId, fragmentId }: { storyId: string; fragmentI
 
 function TagsSection({ storyId, fragmentId }: { storyId: string; fragmentId: string }) {
   const queryClient = useQueryClient()
+  const branchId = useActiveBranchId(storyId)
   const [newTag, setNewTag] = useState('')
 
   const { data } = useQuery({
-    queryKey: ['tags', storyId, fragmentId],
+    queryKey: qk.tags(storyId, branchId, fragmentId),
     queryFn: () => api.fragments.getTags(storyId, fragmentId),
   })
 
   const addMutation = useMutation({
     mutationFn: (tag: string) => api.fragments.addTag(storyId, fragmentId, tag),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['tags', storyId, fragmentId] })
-      queryClient.invalidateQueries({ queryKey: ['fragment', storyId, fragmentId] })
+      queryClient.invalidateQueries({ queryKey: qk.tags(storyId, branchId, fragmentId) })
+      queryClient.invalidateQueries({ queryKey: qk.fragment(storyId, branchId, fragmentId) })
       setNewTag('')
     },
   })
@@ -1352,8 +1356,8 @@ function TagsSection({ storyId, fragmentId }: { storyId: string; fragmentId: str
   const removeMutation = useMutation({
     mutationFn: (tag: string) => api.fragments.removeTag(storyId, fragmentId, tag),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['tags', storyId, fragmentId] })
-      queryClient.invalidateQueries({ queryKey: ['fragment', storyId, fragmentId] })
+      queryClient.invalidateQueries({ queryKey: qk.tags(storyId, branchId, fragmentId) })
+      queryClient.invalidateQueries({ queryKey: qk.fragment(storyId, branchId, fragmentId) })
     },
   })
 
@@ -1416,17 +1420,18 @@ function TagsSection({ storyId, fragmentId }: { storyId: string; fragmentId: str
 
 function RefsSection({ storyId, fragmentId }: { storyId: string; fragmentId: string }) {
   const queryClient = useQueryClient()
+  const branchId = useActiveBranchId(storyId)
   const [newRefId, setNewRefId] = useState('')
 
   const { data } = useQuery({
-    queryKey: ['refs', storyId, fragmentId],
+    queryKey: qk.refs(storyId, branchId, fragmentId),
     queryFn: () => api.fragments.getRefs(storyId, fragmentId),
   })
 
   const addMutation = useMutation({
     mutationFn: (targetId: string) => api.fragments.addRef(storyId, fragmentId, targetId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['refs', storyId, fragmentId] })
+      queryClient.invalidateQueries({ queryKey: qk.refs(storyId, branchId, fragmentId) })
       setNewRefId('')
     },
   })
@@ -1434,7 +1439,7 @@ function RefsSection({ storyId, fragmentId }: { storyId: string; fragmentId: str
   const removeMutation = useMutation({
     mutationFn: (targetId: string) => api.fragments.removeRef(storyId, fragmentId, targetId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['refs', storyId, fragmentId] })
+      queryClient.invalidateQueries({ queryKey: qk.refs(storyId, branchId, fragmentId) })
     },
   })
 

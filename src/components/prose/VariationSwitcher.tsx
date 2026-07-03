@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { api, type ProseChainEntry } from '@/lib/api'
+import { invalidateStoryContent } from '@/lib/branch-cache'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -26,8 +27,7 @@ export function VariationSwitcher({ storyId, sectionIndex, entry }: VariationSwi
     mutationFn: (fragmentId: string) =>
       api.proseChain.switchVariation(storyId, sectionIndex, fragmentId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['fragments', storyId] })
-      queryClient.invalidateQueries({ queryKey: ['proseChain', storyId] })
+      invalidateStoryContent(queryClient, storyId)
       setIsOpen(false)
     },
   })

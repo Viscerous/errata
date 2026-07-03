@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
+import { invalidateStoryContent } from '@/lib/branch-cache'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 
@@ -51,8 +52,7 @@ export function ProseActionInput({
         }
       }
 
-      await queryClient.invalidateQueries({ queryKey: ['fragments', storyId] })
-      await queryClient.invalidateQueries({ queryKey: ['proseChain', storyId] })
+      await invalidateStoryContent(queryClient, storyId)
       onComplete()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Operation failed')

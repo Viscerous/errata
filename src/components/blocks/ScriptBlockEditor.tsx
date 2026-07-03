@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, useMemo, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
+import { qk, useActiveBranchId } from '@/lib/query-keys'
 import type { BlockPreviewResponse } from '@/lib/api/types'
 import { ScriptEditor } from './ScriptEditor'
 import { BlockContentView } from './BlockContentView'
@@ -60,11 +61,12 @@ export function ScriptBlockEditor({
   const [evalLoading, setEvalLoading] = useState(false)
   const [expanded, setExpanded] = useState(false)
   const requestIdRef = useRef(0)
+  const branchId = useActiveBranchId(storyId)
 
   // Fragment hints — fed to the editor's completion system so `ctx.getFragment('...'`
   // suggests real IDs and `ctx.getFragments('...'` suggests real type names.
   const { data: fragments } = useQuery({
-    queryKey: ['fragments', storyId],
+    queryKey: qk.fragments(storyId, branchId),
     queryFn: () => api.fragments.list(storyId),
     staleTime: 30_000,
   })
@@ -494,9 +496,10 @@ function ContextPane({
 export function FragmentReference({ storyId }: { storyId: string }) {
   const [open, setOpen] = useState(false)
   const [copiedId, setCopiedId] = useState<string | null>(null)
+  const branchId = useActiveBranchId(storyId)
 
   const { data: fragments } = useQuery({
-    queryKey: ['fragments', storyId],
+    queryKey: qk.fragments(storyId, branchId),
     queryFn: () => api.fragments.list(storyId),
     enabled: open,
   })

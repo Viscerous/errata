@@ -15,6 +15,7 @@ import {
 import { CharacterAvatar } from '@/components/shared/CharacterAvatar'
 import { ChatConfig } from './ChatConfig'
 import { ConversationList } from './ConversationList'
+import { qk, useActiveBranchId } from '@/lib/query-keys'
 
 interface CharacterChatViewProps {
   storyId: string
@@ -24,6 +25,7 @@ interface CharacterChatViewProps {
 
 export function CharacterChatView({ storyId, initialCharacterId, onClose }: CharacterChatViewProps) {
   const queryClient = useQueryClient()
+  const branchId = useActiveBranchId(storyId)
 
   // Config state
   const [characterId, setCharacterId] = useState<string | null>(initialCharacterId ?? null)
@@ -43,12 +45,12 @@ export function CharacterChatView({ storyId, initialCharacterId, onClose }: Char
 
   // Data queries
   const { data: allFragments } = useQuery({
-    queryKey: ['fragments', storyId],
+    queryKey: qk.fragments(storyId, branchId),
     queryFn: () => api.fragments.list(storyId),
   })
 
   const { data: proseChain } = useQuery({
-    queryKey: ['prose-chain', storyId],
+    queryKey: qk.proseChain(storyId, branchId),
     queryFn: () => api.proseChain.get(storyId),
   })
 

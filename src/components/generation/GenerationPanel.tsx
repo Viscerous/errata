@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
+import { invalidateStoryContent } from '@/lib/branch-cache'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { StreamMarkdown } from '@/components/ui/stream-markdown'
@@ -104,8 +105,7 @@ export function GenerationPanel({ storyId, onBack }: GenerationPanelProps) {
 
       setStreamedText(accumulated)
       if (saveResult) {
-        await queryClient.invalidateQueries({ queryKey: ['fragments', storyId] })
-        await queryClient.invalidateQueries({ queryKey: ['proseChain', storyId] })
+        await invalidateStoryContent(queryClient, storyId)
         setInput('')
       }
     } catch (err) {

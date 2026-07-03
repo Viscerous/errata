@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api, type GenerationLog, type GenerationLogSummary } from '@/lib/api'
+import { qk, useActiveBranchId } from '@/lib/query-keys'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -22,9 +23,10 @@ export function DebugPanel({ storyId, logId, fragmentId, onClose }: DebugPanelPr
   const [selectedLogId, setSelectedLogId] = useState<string | null>(logId ?? null)
   const [activeTab, setActiveTab] = useState<'prompt' | 'prewriter-prompt' | 'tools' | 'output'>('prompt')
   const directLookup = !!(logId || fragmentId)
+  const branchId = useActiveBranchId(storyId)
 
   const { data: logs } = useQuery({
-    queryKey: ['generation-logs', storyId],
+    queryKey: qk.generationLogs(storyId, branchId),
     queryFn: () => api.generation.listLogs(storyId),
   })
 
@@ -36,7 +38,7 @@ export function DebugPanel({ storyId, logId, fragmentId, onClose }: DebugPanelPr
   }
 
   const { data: selectedLog, isLoading: logLoading } = useQuery({
-    queryKey: ['generation-log', storyId, selectedLogId],
+    queryKey: qk.generationLog(storyId, branchId, selectedLogId),
     queryFn: () => api.generation.getLog(storyId, selectedLogId!),
     enabled: !!selectedLogId,
   })

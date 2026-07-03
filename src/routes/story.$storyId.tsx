@@ -269,7 +269,7 @@ function StoryEditorPage() {
     queryClient.invalidateQueries({
       queryKey: ['fragments', storyId],
       predicate: (q) => {
-        const typeSlot = q.queryKey[2]
+        const typeSlot = q.queryKey[3]
         return typeSlot === undefined || typeSlot === type
       },
     })

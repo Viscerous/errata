@@ -5,6 +5,8 @@ import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { PenLine, ArrowRight, Pause, Compass, RefreshCw, Loader2, PenSquare, Type } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { invalidateStoryContent } from '@/lib/branch-cache'
+import { qk, useActiveBranchId } from '@/lib/query-keys'
 import type { SuggestionDirection, ClarifyQuestion, Clarification } from '@/lib/api/types'
 import { QuestionCard } from '@/components/generation/QuestionCard'
 
@@ -24,6 +26,13 @@ type InputMode = 'freeform' | 'guided' | 'compose'
 interface InlineGenerationInputProps {
   storyId: string
   isGenerating: boolean
+  /**
+   * The active head passage of the current timeline (last section's active
+   * fragment). Directions are anchored to the passage they were generated
+   * against and only stay relevant while that passage is still the head — once
+   * the timeline advances, they're hidden.
+   */
+  latestFragmentId?: string
   onGenerationStart: (prompt: string) => void
   onGenerationStream: (text: string) => void
   onGenerationThoughts?: (steps: ThoughtStep[]) => void
@@ -39,6 +48,7 @@ const DEFAULT_SCENE_SETTING_INSTRUCTION = "Continue the story without advancing 
 export function InlineGenerationInput({
   storyId,
   isGenerating,
+  latestFragmentId,
   onGenerationStart,
   onGenerationStream,
   onGenerationThoughts,
@@ -46,6 +56,7 @@ export function InlineGenerationInput({
   onGenerationError,
 }: InlineGenerationInputProps) {
   const queryClient = useQueryClient()
+  const branchId = useActiveBranchId(storyId)
   const [input, setInput] = useState('')
   const [composeInput, setComposeInput] = useState('')
   const [isComposing, setIsComposing] = useState(false)
@@ -72,13 +83,17 @@ export function InlineGenerationInput({
   // Suggestion state
   const [suggestions, setSuggestions] = useState<SuggestionDirection[]>([])
   const [manualSuggestions, setManualSuggestions] = useState<SuggestionDirection[] | null>(null)
+  // The head passage the manual/prewriter directions were produced for. They
+  // stay live only while that passage is still the head (same rule as analysis
+  // directions), so advancing the timeline retires them too.
+  const [manualAnchor, setManualAnchor] = useState<string | undefined>(undefined)
   const [isFetchingSuggestions, setIsFetchingSuggestions] = useState(false)
   const [suggestionError, setSuggestionError] = useState<string | null>(null)
   const [activeSuggestionIndex, setActiveSuggestionIndex] = useState<number | null>(null)
 
   // Poll librarian status to detect when analysis completes
   const { data: librarianStatus } = useQuery({
-    queryKey: ['librarian-status', storyId],
+    queryKey: qk.librarianStatus(storyId, branchId),
     queryFn: () => api.librarian.getStatus(storyId),
     refetchInterval: 5_000,
   })
@@ -92,17 +107,26 @@ export function InlineGenerationInput({
     // (librarian writes annotations to fragment.meta, so prose fragments must be re-fetched)
     if (prev === 'running' && (curr === 'idle' || curr === 'error')) {
       queryClient.invalidateQueries({ queryKey: ['librarian-analyses', storyId] })
-      queryClient.invalidateQueries({ queryKey: ['fragments', storyId, 'prose'] })
+      queryClient.invalidateQueries({ queryKey: qk.fragments(storyId, branchId, 'prose') })
     }
-  }, [librarianStatus?.runStatus, queryClient, storyId])
+  }, [librarianStatus?.runStatus, queryClient, storyId, branchId])
 
   // Query latest analysis for auto-populated directions
   const { data: analysesList } = useQuery({
-    queryKey: ['librarian-analyses', storyId],
+    queryKey: qk.librarianAnalyses(storyId, branchId),
     queryFn: () => api.librarian.listAnalyses(storyId),
   })
 
-  const latestAnalysisId = analysesList?.[0]?.directionsCount ? analysesList[0].id : null
+  // Only surface the newest analysis's directions while the passage it was
+  // generated against is still the timeline's head. Once a new passage is
+  // written (or the tail is deleted / a variation switched), the analysis no
+  // longer describes "what comes next" and its directions drop out — until the
+  // librarian re-analyses the new head.
+  const latestSummary = analysesList?.[0]
+  const latestAnalysisId =
+    latestSummary?.directionsCount && latestSummary.fragmentId === latestFragmentId
+      ? latestSummary.id
+      : null
 
   const { data: latestAnalysis } = useQuery({
     queryKey: ['librarian-analysis', storyId, latestAnalysisId],
@@ -116,16 +140,16 @@ export function InlineGenerationInput({
     [latestAnalysis?.directions],
   )
 
-  // Merge: prewriter/manual directions first, then append analysis directions (deduplicated by title)
+  // Merge: prewriter/manual directions first, then append analysis directions
+  // (deduplicated by title). Manual directions only count while their anchor is
+  // still the head; analysisDirections is already head-gated via latestAnalysisId.
+  // Always replace (never just append) so directions clear once the head moves on.
   useEffect(() => {
-    const base = manualSuggestions ?? []
+    const base = manualSuggestions && manualAnchor === latestFragmentId ? manualSuggestions : []
     const baseTitles = new Set(base.map(s => s.title))
     const extra = analysisDirections.filter(s => !baseTitles.has(s.title))
-    const merged = [...base, ...extra]
-    if (merged.length > 0) {
-      setSuggestions(merged)
-    }
-  }, [manualSuggestions, analysisDirections])
+    setSuggestions([...base, ...extra])
+  }, [manualSuggestions, manualAnchor, analysisDirections, latestFragmentId])
 
   const updateActiveSuggestion = useCallback((nextIndex: number | null) => {
     setActiveSuggestionIndex(nextIndex)
@@ -278,10 +302,16 @@ export function InlineGenerationInput({
         return
       }
 
-      await queryClient.invalidateQueries({ queryKey: ['fragments', storyId] })
-      await queryClient.invalidateQueries({ queryKey: ['proseChain', storyId] })
+      await invalidateStoryContent(queryClient, storyId)
 
       if (prewriterDirectionsRef.current?.length) {
+        // Anchor to the passage that was just written (now the head) — read it
+        // from the chain refreshed by invalidateStoryContent above, since the
+        // latestFragmentId prop may not have propagated yet in this callback.
+        const chain = queryClient.getQueryData<{ entries: Array<{ active: string }> }>(
+          qk.proseChain(storyId, branchId),
+        )
+        setManualAnchor(chain?.entries.at(-1)?.active ?? latestFragmentId)
         setManualSuggestions(prewriterDirectionsRef.current)
       }
 
@@ -290,8 +320,7 @@ export function InlineGenerationInput({
     } catch (err) {
       // User-initiated abort — not an error
       if (ac.signal.aborted) {
-        await queryClient.invalidateQueries({ queryKey: ['fragments', storyId] })
-        await queryClient.invalidateQueries({ queryKey: ['proseChain', storyId] })
+        await invalidateStoryContent(queryClient, storyId)
         onGenerationComplete()
       } else {
         setError(err instanceof Error ? err.message : 'Generation failed')
@@ -300,7 +329,7 @@ export function InlineGenerationInput({
     } finally {
       abortRef.current = null
     }
-  }, [storyId, isGenerating, onGenerationStart, onGenerationStream, onGenerationThoughts, onGenerationComplete, onGenerationError, queryClient])
+  }, [storyId, branchId, latestFragmentId, isGenerating, onGenerationStart, onGenerationStream, onGenerationThoughts, onGenerationComplete, onGenerationError, queryClient])
 
   const handleGenerate = () => {
     handleGenerateWithInput(input)
@@ -336,8 +365,7 @@ export function InlineGenerationInput({
         meta: { generationMode: 'manual' },
       })
       await api.proseChain.addSection(storyId, fragment.id)
-      await queryClient.invalidateQueries({ queryKey: ['fragments', storyId] })
-      await queryClient.invalidateQueries({ queryKey: ['proseChain', storyId] })
+      await invalidateStoryContent(queryClient, storyId)
       setComposeInput('')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to add section')
@@ -351,6 +379,9 @@ export function InlineGenerationInput({
     setSuggestionError(null)
     try {
       const result = await api.generation.proposeDirections(storyId)
+      // proposeDirections is computed from the current story state, i.e. the
+      // current head — anchor to it so these retire when the timeline advances.
+      setManualAnchor(latestFragmentId)
       setManualSuggestions(result.suggestions)
     } catch (err) {
       setSuggestionError(err instanceof Error ? err.message : 'Failed to load suggestions')

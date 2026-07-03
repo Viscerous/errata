@@ -10,6 +10,7 @@ import {
   type LibrarianAnalysisSummary,
   type LibrarianState,
 } from '@/lib/api'
+import { qk, useActiveBranchId } from '@/lib/query-keys'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -172,10 +173,11 @@ export function LibrarianPanel({ storyId, askFragmentId, askPrefill, onAskFragme
   const [chatInitialInput, setChatInitialInput] = useState<string>('')
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null)
   const queryClient = useQueryClient()
+  const branchId = useActiveBranchId(storyId)
 
   // Fetch conversation list
   const { data: conversations } = useQuery({
-    queryKey: ['librarian-conversations', storyId],
+    queryKey: qk.librarianConversations(storyId, branchId),
     queryFn: () => api.librarian.listConversations(storyId),
   })
 
@@ -218,7 +220,7 @@ export function LibrarianPanel({ storyId, askFragmentId, askPrefill, onAskFragme
   }, [activeTab, storyId])
 
   const { data: status } = useQuery({
-    queryKey: ['librarian-status', storyId],
+    queryKey: qk.librarianStatus(storyId, branchId),
     queryFn: () => api.librarian.getStatus(storyId),
     refetchInterval: 5000,
   })
@@ -586,24 +588,25 @@ function StoryContent({ storyId, status, onOpenChat }: LibrarianPanelProps & { s
   const [refineTarget, setRefineTarget] = useState<{ fragmentId: string; fragmentName: string; instructions?: string } | null>(null)
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [showAllAnalyses, setShowAllAnalyses] = useState(false)
+  const branchId = useActiveBranchId(storyId)
 
   const { data: characters } = useQuery({
-    queryKey: ['fragments', storyId, 'character'],
+    queryKey: qk.fragments(storyId, branchId, 'character'),
     queryFn: () => api.fragments.list(storyId, 'character'),
   })
 
   const { data: guidelines } = useQuery({
-    queryKey: ['fragments', storyId, 'guideline'],
+    queryKey: qk.fragments(storyId, branchId, 'guideline'),
     queryFn: () => api.fragments.list(storyId, 'guideline'),
   })
 
   const { data: knowledge } = useQuery({
-    queryKey: ['fragments', storyId, 'knowledge'],
+    queryKey: qk.fragments(storyId, branchId, 'knowledge'),
     queryFn: () => api.fragments.list(storyId, 'knowledge'),
   })
 
   const { data: allFragments } = useQuery({
-    queryKey: ['fragments', storyId],
+    queryKey: qk.fragments(storyId, branchId),
     queryFn: () => api.fragments.list(storyId),
   })
 
@@ -613,7 +616,7 @@ function StoryContent({ storyId, status, onOpenChat }: LibrarianPanelProps & { s
   })
 
   const { data: analyses } = useQuery({
-    queryKey: ['librarian-analyses', storyId],
+    queryKey: qk.librarianAnalyses(storyId, branchId),
     queryFn: () => api.librarian.listAnalyses(storyId),
     refetchInterval: 5000,
   })
@@ -1495,15 +1498,16 @@ function TraceItem({ item }: { item: CollapsedTraceItem }) {
 function SummariesTab({ storyId }: { storyId: string }) {
   const [showArchived, setShowArchived] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
+  const branchId = useActiveBranchId(storyId)
 
   const { data: summaries } = useQuery({
-    queryKey: ['fragments', storyId, 'summary'],
+    queryKey: qk.fragments(storyId, branchId, 'summary'),
     queryFn: () => api.fragments.list(storyId, 'summary'),
     refetchInterval: 5000,
   })
 
   const { data: archivedSummaries } = useQuery({
-    queryKey: ['fragments-archived', storyId, 'summary'],
+    queryKey: qk.fragmentsArchived(storyId, branchId, 'summary'),
     queryFn: async () => {
       const all = await api.fragments.listArchived(storyId)
       return all.filter(f => f.type === 'summary')
@@ -1605,8 +1609,8 @@ function SummaryCard({
   const isEra = !!fragment.meta?.isEraSummary
 
   const invalidate = () => {
-    queryClient.invalidateQueries({ queryKey: ['fragments', storyId, 'summary'] })
-    queryClient.invalidateQueries({ queryKey: ['fragments-archived', storyId, 'summary'] })
+    queryClient.invalidateQueries({ queryKey: ['fragments', storyId] })
+    queryClient.invalidateQueries({ queryKey: ['fragments-archived', storyId] })
   }
 
   const archiveMutation = useMutation({
@@ -1694,8 +1698,8 @@ function FullscreenSummaryEditor({
   const isEra = !!fragment.meta?.isEraSummary
 
   const invalidate = () => {
-    queryClient.invalidateQueries({ queryKey: ['fragments', storyId, 'summary'] })
-    queryClient.invalidateQueries({ queryKey: ['fragments-archived', storyId, 'summary'] })
+    queryClient.invalidateQueries({ queryKey: ['fragments', storyId] })
+    queryClient.invalidateQueries({ queryKey: ['fragments-archived', storyId] })
   }
 
   const saveMutation = useMutation({

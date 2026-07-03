@@ -9,6 +9,7 @@ import { Spinner, EmptyState } from '@/components/ui/async-view'
 import { Undo2, Trash2, Archive } from 'lucide-react'
 import { componentId } from '@/lib/dom-ids'
 import { useConfirm } from '@/components/ui/confirm-dialog'
+import { qk, useActiveBranchId } from '@/lib/query-keys'
 
 interface ArchivePanelProps {
   storyId: string
@@ -18,10 +19,11 @@ interface ArchivePanelProps {
 export function ArchivePanel({ storyId, onSelect }: ArchivePanelProps) {
   const queryClient = useQueryClient()
   const confirm = useConfirm()
+  const branchId = useActiveBranchId(storyId)
   const [search, setSearch] = useState('')
 
   const { data: archivedFragments, isLoading } = useQuery({
-    queryKey: ['fragments-archived', storyId],
+    queryKey: qk.fragmentsArchived(storyId, branchId),
     queryFn: () => api.fragments.listArchived(storyId),
   })
 

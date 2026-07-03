@@ -8,6 +8,7 @@ import { GripVertical, Monitor, User } from 'lucide-react'
 import { EmptyHint } from '@/components/ui/prose-text'
 import { cn } from '@/lib/utils'
 import { BUILTIN_FRAGMENT_TYPES } from '@/components/fragments/fragment-type-icons'
+import { qk, useActiveBranchId } from '@/lib/query-keys'
 
 interface ContextOrderPanelProps {
   storyId: string
@@ -16,27 +17,28 @@ interface ContextOrderPanelProps {
 
 export function ContextOrderPanel({ storyId, story }: ContextOrderPanelProps) {
   const queryClient = useQueryClient()
+  const branchId = useActiveBranchId(storyId)
   const dragItem = useRef<number | null>(null)
   const dragOverItem = useRef<number | null>(null)
   const [dragIndex, setDragIndex] = useState<number | null>(null)
 
   const { data: characters } = useQuery({
-    queryKey: ['fragments', storyId, 'character'],
+    queryKey: qk.fragments(storyId, branchId, 'character'),
     queryFn: () => api.fragments.list(storyId, 'character'),
   })
 
   const { data: guidelines } = useQuery({
-    queryKey: ['fragments', storyId, 'guideline'],
+    queryKey: qk.fragments(storyId, branchId, 'guideline'),
     queryFn: () => api.fragments.list(storyId, 'guideline'),
   })
 
   const { data: knowledge } = useQuery({
-    queryKey: ['fragments', storyId, 'knowledge'],
+    queryKey: qk.fragments(storyId, branchId, 'knowledge'),
     queryFn: () => api.fragments.list(storyId, 'knowledge'),
   })
 
   const { data: allFragments } = useQuery({
-    queryKey: ['fragments', storyId],
+    queryKey: qk.fragments(storyId, branchId),
     queryFn: () => api.fragments.list(storyId),
   })
 

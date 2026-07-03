@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { EditorContent, useEditor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import { api, type Fragment } from '@/lib/api'
+import { qk, useActiveBranchId } from '@/lib/query-keys'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
@@ -174,6 +175,7 @@ export function ProseWritingPanel({
   onFragmentChange,
 }: ProseWritingPanelProps) {
   const queryClient = useQueryClient()
+  const branchId = useActiveBranchId(storyId)
   const [isTransformingSelection, setIsTransformingSelection] = useState(false)
   const [selectionTransformMode, setSelectionTransformMode] = useState<SelectionTransformMode | null>(null)
   const [selectionTransformReasoning, setSelectionTransformReasoning] = useState('')
@@ -192,17 +194,17 @@ export function ProseWritingPanel({
 
   // Queries
   const { data: proseChain } = useQuery({
-    queryKey: ['proseChain', storyId],
+    queryKey: qk.proseChain(storyId, branchId),
     queryFn: () => api.proseChain.get(storyId),
   })
 
   const { data: proseFragments = [] } = useQuery({
-    queryKey: ['fragments', storyId, 'prose'],
+    queryKey: qk.fragments(storyId, branchId, 'prose'),
     queryFn: () => api.fragments.list(storyId, 'prose'),
   })
 
   const { data: markerFragments = [] } = useQuery({
-    queryKey: ['fragments', storyId, 'marker'],
+    queryKey: qk.fragments(storyId, branchId, 'marker'),
     queryFn: () => api.fragments.list(storyId, 'marker'),
   })
 

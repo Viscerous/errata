@@ -4,6 +4,7 @@ import { api } from '@/lib/api'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { Bookmark, ArrowUpDown, ArrowDown, GripVertical, X } from 'lucide-react'
 import type { Fragment } from '@/lib/api'
+import { invalidateStoryContent } from '@/lib/branch-cache'
 
 interface ProseOutlinePanelProps {
   storyId: string
@@ -38,10 +39,7 @@ export function ProseOutlinePanel({
 
   const reorderMutation = useMutation({
     mutationFn: (order: number[]) => api.proseChain.reorder(storyId, order),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['proseChain', storyId] })
-      queryClient.invalidateQueries({ queryKey: ['fragments', storyId] })
-    },
+    onSuccess: () => invalidateStoryContent(queryClient, storyId),
   })
 
   const fragmentsRef = useRef(fragments)
@@ -105,10 +103,7 @@ export function ProseOutlinePanel({
         name: `Chapter`,
         position: fragments.length,
       }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['fragments', storyId] })
-      queryClient.invalidateQueries({ queryKey: ['proseChain', storyId] })
-    },
+    onSuccess: () => invalidateStoryContent(queryClient, storyId),
   })
 
   // Scroll the active item into view when panel opens or active changes
