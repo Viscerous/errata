@@ -166,6 +166,8 @@ export function FragmentEditor({
     }
     if (fragment?.id) {
       promises.push(queryClient.invalidateQueries({ queryKey: qk.fragment(storyId, branchId, fragment.id) }))
+      // Each save writes a new version — refresh the history panel so it appears.
+      promises.push(queryClient.invalidateQueries({ queryKey: qk.fragmentVersions(storyId, branchId, fragment.id) }))
     }
     await Promise.all(promises)
   }
@@ -221,12 +223,12 @@ export function FragmentEditor({
     },
   })
 
-  // Auto-save mutation — only invalidates list queries, not the individual fragment,
-  // so the sync effect doesn't overwrite the user's in-progress edits.
+  // Auto-save never refetches qk.fragment — that would let the sync effect
+  // overwrite in-progress edits. Version metadata is patched by hand below.
   const autoSaveMutation = useMutation({
     mutationFn: (data: { name: string; description: string; content: string; type?: string }) =>
       api.fragments.update(storyId, fragment!.id, data),
-    onSuccess: () => {
+    onSuccess: (saved) => {
       const fType = fragment?.type
       queryClient.invalidateQueries({
         queryKey: ['fragments', storyId],
@@ -239,6 +241,15 @@ export function FragmentEditor({
       if (fType === 'prose') {
         queryClient.invalidateQueries({ queryKey: ['proseChain', storyId] })
         queryClient.invalidateQueries({ queryKey: ['librarian-analysis-index', storyId] })
+      }
+      if (fragment?.id && isVersionedType) {
+        // Surface the new version in the history panel, and mark it current by
+        // patching only the version fields (keep cached content out of the editor).
+        queryClient.invalidateQueries({ queryKey: qk.fragmentVersions(storyId, branchId, fragment.id) })
+        queryClient.setQueryData<Fragment>(
+          qk.fragment(storyId, branchId, fragment.id),
+          (prev) => prev ? { ...prev, version: saved.version, versions: saved.versions } : prev,
+        )
       }
       setSaveStatus('saved')
       if (savedStatusTimerRef.current) clearTimeout(savedStatusTimerRef.current)
