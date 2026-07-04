@@ -705,6 +705,7 @@ function StoryEditorPage() {
         {/* Main view */}
         {mainView === 'prose' ? (
           <ProseChainView
+            key={branchesIndex?.activeBranchId ?? 'main'}
             storyId={storyId}
             coverImage={story.coverImage}
             outlineOpen={outlineOpen}
