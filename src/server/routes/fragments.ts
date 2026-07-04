@@ -63,7 +63,18 @@ export function fragmentRoutes(dataDir: string) {
         order: 0,
         meta: body.meta ?? {},
         version: 1,
-        versions: [],
+        // Seed v1 with a 'created' reason so the opening editing session coalesces
+        // into it (see updateFragmentVersioned) instead of jumping straight to v2.
+        versions: [
+          {
+            version: 1,
+            name: body.name,
+            description: body.description,
+            content: body.content,
+            createdAt: now,
+            reason: 'created',
+          },
+        ],
       }
       await createFragment(dataDir, params.storyId, fragment)
       return fragment
@@ -171,7 +182,7 @@ export function fragmentRoutes(dataDir: string) {
           description: body.description,
           content: body.content,
         },
-        { reason: 'manual-update' },
+        { reason: body.reason ?? 'manual-update' },
       )
       if (!versioned) {
         set.status = 404
@@ -212,6 +223,7 @@ export function fragmentRoutes(dataDir: string) {
         order: t.Optional(t.Number()),
         placement: t.Optional(t.Union([t.Literal('system'), t.Literal('user')])),
         meta: t.Optional(t.Record(t.String(), t.Any())),
+        reason: t.Optional(t.String()),
       }),
     })
 

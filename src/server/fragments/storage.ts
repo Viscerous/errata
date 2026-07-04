@@ -226,6 +226,11 @@ export async function updateFragment(
   await writeJson(path, normalized)
 }
 
+// How long an autosave stays "open" for coalescing. Consecutive autosaves within
+// this window fold into one version; a longer pause seals it and the next edit
+// starts a new version. Roughly "one version per editing session."
+const AUTOSAVE_COALESCE_WINDOW_MS = 2 * 60_000
+
 export async function updateFragmentVersioned(
   dataDir: string,
   storyId: string,
@@ -244,39 +249,80 @@ export async function updateFragmentVersioned(
     nextDescription !== existing.description ||
     nextContent !== existing.content
 
-  const now = new Date().toISOString()
+  const nowMs = Date.now()
+  const now = new Date(nowMs).toISOString()
+  const versions = existing.versions ?? []
   // existing.versions already contains the current version (normalizeFragment).
-  // An edit appends the new content as a fresh version and points at it; numbering
-  // is max+1 so it never collides even when editing after switching to an older one.
-  const maxVersion = (existing.versions ?? []).reduce((m, v) => Math.max(m, v.version), 0)
-  const newVersion = maxVersion + 1
-  const updated: Fragment = hasVersionedChange
-    ? {
-        ...existing,
-        name: nextName,
-        description: nextDescription,
-        content: nextContent,
-        updatedAt: now,
-        version: newVersion,
-        versions: [
-          ...(existing.versions ?? []),
-          {
-            version: newVersion,
-            name: nextName,
-            description: nextDescription,
-            content: nextContent,
-            createdAt: now,
-            ...(opts?.reason ? { reason: opts.reason } : {}),
-          },
-        ],
-      }
-    : {
-        ...existing,
-        name: nextName,
-        description: nextDescription,
-        content: nextContent,
-        updatedAt: now,
-      }
+  const maxVersion = versions.reduce((m, v) => Math.max(m, v.version), 0)
+
+  // Autosave coalescing: a debounced autosave fires after every typing pause, so
+  // appending a version each time would flood history with keystroke-level snapshots.
+  // While actively editing (the tip version is itself a recent autosave or the freshly
+  // 'created' seed), fold new content into it instead of appending. Folding into
+  // 'created' keeps a new fragment's first session at v1; a reason-less original v1
+  // still snapshots a v2 on first edit, staying revertable. A pause past the window or
+  // any non-'autosave' save seals the session and starts fresh.
+  const currentIdx = versions.findIndex((v) => v.version === existing.version)
+  const current = currentIdx >= 0 ? versions[currentIdx] : undefined
+  const canCoalesce =
+    opts?.reason === 'autosave' &&
+    (current?.reason === 'autosave' || current?.reason === 'created') &&
+    existing.version === maxVersion &&
+    nowMs - Date.parse(current.createdAt) < AUTOSAVE_COALESCE_WINDOW_MS
+
+  let updated: Fragment
+  if (!hasVersionedChange) {
+    updated = {
+      ...existing,
+      name: nextName,
+      description: nextDescription,
+      content: nextContent,
+      updatedAt: now,
+    }
+  } else if (canCoalesce && current) {
+    // Fold into the current session's version in place; createdAt bumps to now so
+    // the coalescing window is measured from the most recent keystroke.
+    const nextVersions = versions.slice()
+    nextVersions[currentIdx] = {
+      ...current,
+      name: nextName,
+      description: nextDescription,
+      content: nextContent,
+      createdAt: now,
+    }
+    updated = {
+      ...existing,
+      name: nextName,
+      description: nextDescription,
+      content: nextContent,
+      updatedAt: now,
+      version: current.version,
+      versions: nextVersions,
+    }
+  } else {
+    // Append a fresh version and point at it; numbering is max+1 so it never
+    // collides even when editing after switching to an older one.
+    const newVersion = maxVersion + 1
+    updated = {
+      ...existing,
+      name: nextName,
+      description: nextDescription,
+      content: nextContent,
+      updatedAt: now,
+      version: newVersion,
+      versions: [
+        ...versions,
+        {
+          version: newVersion,
+          name: nextName,
+          description: nextDescription,
+          content: nextContent,
+          createdAt: now,
+          ...(opts?.reason ? { reason: opts.reason } : {}),
+        },
+      ],
+    }
+  }
 
   await updateFragment(dataDir, storyId, updated)
   return updated

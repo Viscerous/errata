@@ -1,9 +1,11 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { api, type Fragment, type FragmentVersion } from '@/lib/api'
+import { api, ApiError, type Fragment, type FragmentVersion } from '@/lib/api'
 import { qk, q, useActiveBranchId } from '@/lib/query-keys'
 import { componentId, fragmentComponentId } from '@/lib/dom-ids'
 import { cn } from '@/lib/utils'
+import { diffRows } from '@/lib/diff'
+import { DiffRowsView } from '@/components/DiffRowsView'
 import { parseVisualRefs, readImageUrl, type BoundaryBox } from '@/lib/fragment-visuals'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -32,6 +34,25 @@ export interface FragmentPrefill {
   name: string
   description: string
   content: string
+}
+
+// Human-readable label for why a version was recorded: known reasons map to friendly
+// text, anything else (e.g. an LLM rationale) shows verbatim, null when a pre-versioning
+// version has no reason. `isLatest` (the tip) shows a still-current autosave as
+// "Autosaved"; once a newer version seals over it, it reads as "Edited".
+function describeVersionReason(reason?: string, isLatest = false): string | null {
+  if (!reason) return null
+  switch (reason) {
+    case 'created': return 'Created'
+    case 'autosave': return isLatest ? 'Autosaved' : 'Edited'
+    case 'manual-update': return 'Edited'
+    case 'llm-applyProposedChanges': return 'AI edit'
+    case 'librarian-manual-accept': return 'Librarian'
+    case 'librarian-auto-apply': return 'Librarian (auto)'
+    case 'librarian-revert-proposal': return 'Librarian revert'
+  }
+  if (reason.startsWith('librarian-')) return 'Librarian'
+  return reason
 }
 
 interface FragmentEditorProps {
@@ -145,6 +166,26 @@ export function FragmentEditor({
     }
   }, [sourceFragment, fragmentProp?.id])
 
+  // When the active timeline changes, the branch-scoped version list refetches but the
+  // fragment query is seeded with `initialData` and suppresses its own refetch, leaving
+  // `fragment.version` on the old branch — desyncing the "current version" highlight and
+  // any open preview. Force-load the fragment for the new branch (realigning the cache),
+  // drop the stale preview, and close the editor if the fragment is gone on the new
+  // branch rather than leaving a phantom on screen.
+  const prevBranchIdRef = useRef(branchId)
+  useEffect(() => {
+    if (branchId === prevBranchIdRef.current) return
+    prevBranchIdRef.current = branchId
+    setPreviewVersion(null)
+    const id = fragmentProp?.id
+    if (!id) return
+    queryClient
+      .fetchQuery({ ...q.fragment(storyId, branchId, id), staleTime: 0, retry: false })
+      .catch((err) => {
+        if (err instanceof ApiError && err.status === 404) onClose()
+      })
+  }, [branchId, fragmentProp?.id, storyId, queryClient, onClose])
+
   const invalidate = async (overrideType?: string) => {
     const fType = overrideType ?? fragment?.type
     const promises: Promise<void>[] = [
@@ -227,7 +268,9 @@ export function FragmentEditor({
   // overwrite in-progress edits. Version metadata is patched by hand below.
   const autoSaveMutation = useMutation({
     mutationFn: (data: { name: string; description: string; content: string; type?: string }) =>
-      api.fragments.update(storyId, fragment!.id, data),
+      // 'autosave' lets the server coalesce this typing session into a single version
+      // instead of appending one per debounced save. Deliberate saves omit the reason.
+      api.fragments.update(storyId, fragment!.id, { ...data, reason: 'autosave' }),
     onSuccess: (saved) => {
       const fType = fragment?.type
       queryClient.invalidateQueries({
@@ -414,24 +457,13 @@ export function FragmentEditor({
 
   const versions = (versionData?.versions ?? []).slice().sort((a, b) => b.version - a.version)
 
-  const versionDiffLines = useMemo(() => {
-    if (!fragment || !previewVersion) return [] as string[]
-    const current = fragment.content.split('\n')
-    const target = previewVersion.content.split('\n')
-    const max = Math.max(current.length, target.length)
-    const out: string[] = []
-    for (let i = 0; i < max; i += 1) {
-      const a = current[i]
-      const b = target[i]
-      if (a === b) {
-        if (a !== undefined) out.push(`  ${a}`)
-        continue
-      }
-      if (a !== undefined) out.push(`- ${a}`)
-      if (b !== undefined) out.push(`+ ${b}`)
-    }
-    return out
-  }, [fragment, previewVersion])
+  const versionDiffRows = useMemo(() => {
+    if (!previewVersion) return []
+    // before = the live editor buffer, after = the selected version. Use the buffer,
+    // not fragment.content: after an autosave the cached fragment is intentionally left
+    // stale (to avoid clobbering in-progress edits) and would make the diff read empty.
+    return diffRows(content, previewVersion.content)
+  }, [content, previewVersion])
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -439,7 +471,6 @@ export function FragmentEditor({
   }
 
   const isEditing = mode === 'edit'
-  const isPending = updateMutation.isPending
   const isMediaType = type === 'image' || type === 'icon'
 
   const handleImageUpload = async (file: File) => {
@@ -943,6 +974,8 @@ export function FragmentEditor({
                     <div className="space-y-1.5 max-h-36 overflow-auto pr-1">
                       {versions.map((v: FragmentVersion) => {
                         const isCurrent = v.version === (fragment.version ?? 1)
+                        // `versions` is sorted descending, so [0] is the tip/latest.
+                        const reasonLabel = describeVersionReason(v.reason, v.version === versions[0]?.version)
                         return (
                         <div
                           key={v.version}
@@ -956,7 +989,9 @@ export function FragmentEditor({
                               v{v.version}
                               {isCurrent && <span className="text-[0.5625rem] uppercase tracking-wide text-primary/80">current</span>}
                             </p>
-                            <p className="text-[0.625rem] text-muted-foreground truncate">{new Date(v.createdAt).toLocaleString()}</p>
+                            <p className="text-[0.625rem] text-muted-foreground truncate" title={v.reason}>
+                              {new Date(v.createdAt).toLocaleString()}{reasonLabel ? ` · ${reasonLabel}` : ''}
+                            </p>
                           </div>
                           <div className="flex items-center gap-1">
                             <Button
@@ -1009,24 +1044,12 @@ export function FragmentEditor({
                           Close
                         </Button>
                       </div>
-                      <p className="text-[0.625rem] text-muted-foreground">`-` current content, `+` selected version</p>
+                      <p className="text-[0.625rem] text-muted-foreground">`-` current content, `+` selected version; `~` edited line shows word-level changes inline</p>
                       <pre className="max-h-40 overflow-auto rounded border border-border/30 bg-background/50 p-2 text-[0.6875rem] leading-4">
-                        {versionDiffLines.length === 0 ? (
+                        {versionDiffRows.length === 0 ? (
                           'No content differences.'
                         ) : (
-                          versionDiffLines.map((line, i) => (
-                            <div
-                              key={i}
-                              className={cn(
-                                'whitespace-pre-wrap break-words',
-                                line.startsWith('- ') && 'text-red-400 bg-red-500/10',
-                                line.startsWith('+ ') && 'text-emerald-400 bg-emerald-500/10',
-                                line.startsWith('  ') && 'text-muted-foreground',
-                              )}
-                            >
-                              {line}
-                            </div>
-                          ))
+                          <DiffRowsView rows={versionDiffRows} />
                         )}
                       </pre>
                     </div>

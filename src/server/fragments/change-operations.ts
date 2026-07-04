@@ -276,6 +276,61 @@ export function excerptAround(text: string, index: number, length: number, radiu
   return `${start > 0 ? '...' : ''}${text.slice(start, end)}${end < text.length ? '...' : ''}`
 }
 
+/**
+ * Before/after excerpts for a single replaced span sharing identical surrounding
+ * context, so a client word diff shows only `oldText` → `newText`. Excerpting each
+ * side independently (two {@link excerptAround} calls) can misalign the `...` markers
+ * and surface the shared context as spurious changes.
+ */
+export function spanDiffExcerpt(
+  prefix: string,
+  oldText: string,
+  newText: string,
+  suffix: string,
+  radius = 140,
+): { before: string; after: string } {
+  const leadStart = Math.max(0, prefix.length - radius)
+  const lead = `${leadStart > 0 ? '...' : ''}${prefix.slice(leadStart)}`
+  const tailEnd = Math.min(suffix.length, radius)
+  const tail = `${suffix.slice(0, tailEnd)}${tailEnd < suffix.length ? '...' : ''}`
+  return {
+    before: `${lead}${oldText}${tail}`,
+    after: `${lead}${newText}${tail}`,
+  }
+}
+
+/**
+ * Before/after excerpts for a whole-field rewrite, centered on what changed.
+ * Truncating both sides from the start (plain {@link truncateText}) hides any change
+ * past the cap — an appended paragraph on a long field yields two identical excerpts
+ * and an empty diff. Trimming the common prefix/suffix first keeps the excerpt on the
+ * real change wherever it sits.
+ */
+export function fieldRewriteExcerpt(before: string, after: string, radius = 140): { before: string; after: string } {
+  if (before === after) return { before: truncateText(before), after: truncateText(after) }
+
+  const limit = Math.min(before.length, after.length)
+  let prefixLen = 0
+  while (prefixLen < limit && before[prefixLen] === after[prefixLen]) prefixLen++
+  let suffixLen = 0
+  while (
+    suffixLen < limit - prefixLen
+    && before[before.length - 1 - suffixLen] === after[after.length - 1 - suffixLen]
+  ) suffixLen++
+
+  const excerpt = spanDiffExcerpt(
+    before.slice(0, prefixLen),
+    before.slice(prefixLen, before.length - suffixLen),
+    after.slice(prefixLen, after.length - suffixLen),
+    before.slice(before.length - suffixLen),
+    radius,
+  )
+  return {
+    before: truncateText(excerpt.before),
+    after: truncateText(excerpt.after),
+  }
+}
+
 function fieldValue(fragment: Pick<Fragment, EditableField>, field: EditableField): string {
   return fragment[field]
 }
@@ -512,8 +567,12 @@ function replaceExactText(params: {
       next,
       diff: {
         field: params.field,
-        before: excerptAround(params.current, first, params.oldText.length),
-        after: excerptAround(next, Math.max(0, first), params.newText.length),
+        ...spanDiffExcerpt(
+          params.current.slice(0, first),
+          params.oldText,
+          params.newText,
+          params.current.slice(first + params.oldText.length),
+        ),
       },
     }
   }
@@ -527,13 +586,14 @@ function replaceExactText(params: {
   })
   if (resolved.errors) return { errors: resolved.errors }
 
-  const next = `${params.current.slice(0, resolved.index)}${params.newText}${params.current.slice(resolved.index + params.oldText.length)}`
+  const prefix = params.current.slice(0, resolved.index)
+  const suffix = params.current.slice(resolved.index + params.oldText.length)
+  const next = `${prefix}${params.newText}${suffix}`
   return {
     next,
     diff: {
       field: params.field,
-      before: excerptAround(params.current, resolved.index, params.oldText.length),
-      after: excerptAround(next, resolved.index, params.newText.length),
+      ...spanDiffExcerpt(prefix, params.oldText, params.newText, suffix),
     },
   }
 }
@@ -550,8 +610,7 @@ function applyOperationToDraft(
       draft: next,
       diffs: (Object.keys(operation.fields) as EditableField[]).map((field) => ({
         field,
-        before: truncateText(before[field]),
-        after: truncateText(next[field]),
+        ...fieldRewriteExcerpt(before[field], next[field]),
       })),
     }
   }

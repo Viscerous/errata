@@ -196,6 +196,80 @@ describe('Fragment CRUD', () => {
     expect(updated!.versions![1].reason).toBe('test-refine')
   })
 
+  it("folds a new fragment's opening autosaves into its created v1", async () => {
+    // Mirrors the create route, which seeds v1 with reason 'created' so the opening
+    // editing session stays v1 instead of jumping to v2 on the first autosave.
+    const fragment = makeFragment({
+      id: 'ch-1040',
+      type: 'character',
+      name: 'Alice',
+      description: 'v1 desc',
+      content: '',
+      version: 1,
+      versions: [
+        { version: 1, name: 'Alice', description: 'v1 desc', content: '', createdAt: new Date().toISOString(), reason: 'created' },
+      ],
+    })
+    await createFragment(dataDir, storyId, fragment)
+
+    const first = await updateFragmentVersioned(dataDir, storyId, 'ch-1040', { content: 'Once' }, { reason: 'autosave' })
+    const last = await updateFragmentVersioned(dataDir, storyId, 'ch-1040', { content: 'Once upon' }, { reason: 'autosave' })
+
+    // Both autosaves fold into the created v1 — no jump to v2.
+    expect(first!.version).toBe(1)
+    expect(last!.version).toBe(1)
+    expect(last!.versions).toHaveLength(1)
+    expect(last!.content).toBe('Once upon')
+  })
+
+  it('coalesces consecutive autosaves into a single version', async () => {
+    const fragment = makeFragment({
+      id: 'ch-1050',
+      type: 'character',
+      name: 'Alice',
+      description: 'v1 desc',
+      content: 'v1',
+    })
+    await createFragment(dataDir, storyId, fragment)
+
+    // First autosave seals v1 and opens a new version (v1 is not itself an autosave).
+    const first = await updateFragmentVersioned(dataDir, storyId, 'ch-1050', { content: 'v1a' }, { reason: 'autosave' })
+    expect(first!.version).toBe(2)
+    expect(first!.versions).toHaveLength(2)
+
+    // Subsequent autosaves fold into that same version instead of appending.
+    await updateFragmentVersioned(dataDir, storyId, 'ch-1050', { content: 'v1ab' }, { reason: 'autosave' })
+    const last = await updateFragmentVersioned(dataDir, storyId, 'ch-1050', { content: 'v1abc' }, { reason: 'autosave' })
+
+    expect(last!.version).toBe(2)
+    expect(last!.versions).toHaveLength(2)
+    expect(last!.content).toBe('v1abc')
+    expect(last!.versions![1].content).toBe('v1abc')
+    // The sealed v1 snapshot is preserved untouched.
+    expect(last!.versions![0].content).toBe('v1')
+  })
+
+  it('appends a fresh version when a deliberate save follows autosaves', async () => {
+    const fragment = makeFragment({
+      id: 'ch-1060',
+      type: 'character',
+      name: 'Alice',
+      description: 'v1 desc',
+      content: 'v1',
+    })
+    await createFragment(dataDir, storyId, fragment)
+
+    await updateFragmentVersioned(dataDir, storyId, 'ch-1060', { content: 'v2' }, { reason: 'autosave' })
+    await updateFragmentVersioned(dataDir, storyId, 'ch-1060', { content: 'v2b' }, { reason: 'autosave' })
+    // A non-autosave reason never coalesces — it seals the session with a new version.
+    const manual = await updateFragmentVersioned(dataDir, storyId, 'ch-1060', { content: 'v3' }, { reason: 'manual-update' })
+
+    expect(manual!.version).toBe(3)
+    expect(manual!.versions!.map(v => v.version)).toEqual([1, 2, 3])
+    expect(manual!.versions![1].content).toBe('v2b')
+    expect(manual!.versions![2].content).toBe('v3')
+  })
+
   it('lists all versions and switches to one without creating a new version', async () => {
     const fragment = makeFragment({
       id: 'gl-2000',

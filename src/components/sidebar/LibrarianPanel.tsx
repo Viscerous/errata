@@ -12,6 +12,8 @@ import {
 } from '@/lib/api'
 import { qk, q, useActiveBranchId } from '@/lib/query-keys'
 import { cn } from '@/lib/utils'
+import { diffRows } from '@/lib/diff'
+import { DiffRowsView } from '@/components/DiffRowsView'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -444,136 +446,22 @@ function buildMentionGroups(
   )
 }
 
-function DiffTextBlock({
-  label,
-  lines,
-  tone,
-  lineKeyPrefix,
-}: {
-  label: 'removed' | 'added'
-  lines: string[]
-  tone: 'removed' | 'added'
-  lineKeyPrefix: string
-}) {
-  const removed = tone === 'removed'
-  return (
-    <div className={cn(
-      '-mx-2 min-w-0 overflow-hidden text-[0.625rem] leading-4',
-      removed ? 'bg-red-500/10' : 'bg-emerald-500/10',
-    )}>
-      <div className={cn(
-        'px-2 py-0.5 text-[0.5rem] uppercase tracking-wide border-b border-border/10',
-        removed ? 'text-red-400/70' : 'text-emerald-400/70',
-      )}>
-        {label}
-      </div>
-      <pre className={cn(
-        'px-2 py-1.5 whitespace-pre-wrap break-words',
-        removed ? 'text-red-400' : 'text-emerald-400',
-      )}>
-        {lines.map((line, i) => (
-          <div key={`${lineKeyPrefix}-${i}`}>{line}</div>
-        ))}
-      </pre>
-    </div>
-  )
-}
-
-export function computeLineDiff(before: string, after: string): { beforeLines: string[]; afterLines: string[] } {
-  const beforeClipped = clipDiffText(before)
-  const afterClipped = clipDiffText(after)
-
-  if (!beforeClipped.length && !afterClipped.length) {
-    return { beforeLines: [], afterLines: [] }
-  }
-
-  const beforeLines = beforeClipped.split('\n')
-  const afterLines = afterClipped.split('\n')
-
-  const n = beforeLines.length
-  const m = afterLines.length
-  const dp: number[][] = Array.from({ length: n + 1 }, () => Array(m + 1).fill(0))
-
-  for (let i = 1; i <= n; i++) {
-    for (let j = 1; j <= m; j++) {
-      if (beforeLines[i - 1] === afterLines[j - 1]) {
-        dp[i][j] = dp[i - 1][j - 1] + 1
-      } else {
-        dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1])
-      }
-    }
-  }
-
-  const unchangedBeforeIndices = new Set<number>()
-  const unchangedAfterIndices = new Set<number>()
-  let i = n, j = m
-  while (i > 0 && j > 0) {
-    if (beforeLines[i - 1] === afterLines[j - 1]) {
-      unchangedBeforeIndices.add(i - 1)
-      unchangedAfterIndices.add(j - 1)
-      i--
-      j--
-    } else if (dp[i - 1][j] >= dp[i][j - 1]) {
-      i--
-    } else {
-      j--
-    }
-  }
-
-  const removed: string[] = []
-  if (beforeClipped.length > 0) {
-    for (let idx = 0; idx < n; idx++) {
-      if (!unchangedBeforeIndices.has(idx)) {
-        removed.push(beforeLines[idx])
-      }
-    }
-  }
-
-  const added: string[] = []
-  if (afterClipped.length > 0) {
-    for (let idx = 0; idx < m; idx++) {
-      if (!unchangedAfterIndices.has(idx)) {
-        added.push(afterLines[idx])
-      }
-    }
-  }
-
-  return { beforeLines: removed, afterLines: added }
-}
-
 function OperationDiffPreview({ items }: { items: ProposalDiffItem[] }) {
   return (
-    <div className="mt-1.5 space-y-2 border-t border-border/20 pt-1.5">
+    <div className="mt-1.5 space-y-2 border-t border-border/20 pt-1.5 text-[0.625rem] leading-4">
       {items.map((item) => {
-        const { beforeLines, afterLines } = computeLineDiff(item.before, item.after)
-        const showBefore = beforeLines.length > 0
-        const showAfter = afterLines.length > 0
-        if (!showBefore && !showAfter) return null
+        const rows = diffRows(clipDiffText(item.before), clipDiffText(item.after))
+        if (rows.length === 0) return null
 
         return (
-          <div key={item.key} className="space-y-1">
+          <div key={item.key} className="space-y-0.5">
             {items.length > 1 && item.fieldLabel && (
               <p className="text-[0.5rem] uppercase tracking-wide text-muted-foreground/70">
                 {item.fieldLabel}
               </p>
             )}
-            <div className="space-y-0">
-              {showBefore && (
-                <DiffTextBlock
-                  label="removed"
-                  lines={beforeLines}
-                  tone="removed"
-                  lineKeyPrefix={`${item.key}-before`}
-                />
-              )}
-              {showAfter && (
-                <DiffTextBlock
-                  label="added"
-                  lines={afterLines}
-                  tone="added"
-                  lineKeyPrefix={`${item.key}-after`}
-                />
-              )}
+            <div className="-mx-2 min-w-0 overflow-hidden">
+              <DiffRowsView rows={rows} rowClassName="px-2" />
             </div>
           </div>
         )
