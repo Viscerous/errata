@@ -30,6 +30,7 @@ export interface AgentInvocationContext {
   parentRunId: string | null
   rootRunId: string
   depth: number
+  abortSignal?: AbortSignal
   invokeAgent: <TInput, TOutput>(name: string, input: TInput) => Promise<TOutput>
 }
 

@@ -483,7 +483,7 @@ export async function buildPrewriterPreviewContext(dataDir: string, storyId: str
  * - Recent prose (for continuity)
  * - The prewriter's writing brief
  *
- * All other context (characters, guidelines, knowledge, summary, shortlists)
+ * All other context (characters, guidelines, knowledge, summary, catalogs)
  * is omitted — the writer relies on the brief instead.
  */
 export function createWriterBriefBlocks(

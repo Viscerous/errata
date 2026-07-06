@@ -7,12 +7,14 @@ import {
 import {
   buildFragmentContextLanes,
   customContextFragmentTypes,
-  findFragmentContextLane,
-  fragmentContextBlock,
+  fragmentCatalogBlock,
+  fragmentFullContextBlocksBySource,
   isBuiltinContextFragmentType,
+  markdownSection,
   renderFullFragmentSheet,
   storySummaryBlock,
 } from '../llm/fragment-context-blocks'
+import { contextSignalMap, selectAttentionContext } from '../llm/context-selection'
 import { baseBlockContext, type AgentBlockContext } from '../agents/agent-block-context'
 import type { Fragment, StoryMeta } from '../fragments/schema'
 import { getStory, listFragments, getFragment } from '../fragments/storage'
@@ -32,34 +34,67 @@ import {
   loadSystemPromptFragments,
 } from '../agents/block-helpers'
 import {
-  allCharactersBlock,
+  allCharactersCatalogBlock,
   fragmentSummaryCatalogBlocks,
-  pinnedFragmentSummaryBlocks,
+  pinnedFragmentCatalogBlocks,
 } from '../agents/fragment-summary-blocks'
+import {
+  fragmentCandidateIds,
+  listRoutableMemoryFragments,
+  mergeFragmentCandidates,
+  writerProvenanceFragmentCandidates,
+} from './candidates'
 
 // ─── Librarian Analyze ───
 
 export function buildAnalyzeSystemPrompt(opts?: { 
   disableDirections?: boolean; 
   disableSuggestions?: boolean;
+  disabledTools?: Iterable<string>;
+  enabledTools?: Iterable<string>;
   customFragmentTypes?: Array<{ type: string; name: string }>;
 }): string {
   // An explicit, ordered procedure: it keeps the step-by-step robustness of a
   // checklist while leaving each tool's parameters to its schema (no catalog to
-  // drift). Steps for disabled tools are omitted and the rest renumber, so the
-  // prompt never names a tool the model wasn't given.
-  const steps: string[] = [
-    'Scan the new prose against every fragment in your context and call **reportAnalysis** once with everything you find. Report each mention as the fragment\'s exact ID plus the exact text used in the prose — a direct name, nickname, title, role, or distinctive key term. When an ambiguous word refers to two entities, report a longer, unique surrounding phrase for each. Never report a bare pronoun ("I", "she", "they") as mention text — an entity the passage refers to only by pronoun gets no mention.',
-  ]
-  if (!opts?.disableSuggestions) {
+  // drift). Steps for disabled tools are omitted and the rest are worded as an
+  // ordered sequence, so the final enabled action is semantically terminal
+  // without adding a separate "say nothing" instruction.
+  const disabledTools = new Set(opts?.disabledTools ?? [])
+  const enabledTools = opts?.enabledTools ? new Set(opts.enabledTools) : null
+  const hasTool = (toolName: string): boolean => enabledTools
+    ? enabledTools.has(toolName)
+    : !disabledTools.has(toolName)
+  const canReport = hasTool('reportAnalysis')
+  const canSuggest = opts?.disableSuggestions !== true && hasTool('proposeFragmentChanges')
+  const canReadFragments = canSuggest && hasTool('readFragments')
+  const canSuggestDirections = opts?.disableDirections !== true && hasTool('proposeDirections')
+  const canFinish = hasTool('finishAnalysis')
+  const actions: string[] = []
+
+  actions.push(canReport
+    ? 'scan the new prose against the provided context and call **reportAnalysis** once with the prose summary, exact fragment mentions, durable-memory candidateFragmentIds, and continuity signals. Mentions must use the fragment\'s exact ID plus exact prose text: a direct name, nickname, title, role, or distinctive key term; never a bare pronoun ("I", "she", "they"). If a surface term is ambiguous, include enough surrounding words to identify the intended fragment. Set needsProposalPass when the prose changes lasting facts or introduces durable story memory.'
+    : 'scan the new prose against the provided context. The reportAnalysis tool is disabled, so do not invent a replacement reporting tool.')
+
+  if (canSuggest) {
     const customTypes = opts?.customFragmentTypes ?? []
     const typeNamesList = ['characters', 'knowledge', ...customTypes.map(t => t.name.toLowerCase())].join(', ')
-    steps.push(`Use **proposeFragmentChanges** to update existing fragments when the prose changes a lasting fact (state, allegiance, title, location, relationships) — keep edits minimal — and to create genuinely new ${typeNamesList} with create_fragment operations using plain fragment names; IDs are assigned by the system.`)
+    const readGuidance = canReadFragments
+      ? 'read any fragment that is not already shown in full before proposing edits, or when validation asks for current content/baseHash.'
+      : 'use only fragments already shown in full when proposing edits; readFragments is disabled.'
+    actions.push(`${readGuidance}; then call **proposeFragmentChanges** for minimal durable updates or genuinely new ${typeNamesList}; use create_fragment operations with plain names, and the system assigns IDs.`)
   }
-  if (!opts?.disableDirections) {
-    steps.push('Call **proposeDirections** with next directions for the story.')
+  if (canSuggestDirections) {
+    actions.push('call **proposeDirections** with next directions for the story.')
   }
-  steps.push('Finish with the exact text "Analysis complete" and nothing else.')
+  if (canFinish) {
+    actions.push('call **finishAnalysis** upon completion of all steps.')
+  }
+
+  const sentenceCase = (action: string): string => action.charAt(0).toUpperCase() + action.slice(1)
+  const steps = actions.map((action, index) => {
+    if (index === actions.length - 1) return `Finally, ${action}`
+    return sentenceCase(action)
+  })
   const numbered = steps.map((s, i) => `${i + 1}. ${s}`).join('\n')
 
   return `
@@ -75,22 +110,10 @@ ${numbered}
 export const ANALYZE_SYSTEM_PROMPT = buildAnalyzeSystemPrompt()
 
 /**
- * The characters the writer worked from on a prose fragment, resolved to full
- * fragments from its forwarded `writerContextIds`. Shared by the analyze run and
- * its context preview so both populate the character-recent block the same way.
- */
-export function recentCastFromFragment(allCharacters: Fragment[], fragment: Fragment | null | undefined): Fragment[] {
-  const ids = new Set(
-    Array.isArray(fragment?.meta?.writerContextIds) ? (fragment.meta.writerContextIds as string[]) : [],
-  )
-  return allCharacters.filter((c) => ids.has(c.id))
-}
-
-/**
  * Build the analyze agent's block context. Single source for both a real run and
  * the context preview, so neither can drift from the other — the only difference
  * is the input: the run passes the prose being analyzed, the preview passes the
- * latest prose (for the recent cast) with a placeholder new-prose block.
+ * latest prose with a placeholder new-prose block.
  */
 export async function buildAnalyzeContext(
   dataDir: string,
@@ -124,7 +147,10 @@ export async function buildAnalyzeContext(
     // Author-pinned characters are always-relevant, so analyze loads them in full
     // independent of what the prose forwarded (writerContextIds).
     stickyCharacters: allCharacters.filter((c) => c.sticky),
-    recentCharacters: recentCastFromFragment(allCharacters, input.proseFragment),
+    stickyKnowledge: allKnowledge.filter((k) => k.sticky),
+    recentCharacters: ctxState.recentCharacters ?? [],
+    recentKnowledge: ctxState.recentKnowledge ?? [],
+    recentCustomFragments: ctxState.recentCustomFragments ?? [],
   }
 }
 
@@ -140,6 +166,8 @@ export function createLibrarianAnalyzeBlocks(ctx: AgentBlockContext): ContextBlo
     content: buildAnalyzeSystemPrompt({
       disableDirections: ctx.story.settings?.disableLibrarianDirections === true,
       disableSuggestions: ctx.story.settings?.disableLibrarianSuggestions === true,
+      disabledTools: ctx.disabledTools,
+      enabledTools: ctx.enabledTools,
       customFragmentTypes: ctx.story.settings.customFragmentTypes,
     }).trim(),
     order: 100,
@@ -155,102 +183,82 @@ export function createLibrarianAnalyzeBlocks(ctx: AgentBlockContext): ContextBlo
     placeholder: STORY_SUMMARY_PLACEHOLDER,
   }))
 
-  // Pinned and recent characters are preloaded in full so edits land on the
-  // current sheet; everyone else stays a one-line summary (readFragments reads any
-  // in full). Each character lands in exactly one block: pinned takes precedence,
-  // then recent, then the shortlist.
   const lanes = buildFragmentContextLanes(ctx)
-  const characterLane = findFragmentContextLane(lanes, 'character')
-  const sticky = characterLane?.sticky ?? []
-  const stickyIds = new Set(sticky.map((c) => c.id))
-  const recent = characterLane?.recent ?? []
-  const recentIds = new Set(recent.map((c) => c.id))
-
-  // Author-pinned, always-relevant — full and in their own block whether or not
-  // they also appear in the recent prose, so a pin reliably shows up here.
-  if (sticky.length > 0) {
-    pushFragmentBlock(fragmentContextBlock({
-      id: 'character-sticky',
-      type: 'character',
-      label: 'Characters',
-      fragments: sticky,
-      mode: 'full',
-      scope: 'pinned',
-      order: 195,
-      heading: 'Pinned Characters',
-      renderFragment: renderFullFragmentSheet,
-      separator: '\n\n',
-    }))
+  const selection = selectAttentionContext(lanes, {
+    runner: 'librarian.analyze',
+    catalogScope: 'all',
+    fullSignalSources: ['writer-context', 'current-observation', 'router'],
+  },
+    contextSignalMap({
+      fragmentIds: ctx.attentionCandidateIds,
+      signals: ctx.attentionCandidateSignals,
+    }),
+  )
+  const contextTypeOrder = ['character', 'knowledge', ...lanes.filter((lane) => !isBuiltinContextFragmentType(lane.type)).map((lane) => lane.type)]
+  const orderedSelection = {
+    ...selection,
+    lanes: contextTypeOrder
+      .map((type) => selection.lanes.find((lane) => lane.type === type))
+      .filter((lane): lane is NonNullable<typeof lane> => Boolean(lane)),
   }
 
-  const recentNonPinned = recent.filter((c) => !stickyIds.has(c.id))
-  if (recentNonPinned.length > 0) {
-    pushFragmentBlock(fragmentContextBlock({
-      id: 'character-recent',
-      type: 'character',
-      label: 'Characters',
-      fragments: recentNonPinned,
-      mode: 'full',
-      scope: 'recent',
-      order: 200,
-      renderFragment: renderFullFragmentSheet,
-      separator: '\n\n',
-    }))
-  }
-
-  const shortlistCharacters = (characterLane?.all ?? []).filter((c) => !stickyIds.has(c.id) && !recentIds.has(c.id))
-  pushFragmentBlock(fragmentContextBlock({
-    id: 'character-shortlist',
-    type: 'character',
-    label: 'Characters',
-    fragments: shortlistCharacters,
-    mode: 'summary-index',
-    scope: 'available',
-    order: 210,
-    editable: true,
+  blocks.push(...fragmentFullContextBlocksBySource({
+    selection: orderedSelection,
+    renderFragment: renderFullFragmentSheet,
+    partitions: [
+      {
+        id: 'fragment-pinned',
+        heading: 'Pinned Fragments',
+        scope: 'pinned',
+        order: 195,
+        intro: 'These fragments are author-pinned standing context. They are not evidence that the new prose mentions them.',
+        matches: (sources) => sources.includes('sticky'),
+      },
+      {
+        id: 'fragment-writer-context',
+        heading: 'Writer Context For This Passage',
+        scope: 'writer-context',
+        order: 200,
+        intro: 'These fragments were in the writer working set for this prose passage, either preloaded or read while drafting.',
+        matches: (sources) => sources.includes('writer-context'),
+      },
+      {
+        id: 'fragment-recent',
+        heading: 'Recent Fragments',
+        scope: 'recent',
+        order: 205,
+        intro: 'These fragments are active continuity context from the recent prose window.',
+        matches: (sources) => sources.includes('recent-context'),
+      },
+      {
+        id: 'fragment-candidates',
+        heading: 'Candidate Fragments',
+        scope: 'candidate',
+        order: 210,
+        intro: 'These fragments are candidate memory targets. Treat them as relevant context, not as confirmed prose mentions.',
+        matches: (sources) => sources.includes('current-observation') || sources.includes('router'),
+      },
+    ],
   }))
 
-  const allKnowledge = findFragmentContextLane(lanes, 'knowledge')?.all ?? []
-  if (allKnowledge.length > 0) {
-    // Knowledge is delivered in full (bounded, read-mostly — analyze checks
-    // contradictions against it).
-    pushFragmentBlock(fragmentContextBlock({
-      id: 'knowledge',
-      type: 'knowledge',
-      label: 'Knowledge',
-      fragments: allKnowledge,
-      mode: 'full',
-      scope: 'all',
-      order: 300,
-      renderFragment: renderFullFragmentSheet,
-      separator: '\n\n',
-    }))
-  }
-
-  let customOrder = 320
-  for (const lane of lanes) {
-    if (isBuiltinContextFragmentType(lane.type)) continue
-    pushFragmentBlock(fragmentContextBlock({
-      id: `${lane.type}-shortlist`,
+  pushFragmentBlock(fragmentCatalogBlock({
+    sections: orderedSelection.lanes.map((lane) => ({
       type: lane.type,
       label: lane.label,
-      fragments: lane.all,
-      mode: 'summary-index',
-      scope: 'available',
-      order: customOrder++,
-      editable: true,
-    }))
-  }
+      fragments: lane.catalog,
+    })),
+    order: 390,
+    editable: true,
+  }))
 
   if (ctx.newProse) {
     blocks.push({
       id: 'prose-new',
       role: 'user',
-      content: [
-        '## New Prose Fragment',
+      content: markdownSection(2, 'New Prose Fragment', [
         `Fragment ID: ${ctx.newProse.id}`,
         ctx.newProse.content,
-      ].join('\n'),
+      ]),
       order: 400,
       source: 'builtin',
     })
@@ -263,16 +271,28 @@ export async function buildAnalyzePreviewContext(dataDir: string, storyId: strin
   const story = await getStory(dataDir, storyId)
   if (!story) throw new Error(`Story ${storyId} not found`)
 
-  // Resolve the recent cast from the latest prose's forwarded writer context, the
-  // same input a run uses; the new-prose block is a placeholder until a run fills it.
+  // Use the latest prose as the preview stand-in; the new-prose block is a
+  // placeholder until a run fills it.
   const activeProseIds = await getActiveProseIds(dataDir, storyId)
   const latestProseId = activeProseIds.at(-1)
   const latestProse = latestProseId ? await getFragment(dataDir, storyId, latestProseId) : null
 
-  return buildAnalyzeContext(dataDir, storyId, story, {
+  const context = await buildAnalyzeContext(dataDir, storyId, story, {
     proseFragment: latestProse,
     newProse: { id: '(the new fragment\'s ID)', content: '(the new prose passage will appear here)' },
   })
+  if (latestProse) {
+    const routableFragments = await listRoutableMemoryFragments(dataDir, storyId, context.story)
+    const candidates = mergeFragmentCandidates(
+      writerProvenanceFragmentCandidates(context.story, latestProse, routableFragments),
+    )
+    context.attentionCandidateIds = fragmentCandidateIds(candidates)
+    context.attentionCandidateSignals = candidates.map((candidate) => ({
+      fragmentId: candidate.fragmentId,
+      sources: candidate.sources,
+    }))
+  }
+  return context
 }
 
 // ─── Librarian Chat ───
@@ -317,14 +337,7 @@ export function createLibrarianChatBlocks(ctx: AgentBlockContext): ContextBlock[
 
   const sysFrags = systemFragmentsBlock(ctx)
   if (sysFrags) {
-    // Chat uses a different format for system fragments (dash-list vs ## headers)
-    blocks.push({
-      id: 'system-fragments',
-      role: 'system',
-      content: ctx.systemPromptFragments.map(f => `- ${f.id}: ${f.name} — ${f.content}`).join('\n'),
-      order: 200,
-      source: 'builtin',
-    })
+    blocks.push(sysFrags)
   }
 
   blocks.push(storyInfoBlock(ctx))
@@ -367,7 +380,7 @@ export function createLibrarianRefineBlocks(ctx: AgentBlockContext): ContextBloc
     instructionsBlock('librarian.refine.system', ctx),
     storyInfoBlock(ctx),
     recentProseBlock(ctx),
-    ...pinnedFragmentSummaryBlocks(ctx),
+    ...pinnedFragmentCatalogBlocks(ctx),
     targetFragmentBlock(ctx,
       'fragment to refine',
       'No specific instructions provided. Improve this fragment based on recent story events for consistency, clarity, and depth.',
@@ -402,34 +415,29 @@ export function createProseTransformBlocks(ctx: AgentBlockContext): ContextBlock
     blocks.push({
       id: 'operation',
       role: 'user',
-      content: [
-        `Operation: ${ctx.operation}`,
-        ctx.guidance || '',
-      ].join('\n').trim(),
+      content: markdownSection(2, 'Operation', [
+        ctx.operation,
+        markdownSection(3, 'Guidance', ctx.guidance || '(none)'),
+      ]),
       order: 100,
       source: 'builtin',
     })
   }
 
-  blocks.push({
+  const summary = storySummaryBlock(ctx.story.summary, {
     id: 'story-summary',
-    role: 'user',
-    content: [
-      'Story summary:',
-      ctx.story.summary || STORY_SUMMARY_PLACEHOLDER,
-    ].join('\n'),
     order: 200,
-    source: 'builtin',
+    placeholder: STORY_SUMMARY_PLACEHOLDER,
   })
+  if (summary) blocks.push(summary)
 
   if (ctx.sourceContent) {
     blocks.push({
       id: 'source',
       role: 'user',
-      content: [
-        'Fragment context:',
-        ctx.sourceContent,
-      ].join('\n'),
+      content: markdownSection(2, 'Source Prose',
+        markdownSection(3, 'Current Source', ctx.sourceContent)
+      ),
       order: 300,
       source: 'builtin',
     })
@@ -439,16 +447,11 @@ export function createProseTransformBlocks(ctx: AgentBlockContext): ContextBlock
     blocks.push({
       id: 'selection',
       role: 'user',
-      content: [
-        'Selected span to transform:',
-        ctx.selectedText,
-        '',
-        'Context before selected span:',
-        ctx.contextBefore?.trim() || '(none)',
-        '',
-        'Context after selected span:',
-        ctx.contextAfter?.trim() || '(none)',
-      ].join('\n'),
+      content: markdownSection(2, 'Selected Span', [
+        markdownSection(3, 'Text to Transform', ctx.selectedText),
+        markdownSection(3, 'Context Before', ctx.contextBefore?.trim() || '(none)'),
+        markdownSection(3, 'Context After', ctx.contextAfter?.trim() || '(none)'),
+      ]),
       order: 400,
       source: 'builtin',
     })
@@ -512,8 +515,8 @@ export function createOptimizeCharacterBlocks(ctx: AgentBlockContext): ContextBl
     instructionsBlock('librarian.optimize-character.system', ctx),
     storyInfoBlock(ctx),
     recentProseBlock(ctx),
-    ...pinnedFragmentSummaryBlocks(ctx, { includeCharacters: false }),
-    allCharactersBlock(ctx),
+    ...pinnedFragmentCatalogBlocks(ctx, { includeCharacters: false }),
+    allCharactersCatalogBlock(ctx),
     targetFragmentBlock(ctx,
       'character to optimize',
       'No specific instructions provided. Optimize this character for depth, causality, and friction using the methodology.',

@@ -59,7 +59,7 @@ export const HELP_SECTIONS: HelpSection[] = [
           <>
             <P>
               When you generate, Errata assembles your story context — prose history, sticky fragments,
-              and shortlists — into a prompt, then streams a continuation from the model.
+              and catalog rows — into a prompt, then streams a continuation from the model.
             </P>
             <P>
               The pipeline follows this sequence: your author input is combined with the story context,
@@ -67,7 +67,7 @@ export const HELP_SECTIONS: HelpSection[] = [
               is streamed back to you in real time.
             </P>
             <Tip>
-              The model sees your sticky fragments in full and non-sticky fragments as one-line shortlists.
+              The model sees your sticky fragments in full and non-sticky fragments as one-line catalog rows.
               Use the <Mono>sticky</Mono> toggle on fragments to control what the model always sees.
             </Tip>
           </>
@@ -90,7 +90,7 @@ export const HELP_SECTIONS: HelpSection[] = [
                 {[
                   ['1', 'Load fragments', 'All fragments are loaded and sorted by type — prose, guidelines, characters, knowledge.'],
                   ['2', 'Apply context limit', 'Recent prose is selected from the chain based on your Context Limit setting (fragment count, token budget, or character budget).'],
-                  ['3', 'Split sticky / non-sticky', 'Sticky fragments go in full. Non-sticky become one-line shortlist entries (ID, name, description).'],
+                  ['3', 'Split sticky / non-sticky', 'Sticky fragments go in full. Non-sticky become one-line catalog rows (ID, name, description).'],
                   ['4', 'Plugin beforeContext hooks', 'Enabled plugins can modify the context state — adding, removing, or reordering fragments before they\'re rendered.'],
                   ['5', 'Assemble messages', 'Everything is rendered into a system message and a user message.'],
                   ['6', 'Plugin beforeGeneration hooks', 'Plugins get a final chance to modify the assembled messages before they\'re sent.'],
@@ -122,7 +122,7 @@ export const HELP_SECTIONS: HelpSection[] = [
                 'Story name and description',
                 'Rolling summary (maintained by the librarian)',
                 'Sticky fragments (user-placed) — full content',
-                'Non-sticky shortlists — one-line per fragment',
+                'Non-sticky catalog rows — one line per fragment',
                 'Recent prose from the chain (context-limited)',
                 'Your author input',
               ].map((item, i) => (
@@ -584,7 +584,7 @@ export const HELP_SECTIONS: HelpSection[] = [
                   ['story-info', 'Story name and description.'],
                   ['summary', 'Rolling story summary maintained by the librarian.'],
                   ['user-fragments', 'Sticky fragments placed in "user" position (if any).'],
-                  ['shortlist-*', 'One-line listings of non-sticky guidelines, knowledge, characters.'],
+                  ['fragment-catalog', 'One-line catalog rows grouped by fragment type.'],
                   ['prose', 'Recent prose from the chain, limited by your context limit setting.'],
                   ['author-input', 'Your direction for what should happen next.'],
                 ].map(([name, desc]) => (
@@ -615,7 +615,7 @@ export const HELP_SECTIONS: HelpSection[] = [
             <P>
               Common uses: disable the <Mono>tools</Mono> block if you don't want the model to call tools,
               disable <Mono>summary</Mono> if the librarian's summary is causing issues, or disable
-              shortlist blocks to keep the prompt shorter.
+              catalog rows to keep the prompt shorter.
             </P>
             <Tip>
               Disabling a block doesn't delete anything — toggle it back on anytime to restore it.
@@ -746,9 +746,9 @@ export const HELP_SECTIONS: HelpSection[] = [
                   ['ctx.stickyGuidelines', 'Pinned guideline fragments (full content).'],
                   ['ctx.stickyKnowledge', 'Pinned knowledge fragments (full content).'],
                   ['ctx.stickyCharacters', 'Pinned character fragments (full content).'],
-                  ['ctx.guidelineShortlist', 'Non-pinned guidelines.'],
-                  ['ctx.knowledgeShortlist', 'Non-pinned knowledge.'],
-                  ['ctx.characterShortlist', 'Non-pinned characters.'],
+                  ['ctx.guidelineCatalog', 'Non-pinned guidelines rendered as catalog rows.'],
+                  ['ctx.knowledgeCatalog', 'Non-pinned knowledge rendered as catalog rows.'],
+                  ['ctx.characterCatalog', 'Non-pinned characters rendered as catalog rows.'],
                   ['ctx.authorInput', 'The author\'s current direction.'],
                   ['ctx.getFragment(id)', 'Fetch any fragment by ID (async — use await).'],
                   ['ctx.getFragments(type?)', 'List all fragments, optionally filtered by type (async).'],
@@ -843,7 +843,7 @@ return rules.map(r => r.content).join('\\n')`}</div>
             <P>
               <strong className="text-foreground/75">Characters</strong> — Character profiles, backstories,
               and personality descriptions. Sticky characters are always visible to the model; non-sticky
-              appear as shortlist entries the model can look up.
+              appear as catalog rows the model can look up.
             </P>
             <P>
               <strong className="text-foreground/75">Guidelines</strong> — Writing style instructions, tone
@@ -869,7 +869,7 @@ return rules.map(r => r.content).join('\\n')`}</div>
             </P>
             <P>
               <strong className="text-foreground/75">Non-sticky fragments</strong> appear only as one-line
-              entries in a shortlist (ID, name, description). The model can use tools to look up their
+              entries in a catalog (ID, name, description). The model can use tools to look up their
               full content if needed. This keeps the prompt focused while still making information accessible.
             </P>
             <Tip>
@@ -1146,8 +1146,8 @@ return rules.map(r => r.content).join('\\n')`}</div>
               librarian from running automatically after prose generation.
             </P>
             <P>
-              <strong className="text-foreground/75">Disable directions</strong> turns off story
-              direction suggestions during analysis, while
+              <strong className="text-foreground/75">Disable directions</strong> turns off guided story
+              direction suggestions, while
               <strong className="text-foreground/75"> Disable suggestions</strong> turns off fragment
               create, update, and edit suggestions. These let you keep summary and contradiction tracking while
               reducing proactive librarian output.

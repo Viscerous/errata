@@ -3,6 +3,7 @@ import { tool } from 'ai'
 import { z } from 'zod/v4'
 import { createTempDir, makeTestSettings } from '../setup'
 import { createFragment, createStory } from '@/server/fragments/storage'
+import { initProseChain } from '@/server/fragments/prose-chain'
 import type { Fragment, StoryMeta } from '@/server/fragments/schema'
 import { ensureCoreAgentsRegistered } from '@/server/agents'
 import { agentBlockRegistry } from '@/server/agents/agent-block-registry'
@@ -35,9 +36,10 @@ function makeContext(overrides: Partial<AgentBlockContext> = {}): AgentBlockCont
     stickyGuidelines: [],
     stickyKnowledge: [],
     stickyCharacters: [],
-    guidelineShortlist: [],
-    knowledgeShortlist: [],
-    characterShortlist: [],
+    guidelineCatalog: [],
+    knowledgeCatalog: [],
+    characterCatalog: [],
+    customFragmentCatalogs: [],
     systemPromptFragments: [],
     ...overrides,
   }
@@ -135,6 +137,47 @@ describe('compileAgentContext', () => {
     expect(result.tools.toolB).toBeUndefined()
   })
 
+  it('builds default prompt from the same disabled tools config', async () => {
+    const tools = {
+      reportAnalysis: tool({
+        description: 'Report analysis',
+        inputSchema: z.object({}),
+        execute: async () => ({ ok: true }),
+      }),
+      proposeFragmentChanges: tool({
+        description: 'Propose fragment changes',
+        inputSchema: z.object({}),
+        execute: async () => ({ ok: true }),
+      }),
+      proposeDirections: tool({
+        description: 'Propose directions',
+        inputSchema: z.object({}),
+        execute: async () => ({ ok: true }),
+      }),
+      finishAnalysis: tool({
+        description: 'Finish analysis',
+        inputSchema: z.object({}),
+        execute: async () => ({ ok: true }),
+      }),
+    }
+    await saveAgentBlockConfig(dataDir, STORY_ID, 'librarian.analyze', {
+      customBlocks: [],
+      overrides: {},
+      blockOrder: [],
+      disabledTools: ['proposeDirections', 'proposeFragmentChanges'],
+    })
+
+    const result = await compileAgentContext(dataDir, STORY_ID, 'librarian.analyze', makeContext(), tools)
+    const instructions = result.blocks.find((block) => block.id === 'instructions')!
+
+    expect(Object.keys(result.tools)).toEqual(['reportAnalysis', 'finishAnalysis'])
+    expect(instructions.content).toContain('1. Scan the new prose')
+    expect(instructions.content).toContain('2. Finally, call **finishAnalysis**')
+    expect(instructions.content).toContain('reportAnalysis')
+    expect(instructions.content).not.toContain('proposeDirections')
+    expect(instructions.content).not.toContain('proposeFragmentChanges')
+  })
+
   it('applies block overrides from config', async () => {
     await saveAgentBlockConfig(dataDir, STORY_ID, 'librarian.analyze', {
       customBlocks: [],
@@ -214,6 +257,53 @@ describe('compileAgentContext', () => {
 
     expect(summaryBlock.content).toContain('Fragment-backed summary.')
     expect(summaryBlock.content).not.toContain('(summary will appear here)')
+  })
+
+  it('seeds analyze preview writer context from the latest prose provenance', async () => {
+    await createFragment(dataDir, STORY_ID, {
+      id: 'ch-0001',
+      type: 'character',
+      name: 'Alice',
+      description: 'Gate captain',
+      content: 'Alice keeps watch at the north gate.',
+      tags: [],
+      refs: [],
+      sticky: false,
+      placement: 'user',
+      createdAt: now,
+      updatedAt: now,
+      order: 0,
+      meta: {},
+      archived: false,
+    })
+    await createFragment(dataDir, STORY_ID, {
+      id: 'pr-0001',
+      type: 'prose',
+      name: 'Opening',
+      description: 'Opening prose',
+      content: 'The gate captain watched the road.',
+      tags: [],
+      refs: [],
+      sticky: false,
+      placement: 'user',
+      createdAt: now,
+      updatedAt: now,
+      order: 0,
+      meta: { writerContextIds: ['ch-0001'] },
+      archived: false,
+    })
+    await initProseChain(dataDir, STORY_ID, 'pr-0001')
+
+    const def = agentBlockRegistry.get('librarian.analyze')!
+    const ctx = await def.buildPreviewContext(dataDir, STORY_ID)
+    const blocks = def.createDefaultBlocks(ctx)
+
+    expect(ctx.attentionCandidateIds).toEqual(['ch-0001'])
+    const writerContext = blocks.find((block) => block.id === 'fragment-writer-context')
+    expect(writerContext).toBeDefined()
+    expect(writerContext!.content).toContain('## Writer Context For This Passage')
+    expect(writerContext!.content).toContain('Alice keeps watch at the north gate.')
+    expect(blocks.find((block) => block.id === 'fragment-candidates')).toBeUndefined()
   })
 
   it('works with librarian.chat agent', async () => {

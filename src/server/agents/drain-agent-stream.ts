@@ -8,6 +8,74 @@ export interface DrainedAgentStream {
   finishReason: string
 }
 
+export interface DrainAgentStreamOptions {
+  abortSignal?: AbortSignal
+  /**
+   * Maximum time to wait for the next SDK stream part. This catches provider
+   * connections that have stopped producing data but have not closed cleanly.
+   */
+  idleTimeoutMs?: number
+  onIdleTimeout?: () => void
+}
+
+function abortError(): Error {
+  const error = new Error('Agent stream aborted')
+  error.name = 'AbortError'
+  return error
+}
+
+function idleTimeoutError(timeoutMs: number): Error {
+  const error = new Error(`Agent stream idle timeout after ${timeoutMs}ms`)
+  error.name = 'TimeoutError'
+  return error
+}
+
+function guardedNext(
+  iterator: AsyncIterator<unknown>,
+  options: DrainAgentStreamOptions,
+): Promise<IteratorResult<unknown>> {
+  if (options.abortSignal?.aborted) return Promise.reject(abortError())
+
+  const idleTimeoutMs = options.idleTimeoutMs ?? 0
+  if (!options.abortSignal && idleTimeoutMs <= 0) return iterator.next()
+
+  return new Promise((resolve, reject) => {
+    let settled = false
+    let idleTimer: ReturnType<typeof setTimeout> | null = null
+
+    const cleanup = () => {
+      if (idleTimer) clearTimeout(idleTimer)
+      options.abortSignal?.removeEventListener('abort', onAbort)
+    }
+    const resolveOnce = (value: IteratorResult<unknown>) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      resolve(value)
+    }
+    const rejectOnce = (error: unknown) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      reject(error)
+    }
+    const onAbort = () => rejectOnce(abortError())
+
+    options.abortSignal?.addEventListener('abort', onAbort, { once: true })
+    if (idleTimeoutMs > 0) {
+      idleTimer = setTimeout(() => {
+        options.onIdleTimeout?.()
+        rejectOnce(idleTimeoutError(idleTimeoutMs))
+      }, idleTimeoutMs)
+    }
+
+    iterator.next().then(
+      (next) => resolveOnce(next),
+      (error) => rejectOnce(error),
+    )
+  })
+}
+
 /**
  * Drains an AI SDK v6 `fullStream`, translating each part into an
  * `AgentStreamEvent` and accumulating the text/reasoning/tool-calls/step-count/
@@ -27,6 +95,7 @@ export interface DrainedAgentStream {
 export async function drainAgentStream(
   fullStream: AsyncIterable<unknown>,
   onEvent?: (event: AgentStreamEvent) => void,
+  options: DrainAgentStreamOptions = {},
 ): Promise<DrainedAgentStream> {
   let fullText = ''
   let fullReasoning = ''
@@ -35,49 +104,63 @@ export async function drainAgentStream(
   const toolCallArgsById = new Map<string, Record<string, unknown>>()
   let stepCount = 0
   let finishReason = 'unknown'
+  const iterator = fullStream[Symbol.asyncIterator]()
+  let completed = false
 
-  for await (const part of fullStream) {
-    const p = part as Record<string, unknown>
-    let event: AgentStreamEvent | null = null
+  try {
+    for (;;) {
+      const next = await guardedNext(iterator, options)
+      if (next.done) {
+        completed = true
+        break
+      }
+      const p = next.value as Record<string, unknown>
+      let event: AgentStreamEvent | null = null
 
-    switch (p.type) {
-      case 'text-delta': {
-        const text = (p.text ?? '') as string
-        fullText += text
-        event = { type: 'text', text }
-        break
+      switch (p.type) {
+        case 'text-delta': {
+          const text = (p.text ?? '') as string
+          fullText += text
+          event = { type: 'text', text }
+          break
+        }
+        case 'reasoning-delta': {
+          const text = (p.text ?? '') as string
+          fullReasoning += text
+          event = { type: 'reasoning', text }
+          break
+        }
+        case 'tool-call': {
+          const input = (p.input ?? {}) as Record<string, unknown>
+          const toolCallId = p.toolCallId as string
+          toolCallArgsById.set(toolCallId, input)
+          event = { type: 'tool-call', id: toolCallId, toolName: p.toolName as string, args: input }
+          break
+        }
+        case 'tool-result': {
+          const toolCallId = p.toolCallId as string
+          const toolName = (p.toolName as string) ?? ''
+          toolCalls.push({ toolName, args: toolCallArgsById.get(toolCallId) ?? {}, result: p.output })
+          event = { type: 'tool-result', id: toolCallId, toolName, result: p.output }
+          break
+        }
+        // `finish-step` fires once per LLM step; `finish` fires once for the
+        // whole generation. Count steps, capture the final reason.
+        case 'finish-step':
+          stepCount++
+          break
+        case 'finish':
+          finishReason = (p.finishReason as string) ?? 'unknown'
+          break
       }
-      case 'reasoning-delta': {
-        const text = (p.text ?? '') as string
-        fullReasoning += text
-        event = { type: 'reasoning', text }
-        break
-      }
-      case 'tool-call': {
-        const input = (p.input ?? {}) as Record<string, unknown>
-        const toolCallId = p.toolCallId as string
-        toolCallArgsById.set(toolCallId, input)
-        event = { type: 'tool-call', id: toolCallId, toolName: p.toolName as string, args: input }
-        break
-      }
-      case 'tool-result': {
-        const toolCallId = p.toolCallId as string
-        const toolName = (p.toolName as string) ?? ''
-        toolCalls.push({ toolName, args: toolCallArgsById.get(toolCallId) ?? {}, result: p.output })
-        event = { type: 'tool-result', id: toolCallId, toolName, result: p.output }
-        break
-      }
-      // `finish-step` fires once per LLM step; `finish` fires once for the
-      // whole generation. Count steps, capture the final reason.
-      case 'finish-step':
-        stepCount++
-        break
-      case 'finish':
-        finishReason = (p.finishReason as string) ?? 'unknown'
-        break
+
+      if (event) onEvent?.(event)
     }
-
-    if (event) onEvent?.(event)
+  } finally {
+    if (!completed) {
+      const cleanup = iterator.return?.()
+      void cleanup?.catch(() => {})
+    }
   }
 
   return { fullText, fullReasoning, toolCalls, stepCount, finishReason }

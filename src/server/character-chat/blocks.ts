@@ -1,9 +1,15 @@
 import type { ContextBlock } from '../llm/context-builder'
-import { renderFragmentContextGroup, storyHeaderContent, STORY_SUMMARY_HEADING } from '../llm/fragment-context-blocks'
+import {
+  fragmentFullContextBlock,
+  joinMarkdownBlocks,
+  markdownSection,
+  renderFullFragmentSheet,
+  STORY_SUMMARY_HEADING,
+} from '../llm/fragment-context-blocks'
 import type { AgentBlockContext } from '../agents/agent-block-context'
 import { instructionRegistry } from '../instructions'
 import { buildBasePreviewContext } from '../agents/block-helpers'
-import { pinnedFragmentSummaryGroups } from '../agents/fragment-summary-blocks'
+import { pinnedFragmentCatalogBlocks } from '../agents/fragment-summary-blocks'
 
 export function createCharacterChatBlocks(ctx: AgentBlockContext): ContextBlock[] {
   const blocks: ContextBlock[] = []
@@ -24,75 +30,68 @@ export function createCharacterChatBlocks(ctx: AgentBlockContext): ContextBlock[
   })
 
   if (ctx.character) {
-    blocks.push({
+    const characterBlock = fragmentFullContextBlock({
       id: 'character',
-      role: 'user',
-      content: [
-        `## Character: ${ctx.character.name}`,
-        '',
-        '## Character Details',
-        ctx.character.content,
-        '',
-        '## Character Description',
-        ctx.character.description,
-      ].join('\n'),
+      heading: 'Character',
+      sections: [{
+        type: 'character',
+        label: 'Character',
+        fragments: [ctx.character],
+      }],
+      scope: 'all',
       order: 100,
-      source: 'builtin',
+      intro: 'This is the full character sheet for the person you are roleplaying.',
+      renderFragment: renderFullFragmentSheet,
     })
+    if (characterBlock) blocks.push(characterBlock)
   }
 
   if (ctx.personaDescription) {
     blocks.push({
       id: 'persona',
       role: 'user',
-      content: [
-        '## Who You Are Speaking With',
-        ctx.personaDescription,
-      ].join('\n'),
+      content: markdownSection(2, 'Who You Are Speaking With', ctx.personaDescription),
       order: 200,
       source: 'builtin',
     })
   }
 
-  // Story context + instructions
-  const storyContextParts: string[] = []
-  storyContextParts.push(storyHeaderContent(ctx.story))
+  const storyParts = [`Name: ${ctx.story.name}`]
+  if (ctx.story.description.trim()) {
+    storyParts.push(`Description: ${ctx.story.description}`)
+  }
+  const storyContextParts: string[] = [
+    markdownSection(3, 'Story', storyParts.join('\n')),
+  ]
   if (ctx.story.summary) {
-    storyContextParts.push(`\n## ${STORY_SUMMARY_HEADING}\n${ctx.story.summary}`)
+    storyContextParts.push(markdownSection(3, STORY_SUMMARY_HEADING, ctx.story.summary))
   }
 
-  // Prose summaries (inline — character chat bundles everything into one block)
   if (ctx.proseFragments.length > 0) {
-    storyContextParts.push('\n## Story Events (use readFragments or readProseChain to inspect full prose)')
+    const eventRows: string[] = ['Use readFragments or readProseChain to inspect full prose.']
     for (const p of ctx.proseFragments) {
       if ((p.meta._librarian as { summary?: string })?.summary) {
-        storyContextParts.push(`- ${p.id}: ${(p.meta._librarian as { summary?: string }).summary}`)
+        eventRows.push(`- ${p.id}: ${(p.meta._librarian as { summary?: string }).summary}`)
       } else if (p.content.length < 600) {
-        storyContextParts.push(`- ${p.id}: \n${p.content}`)
+        eventRows.push(`- ${p.id}: \n${p.content}`)
       } else {
-        storyContextParts.push(`- ${p.id}: ${p.content.slice(0, 500).replace(/\n/g, ' ')}... [truncated]`)
+        eventRows.push(`- ${p.id}: ${p.content.slice(0, 500).replace(/\n/g, ' ')}... [truncated]`)
       }
     }
-  }
-
-  // Pinned fragment summaries, split by type so summary indexes cannot read as full sheets.
-  const pinnedSummaryGroups = pinnedFragmentSummaryGroups(ctx, {
-    excludeIds: ctx.character ? [ctx.character.id] : [],
-  })
-  for (const group of pinnedSummaryGroups) {
-    storyContextParts.push(`\n${renderFragmentContextGroup(group)}`)
+    storyContextParts.push(markdownSection(3, 'Story Events', eventRows.join('\n')))
   }
 
   blocks.push({
     id: 'story-context',
     role: 'user',
-    content: [
-      '## Story Context',
-      storyContextParts.join('\n'),
-    ].join('\n'),
+    content: markdownSection(2, 'Story Context', joinMarkdownBlocks(storyContextParts)),
     order: 300,
     source: 'builtin',
   })
+
+  blocks.push(...pinnedFragmentCatalogBlocks(ctx, {
+    excludeIds: ctx.character ? [ctx.character.id] : [],
+  }))
 
   return blocks
 }

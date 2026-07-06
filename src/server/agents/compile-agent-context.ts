@@ -23,23 +23,31 @@ export async function compileAgentContext(
   const def = agentBlockRegistry.get(agentName)
   if (!def) throw new Error(`No block definition for agent: ${agentName}`)
 
-  // 1. Create default blocks
-  let blocks = def.createDefaultBlocks(blockContext)
-
-  // 2. Load and apply config
+  // 1. Load config first so default blocks can align prompt text with disabled
+  // tools before block overrides/custom blocks are applied.
   const config = await getAgentBlockConfig(dataDir, storyId, agentName)
-  const scriptContext = {
+  const disabledTools = new Set(config.disabledTools ?? [])
+  const enabledTools = Object.keys(allTools).filter((name) => !disabledTools.has(name))
+  const contextWithConfig: AgentBlockContext = {
     ...blockContext,
+    disabledTools: config.disabledTools ?? [],
+    enabledTools,
+  }
+
+  // 2. Create default blocks
+  let blocks = def.createDefaultBlocks(contextWithConfig)
+
+  const scriptContext = {
+    ...contextWithConfig,
     ...createScriptHelpers(dataDir, storyId),
   }
   blocks = await applyBlockConfig(blocks, config, scriptContext)
 
-  // 3. Compile blocks → messages
+  // 3. Compile blocks -> messages
   let messages = compileBlocks(blocks)
   messages = await expandMessagesFragmentTags(messages, dataDir, storyId)
 
   // 4. Filter tools
-  const disabledTools = new Set(config.disabledTools ?? [])
   const tools: ToolSet = {}
   for (const [name, tool] of Object.entries(allTools)) {
     if (!disabledTools.has(name)) tools[name] = tool

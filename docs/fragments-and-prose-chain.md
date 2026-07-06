@@ -61,9 +61,9 @@ Plugins can register additional types with custom prefixes via the `FragmentType
 ### Type semantics
 
 - **prose** — Story text. Ordered by the prose chain. Not directly included via the fragment list; the prose chain controls which prose fragments appear in context.
-- **character** — Character definitions. Bio, personality, appearance. Sticky characters are always in context; non-sticky ones appear in a shortlist the LLM can query.
+- **character** — Character definitions. Bio, personality, appearance. Sticky characters are always in context; non-sticky ones appear as catalog rows the LLM can query.
 - **guideline** — Writing instructions. Sticky by default — they're always in context. Used for style rules, tone guidance, dos/don'ts.
-- **knowledge** — World-building facts, lore, rules. Non-sticky by default; the LLM sees a shortlist and can read full entries via tools.
+- **knowledge** — World-building facts, lore, rules. Non-sticky by default; the LLM sees catalog rows and can read full entries via tools.
 - **image** / **icon** — Media references. Content is typically a base64 data URL or external URL.
 - **marker** — Chapter markers. Inserted into the prose chain to delimit chapters. Renders no content into LLM context but structures the story timeline.
 

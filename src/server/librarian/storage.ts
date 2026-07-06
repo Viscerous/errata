@@ -6,6 +6,7 @@ import { generateConversationId } from '@/lib/fragment-ids'
 import { writeJsonAtomic } from '../fs-utils'
 import { withKeyLock } from '../async-lock'
 import type { EditableField, FragmentChangeOperation, OperationValidation } from '../fragments/change-operations'
+import type { MergedFragmentCandidate } from './candidates'
 
 /** Serializes read-modify-write of a story's analysis index against concurrent saves. */
 function withIndexLock<T>(storyId: string, fn: () => Promise<T>): Promise<T> {
@@ -87,6 +88,8 @@ export interface LibrarianAnalysis {
     openThreads: string[]
   }
   mentions: LibrarianMention[]
+  candidateFragmentIds?: string[]
+  candidateFragments?: MergedFragmentCandidate[]
   contradictions: Array<{
     description: string
     fragmentIds: string[]
@@ -101,6 +104,7 @@ export interface LibrarianAnalysis {
     description: string
     instruction: string
   }>
+  passes?: LibrarianPassRecord[]
   trace?: Array<{
     type: string
     [key: string]: unknown
@@ -108,6 +112,19 @@ export interface LibrarianAnalysis {
 }
 
 export type LibrarianMention = { fragmentId: string; text: string }
+
+export interface LibrarianPassRecord {
+  name: 'observe' | 'proposal' | 'directions' | 'audit' | string
+  status: 'complete' | 'skipped' | 'failed'
+  startedAt: string
+  durationMs?: number
+  modelId?: string
+  stepCount?: number
+  finishReason?: string
+  reason?: string
+  error?: string
+  diagnostics?: Record<string, unknown>
+}
 
 export function selectLatestAnalysesByFragment(
   summaries: LibrarianAnalysisSummary[],
@@ -146,7 +163,7 @@ export interface LibrarianAnalysisSummary {
 
 export interface LibrarianState {
   lastAnalyzedFragmentId: string | null
-  /** Fragment ID up to which summaries have been applied to the story summary */
+  /** Fragment ID up to which analysis summaries have been applied to summary fragments. */
   summarizedUpTo: string | null
   recentMentions: Record<string, string[]>
   timeline: Array<{ event: string; fragmentId: string }>
@@ -162,6 +179,27 @@ export interface LibrarianAnalysisIndex {
   updatedAt: string
   latestByFragmentId: Record<string, LibrarianAnalysisIndexEntry>
   appliedSummarySequence?: string[]
+}
+
+export interface LibrarianBackfillJob {
+  id: string
+  storyId: string
+  createdAt: string
+  updatedAt: string
+  status: 'queued' | 'running' | 'paused' | 'complete' | 'failed' | 'cancelled'
+  fragmentIds: string[]
+  cursor: number
+  completedFragmentIds: string[]
+  failedFragments: Array<{
+    fragmentId: string
+    error: string
+    at: string
+  }>
+  options?: {
+    source?: 'import' | 'historical' | 'manual'
+  }
+  lastAnalysisId?: string
+  error?: string
 }
 
 // --- Path helpers ---
@@ -189,6 +227,16 @@ async function statePath(dataDir: string, storyId: string): Promise<string> {
 async function analysisIndexPath(dataDir: string, storyId: string): Promise<string> {
   const dir = await librarianDir(dataDir, storyId)
   return join(dir, 'index.json')
+}
+
+async function backfillJobsDir(dataDir: string, storyId: string): Promise<string> {
+  const dir = await librarianDir(dataDir, storyId)
+  return join(dir, 'backfill-jobs')
+}
+
+async function backfillJobPath(dataDir: string, storyId: string, jobId: string): Promise<string> {
+  const dir = await backfillJobsDir(dataDir, storyId)
+  return join(dir, `${jobId}.json`)
 }
 
 function shouldReplaceIndexEntry(
@@ -422,6 +470,60 @@ export async function saveState(
   const dir = await librarianDir(dataDir, storyId)
   await mkdir(dir, { recursive: true })
   await writeJsonAtomic(await statePath(dataDir, storyId), state)
+}
+
+// --- Backfill jobs ---
+
+function normalizeBackfillJob(data: Record<string, unknown>): LibrarianBackfillJob {
+  const job = data as unknown as LibrarianBackfillJob
+  return {
+    ...job,
+    status: job.status ?? 'queued',
+    fragmentIds: Array.isArray(job.fragmentIds) ? job.fragmentIds : [],
+    cursor: Number.isInteger(job.cursor) ? job.cursor : 0,
+    completedFragmentIds: Array.isArray(job.completedFragmentIds) ? job.completedFragmentIds : [],
+    failedFragments: Array.isArray(job.failedFragments) ? job.failedFragments : [],
+  }
+}
+
+export async function saveBackfillJob(
+  dataDir: string,
+  storyId: string,
+  job: LibrarianBackfillJob,
+): Promise<void> {
+  const dir = await backfillJobsDir(dataDir, storyId)
+  await mkdir(dir, { recursive: true })
+  job.storyId = storyId
+  job.updatedAt = new Date().toISOString()
+  await writeJsonAtomic(await backfillJobPath(dataDir, storyId, job.id), job)
+}
+
+export async function getBackfillJob(
+  dataDir: string,
+  storyId: string,
+  jobId: string,
+): Promise<LibrarianBackfillJob | null> {
+  const path = await backfillJobPath(dataDir, storyId, jobId)
+  if (!existsSync(path)) return null
+  const raw = await readFile(path, 'utf-8')
+  return normalizeBackfillJob(JSON.parse(raw))
+}
+
+export async function listBackfillJobs(
+  dataDir: string,
+  storyId: string,
+): Promise<LibrarianBackfillJob[]> {
+  const dir = await backfillJobsDir(dataDir, storyId)
+  if (!existsSync(dir)) return []
+  const entries = await readdir(dir)
+  const jobs: LibrarianBackfillJob[] = []
+  for (const entry of entries) {
+    if (!entry.endsWith('.json')) continue
+    const raw = await readFile(join(dir, entry), 'utf-8')
+    jobs.push(normalizeBackfillJob(JSON.parse(raw)))
+  }
+  jobs.sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+  return jobs
 }
 
 // --- Chat history ---

@@ -12,6 +12,7 @@ export const AgentBlockConfigSchema = BlockConfigSchema.extend({
 })
 
 export type AgentBlockConfig = z.infer<typeof AgentBlockConfigSchema>
+export type AgentBlockConfigInput = z.input<typeof AgentBlockConfigSchema>
 
 const DISABLED_TOOL_MIGRATIONS: Record<string, string[]> = {
   getFragment: ['readFragments'],
@@ -71,10 +72,11 @@ export async function getAgentBlockConfig(dataDir: string, storyId: string, agen
   }
 }
 
-export async function saveAgentBlockConfig(dataDir: string, storyId: string, agentName: string, config: AgentBlockConfig): Promise<void> {
+export async function saveAgentBlockConfig(dataDir: string, storyId: string, agentName: string, config: AgentBlockConfigInput): Promise<void> {
   const path = await agentBlockConfigPath(dataDir, storyId, agentName)
   await mkdir(dirname(path), { recursive: true })
-  await writeJsonAtomic(path, { ...config, disabledTools: normalizeDisabledTools(config.disabledTools) })
+  const parsed = AgentBlockConfigSchema.parse(config)
+  await writeJsonAtomic(path, { ...parsed, disabledTools: normalizeDisabledTools(parsed.disabledTools) })
 }
 
 export async function addAgentCustomBlock(

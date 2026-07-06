@@ -63,6 +63,49 @@ describe('change-operation content integrity guards', () => {
     await cleanup()
   })
 
+  it('rejects replace_text with an empty oldText anchor', async () => {
+    await createFragment(dataDir, 'story-guards', makeKnowledge('A stable paragraph.'))
+
+    const { results } = await validateOperations(dataDir, 'story-guards', [{
+      action: 'replace_text',
+      fragmentId: 'kn-guard01',
+      field: 'content',
+      oldText: '   ',
+      newText: 'A changed paragraph.',
+      replaceAll: false,
+    }])
+
+    expect(results[0].status).toBe('invalid')
+    expect(results[0].errors?.[0]).toMatchObject({
+      code: 'old_text_missing',
+      nextAction: 'readFragments',
+    })
+  })
+
+  it('rejects replace_text when oldText is the whole current field', async () => {
+    const current = 'Status: Active Elicitation.\n\nCurrent Lure: Victoria will approach Thorne through the preservation project.'
+    await createFragment(dataDir, 'story-guards', makeKnowledge(current))
+
+    const { results } = await validateOperations(dataDir, 'story-guards', [{
+      action: 'replace_text',
+      fragmentId: 'kn-guard01',
+      field: 'content',
+      oldText: current,
+      newText: 'Status: Active Cultivation.\n\nCurrent Status: Thorne sees the preservation role as his only viable exit.',
+      replaceAll: false,
+    }])
+
+    expect(results[0].status).toBe('invalid')
+    const error = results[0].errors?.[0]
+    expect(error).toMatchObject({
+      code: 'whole_field_replace_text',
+      nextAction: 'readFragments',
+    })
+    expect(error!.message).toContain('whole-field rewrite')
+    expect(error!.message).toContain('set_fields with baseHash')
+    expect(error!.message).toContain('smaller replace_text operations')
+  })
+
   it('rejects an edit that introduces a duplicated paragraph (looping artifact)', async () => {
     await createFragment(dataDir, 'story-guards', makeKnowledge(`${LONG_PARA}\n\nA second topic paragraph.`))
 
@@ -138,7 +181,7 @@ describe('change-operation content integrity guards', () => {
   })
 
   it('rejects an oversized localized edit and directs the model to set_fields', async () => {
-    await createFragment(dataDir, 'story-guards', makeKnowledge('Short body to revise.'))
+    await createFragment(dataDir, 'story-guards', makeKnowledge('Opening context.\n\nShort body to revise.\n\nClosing context.'))
 
     const { results } = await validateOperations(dataDir, 'story-guards', [{
       action: 'replace_text',
@@ -152,6 +195,9 @@ describe('change-operation content integrity guards', () => {
     expect(results[0].status).toBe('invalid')
     const error = results[0].errors?.find(e => e.code === 'localized_edit_too_large')
     expect(error).toBeDefined()
+    expect(error!.message).toContain('newText is the complete replacement for oldText')
+    expect(error!.message).toContain('surrounding text is already preserved')
+    expect(error!.message).toContain('do not restate the whole fragment')
     expect(error!.message).toContain('set_fields')
   })
 

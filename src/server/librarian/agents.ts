@@ -6,7 +6,7 @@ import { instructionRegistry } from '../instructions'
 import type { AgentDefinition } from '../agents/types'
 import { coreProposalToolNames, coreReadToolNames, createFragmentTools } from '../llm/tools'
 import { getStory } from '../fragments/storage'
-import { createEmptyCollector, createLibrarianAnalyzeTools, listLibrarianAnalyzeToolNames } from './analysis-tools'
+import { createEmptyCollector, createLibrarianOnlineTools, listLibrarianAnalyzeToolNames } from './analysis-tools'
 import { runLibrarian } from './agent'
 import { librarianChat, createLibrarianChatBespokeTools } from './chat'
 import { refineFragment } from './refine'
@@ -79,7 +79,7 @@ const analyzeDefinition: AgentDefinition<typeof AnalyzeInputSchema> = {
   description: 'Analyze a prose fragment for continuity signals and summary updates.',
   inputSchema: AnalyzeInputSchema,
   run: async (ctx, input) => {
-    return runLibrarian(ctx.dataDir, ctx.storyId, input.fragmentId)
+    return runLibrarian(ctx.dataDir, ctx.storyId, input.fragmentId, { abortSignal: ctx.abortSignal })
   },
 }
 
@@ -152,12 +152,12 @@ export function registerLibrarianAgents(): void {
     availableTools: listLibrarianAnalyzeToolNames(),
     resolveTools: async ({ dataDir, storyId }) => {
       const story = await getStory(dataDir, storyId)
-      return createLibrarianAnalyzeTools(createEmptyCollector(), {
+      return createLibrarianOnlineTools(createEmptyCollector(), {
         dataDir,
         storyId,
         disableDirections: story?.settings.disableLibrarianDirections === true,
         disableSuggestions: story?.settings.disableLibrarianSuggestions === true,
-        customFragmentTypes: story?.settings.customFragmentTypes ?? [],
+        customFragmentTypes: story?.settings.customFragmentTypes,
       })
     },
     buildPreviewContext: buildAnalyzePreviewContext,

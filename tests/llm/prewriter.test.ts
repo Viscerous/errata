@@ -234,9 +234,10 @@ describe('prewriter', () => {
         stickyGuidelines: [],
         stickyKnowledge: [],
         stickyCharacters: [],
-        guidelineShortlist: [],
-        knowledgeShortlist: [],
-        characterShortlist: [],
+        guidelineCatalog: [],
+        knowledgeCatalog: [],
+        characterCatalog: [],
+        customFragmentCatalogs: [],
         systemPromptFragments: [],
       }
 

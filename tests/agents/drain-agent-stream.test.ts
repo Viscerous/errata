@@ -60,4 +60,26 @@ describe('drainAgentStream', () => {
     expect(result.finishReason).toBe('unknown')
     expect(result.fullText).toBe('hello')
   })
+
+  it('fails when the stream stops producing parts without closing', async () => {
+    async function* stalledStream(): AsyncGenerator<unknown> {
+      yield { type: 'text-delta', text: 'partial' }
+      await new Promise(() => {})
+    }
+
+    await expect(drainAgentStream(stalledStream(), undefined, { idleTimeoutMs: 5 }))
+      .rejects.toThrow('Agent stream idle timeout')
+  })
+
+  it('fails promptly when the abort signal fires', async () => {
+    const controller = new AbortController()
+    async function* stalledStream(): AsyncGenerator<unknown> {
+      await new Promise(() => {})
+    }
+
+    const drained = drainAgentStream(stalledStream(), undefined, { abortSignal: controller.signal })
+    controller.abort()
+
+    await expect(drained).rejects.toThrow('Agent stream aborted')
+  })
 })

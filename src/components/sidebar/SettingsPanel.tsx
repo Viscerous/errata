@@ -847,7 +847,7 @@ export function SettingsPanel({
                 label="Toggle auto-apply suggestions"
               />
             </SettingRow>
-            <SettingRow label="Disable directions" description="Skip story direction suggestions during analysis">
+            <SettingRow label="Disable directions" description="Skip guided story direction suggestions">
               <Toggle
                 checked={story.settings.disableLibrarianDirections ?? false}
                 onChange={(next) => updateMutation.mutate({ disableLibrarianDirections: next })}

@@ -1,6 +1,4 @@
 import { resolveAgentRuntime } from '../llm/client'
-import { MISSING_SYSTEM_PROMPT_FALLBACK } from '../instructions'
-import { ToolLoopAgent, stepCountIs } from 'ai'
 import {
   getStory,
   listFragments,
@@ -30,13 +28,10 @@ import {
   ProposalApplyError,
   ProposalValidationError,
 } from './suggestions'
-import { resolveAndReportUsage } from '../llm/usage-normalizer'
 import { createLogger } from '../logging'
-import { compileAgentContext } from '../agents/compile-agent-context'
-import { createEmptyCollector, createLibrarianAnalyzeTools, toMentionAnnotations } from './analysis-tools'
-import { buildAnalyzeContext } from './blocks'
+import { toMentionAnnotations } from './analysis-tools'
 import { getActivityBuffer, pushActivityEvent, type ActivityStreamEvent } from '../agents/activity-stream'
-import { drainAgentStream } from '../agents/drain-agent-stream'
+import { runLibrarianPipeline } from './pipeline'
 
 const logger = createLogger('librarian-agent')
 
@@ -83,12 +78,13 @@ export async function runLibrarian(
   dataDir: string,
   storyId: string,
   fragmentId: string,
+  options: { abortSignal?: AbortSignal; idleTimeoutMs?: number } = {},
 ): Promise<LibrarianAnalysis> {
   // Serialize analysis runs per story. Concurrent runs would clobber state.json,
   // the live SSE buffer, the analysis index, deferred summary fragments, and the
   // summarizedUpTo watermark — all unguarded read-modify-write.
   return withKeyLock(`librarian:${storyId}`, () =>
-    withBranch(dataDir, storyId, () => runLibrarianInner(dataDir, storyId, fragmentId)),
+    withBranch(dataDir, storyId, () => runLibrarianInner(dataDir, storyId, fragmentId, options)),
   )
 }
 
@@ -96,6 +92,7 @@ async function runLibrarianInner(
   dataDir: string,
   storyId: string,
   fragmentId: string,
+  options: { abortSignal?: AbortSignal; idleTimeoutMs?: number },
 ): Promise<LibrarianAnalysis> {
   const requestLogger = logger.child({ storyId })
   requestLogger.info('Starting librarian analysis...', { fragmentId })
@@ -116,33 +113,8 @@ async function runLibrarianInner(
   // Load current librarian state for context
   const state = await getState(dataDir, storyId)
 
-  // Resolve model early so modelId is available for instruction resolution
-  const { model, modelId, providerId, config, temperature, providerOptions, guards } = await resolveAgentRuntime(dataDir, storyId, 'librarian.analyze', story)
-
-  // Build agent block context (the run and the preview share this builder, so the
-  // context preview can't drift from what a run actually sees).
-  const blockContext = await buildAnalyzeContext(dataDir, storyId, story, {
-    proseFragment: fragment,
-    newProse: { id: fragment.id, content: fragment.content },
-  })
-  blockContext.modelId = modelId
-  requestLogger.debug('Analyze context built', { recentCharacters: blockContext.recentCharacters?.length ?? 0 })
-
-  // Create collector and analysis tools
-  const disableDirections = story.settings?.disableLibrarianDirections === true
+  const runtime = await resolveAgentRuntime(dataDir, storyId, 'librarian.analyze', story)
   const disableSuggestions = story.settings?.disableLibrarianSuggestions === true
-  const collector = createEmptyCollector()
-  const analysisTools = createLibrarianAnalyzeTools(collector, {
-    dataDir,
-    storyId,
-    proseFragmentId: fragmentId,
-    disableDirections,
-    disableSuggestions,
-    customFragmentTypes: story.settings.customFragmentTypes,
-  })
-
-  // Compile context via block system
-  const compiled = await compileAgentContext(dataDir, storyId, 'librarian.analyze', blockContext, analysisTools)
 
   // The active registry owns the live buffer; collect the trace locally for the
   // persisted analysis and mirror it onto that buffer when one exists.
@@ -153,84 +125,24 @@ async function runLibrarianInner(
     if (liveBuffer) pushActivityEvent(liveBuffer, event)
   }
 
-  // Call the LLM with tool-based analysis
-  requestLogger.info('Calling LLM for analysis...')
-  const llmStartTime = Date.now()
-  const requestHeaders = {
-    ...config.headers,
-    'User-Agent': config.headers['User-Agent'] ?? 'errata-librarian/1.0',
-  }
-
-  // Extract system instructions from compiled messages. The analyze default
-  // prompt is dynamic at block-construction time so block overrides, custom
-  // system blocks, and system prompt fragments stay in the compiled message.
-  const systemMessage = compiled.messages.find(m => m.role === 'system')
-  const userMessage = compiled.messages.find(m => m.role === 'user')
-
-  const agent = new ToolLoopAgent({
-    model,
-    instructions: systemMessage?.content || MISSING_SYSTEM_PROMPT_FALLBACK,
-    tools: compiled.tools,
-    toolChoice: 'auto',
-    stopWhen: stepCountIs(6),
-    temperature,
-    providerOptions,
-    maxOutputTokens: guards.maxOutputTokens,
+  const pipeline = await runLibrarianPipeline({
+    dataDir,
+    storyId,
+    story,
+    fragment,
+    runtime,
+    requestLogger,
+    emit,
+    abortSignal: options.abortSignal,
+    idleTimeoutMs: options.idleTimeoutMs,
   })
-
-  let fullText = ''
-  let stepCount = 0
-  let lastFinishReason = 'unknown'
-
-  try {
-    const result = await agent.stream({
-      prompt: userMessage?.content ?? '',
-    })
-
-    const drained = await drainAgentStream(result.fullStream, emit)
-    fullText = drained.fullText
-    stepCount = drained.stepCount
-    lastFinishReason = drained.finishReason
-
-    // Track token usage for librarian analysis
-    await resolveAndReportUsage(dataDir, storyId, 'librarian.analyze', result.totalUsage, modelId)
-
-    // Emit final finish event
-    emit({
-      type: 'finish',
-      finishReason: lastFinishReason,
-      stepCount,
-    })
-  } catch (err) {
-    const errorMsg = err instanceof Error ? err.message : String(err)
-    emit({ type: 'error', error: errorMsg })
-    throw err
-  }
-
-  const llmDurationMs = Date.now() - llmStartTime
-  requestLogger.info('LLM analysis completed', {
-    durationMs: llmDurationMs,
-    providerId,
-    modelId,
-    providerName: config.providerName,
-    baseURL: config.baseURL,
-    headers: Object.keys(requestHeaders),
-  })
-
-  // Fallback: if collector.summaryUpdate is empty but the LLM produced text, use it
-  if (!collector.summaryUpdate && fullText.trim()) {
-    collector.summaryUpdate = fullText.trim()
-  }
-
-  const mentionedFragmentIds = [...new Set(collector.mentions.map(m => m.fragmentId))]
-
-  requestLogger.debug('Analysis parsed', {
-    mentions: collector.mentions.length,
-    mentionedFragments: mentionedFragmentIds.length,
-    contradictions: collector.contradictions.length,
-    fragmentChangeProposals: collector.fragmentChangeProposals.length,
-    timelineEvents: collector.timelineEvents.length,
-  })
+  const {
+    collector,
+    mentionedFragmentIds,
+    candidateFragmentIds,
+    candidateFragments,
+    passes,
+  } = pipeline
 
   // Build the analysis
   const analysisId = `la-${Date.now().toString(36)}`
@@ -241,6 +153,8 @@ async function runLibrarianInner(
     summaryUpdate: collector.summaryUpdate,
     structuredSummary: collector.structuredSummary,
     mentions: collector.mentions,
+    candidateFragmentIds,
+    candidateFragments,
     contradictions: collector.contradictions,
     timelineEvents: collector.timelineEvents,
     fragmentChangeProposals: collector.fragmentChangeProposals.map((proposal) => ({
@@ -248,6 +162,7 @@ async function runLibrarianInner(
       sourceFragmentId: fragmentId,
     })),
     directions: collector.directions,
+    passes,
     trace: traceEvents as LibrarianAnalysis['trace'],
   }
 
@@ -537,8 +452,8 @@ async function nameForChapter(
  * Apply summaries from analyses whose fragments are now old enough
  * (past the summarization threshold from the end of the prose chain).
  *
- * Writes to summary fragments grouped by chapter. Also dual-writes the
- * legacy story.summary field during the transition — phase 3 drops that.
+ * Writes to summary fragments grouped by chapter. The legacy story.summary
+ * field is migrated before writes and is no longer a production memory target.
  */
 async function applyDeferredSummaries(
   dataDir: string,

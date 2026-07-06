@@ -9,7 +9,13 @@ import type { ContextBlock } from '../llm/context-builder'
 import { type AgentBlockContext, baseBlockContext } from './agent-block-context'
 import type { Fragment } from '../fragments/schema'
 import { buildContextState } from '../llm/context-builder'
-import { storyHeaderContent, STORY_SUMMARY_HEADING } from '../llm/fragment-context-blocks'
+import {
+  joinMarkdownBlocks,
+  markdownSection,
+  proseWindowContent,
+  storyHeaderContent,
+  STORY_SUMMARY_HEADING,
+} from '../llm/fragment-context-blocks'
 import { instructionRegistry } from '../instructions'
 
 // ─── Block helpers ───
@@ -31,7 +37,9 @@ export function systemFragmentsBlock(ctx: AgentBlockContext): ContextBlock | nul
   return {
     id: 'system-fragments',
     role: 'system',
-    content: ctx.systemPromptFragments.map(frag => `## ${frag.name}\n${frag.content}`).join('\n\n'),
+    content: markdownSection(2, 'System Prompt Fragments',
+      ctx.systemPromptFragments.map((frag) => markdownSection(3, frag.name, frag.content))
+    ),
     order: 200,
     source: 'builtin',
   }
@@ -41,12 +49,12 @@ export function systemFragmentsBlock(ctx: AgentBlockContext): ContextBlock | nul
 export function storyInfoBlock(ctx: AgentBlockContext): ContextBlock {
   const parts = [storyHeaderContent(ctx.story)]
   if (ctx.story.summary) {
-    parts.push(`\n## ${STORY_SUMMARY_HEADING}\n${ctx.story.summary}`)
+    parts.push(markdownSection(2, STORY_SUMMARY_HEADING, ctx.story.summary))
   }
   return {
     id: 'story-info',
     role: 'user',
-    content: parts.join('\n'),
+    content: joinMarkdownBlocks(parts),
     order: 100,
     source: 'builtin',
   }
@@ -58,10 +66,7 @@ export function recentProseBlock(ctx: AgentBlockContext): ContextBlock | null {
   return {
     id: 'prose-recent',
     role: 'user',
-    content: [
-      '## Recent Prose',
-      ...ctx.proseFragments.map(p => `### ${p.name} (${p.id})\n${p.content}`),
-    ].join('\n'),
+    content: proseWindowContent(ctx.proseFragments, { includeFragmentHeadings: true }),
     order: 200,
     source: 'builtin',
   }
@@ -83,7 +88,10 @@ export function proseSummariesBlock(ctx: AgentBlockContext, header: string): Con
   return {
     id: 'prose-summaries',
     role: 'user',
-    content: parts.join('\n'),
+    content: joinMarkdownBlocks([
+      parts[0],
+      parts.slice(1).join('\n'),
+    ]),
     order: 200,
     source: 'builtin',
   }
@@ -96,16 +104,21 @@ export function targetFragmentBlock(
   defaultGuidance: string,
 ): ContextBlock | null {
   if (!ctx.targetFragment) return null
-  const parts = [`Target ${label}: ${ctx.targetFragment.id} (type: ${ctx.targetFragment.type}, name: "${ctx.targetFragment.name}")`]
-  if (ctx.instructions) {
-    parts.push(`\nUser instructions: ${ctx.instructions}`)
-  } else {
-    parts.push(`\n${defaultGuidance}`)
-  }
+  const fragmentIdentity = [
+    `ID: ${ctx.targetFragment.id}`,
+    `Type: ${ctx.targetFragment.type}`,
+    `Name: "${ctx.targetFragment.name}"`,
+  ].join('\n')
+  const guidance = ctx.instructions
+    ? markdownSection(3, 'User Instructions', ctx.instructions)
+    : markdownSection(3, 'Default Guidance', defaultGuidance)
   return {
     id: 'target',
     role: 'user',
-    content: parts.join('\n'),
+    content: markdownSection(2, `Target ${label}`, [
+      fragmentIdentity,
+      guidance,
+    ]),
     order: 400,
     source: 'builtin',
   }

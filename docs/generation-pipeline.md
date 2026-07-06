@@ -26,7 +26,7 @@ Author input
   → Trigger librarian              Fire-and-forget analysis
 ```
 
-The writer agent sees the complete context: system instructions, tool descriptions, story info, summaries, characters, guidelines, knowledge, shortlists, prose chain, and the author's input.
+The writer agent sees the complete context: system instructions, tool guidance, story info, summaries, full fragments, catalog rows, prose chain, and the author's input.
 
 ## Prewriter Mode Flow
 
@@ -106,8 +106,8 @@ Additionally, these blocks are carried over from the standard context:
 |---|---|---|
 | System instructions | Full `generation.system` | Condensed `generation.writer-brief.system` |
 | Characters | Full character sheets | Distilled in brief |
-| Guidelines | All sticky + shortlisted | Sticky carried over; rest distilled in brief |
-| Knowledge | All sticky + shortlisted | Distilled in brief |
+| Guidelines | Sticky full + catalog rows | Sticky carried over; rest distilled in brief |
+| Knowledge | Sticky/recent full + catalog rows | Distilled in brief |
 | Summary | Rolling summary block | Distilled in brief |
 | Prose | Full chain (within limits) | Recent prose only |
 | Author input | Direct | Embedded in brief's planning request |

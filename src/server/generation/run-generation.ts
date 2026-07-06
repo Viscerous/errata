@@ -140,10 +140,10 @@ export async function runGeneration(
     stickyKnowledge: ctxState.stickyKnowledge.length,
     stickyCharacters: ctxState.stickyCharacters.length,
     stickyCustomFragments: (ctxState.stickyCustomFragments ?? []).length,
-    guidelineShortlist: ctxState.guidelineShortlist.length,
-    knowledgeShortlist: ctxState.knowledgeShortlist.length,
-    characterShortlist: ctxState.characterShortlist.length,
-    customFragmentShortlists: (ctxState.customFragmentShortlists ?? [])
+    guidelineCatalog: ctxState.guidelineCatalog.length,
+    knowledgeCatalog: ctxState.knowledgeCatalog.length,
+    characterCatalog: ctxState.characterCatalog.length,
+    customFragmentCatalogs: (ctxState.customFragmentCatalogs ?? [])
       .reduce((sum, group) => sum + group.fragments.length, 0),
   }
   requestLogger.info('Context state built', contextFragments)

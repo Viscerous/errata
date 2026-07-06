@@ -76,6 +76,8 @@ export interface AnalysisCollector {
     openThreads: string[]
   }
   mentions: LibrarianMention[]
+  candidateFragmentIds: string[]
+  needsProposalPass: boolean
   contradictions: Array<{ description: string; fragmentIds: string[] }>
   fragmentChangeProposals: LibrarianFragmentChangeProposal[]
   timelineEvents: Array<{ event: string; position: 'before' | 'during' | 'after' }>
@@ -91,6 +93,8 @@ export function createEmptyCollector(): AnalysisCollector {
       openThreads: [],
     },
     mentions: [],
+    candidateFragmentIds: [],
+    needsProposalPass: false,
     contradictions: [],
     fragmentChangeProposals: [],
     timelineEvents: [],
@@ -152,7 +156,7 @@ export function renderStructuredSummary(structured: {
 const coercedStringItem = z.union([
   z.string().max(400),
   z.object({ description: z.string() }).transform((obj) => obj.description),
-]).catch(undefined as unknown as string)
+]).catch('')
 
 const coercedStringArray = z.array(coercedStringItem).max(200).default([])
   .transform((arr) => arr.filter((item): item is string => typeof item === 'string' && item.length > 0))
@@ -167,6 +171,10 @@ export const reportAnalysisInputSchema = z.object({
     .describe('Unresolved questions or threads introduced/advanced by this prose — at most 8 are kept'),
   mentions: z.array(mentionInputSchema).max(150).default([])
     .describe('Distinct mentions of listed fragments in the new prose — at most one entry per fragment/text pair; a single mention highlights every occurrence of that text. Use exact prose text; never a bare pronoun.'),
+  candidateFragmentIds: z.array(FragmentIdSchema).max(120).default([])
+    .describe('Existing fragment IDs that may need full context for memory proposals or continuity audit even if they were not exactly mentioned. Use this only for durable-memory candidates.'),
+  needsProposalPass: z.boolean().default(false)
+    .describe('Set true when the prose changes lasting facts or introduces durable story memory that may need fragment proposals.'),
   contradictions: z.array(z.object({
     description: z.string().describe('What the contradiction is'),
     fragmentIds: z.array(z.string()).describe('IDs of the fragments involved'),
@@ -275,12 +283,17 @@ export function createAnalysisTools(
     proseFragmentId?: string; 
     disableDirections?: boolean; 
     disableSuggestions?: boolean;
+    includeReadTools?: boolean;
+    includeReportTool?: boolean;
+    includeFinishTool?: boolean;
     customFragmentTypes?: Array<{ type: string; name: string }>;
   },
 ) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const tools: Record<string, any> = {
-    reportAnalysis: tool({
+  const tools: Record<string, any> = {}
+
+  if (opts?.includeReportTool !== false) {
+    tools.reportAnalysis = tool({
       description: 'Report the prose analysis in one batch: summary, structured signals, mentions, contradictions, and timeline events. Call once with everything you found.',
       inputSchema: reportAnalysisInputSchema,
       execute: async ({
@@ -289,6 +302,8 @@ export function createAnalysisTools(
         stateChanges = [],
         openThreads = [],
         mentions = [],
+        candidateFragmentIds = [],
+        needsProposalPass = false,
         contradictions = [],
         timelineEvents = [],
       }) => {
@@ -300,6 +315,8 @@ export function createAnalysisTools(
           stateChanges.length +
           openThreads.length +
           mentions.length +
+          candidateFragmentIds.length +
+          Number(needsProposalPass) +
           contradictions.length +
           timelineEvents.length
         if (signalCount === 0) {
@@ -312,6 +329,7 @@ export function createAnalysisTools(
         if (opts) {
           const uniqueIds = [...new Set<string>([
             ...mentions.map(m => m.fragmentId),
+            ...candidateFragmentIds,
             ...contradictions.flatMap(c => c.fragmentIds),
           ].filter((id): id is string => typeof id === 'string'))]
 
@@ -378,6 +396,14 @@ export function createAnalysisTools(
           seen.add(key)
           collector.mentions.push(m)
         }
+        const existingCandidates = new Set(collector.candidateFragmentIds)
+        for (const fragmentId of candidateFragmentIds) {
+          if (collector.candidateFragmentIds.length >= 80) break
+          if (existingCandidates.has(fragmentId)) continue
+          existingCandidates.add(fragmentId)
+          collector.candidateFragmentIds.push(fragmentId)
+        }
+        collector.needsProposalPass ||= needsProposalPass
         // Persist annotations now so the prose highlights appear as soon as
         // mentions resolve, not at the end of the run.
         if (opts?.proseFragmentId && collector.mentions.length > 0) {
@@ -388,6 +414,8 @@ export function createAnalysisTools(
         return {
           ok: true,
           mentionCount: collector.mentions.length,
+          candidateFragmentCount: collector.candidateFragmentIds.length,
+          needsProposalPass: collector.needsProposalPass,
           contradictionCount: collector.contradictions.length,
           timelineEventCount: collector.timelineEvents.length,
           ...(skippedMentions.length > 0 ? {
@@ -396,8 +424,11 @@ export function createAnalysisTools(
           } : {}),
         }
       },
-    }),
-    ...(opts ? createFragmentTools(opts.dataDir, opts.storyId, { readOnly: true }) : {}),
+    })
+  }
+
+  if (opts && opts.includeReadTools !== false) {
+    Object.assign(tools, createFragmentTools(opts.dataDir, opts.storyId, { readOnly: true }))
   }
 
   if (!opts?.disableSuggestions) {
@@ -495,6 +526,26 @@ export function createAnalysisTools(
     })
   }
 
+  if (opts?.includeFinishTool !== false) {
+    tools.finishAnalysis = tool({
+      description: 'Signal that the online analysis pass has completed all useful report, proposal, and direction tool calls. This does not record story data; it only ends the tool loop.',
+      inputSchema: z.object({
+        completed: z.array(z.enum(['reportAnalysis', 'proposeFragmentChanges', 'proposeDirections']))
+          .default([])
+          .describe('Tool names actually completed during this analysis pass. Include only tools that were called or deliberately skipped because they were unnecessary.'),
+        skipped: z.array(z.object({
+          toolName: z.enum(['proposeFragmentChanges', 'proposeDirections']),
+          reason: z.string().trim().min(1),
+        })).default([]).describe('Optional enabled tools that were not needed, with a terse reason.'),
+      }),
+      execute: async ({ completed = [], skipped = [] }) => ({
+        ok: true,
+        completed,
+        skipped,
+      }),
+    })
+  }
+
   return tools
 }
 
@@ -502,26 +553,29 @@ export function createAnalysisTools(
  * The analyze toolset. Single source for the runtime handler and the agent's
  * available-tools list, so the toggle path and the model stay in sync.
  *
- * The characters in the recent prose are preloaded into context in full, and
- * knowledge sits in context in full, so the pass proposes changes against the
- * sheets it already holds. readFragments is the fallback for reading any other
- * fragment before proposing an edit.
+ * Online analysis is a fused tool loop: report first, then read/propose as
+ * needed. Deeper router/audit/backfill jobs can feed candidates into this same
+ * shape; they are not separate observe/proposal analyze modes.
  */
-export function createLibrarianAnalyzeTools(
+export function createLibrarianOnlineTools(
   collector: AnalysisCollector,
-  opts: { 
-    dataDir: string; 
-    storyId: string; 
-    proseFragmentId?: string; 
-    disableDirections?: boolean; 
-    disableSuggestions?: boolean;
-    customFragmentTypes?: Array<{ type: string; name: string }>;
+  opts: {
+    dataDir: string
+    storyId: string
+    proseFragmentId?: string
+    disableDirections?: boolean
+    disableSuggestions?: boolean
+    customFragmentTypes?: Array<{ type: string; name: string }>
   },
 ): ToolSet {
-  return createAnalysisTools(collector, opts)
+  return createAnalysisTools(collector, {
+    ...opts,
+    includeReadTools: opts.disableSuggestions === true ? false : true,
+    includeReportTool: true,
+  })
 }
 
 /** Tool names the analyze agent exposes — drives the toggle list with no drift. */
 export function listLibrarianAnalyzeToolNames(): string[] {
-  return Object.keys(createLibrarianAnalyzeTools(createEmptyCollector(), { dataDir: '', storyId: '' }))
+  return Object.keys(createLibrarianOnlineTools(createEmptyCollector(), { dataDir: '', storyId: '' }))
 }
