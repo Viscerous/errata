@@ -158,7 +158,7 @@ describe('context-builder', () => {
     expect(msg!.content).toContain('Magic requires blood sacrifice.')
   })
 
-  it('includes non-sticky guidelines as shortlist only', async () => {
+  it('includes non-sticky guidelines as catalog rows only', async () => {
     const story = makeStory()
     await createStory(dataDir, story)
 
@@ -175,7 +175,7 @@ describe('context-builder', () => {
     const messages = await buildContext(dataDir, story.id, 'Continue')
     const msg = messages.find((m) => m.role === 'user')
 
-    // Shortlist should contain id and description but not full content
+    // Catalog should contain id and description but not full content
     expect(msg!.content).toContain('gl-0002')
     expect(msg!.content).toContain('Point of view constraints')
     expect(msg!.content).not.toContain('Always use third person limited.')
@@ -297,10 +297,12 @@ describe('context-builder', () => {
     const msg = messages.find((m) => m.role === 'user')
 
     expect(msg!.content).toContain('Elena is a fierce warrior with red hair.')
-    expect(msg!.content).toContain('## Characters')
+    expect(msg!.content).toContain('## User Fragments')
+    expect(msg!.content).toContain('### Characters')
+    expect(msg!.content).toContain('#### Elena')
   })
 
-  it('includes non-sticky characters as shortlist only', async () => {
+  it('includes non-sticky characters as catalog rows only', async () => {
     const story = makeStory()
     await createStory(dataDir, story)
 
@@ -317,13 +319,13 @@ describe('context-builder', () => {
     const messages = await buildContext(dataDir, story.id, 'Continue')
     const msg = messages.find((m) => m.role === 'user')
 
-    // Shortlist should contain id and description but not full content
+    // Catalog should contain id and description but not full content
     expect(msg!.content).toContain('ch-0002')
     expect(msg!.content).toContain('The antagonist')
     expect(msg!.content).not.toContain('The dark lord rules with an iron fist.')
   })
 
-  it('carries non-sticky characters mentioned in recent prose as full sheets, not shortlist', async () => {
+  it('carries non-sticky characters mentioned in recent prose as full sheets, not catalog rows', async () => {
     const story = makeStory()
     await createStory(dataDir, story)
 
@@ -350,12 +352,49 @@ describe('context-builder', () => {
 
     const state = await buildContextState(dataDir, story.id, 'Continue')
     expect((state.recentCharacters ?? []).map((c) => c.id)).toContain('ch-0002')
-    expect(state.characterShortlist.map((c) => c.id)).not.toContain('ch-0002')
+    expect(state.characterCatalog.map((c) => c.id)).not.toContain('ch-0002')
 
     const blocks = createDefaultBlocks(state)
-    const recent = findBlock(blocks, 'character-recent')
+    const recent = findBlock(blocks, 'fragment-recent')
     expect(recent).toBeDefined()
+    expect(recent!.content).toContain('## Recent Fragments')
+    expect(recent!.content).toContain('### Characters')
     expect(recent!.content).toContain('The dark lord rules with an iron fist.')
+  })
+
+  it('promotes recent writerContextIds before librarian annotations exist', async () => {
+    const story = makeStory()
+    await createStory(dataDir, story)
+
+    const character = makeFragment({
+      id: 'ch-0003',
+      type: 'character',
+      name: 'Scout',
+      description: 'A cautious scout',
+      content: 'The scout hides a silver compass.',
+      sticky: false,
+    })
+    await createFragment(dataDir, story.id, character)
+
+    const prose = makeFragment({
+      id: 'pr-0003',
+      type: 'prose',
+      name: 'Ch1',
+      content: 'The path narrowed under the old trees.',
+      order: 1,
+      meta: { writerContextIds: ['ch-0003'] },
+    })
+    await createFragment(dataDir, story.id, prose)
+
+    const state = await buildContextState(dataDir, story.id, 'Continue')
+    expect((state.recentCharacters ?? []).map((c) => c.id)).toContain('ch-0003')
+    expect(state.characterCatalog.map((c) => c.id)).not.toContain('ch-0003')
+
+    const blocks = createDefaultBlocks(state)
+    const recent = findBlock(blocks, 'fragment-recent')
+    expect(recent).toBeDefined()
+    expect(recent!.content).toContain('### Characters')
+    expect(recent!.content).toContain('The scout hides a silver compass.')
   })
 
   it('promotes recently mentioned non-sticky knowledge to recentKnowledge and formats it', async () => {
@@ -385,15 +424,16 @@ describe('context-builder', () => {
 
     const state = await buildContextState(dataDir, story.id, 'Continue')
     expect((state.recentKnowledge ?? []).map((k) => k.id)).toContain('kn-0002')
-    expect(state.knowledgeShortlist.map((k) => k.id)).not.toContain('kn-0002')
+    expect(state.knowledgeCatalog.map((k) => k.id)).not.toContain('kn-0002')
 
     const blocks = createDefaultBlocks(state)
-    const recent = findBlock(blocks, 'knowledge-recent')
+    const recent = findBlock(blocks, 'fragment-recent')
     expect(recent).toBeDefined()
+    expect(recent!.content).toContain('### Knowledge')
     expect(recent!.content).toContain('Contains dark forbidden spells.')
   })
 
-  it('injects story custom fragment types as sticky, recent, and shortlist context', async () => {
+  it('injects story custom fragment types as sticky, recent, and catalog context', async () => {
     const story = makeStory({
       settings: {
         ...makeTestSettings(),
@@ -449,30 +489,34 @@ describe('context-builder', () => {
     const recentLocations = (state.recentCustomFragments ?? []).find((group) => group.type === 'location')
     expect(recentLocations?.fragments.map((f) => f.id)).toEqual(['loc-0003'])
 
-    const shortlistLocations = (state.customFragmentShortlists ?? []).find((group) => group.type === 'location')
-    expect(shortlistLocations?.fragments.map((f) => f.id)).toEqual(['loc-0002'])
+    const catalogLocations = (state.customFragmentCatalogs ?? []).find((group) => group.type === 'location')
+    expect(catalogLocations?.fragments.map((f) => f.id)).toEqual(['loc-0002'])
 
     const blocks = createDefaultBlocks(state)
     const sticky = findBlock(blocks, 'user-fragments')
     expect(sticky).toBeDefined()
-    expect(sticky!.content).toContain('## Locations')
+    expect(sticky!.content).toContain('## User Fragments')
+    expect(sticky!.content).toContain('### Locations')
+    expect(sticky!.content).toContain('#### Crystal Library')
     expect(sticky!.content).toContain('Every shelf hums with captured starlight.')
 
-    const recent = findBlock(blocks, 'location-recent')
+    const recent = findBlock(blocks, 'fragment-recent')
     expect(recent).toBeDefined()
+    expect(recent!.content).toContain('### Locations')
     expect(recent!.content).toContain('The Ash Market trades in debts and sealed names.')
 
-    const shortlist = findBlock(blocks, 'location-shortlist')
-    expect(shortlist).toBeDefined()
-    expect(shortlist!.content).toContain('## Locations (Shortlist)')
-    expect(shortlist!.content).toContain('not the full fragment')
-    expect(shortlist!.content).toContain('loc-0002')
-    expect(shortlist!.content).toContain('A dangerous crossing')
-    expect(shortlist!.content).not.toContain('The bridge stones remember every betrayal.')
-    expect(shortlist!.fragmentContext).toEqual({
+    const catalog = findBlock(blocks, 'fragment-catalog')
+    expect(catalog).toBeDefined()
+    expect(catalog!.content).toContain('## Fragment Catalog')
+    expect(catalog!.content).toContain('one-line catalog row, not the full fragment')
+    expect(catalog!.content).toContain('### Locations')
+    expect(catalog!.content).toContain('loc-0002')
+    expect(catalog!.content).toContain('A dangerous crossing')
+    expect(catalog!.content).not.toContain('The bridge stones remember every betrayal.')
+    expect(catalog!.fragmentContext).toEqual({
       mode: 'summary-index',
-      scope: 'available',
-      fragmentType: 'location',
+      scope: 'catalog',
+      fragmentType: 'mixed',
     })
   })
 
@@ -815,10 +859,12 @@ describe('context blocks', () => {
       const prose = findBlock(blocks, 'prose-recent')
       expect(prose).toBeDefined()
       expect(prose!.role).toBe('user')
+      expect(prose!.content).toContain('## Recent Prose\n\nHello world.\n\n## End of Recent Prose')
       expect(prose!.content).toContain('Hello world.')
+      expect(prose!.content).not.toMatch(/\n{3,}/)
     })
 
-    it('creates shortlist blocks for non-sticky fragments', async () => {
+    it('creates a fragment catalog for non-sticky fragments', async () => {
       const story = makeStory()
       await createStory(dataDir, story)
       await createFragment(dataDir, story.id, makeFragment({
@@ -833,25 +879,24 @@ describe('context blocks', () => {
       const state = await buildContextState(dataDir, story.id, 'Continue')
       const blocks = createDefaultBlocks(state)
 
-      const guideline = findBlock(blocks, 'guideline-shortlist')
-      const knowledge = findBlock(blocks, 'knowledge-shortlist')
-      expect(guideline).toBeDefined()
-      expect(knowledge).toBeDefined()
-      expect(guideline!.content).toContain('## Guidelines (Shortlist)')
-      expect(knowledge!.content).toContain('## Knowledge (Shortlist)')
-      expect(guideline!.content).toContain('not the full fragment')
+      const catalog = findBlock(blocks, 'fragment-catalog')
+      expect(catalog).toBeDefined()
+      expect(catalog!.content).toContain('## Fragment Catalog')
+      expect(catalog!.content).toContain('one-line catalog row, not the full fragment')
+      expect(catalog!.content).toContain('### Guidelines')
+      expect(catalog!.content).toContain('### Knowledge')
+      expect(catalog!.content).toContain('gl-0001')
+      expect(catalog!.content).toContain('kn-0001')
     })
 
-    it('omits shortlist blocks when no non-sticky fragments of that type', async () => {
+    it('omits the fragment catalog when there are no catalog rows', async () => {
       const story = makeStory()
       await createStory(dataDir, story)
 
       const state = await buildContextState(dataDir, story.id, 'Continue')
       const blocks = createDefaultBlocks(state)
 
-      expect(findBlock(blocks, 'guideline-shortlist')).toBeUndefined()
-      expect(findBlock(blocks, 'knowledge-shortlist')).toBeUndefined()
-      expect(findBlock(blocks, 'character-shortlist')).toBeUndefined()
+      expect(findBlock(blocks, 'fragment-catalog')).toBeUndefined()
     })
 
     it('all blocks have source "builtin"', async () => {

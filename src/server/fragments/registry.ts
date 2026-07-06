@@ -5,6 +5,8 @@ export interface FragmentTypeDefinition {
   prefix: string
   stickyByDefault: boolean
   contextRenderer: (fragment: Fragment) => string
+  catalogFields?: (keyof Fragment)[]
+  /** @deprecated Use catalogFields. */
   shortlistFields?: (keyof Fragment)[]
   /** Whether to generate type-specific LLM tools (get/list) for this type. Defaults to true. */
   llmTools?: boolean
@@ -70,7 +72,7 @@ export class FragmentTypeRegistry {
       prefix: 'pr',
       stickyByDefault: false,
       contextRenderer: (f) => f.content,
-      shortlistFields: ['id', 'type', 'description'],
+      catalogFields: ['id', 'type', 'description'],
       llmTools: false,
     })
 
@@ -78,9 +80,10 @@ export class FragmentTypeRegistry {
       type: 'character',
       prefix: 'ch',
       stickyByDefault: false,
-      // One level below the `## <Type>` section heading, like every fragment.
+      // Local full-sheet form. Aggregate context blocks demote this to `####`
+      // under their `### <Type>` section heading.
       contextRenderer: (f) =>
-        `### ${f.name}\n${f.content}`,
+        `### ${f.name}\n\n${f.content}`,
       llmTools: false,
     })
 
@@ -88,12 +91,12 @@ export class FragmentTypeRegistry {
       type: 'guideline',
       prefix: 'gl',
       stickyByDefault: true,
-      // A `###` heading like every fragment: bold stays reserved for the rule
-      // labels *inside* guideline bodies (house style: one bold = one rule), so
-      // the name doesn't compete with them.
+      // A markdown heading like every full sheet: bold stays reserved for the
+      // rule labels *inside* guideline bodies (house style: one bold = one
+      // rule), so the name doesn't compete with them.
       contextRenderer: (f) =>
-        `### ${f.name}\n${f.content}`,
-      shortlistFields: ['id', 'name', 'description'],
+        `### ${f.name}\n\n${f.content}`,
+      catalogFields: ['id', 'name', 'description'],
       llmTools: false,
     })
 
@@ -102,8 +105,8 @@ export class FragmentTypeRegistry {
       prefix: 'kn',
       stickyByDefault: false,
       contextRenderer: (f) =>
-        `### ${f.name}\n${f.content}`,
-      shortlistFields: ['id', 'name', 'description'],
+        `### ${f.name}\n\n${f.content}`,
+      catalogFields: ['id', 'name', 'description'],
       llmTools: false,
     })
 
@@ -113,7 +116,7 @@ export class FragmentTypeRegistry {
       stickyByDefault: false,
       contextRenderer: (f) =>
         `[image:${f.id}] ${f.name} - ${f.description}`,
-      shortlistFields: ['id', 'name', 'description'],
+      catalogFields: ['id', 'name', 'description'],
       llmTools: false,
     })
 
@@ -123,7 +126,7 @@ export class FragmentTypeRegistry {
       stickyByDefault: false,
       contextRenderer: (f) =>
         `[icon:${f.id}] ${f.name} - ${f.description}`,
-      shortlistFields: ['id', 'name', 'description'],
+      catalogFields: ['id', 'name', 'description'],
       llmTools: false,
     })
 
@@ -140,7 +143,7 @@ export class FragmentTypeRegistry {
       prefix: 'sm',
       stickyByDefault: false,
       contextRenderer: (f) => f.content,
-      shortlistFields: ['id', 'name', 'description'],
+      catalogFields: ['id', 'name', 'description'],
       llmTools: false,
       hiddenFromList: true,
     })

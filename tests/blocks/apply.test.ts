@@ -23,9 +23,10 @@ function makeState(overrides: Partial<ContextBuildState> = {}): ContextBuildStat
     stickyKnowledge: [],
     stickyCharacters: [],
     recentCharacters: [],
-    guidelineShortlist: [],
-    knowledgeShortlist: [],
-    characterShortlist: [],
+    guidelineCatalog: [],
+    knowledgeCatalog: [],
+    characterCatalog: [],
+    customFragmentCatalogs: [],
     authorInput: 'Continue the story',
     ...overrides,
   }

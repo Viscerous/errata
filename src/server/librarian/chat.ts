@@ -50,11 +50,14 @@ export function createLibrarianChatBespokeTools(dataDir: string, storyId: string
       fragmentId: z.string().describe('The target fragment ID. analyze expects prose; optimize-character expects character; refine expects a non-prose fragment.'),
       instructions: z.string().optional().describe('Optional instructions for refine or optimize-character.'),
     }),
-    execute: async ({ agent, fragmentId, instructions }: { agent: 'librarian.analyze' | 'librarian.refine' | 'librarian.optimize-character'; fragmentId: string; instructions?: string }) => {
+    execute: async (
+      { agent, fragmentId, instructions }: { agent: 'librarian.analyze' | 'librarian.refine' | 'librarian.optimize-character'; fragmentId: string; instructions?: string },
+      options?: { abortSignal?: AbortSignal },
+    ) => {
       log.info('Invoking librarian agent via chat tool', { agent, fragmentId })
       try {
         if (agent === 'librarian.analyze') {
-          const analysis = await runLibrarian(dataDir, storyId, fragmentId)
+          const analysis = await runLibrarian(dataDir, storyId, fragmentId, { abortSignal: options?.abortSignal })
           return {
             ok: true,
             agent,

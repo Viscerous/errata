@@ -57,7 +57,7 @@ Other marker types used within block content:
 
 - `[@plugin=name]` — plugin-contributed tool descriptions
 
-Block *content* carries no markers beyond these: sub-sections inside `system-fragments`/`user-fragments` are plain `## Label` headings, and fragment content carries no per-fragment id marker — full renders are the literary form (name-first heading), and fragment ids appear only on the machine surface, the `` `id` | name | desc `` shortlist rows (or, for editing agents, `renderFullFragmentSheet`'s id-bearing headings).
+Block *content* carries no markers beyond these. Grouped fragment context uses a consistent hierarchy: `##` for the block, `###` for the fragment type or group, and `####` for each full fragment sheet. Headings are separated from the next heading or body by one blank line. Catalog entries are not headings; they are plain `` `id` | name | desc `` rows. Full literary renders keep ids off the page, while editing agents use `renderFullFragmentSheet` for id-bearing `####` headings.
 
 ## Default Blocks
 
@@ -66,44 +66,53 @@ Block *content* carries no markers beyond these: sub-sections inside `system-fra
 | Block ID | Role | Order | Content |
 |---|---|---|---|
 | `instructions` | system | 100 | Writing assistant instructions |
-| `tools` | system | 200 | Available tools listing |
+| `tools` | system | 200 | Tool usage guidance |
 | `system-fragments` | system | 300 | System-placed sticky fragments |
 | `story-info` | user | 100 | Story name + description |
-| `summary` | user | 200 | Story summary (omitted if empty) |
-| `user-fragments` | user | 300 | User-placed sticky fragments |
-| `guideline-shortlist` | user | 300 | Non-sticky guideline shortlist |
-| `knowledge-shortlist` | user | 310 | Non-sticky knowledge shortlist |
-| `character-recent` | user | 315 | Full sheets for non-sticky characters appearing in the recent prose |
-| `character-shortlist` | user | 320 | Remaining non-sticky character shortlist |
+| `user-fragments` | user | 200 | User-placed sticky fragments |
+| `fragment-recent` | user | 308 | One full-context block with per-type sections for fragments active in recent context |
+| `fragment-catalog` | user | 330 | One compact catalog block with per-type sections for non-full fragments |
+| `summary` | user | 400 | Story summary (omitted if empty) |
+| `chapter-summaries` | user | 410 | Chapter/arc summaries overlapping the prose window |
 | `prose-recent` | user | 500 | Recent prose chain |
 | `author-input` | user | 600 | Author's direction |
 
-Order gaps of 100 leave room for inserting custom blocks between existing ones.
+Orders leave space around major prompt phases; closely related fragment blocks
+sit near each other so full context and catalogs stay together.
+
+`prose-recent` has two intentional render modes:
+
+- Writer/directions prose windows keep prose as continuous manuscript text under `## Recent Prose`, followed by `## End of Recent Prose`.
+- Editing and analysis agents that need fragment identity render each prose fragment as `### Name (id)` followed by the prose body.
 
 ## Content tiering
 
-Fragments enter context at one of three depths, by **relevance**, to keep token
-cost bounded:
+Fragments enter context at one of three depths, by **relevance** and runner
+authority:
 
 - **Full** — the entire body is inlined. Used for **sticky** fragments (always
-  relevant) and the **relevance set** — characters the writer actually worked from,
-  rendered in `character-recent`. The relevance set comes from `writerContextIds`,
-  a type-agnostic signal the writer records on each prose fragment's `meta`.
-- **Summary** — one line per fragment (`` `id` | name | desc ``) via
-  `fragmentSummaryBlock`. Used for the `*-shortlist` blocks (non-sticky, non-recent).
+  relevant) and promoted attention candidates — fragments the runner profile
+  has selected for full context. These render in semantic aggregate blocks such
+  as `fragment-pinned`, `fragment-recent`, `fragment-writer-context`, or
+  `fragment-candidates`, each grouped by type. Writer provenance comes from
+  `writerContextIds`, a type-agnostic signal the writer records on each prose
+  fragment's `meta`.
+- **Catalog** — one line per fragment (`` `id` | name | desc ``), grouped by
+  type in a summary-index block such as `fragment-catalog` or
+  `fragment-pinned-catalog`. Used for non-full fragments and scoped lookup
+  surfaces.
 - **On demand** — not in context at all; the agent fetches with `readFragments`.
 
-A fragment's **full** render is `name + content` (per type's `registry.renderContext`);
-the `description` is dropped, since it's the fragment's *summary* form and would be a
-redundant restatement once the body is inlined. (Image/icon keep it — with no content
-body, the description *is* the substance.) The one exception is the **analyze** agent,
-which renders character sheets *with* the description (and inline id) because it edits
-those fields and needs to see them.
+A fragment's **full** render is `name + content` (per type's `registry.renderContext`),
+placed as a `####` sheet inside an aggregate full-context block. The `description`
+is dropped, since it's the fragment's *summary* form and would be a redundant
+restatement once the body is inlined. (Image/icon keep it — with no content body,
+the description *is* the substance.) The one exception is the **analyze** agent,
+which renders its semantic full-context sheets *with* the description (and
+inline id) because it edits those fields and needs to see them.
 
-See [Context Strategy](analyze-context-design.md) for the full rationale, the
-relevance signal, and the deferred token-budget knob. (Note: `directions` and
-the analyze knowledge block currently inline full bodies and predate this signal —
-see that doc's "Current state vs the principle".)
+See [Context Strategy](analyze-context-design.md) for the full rationale,
+relevance signals, and the current no-hard-cap testing stance.
 
 ## Block Manipulation
 
@@ -283,9 +292,9 @@ The `ctx` object contains:
 | `ctx.stickyGuidelines` | `Fragment[]` | Pinned guideline fragments |
 | `ctx.stickyKnowledge` | `Fragment[]` | Pinned knowledge fragments |
 | `ctx.stickyCharacters` | `Fragment[]` | Pinned character fragments |
-| `ctx.guidelineShortlist` | `Fragment[]` | Non-pinned guidelines (shown as shortlist) |
-| `ctx.knowledgeShortlist` | `Fragment[]` | Non-pinned knowledge (shown as shortlist) |
-| `ctx.characterShortlist` | `Fragment[]` | Non-pinned characters (shown as shortlist) |
+| `ctx.guidelineCatalog` | `Fragment[]` | Non-pinned guidelines rendered as catalog rows |
+| `ctx.knowledgeCatalog` | `Fragment[]` | Non-pinned knowledge rendered as catalog rows |
+| `ctx.characterCatalog` | `Fragment[]` | Non-pinned characters rendered as catalog rows |
 | `ctx.authorInput` | `string` | The author's current input/direction |
 | `ctx.getFragment(id)` | `async (id: string) => Fragment \| null` | Fetch any fragment by ID (async — use `await`) |
 | `ctx.getFragments(type?)` | `async (type?: string) => Fragment[]` | List fragments, optionally filtered by type (async — use `await`) |
@@ -540,9 +549,9 @@ interface AgentBlockContext {
   stickyGuidelines: Fragment[]
   stickyKnowledge: Fragment[]
   stickyCharacters: Fragment[]
-  guidelineShortlist: Fragment[]
-  knowledgeShortlist: Fragment[]
-  characterShortlist: Fragment[]
+  guidelineCatalog: Fragment[]
+  knowledgeCatalog: Fragment[]
+  characterCatalog: Fragment[]
   systemPromptFragments: Fragment[]
   // Agent-specific fields (used by block builders that need them):
   allCharacters?: Fragment[]
@@ -669,7 +678,7 @@ data/stories/<storyId>/branches/<branchId>/agent-blocks/<agentName>.json
 
 Each config file follows the same `BlockConfig` schema (custom blocks, overrides, block order) plus:
 
-- `disabledTools: string[]` — filters which tools the agent can use
+- `disabledTools: string[]` — filters which tools the agent can use; default block builders also receive `ctx.disabledTools` and the post-filter `ctx.enabledTools` so generated instructions can avoid naming unavailable tools
 - `disableAutoAnalysis?: boolean` — currently used by `librarian.analyze` to suppress automatic post-generation analysis
 
 ## API Endpoints

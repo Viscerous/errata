@@ -44,9 +44,9 @@ const CTX_MEMBERS: Completion[] = [
   { label: 'stickyCharacters', type: 'property', detail: 'Fragment[]', info: 'Characters pinned to the prompt.' },
   { label: 'stickyGuidelines', type: 'property', detail: 'Fragment[]', info: 'Guideline fragments pinned to the prompt.' },
   { label: 'stickyKnowledge', type: 'property', detail: 'Fragment[]', info: 'Knowledge fragments pinned to the prompt.' },
-  { label: 'characterShortlist', type: 'property', detail: 'Fragment[]', info: 'Characters likely to matter for the next generation.' },
-  { label: 'guidelineShortlist', type: 'property', detail: 'Fragment[]' },
-  { label: 'knowledgeShortlist', type: 'property', detail: 'Fragment[]' },
+  { label: 'characterCatalog', type: 'property', detail: 'Fragment[]', info: 'Non-pinned characters rendered as catalog rows.' },
+  { label: 'guidelineCatalog', type: 'property', detail: 'Fragment[]', info: 'Non-pinned guidelines rendered as catalog rows.' },
+  { label: 'knowledgeCatalog', type: 'property', detail: 'Fragment[]', info: 'Non-pinned knowledge rendered as catalog rows.' },
   { label: 'systemPromptFragments', type: 'property', detail: 'Fragment[]', info: 'Fragments tagged for system-prompt placement.' },
   { label: 'modelId', type: 'property', detail: 'string | undefined', info: 'Resolved model ID for this agent run.' },
 

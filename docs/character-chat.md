@@ -139,6 +139,8 @@ The Character Chat view is mounted from the story route. The composer auto-resiz
 
 Character chat uses the **agent block system** for context assembly. Instead of hardcoded system prompts and manual context string building, the character chat agent registers block definitions in `src/server/character-chat/blocks.ts`. At runtime, `compileAgentContext()` assembles the system and user messages from those blocks, applying any per-story agent block config overrides.
 
+The active character is rendered as a full fragment sheet under `## Character` (`#### id | name | desc` plus body). Pinned supporting fragments are rendered separately as one aggregate `fragment-pinned-catalog` summary-index block, so lookup rows cannot be mistaken for full fragment bodies.
+
 The agent is built with the shared `createStreamingRunner()` factory, and the response stream is produced by `createEventStream()` — both from `src/server/agents/`.
 
 Character portraits are shown in the chat UI when the character fragment has an image reference in its `refs` array.

@@ -66,7 +66,7 @@ Block builders assemble the context the agent receives. Each builder takes an `A
 
 ### Using composable block helpers
 
-Most agents can be composed from reusable helpers living in two files: single-block helpers in `src/server/agents/block-helpers.ts`, and fragment summary-index group helpers in `src/server/agents/fragment-summary-blocks.ts`. Single-block helpers produce one `ContextBlock` (or `null` when the data is empty — use `compactBlocks()` to filter); group helpers return `ContextBlock[]` to spread. The real optimize-character builder:
+Most agents can be composed from reusable helpers living in three places: single-block helpers in `src/server/agents/block-helpers.ts`, fragment catalog helpers in `src/server/agents/fragment-summary-blocks.ts`, and low-level aggregate fragment/Markdown builders in `src/server/llm/fragment-context-blocks.ts`. Single-block helpers produce one `ContextBlock` (or `null` when the data is empty — use `compactBlocks()` to filter); catalog helpers return `ContextBlock[]` to spread. The real optimize-character builder:
 
 ```ts
 import {
@@ -77,8 +77,8 @@ import {
   compactBlocks,
 } from '../agents/block-helpers'
 import {
-  allCharactersBlock,
-  pinnedFragmentSummaryBlocks,
+  allCharactersCatalogBlock,
+  pinnedFragmentCatalogBlocks,
 } from '../agents/fragment-summary-blocks'
 
 export function createOptimizeCharacterBlocks(ctx: AgentBlockContext): ContextBlock[] {
@@ -86,8 +86,8 @@ export function createOptimizeCharacterBlocks(ctx: AgentBlockContext): ContextBl
     instructionsBlock('librarian.optimize-character.system', ctx),
     storyInfoBlock(ctx),
     recentProseBlock(ctx),
-    ...pinnedFragmentSummaryBlocks(ctx, { includeCharacters: false }),
-    allCharactersBlock(ctx),
+    ...pinnedFragmentCatalogBlocks(ctx, { includeCharacters: false }),
+    allCharactersCatalogBlock(ctx),
     targetFragmentBlock(ctx,
       'character to optimize',
       'No specific instructions provided. Optimize this character for depth, causality, and friction using the methodology.',
@@ -106,16 +106,21 @@ This is equivalent to ~40 lines of manual block construction. Available helpers:
 | `recentProseBlock(ctx)` | `prose-recent` | user | 200 | Full content of recent prose |
 | `proseSummariesBlock(ctx, header)` | `prose-summaries` | user | 200 | Truncated/summarized prose (for chat) |
 | `targetFragmentBlock(ctx, label, default)` | `target` | user | 400 | Target fragment + user instructions |
-| `pinnedFragmentSummaryBlocks(ctx, opts?)` | `<type>-pinned-summary-index` | user | 300+ | Pinned fragments as summary-index rows, one block per type; `opts` toggles types |
-| `fragmentSummaryCatalogBlocks(ctx, opts?)` | `<type>-summary-index` | user | 300+ | One catalog per type with pinned/recent inline notes (for tool-using agents like chat) |
-| `shortlistBlocks(ctx, opts?)` | `<type>-shortlist` | user | 400+ | Non-pinned, non-recent fragments as summary rows |
-| `allCharactersBlock(ctx)` | `character-shortlist` | user | 350 | Every character as a summary-index row |
+| `pinnedFragmentCatalogBlocks(ctx, opts?)` | `fragment-pinned-catalog` | user | 303 | One aggregate pinned summary-index catalog with per-type sections |
+| `fragmentSummaryCatalogBlocks(ctx, opts?)` | `fragment-catalog` | user | 303 | One aggregate catalog with per-type sections and pinned/recent inline notes (for tool-using agents like chat) |
+| `availableFragmentCatalogBlocks(ctx, opts?)` | `fragment-catalog` | user | 400 | One aggregate catalog for non-pinned, non-recent fragments |
+| `allCharactersCatalogBlock(ctx)` | `character-catalog` | user | 350 | Every character as a narrow one-type catalog |
+| `fragmentFullContextBlock(opts)` | caller-defined | user | caller-defined | One aggregate full-fragment block with per-type sections, used for semantic full context |
+| `fragmentCatalogBlock(opts)` | `fragment-catalog` | user | caller-defined | One aggregate compact catalog with per-type sections |
+| `markdownSection(level, heading, body?)` | n/a | n/a | n/a | Shared heading/body formatter; use for custom block sections |
+| `joinMarkdownBlocks(parts)` | n/a | n/a | n/a | Shared blank-line joiner for block sections |
+| `proseWindowContent(fragments, opts?)` | n/a | n/a | n/a | Shared `prose-recent` body renderer, with optional fragment headings |
 
-The last four live in `fragment-summary-blocks.ts` and return arrays (or, for `allCharactersBlock`, a single block). All conditional helpers return `null`/`[]` when their data is empty, so `compactBlocks` and spreads safely drop them.
+The fragment summary helpers live in `fragment-summary-blocks.ts` and return arrays (or, for `allCharactersCatalogBlock`, a single block). The aggregate full/catalog builders live in `fragment-context-blocks.ts` and return `null` when every section is empty. All conditional helpers return `null`/`[]` when their data is empty, so `compactBlocks` and spreads safely drop them.
 
 ### Manual block construction
 
-For agents with unique context shapes (e.g. the analyze agent's per-fragment character/knowledge lists, or prose-transform's operation/selection blocks), construct blocks manually:
+For agents with unique context shapes (e.g. the analyze agent's semantic full-fragment blocks and compact catalog, or prose-transform's operation/selection blocks), construct blocks manually:
 
 ```ts
 export function createLibrarianAnalyzeBlocks(ctx: AgentBlockContext): ContextBlock[] {
@@ -183,7 +188,7 @@ export async function buildOptimizeCharacterPreviewContext(
 }
 ```
 
-`buildBasePreviewContext` handles `story`, `proseFragments`, all sticky/shortlist fields, and `systemPromptFragments: []`. If your agent needs system prompt fragments loaded, use `loadSystemPromptFragments()`:
+`buildBasePreviewContext` handles `story`, `proseFragments`, all sticky/catalog-source fields, and `systemPromptFragments: []`. If your agent needs system prompt fragments loaded, use `loadSystemPromptFragments()`:
 
 ```ts
 export async function buildChatPreviewContext(dataDir: string, storyId: string): Promise<AgentBlockContext> {
@@ -374,9 +379,9 @@ export async function myAgent(dataDir, storyId, opts): Promise<AgentStreamResult
       stickyGuidelines: ctxState.stickyGuidelines,
       stickyKnowledge: ctxState.stickyKnowledge,
       stickyCharacters: ctxState.stickyCharacters,
-      guidelineShortlist: ctxState.guidelineShortlist,
-      knowledgeShortlist: ctxState.knowledgeShortlist,
-      characterShortlist: ctxState.characterShortlist,
+      guidelineCatalog: ctxState.guidelineCatalog,
+      knowledgeCatalog: ctxState.knowledgeCatalog,
+      characterCatalog: ctxState.characterCatalog,
       systemPromptFragments: [],
       targetFragment: fragment,
       modelId,
@@ -385,7 +390,7 @@ export async function myAgent(dataDir, storyId, opts): Promise<AgentStreamResult
     // 6. Create tools
     const allTools = createFragmentTools(dataDir, storyId, { readOnly: false })
 
-    // 7. Compile context (block lifecycle: defaults → overrides → compile → filter tools)
+    // 7. Compile context (block lifecycle: config-aware defaults → overrides → compile → filter tools)
     const compiled = await compileAgentContext(dataDir, storyId, 'my-agent', blockContext, allTools)
 
     // 8. Extract messages
@@ -422,7 +427,7 @@ export async function myAgent(dataDir, storyId, opts): Promise<AgentStreamResult
 | Model resolved early | `modelId` must be available when `compileAgentContext` calls `createDefaultBlocks`, which calls `instructionRegistry.resolve(key, modelId)` |
 | `resolveAgentRuntime` | One call for the role's model plus `disableThinking`/`generationLimits` — see `llm/client.ts` |
 | `excludeFragmentId` | Prevents the target fragment from appearing in context twice — the agent reads it via tools instead |
-| `compileAgentContext` | Handles the full block lifecycle: load block definition → `createDefaultBlocks()` → `applyBlockConfig()` (user overrides) → `compileBlocks()` → filter tools by `disabledTools` |
+| `compileAgentContext` | Handles the full block lifecycle: load block definition + config → `createDefaultBlocks()` with `ctx.disabledTools`/`ctx.enabledTools` → `applyBlockConfig()` (user overrides) → `compileBlocks()` → filter tools by `disabledTools` |
 | `createEventStream` | Converts the AI SDK's `fullStream` into an NDJSON `ReadableStream<string>` + a `completion` promise |
 
 ### Observability comes free
@@ -643,9 +648,9 @@ describe('optimize-character blocks', () => {
       stickyGuidelines: [],
       stickyKnowledge: [],
       stickyCharacters: [],
-      guidelineShortlist: [],
-      knowledgeShortlist: [],
-      characterShortlist: [],
+      guidelineCatalog: [],
+      knowledgeCatalog: [],
+      characterCatalog: [],
       systemPromptFragments: [],
       targetFragment: makeFragment({ id: 'ch-test', type: 'character', name: 'Hero' }),
       instructions: 'Focus on friction',
@@ -667,9 +672,9 @@ describe('optimize-character blocks', () => {
       stickyGuidelines: [],
       stickyKnowledge: [],
       stickyCharacters: [],
-      guidelineShortlist: [],
-      knowledgeShortlist: [],
-      characterShortlist: [],
+      guidelineCatalog: [],
+      knowledgeCatalog: [],
+      characterCatalog: [],
       systemPromptFragments: [],
       allCharacters: [
         makeFragment({ id: 'ch-a', name: 'Alice' }),
@@ -680,9 +685,9 @@ describe('optimize-character blocks', () => {
     const def = agentBlockRegistry.get('librarian.optimize-character')
     const blocks = def!.createDefaultBlocks(ctx)
 
-    // allCharactersBlock renders every character as summary-index rows under
-    // the id 'character-shortlist'.
-    const charBlock = blocks.find(b => b.id === 'character-shortlist')
+    // allCharactersCatalogBlock renders every character as catalog rows under
+    // the id 'character-catalog'.
+    const charBlock = blocks.find(b => b.id === 'character-catalog')
     expect(charBlock).toBeDefined()
     expect(charBlock!.content).toContain('ch-a')
     expect(charBlock!.content).toContain('ch-b')
@@ -752,7 +757,7 @@ When adding a new agent:
 | `src/server/agents/drain-agent-stream.ts` | `drainAgentStream()` — shared `fullStream` → `AgentStreamEvent` translator |
 | `src/server/agents/create-streaming-runner.ts` | `createStreamingRunner()` — standard pipeline factory (constructs the `ToolLoopAgent`) |
 | `src/server/agents/block-helpers.ts` | Composable single-block helpers and preview context utilities |
-| `src/server/agents/fragment-summary-blocks.ts` | Summary-index group helpers (`pinnedFragmentSummaryBlocks`, `shortlistBlocks`, `allCharactersBlock`, catalogs) |
+| `src/server/agents/fragment-summary-blocks.ts` | Catalog helpers (`pinnedFragmentCatalogBlocks`, `fragmentSummaryCatalogBlocks`, `availableFragmentCatalogBlocks`, `allCharactersCatalogBlock`) |
 | `src/server/agents/stream-types.ts` | `AgentStreamEvent`, `AgentStreamResult` types |
 | `src/server/agents/model-role-registry.ts` | Model role fallback chain registry |
 | `src/server/agents/register-core.ts` | Auto-discovery via `import.meta.glob` |

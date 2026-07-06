@@ -1,17 +1,17 @@
 # Summarization and Story Memory
 
-This document describes how Errata maintains long-term story memory, how deferred summary application works, and how summary compaction prevents unbounded summary growth.
+This document describes how Errata maintains long-term story memory, how deferred summary application works, and how summary fragments prevent unbounded prompt growth.
 
 ## Overview
 
-Errata uses a rolling `story.summary` string as memory for prose that has fallen outside the active prose context window.
+Errata uses `summary` fragments as long-term memory for prose that has fallen outside the active prose context window. The legacy `story.summary` string is migrated into a summary fragment and then cleared.
 
 The pipeline is:
 
 1. A prose fragment is generated/saved or manually re-analyzed.
 2. Librarian analyzes that fragment and produces `summaryUpdate` and optional `structuredSummary` signals.
-3. Deferred summary application appends eligible `summaryUpdate` entries into `story.summary`.
-4. Summary compaction runs when needed to keep `story.summary` bounded.
+3. Deferred summary application appends eligible `summaryUpdate` entries into chapter-scoped summary fragments.
+4. Oversized chapter summaries split into an era summary fragment plus a fresh active chapter summary.
 
 Key implementation files:
 
@@ -20,14 +20,14 @@ Key implementation files:
 
 ## Data Model
 
-Story settings now include:
+Relevant story settings include:
 
 ```ts
 disableLibrarianAutoAnalysis: boolean
 disableLibrarianDirections: boolean
 disableLibrarianSuggestions: boolean
 enableHierarchicalSummary: boolean
-summaryCompact: {
+summaryCompact: { // legacy compatibility only
   maxCharacters: number
   targetCharacters: number
 }
@@ -35,8 +35,8 @@ summaryCompact: {
 
 Defaults:
 
-- `maxCharacters: 12000`
-- `targetCharacters: 9000`
+- `maxCharacters: 12000` (legacy setting; no longer read by the summary-fragment path)
+- `targetCharacters: 9000` (legacy setting; no longer read by the summary-fragment path)
 - `disableLibrarianAutoAnalysis: false`
 - `disableLibrarianDirections: false`
 - `disableLibrarianSuggestions: false`
@@ -80,7 +80,7 @@ Implementation:
 
 ### Threshold semantics
 
-`summarizationThreshold` defines how many most-recent prose positions are *not yet folded* into rolling summary.
+`summarizationThreshold` defines how many most-recent prose positions are *not yet folded* into summary fragments.
 
 Given `proseIds.length = N`, the apply cutoff is:
 
@@ -108,8 +108,9 @@ Diagnostic logs emitted on stop:
 
 If one or more contiguous updates are applied:
 
-- append joined updates to `story.summary`
+- append joined updates to the active summary fragment for each chapter
 - advance `state.summarizedUpTo` to last applied prose ID
+- write `analysis.summaryFragmentId` on each contributing analysis
 
 If none are applicable:
 
@@ -134,33 +135,34 @@ Analysis behavior can also be narrowed without disabling memory entirely:
 - `disableLibrarianDirections` keeps summary/continuity analysis but skips direction cards
 - `disableLibrarianSuggestions` keeps summary/continuity analysis but skips fragment create/update/edit suggestions
 
-## Summary Compaction
+## Summary Fragment Overflow
 
-Compaction function:
+Overflow function:
 
-- `compactSummary(...)` (LLM compaction with truncation fallback)
+- `appendAndMaybeSplit(...)` in `src/server/librarian/agent.ts`
 
 Strategy:
 
-- If `summary.length <= maxCharacters`, keep as-is.
-- If `summary.length > maxCharacters`, trigger a one-shot librarian-model compression pass targeting `targetCharacters`.
-- If model compaction fails or returns empty output, fallback preserves the newest tail of summary text (prefixed with `... `).
+- If the active chapter summary remains under `SUMMARY_OVERFLOW_THRESHOLD`, append in place.
+- If it exceeds the threshold, split near the middle on a paragraph boundary.
+- The older half becomes an archived-era summary fragment after deterministic character compaction.
+- The newer half becomes the fresh active chapter summary.
 
 Behavioral implications:
 
 - Memory stays bounded for very long stories.
-- Compaction prefers semantic retention of continuity-critical facts, with deterministic fallback behavior.
+- Context loading reads active summary fragments, with era summaries first and chapter summaries after them.
 
 ### Guardrails
 
-Runtime clamp behavior:
+Runtime behavior:
 
-- both values minimum 100
-- `targetCharacters <= maxCharacters`
+- Summary overflow is deterministic and does not add an LLM call to the hot path.
+- Legacy `summaryCompact` settings remain in the schema only for compatibility.
 
 ## Context Builder Interaction
 
-The rolling summary appears in prompt context as `Story Summary So Far` (unless excluded by options such as `excludeStorySummary` in specialized flows).
+Summary fragments appear in prompt context as `Story Summary So Far` (unless excluded by options such as `excludeStorySummary` in specialized flows).
 
 When building `summaryBeforeFragmentId`, context rebuild also uses the same latest-analysis dedupe to avoid stale reanalysis summaries.
 
@@ -168,7 +170,7 @@ Relevant file:
 
 - `src/server/llm/context-builder.ts`
 
-When `enableHierarchicalSummary` is on, chapter marker summaries are also included as an intermediate memory layer between the rolling summary and the recent prose window.
+When `enableHierarchicalSummary` is on, chapter marker summaries are also included as an intermediate memory layer between long-term summary fragments and the recent prose window.
 
 ## Analysis Index
 
@@ -188,8 +190,8 @@ Primary tests:
 Important coverage:
 
 - contiguous application does not skip gaps
-- compaction enforces bounded summary length
-- compaction uses LLM compression when over budget
+- summary fragments split when chapter summaries exceed the overflow threshold
+- overflow handling stays deterministic and does not call an LLM
 - deferred apply uses latest analysis per fragment
 - librarian can derive `summaryUpdate` from structured signals when summary text is empty
 
@@ -200,9 +202,7 @@ Related context tests:
 ## Operational Notes
 
 - For short stories, defaults are usually sufficient.
-- For long-running projects, tune `summaryCompact` in Settings:
-  - increase `maxCharacters` for richer memory at higher token cost
-  - lower `targetCharacters` for more aggressive compaction
+- For long-running projects, monitor summary-fragment growth and lower the code-level overflow threshold only if active summary fragments become too large in practice.
 - If summaries stall, check for gap logs from deferred application.
 
 ## Agent Block System Integration
@@ -217,12 +217,12 @@ The same block system is used by `librarian.chat`, `librarian.refine`, and `libr
 
 ## Direction Suggestions
 
-After each analysis, the librarian can produce **direction suggestions** — possible next steps for the story. The `directions.suggest` agent uses the full story context to generate titled suggestion cards, each with a description and a ready-to-use writing instruction.
+When guided mode asks for them, Errata can produce **direction suggestions** — possible next steps for the story. The `directions.suggest` agent uses a directions-specific, tiered context profile to generate titled suggestion cards, each with a description and a ready-to-use writing instruction.
 
 - Agent module: `src/server/directions/suggest.ts`
 - Block definitions: `src/server/directions/blocks.ts`
-- Librarian tool: `proposeDirections` registered in `src/server/librarian/analysis-tools.ts`
-- Directions from the latest analysis are surfaced in the generation input's **guided mode**
+- Runtime path: guided mode or the explicit directions endpoint invokes `directions.suggest`. Routine librarian analysis can also record direction cards in the fused analyze pass when directions are enabled.
+- Directions requested for the current head passage are surfaced in the generation input's **guided mode**.
 
 Mentions and fragment change suggestions are deduplicated across multi-turn tool calls to prevent duplicate entries when the librarian's analysis spans several steps.
 

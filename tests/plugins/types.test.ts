@@ -15,7 +15,7 @@ describe('WritingPlugin types', () => {
           prefix: 'tl',
           stickyByDefault: false,
           contextRenderer: (f) => `[${f.name}] ${f.content}`,
-          shortlistFields: ['id', 'name', 'description'],
+          catalogFields: ['id', 'name', 'description'],
         },
       ],
       tools: (_dataDir, _storyId) => ({}),

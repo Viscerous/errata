@@ -1,9 +1,10 @@
 import { registry } from '../fragments/registry'
 import { FRAGMENT_TYPES, type Fragment, type StoryMeta } from '../fragments/schema'
 import type { ContextBlock } from './context-builder'
+import type { AttentionSelection, ContextSelectionSource } from './context-selection'
 
 export type FragmentContextMode = 'full' | 'summary-index'
-export type FragmentContextScope = 'pinned' | 'recent' | 'available' | 'catalog' | 'all'
+export type FragmentContextScope = 'pinned' | 'recent' | 'writer-context' | 'candidate' | 'available' | 'catalog' | 'all'
 
 export interface FragmentContextMetadata {
   mode: FragmentContextMode
@@ -27,6 +28,29 @@ export interface FragmentContextGroup {
   separator?: string
 }
 
+export interface FragmentCatalogSection {
+  type: string
+  label: string
+  fragments: Fragment[]
+  summaryNote?: (fragment: Fragment) => string | undefined
+}
+
+export interface FragmentFullSection {
+  type: string
+  label: string
+  fragments: Fragment[]
+  renderFragment?: (fragment: Fragment) => string
+}
+
+export interface FragmentFullContextPartition {
+  id: string
+  heading: string
+  scope: Extract<FragmentContextScope, 'pinned' | 'recent' | 'writer-context' | 'candidate' | 'all'>
+  order: number
+  intro?: string
+  matches: (sources: ContextSelectionSource[]) => boolean
+}
+
 export interface FragmentContextLane {
   type: string
   label: string
@@ -45,13 +69,46 @@ export interface FragmentContextLaneSource {
   recentKnowledge?: Fragment[]
   recentCharacters?: Fragment[]
   recentCustomFragments?: Array<{ type: string; name: string; fragments: Fragment[] }>
+  guidelineCatalog?: Fragment[]
+  knowledgeCatalog?: Fragment[]
+  characterCatalog?: Fragment[]
+  customFragmentCatalogs?: Array<{ type: string; name: string; fragments: Fragment[] }>
+  /** @deprecated Use guidelineCatalog. */
   guidelineShortlist?: Fragment[]
+  /** @deprecated Use knowledgeCatalog. */
   knowledgeShortlist?: Fragment[]
+  /** @deprecated Use characterCatalog. */
   characterShortlist?: Fragment[]
+  /** @deprecated Use customFragmentCatalogs. */
   customFragmentShortlists?: Array<{ type: string; name: string; fragments: Fragment[] }>
   allKnowledge?: Fragment[]
   allCharacters?: Fragment[]
   allCustomFragments?: Array<{ type: string; name: string; fragments: Fragment[] }>
+}
+
+type MarkdownPart = string | null | undefined | false
+
+function trimMarkdownBoundary(value: string): string {
+  return value.replace(/^\n+|\n+$/g, '')
+}
+
+export function markdownHeading(level: number, text: string): string {
+  return `${'#'.repeat(level)} ${text}`
+}
+
+export function joinMarkdownBlocks(parts: MarkdownPart[]): string {
+  return parts
+    .map((part) => typeof part === 'string' ? trimMarkdownBoundary(part) : '')
+    .filter((part) => part.length > 0)
+    .join('\n\n')
+}
+
+export function markdownSection(level: number, heading: string, body?: MarkdownPart | MarkdownPart[]): string {
+  const bodyParts = Array.isArray(body) ? body : [body]
+  return joinMarkdownBlocks([
+    markdownHeading(level, heading),
+    ...bodyParts,
+  ])
 }
 
 const BUILTIN_FRAGMENT_TYPES = new Set<string>(FRAGMENT_TYPES)
@@ -168,9 +225,9 @@ export function buildFragmentContextLanes(source: FragmentContextLaneSource): Fr
   setSticky('character', 'Characters', source.stickyCharacters)
   setRecent('knowledge', 'Knowledge', source.recentKnowledge)
   setRecent('character', 'Characters', source.recentCharacters)
-  setAvailable('guideline', 'Guidelines', source.guidelineShortlist)
-  setAvailable('knowledge', 'Knowledge', source.knowledgeShortlist)
-  setAvailable('character', 'Characters', source.characterShortlist)
+  setAvailable('guideline', 'Guidelines', source.guidelineCatalog ?? source.guidelineShortlist)
+  setAvailable('knowledge', 'Knowledge', source.knowledgeCatalog ?? source.knowledgeShortlist)
+  setAvailable('character', 'Characters', source.characterCatalog ?? source.characterShortlist)
   setAll('knowledge', 'Knowledge', source.allKnowledge)
   setAll('character', 'Characters', source.allCharacters)
 
@@ -183,7 +240,7 @@ export function buildFragmentContextLanes(source: FragmentContextLaneSource): Fr
   for (const group of source.recentCustomFragments ?? []) {
     setRecent(group.type, group.name, group.fragments)
   }
-  for (const group of source.customFragmentShortlists ?? []) {
+  for (const group of source.customFragmentCatalogs ?? source.customFragmentShortlists ?? []) {
     setAvailable(group.type, group.name, group.fragments)
   }
   for (const group of source.allCustomFragments ?? []) {
@@ -205,11 +262,10 @@ export function findFragmentContextLane(lanes: FragmentContextLane[], type: stri
 }
 
 function renderGenericFragmentContext(f: Fragment): string {
-  return [
-    `### ${f.name}`,
-    f.description ? f.description : undefined,
+  return markdownSection(3, f.name, [
+    f.description || undefined,
     f.content,
-  ].filter((part): part is string => Boolean(part)).join('\n')
+  ])
 }
 
 export function renderContextFragment(f: Fragment): string {
@@ -225,9 +281,9 @@ function summaryCell(value: string): string {
 
 /**
  * The shared one-line identity for a fragment: `` `id` | name | desc ``. Used both
- * for shortlist rows and as the heading of a full sheet, so the model reads the
- * same `id | name | desc` grammar everywhere and distinguishes a full fragment
- * (a `###` heading followed by content) from a summary (a bare row) at a glance.
+ * for catalog rows and as the heading of an editable full sheet, so the model
+ * reads the same `id | name | desc` grammar everywhere and distinguishes a full
+ * fragment (heading followed by content) from a summary (a bare row) at a glance.
  */
 export function fragmentSummaryLine(
   item: { id: string; name: string; description: string },
@@ -238,20 +294,24 @@ export function fragmentSummaryLine(
 }
 
 /**
- * A full fragment sheet: the shared identity line as a `###` heading, then the
- * complete content. Distinct from a shortlist row (heading + body) yet cohesive
- * with it (same `id | name | desc` grammar), and it keeps the description that
- * proposals may target.
+ * A local full fragment sheet: the shared identity line as a heading, then the
+ * complete content. Aggregate full-context blocks demote this initial heading
+ * to `####` under their `### <Type>` section. Distinct from a catalog row
+ * (heading + body) yet cohesive with it (same `id | name | desc` grammar), and
+ * it keeps the description that proposals may target.
  */
 export function renderFullFragmentSheet(f: Fragment): string {
-  return `### ${fragmentSummaryLine(f)}\n${f.content}`
+  return markdownSection(3, fragmentSummaryLine(f), f.content)
 }
 
 // ─── Shared block builders — one source for the house context grammar ───
 
 /** The story header: the title as the prompt's single `#`, description beneath. */
 export function storyHeaderContent(story: StoryMeta): string {
-  return `# ${story.name}\n${story.description}`
+  return joinMarkdownBlocks([
+    markdownHeading(1, story.name),
+    story.description,
+  ])
 }
 
 /** Canonical heading for the rolling summary — one phrasing across every agent. */
@@ -266,10 +326,27 @@ export function storySummaryBlock(
   return {
     id: opts.id ?? 'summary',
     role: 'user',
-    content: `## ${STORY_SUMMARY_HEADING}\n${body}`,
+    content: markdownSection(2, STORY_SUMMARY_HEADING, body),
     order: opts.order,
     source: 'builtin',
   }
+}
+
+export function proseWindowContent(
+  proseFragments: Fragment[],
+  opts: { includeFragmentHeadings?: boolean; includeEndMarker?: boolean } = {},
+): string {
+  const proseParts = opts.includeFragmentHeadings
+    ? proseFragments.map((fragment) =>
+        markdownSection(3, `${fragment.name} (${fragment.id})`, fragment.content)
+      )
+    : proseFragments.map((fragment) => fragment.content)
+
+  return joinMarkdownBlocks([
+    markdownHeading(2, 'Recent Prose'),
+    ...proseParts,
+    opts.includeEndMarker ? markdownHeading(2, 'End of Recent Prose') : undefined,
+  ])
 }
 
 /**
@@ -286,12 +363,11 @@ export function proseWindowBlock(
     return {
       id: 'new-story',
       role: 'user',
-      content: [
-        '## New Story',
+      content: markdownSection(2, 'New Story', [
         'There is no existing prose yet. You are writing the very beginning of this story.',
         opts.newStoryGuidance,
         'Do NOT reference or continue from any prior narrative; start fresh.',
-      ].join('\n'),
+      ]),
       order: opts.order,
       source: 'builtin',
     }
@@ -299,11 +375,7 @@ export function proseWindowBlock(
   return {
     id: 'prose-recent',
     role: 'user',
-    content: [
-      '## Recent Prose',
-      ...proseFragments.map(renderContextFragment),
-      '## End of Recent Prose',
-    ].join('\n\n'),
+    content: proseWindowContent(proseFragments, { includeEndMarker: true }),
     order: opts.order,
     source: 'builtin',
   }
@@ -312,9 +384,9 @@ export function proseWindowBlock(
 export function fragmentSummaryIndexHeading(label: string, scope?: FragmentContextScope | string): string {
   const normalized = label.trim() || 'Fragments'
   const normalizedScope = scope?.trim().toLowerCase()
-  if (normalizedScope === 'pinned') return `Pinned ${normalized} (Shortlist)`
-  if (normalizedScope === 'all') return `All ${normalized} (Shortlist)`
-  return `${normalized} (Shortlist)`
+  if (normalizedScope === 'pinned') return `Pinned ${normalized} Catalog`
+  if (normalizedScope === 'all') return `All ${normalized} Catalog`
+  return `${normalized} Catalog`
 }
 
 export function fragmentSummaryList<T extends { id: string; name: string; description: string }>(
@@ -325,16 +397,177 @@ export function fragmentSummaryList<T extends { id: string; name: string; descri
   const expand = opts.editable
     ? 'Read full fragments with readFragments before editing them or relying on details.'
     : 'Use readFragments to read the full fragment before relying on details.'
-  return [
-    `## ${heading}`,
-    `Each line is a one-line summary, not the full fragment. Format: \`id\` | name | desc. ${expand}`,
-    '',
-    ...items.map((f) => fragmentSummaryLine(f, opts.summaryNote?.(f))),
-  ].join('\n')
+  return joinMarkdownBlocks([
+    markdownHeading(2, heading),
+    `Each line is a one-line catalog row, not the full fragment. Format: \`id\` | name | desc. ${expand}`,
+    items.map((f) => fragmentSummaryLine(f, opts.summaryNote?.(f))).join('\n'),
+  ])
+}
+
+export function fragmentCatalogContent(
+  sections: FragmentCatalogSection[],
+  opts: { heading?: string; editable?: boolean } = {},
+): string {
+  const nonEmpty = sections.filter((section) => section.fragments.length > 0)
+  const expand = opts.editable
+    ? 'Read full fragments with readFragments before editing them or relying on details.'
+    : 'Use readFragments to read the full fragment before relying on details.'
+  return joinMarkdownBlocks([
+    markdownHeading(2, opts.heading ?? 'Fragment Catalog'),
+    `Each line is a one-line catalog row, not the full fragment. Format: \`id\` | name | desc. ${expand}`,
+    ...nonEmpty.map((section) =>
+      markdownSection(3, section.label,
+        section.fragments.map((fragment) => fragmentSummaryLine(fragment, section.summaryNote?.(fragment))).join('\n')
+      )
+    ),
+  ])
+}
+
+export function fragmentCatalogBlock(opts: {
+  id?: string
+  sections: FragmentCatalogSection[]
+  order: number
+  role?: ContextBlock['role']
+  editable?: boolean
+  heading?: string
+  scope?: Extract<FragmentContextScope, 'pinned' | 'available' | 'catalog' | 'all'>
+}): ContextBlock | null {
+  const sections = opts.sections.filter((section) => section.fragments.length > 0)
+  if (sections.length === 0) return null
+  return {
+    id: opts.id ?? 'fragment-catalog',
+    role: opts.role ?? 'user',
+    content: fragmentCatalogContent(sections, {
+      heading: opts.heading,
+      editable: opts.editable,
+    }),
+    order: opts.order,
+    source: 'builtin',
+    fragmentContext: {
+      mode: 'summary-index',
+      scope: opts.scope ?? 'catalog',
+      fragmentType: 'mixed',
+    },
+  }
+}
+
+function demoteInitialFragmentHeading(rendered: string): string {
+  const lines = rendered.trim().split('\n')
+  if (lines[0]?.startsWith('### ')) {
+    lines[0] = `#### ${lines[0].slice(4)}`
+  }
+  return lines.join('\n')
+}
+
+export function fragmentFullContextContent(
+  sections: FragmentFullSection[],
+  opts: {
+    heading: string
+    intro?: string
+    renderFragment?: (fragment: Fragment) => string
+  },
+): string {
+  const nonEmpty = sections.filter((section) => section.fragments.length > 0)
+  const intro = opts.intro ?? 'These fragments are shown in full. Use their complete bodies as authoritative context.'
+  const renderedSections = nonEmpty.map((section) => {
+    const render = section.renderFragment ?? opts.renderFragment ?? renderContextFragment
+    return markdownSection(3, section.label,
+      section.fragments.map((fragment) => demoteInitialFragmentHeading(render(fragment)))
+    )
+  })
+
+  return joinMarkdownBlocks([
+    markdownHeading(2, opts.heading),
+    intro,
+    ...renderedSections,
+  ])
+}
+
+export function fragmentFullContextBlock(opts: {
+  id: string
+  sections: FragmentFullSection[]
+  scope: Extract<FragmentContextScope, 'pinned' | 'recent' | 'writer-context' | 'candidate' | 'all'>
+  order: number
+  heading: string
+  role?: ContextBlock['role']
+  intro?: string
+  renderFragment?: (fragment: Fragment) => string
+}): ContextBlock | null {
+  const sections = opts.sections.filter((section) => section.fragments.length > 0)
+  if (sections.length === 0) return null
+  return {
+    id: opts.id,
+    role: opts.role ?? 'user',
+    content: fragmentFullContextContent(sections, {
+      heading: opts.heading,
+      intro: opts.intro,
+      renderFragment: opts.renderFragment,
+    }),
+    order: opts.order,
+    source: 'builtin',
+    fragmentContext: {
+      mode: 'full',
+      scope: opts.scope,
+      fragmentType: 'mixed',
+    },
+  }
+}
+
+function promotedSourceMap(selection: AttentionSelection): Map<string, ContextSelectionSource[]> {
+  const sources = new Map<string, ContextSelectionSource[]>()
+  for (const entry of selection.diagnostics.promotedFull) {
+    sources.set(`${entry.type}\u0000${entry.fragmentId}`, entry.sources)
+  }
+  return sources
+}
+
+export function fragmentFullContextBlocksBySource(opts: {
+  selection: AttentionSelection
+  partitions: FragmentFullContextPartition[]
+  renderFragment?: (fragment: Fragment) => string
+}): ContextBlock[] {
+  const sourcesByFragment = promotedSourceMap(opts.selection)
+  const consumed = new Set<string>()
+  const blocks: ContextBlock[] = []
+
+  for (const partition of opts.partitions) {
+    const sections = opts.selection.lanes.map((lane) => {
+      const fragments = lane.full.filter((fragment) => {
+        if (consumed.has(fragment.id)) return false
+        const sources = sourcesByFragment.get(`${lane.type}\u0000${fragment.id}`) ?? []
+        return partition.matches(sources)
+      })
+      return {
+        type: lane.type,
+        label: lane.label,
+        fragments,
+      }
+    })
+
+    const block = fragmentFullContextBlock({
+      id: partition.id,
+      heading: partition.heading,
+      scope: partition.scope,
+      order: partition.order,
+      sections,
+      intro: partition.intro,
+      renderFragment: opts.renderFragment,
+    })
+    if (!block) continue
+
+    for (const section of sections) {
+      for (const fragment of section.fragments) consumed.add(fragment.id)
+    }
+    blocks.push(block)
+  }
+
+  return blocks
 }
 
 function fullContextHeading(label: string, scope: FragmentContextScope): string {
   if (scope === 'recent') return `${label} in Recent Prose`
+  if (scope === 'writer-context') return `${label} in Writer Context`
+  if (scope === 'candidate') return `Candidate ${label}`
   if (scope === 'pinned') return `Pinned ${label}`
   return label
 }
@@ -354,15 +587,15 @@ export function renderFragmentContextGroup(group: FragmentContextGroup): string 
 
   // Default full render is the literary form (name-first heading, no id): a
   // fragment already in full needs no lookup key, and ids stay confined to the
-  // one machine surface — the `id | name | desc` shortlist rows. Agents that
+  // one machine surface — the `id | name | desc` catalog rows. Agents that
   // edit fragments opt into renderFullFragmentSheet for id-bearing headings.
   // Blank-line separation is the default: with no per-fragment id markers,
   // spacing alone marks where one fragment ends and the next begins.
   const render = group.renderFragment ?? renderContextFragment
   return [
-    `## ${heading}`,
+    markdownHeading(2, heading),
     ...group.fragments.map(render),
-  ].join(group.separator ?? '\n\n')
+  ].join(group.separator ?? '\n\n').trimEnd()
 }
 
 export function fragmentContextBlock(group: FragmentContextGroup): ContextBlock | null {

@@ -44,9 +44,18 @@ export interface ContextBuildState {
   stickyGuidelines: Fragment[]
   stickyKnowledge: Fragment[]
   stickyCharacters: Fragment[]
-  guidelineShortlist: Fragment[]
-  knowledgeShortlist: Fragment[]
-  characterShortlist: Fragment[]
+  guidelineCatalog: Fragment[]
+  knowledgeCatalog: Fragment[]
+  characterCatalog: Fragment[]
+  customFragmentCatalogs?: Array<{ type: string; name: string; fragments: Fragment[] }>
+  /** @deprecated Use guidelineCatalog. */
+  guidelineShortlist?: Fragment[]
+  /** @deprecated Use knowledgeCatalog. */
+  knowledgeShortlist?: Fragment[]
+  /** @deprecated Use characterCatalog. */
+  characterShortlist?: Fragment[]
+  /** @deprecated Use customFragmentCatalogs. */
+  customFragmentShortlists?: Array<{ type: string; name: string; fragments: Fragment[] }>
   authorInput?: string
   modelId?: string
 }
@@ -99,7 +108,9 @@ export interface FragmentTypeDefinition {
   prefix: string
   stickyByDefault: boolean
   contextRenderer: (fragment: Fragment) => string
-  shortlistFields: Array<'id' | 'name' | 'description'>
+  catalogFields?: Array<'id' | 'name' | 'description'>
+  /** @deprecated Use catalogFields. */
+  shortlistFields?: Array<'id' | 'name' | 'description'>
   llmTools?: boolean
 }
 

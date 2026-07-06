@@ -5,7 +5,7 @@ import { agentBlockRegistry } from '@/server/agents/agent-block-registry'
 import { modelRoleRegistry } from '@/server/agents/model-role-registry'
 import type { AgentBlockContext } from '@/server/agents/agent-block-context'
 import type { Fragment, StoryMeta } from '@/server/fragments/schema'
-import { buildAnalyzeSystemPrompt, recentCastFromFragment } from '@/server/librarian/blocks'
+import { buildAnalyzeSystemPrompt } from '@/server/librarian/blocks'
 
 const now = new Date().toISOString()
 
@@ -50,9 +50,10 @@ function makeBaseContext(overrides: Partial<AgentBlockContext> = {}): AgentBlock
     stickyGuidelines: [],
     stickyKnowledge: [],
     stickyCharacters: [],
-    guidelineShortlist: [],
-    knowledgeShortlist: [],
-    characterShortlist: [],
+    guidelineCatalog: [],
+    knowledgeCatalog: [],
+    characterCatalog: [],
+    customFragmentCatalogs: [],
     systemPromptFragments: [],
     ...overrides,
   }
@@ -140,68 +141,64 @@ describe('Librarian Analyze Blocks', () => {
     const blocks = def.createDefaultBlocks(makeBaseContext({
       allCharacters: [makeFragment({ id: 'ch-hero01', name: 'Hero', description: 'A brave hero' })],
     }))
-    const chBlock = blocks.find(b => b.id === 'character-shortlist')
-    expect(chBlock).toBeDefined()
-    expect(chBlock!.content).toContain('## Characters (Shortlist)')
-    expect(chBlock!.content).toContain('not the full fragment')
-    expect(chBlock!.content).toContain('Hero')
+    const catalog = blocks.find(b => b.id === 'fragment-catalog')
+    expect(catalog).toBeDefined()
+    expect(catalog!.content).toContain('## Fragment Catalog')
+    expect(catalog!.content).toContain('one-line catalog row, not the full fragment')
+    expect(catalog!.content).toContain('### Characters')
+    expect(catalog!.content).toContain('Hero')
   })
 
-  it('recentCastFromFragment resolves characters from the fragment writerContextIds', () => {
-    const alice = makeFragment({ id: 'ch-alice', type: 'character' })
-    const bob = makeFragment({ id: 'ch-bob', type: 'character' })
-    const fragment = makeFragment({ id: 'pr-1', type: 'prose', meta: { writerContextIds: ['ch-alice'] } })
-
-    expect(recentCastFromFragment([alice, bob], fragment).map(c => c.id)).toEqual(['ch-alice'])
-    expect(recentCastFromFragment([alice, bob], null)).toEqual([])
-  })
-
-  it('renders recent-cast characters in full and drops them from the shortlist', () => {
+  it('renders recent-context characters in full and drops them from the catalog', () => {
     const def = agentBlockRegistry.get('librarian.analyze')!
-    const hero = makeFragment({ id: 'ch-hero01', name: 'Hero', description: 'A brave hero', content: 'Hero full sheet body.' })
+    const hero = makeFragment({ id: 'ch-hero01', name: 'Hero', description: 'A brave hero', content: 'Hero full sheet body.\n\n' })
     const villain = makeFragment({ id: 'ch-vil01', name: 'Villain', description: 'The antagonist', content: 'Villain full sheet body.' })
     const blocks = def.createDefaultBlocks(makeBaseContext({
       allCharacters: [hero, villain],
       recentCharacters: [hero],
     }))
 
-    const recent = blocks.find(b => b.id === 'character-recent')
+    const recent = blocks.find(b => b.id === 'fragment-recent')
     expect(recent).toBeDefined()
+    expect(recent!.content).toContain('## Recent Fragments')
+    expect(recent!.content).toContain('### Characters')
     // Full sheet: the shared `id | name | desc` identity line as a heading (the
     // description is kept so proposals can target it) followed by the content.
-    expect(recent!.content).toContain('### `ch-hero01` | Hero | A brave hero')
+    expect(recent!.content).toContain('#### `ch-hero01` | Hero | A brave hero')
     expect(recent!.content).toContain('Hero full sheet body.')
+    expect(recent!.content).not.toMatch(/\n{3,}/)
 
-    // The recent character is not duplicated into the summary shortlist; the
-    // other character still appears there.
-    const shortlist = blocks.find(b => b.id === 'character-shortlist')
-    expect(shortlist).toBeDefined()
-    expect(shortlist!.content).toContain('ch-vil01')
-    expect(shortlist!.content).not.toContain('ch-hero01')
+    // The recent character is not duplicated into the catalog; the other
+    // character still appears there.
+    const catalog = blocks.find(b => b.id === 'fragment-catalog')
+    expect(catalog).toBeDefined()
+    expect(catalog!.content).toContain('ch-vil01')
+    expect(catalog!.content).not.toContain('ch-hero01')
   })
 
-  it('analyze preloads pinned characters in full in a dedicated block, even when not in the recent cast', () => {
+  it('analyze preloads pinned characters in full in a dedicated block, even when not in recent context', () => {
     const def = agentBlockRegistry.get('librarian.analyze')!
     const pinned = makeFragment({ id: 'ch-pin01', name: 'Mentor', description: 'A wise mentor', content: 'Mentor full sheet body.' })
     const other = makeFragment({ id: 'ch-oth01', name: 'Extra', description: 'A bit player', content: 'Extra full sheet body.' })
     const blocks = def.createDefaultBlocks(makeBaseContext({
       allCharacters: [pinned, other],
-      recentCharacters: [], // pinned is NOT in the forwarded recent cast
+      recentCharacters: [], // pinned is NOT in recent context
       stickyCharacters: [pinned],
     }))
 
-    // Pinned char is rendered in full in its own block, not duplicated into the shortlist.
-    const sticky = blocks.find(b => b.id === 'character-sticky')
-    expect(sticky).toBeDefined()
-    expect(sticky!.content).toContain('## Pinned Characters')
-    expect(sticky!.content).toContain('### `ch-pin01` | Mentor | A wise mentor')
-    expect(sticky!.content).toContain('Mentor full sheet body.')
-    const shortlist = blocks.find(b => b.id === 'character-shortlist')
-    expect(shortlist!.content).toContain('ch-oth01')
-    expect(shortlist!.content).not.toContain('ch-pin01')
+    // Pinned char is rendered in full in the pinned-fragment block, not duplicated into the catalog.
+    const pinnedBlock = blocks.find(b => b.id === 'fragment-pinned')
+    expect(pinnedBlock).toBeDefined()
+    expect(pinnedBlock!.content).toContain('## Pinned Fragments')
+    expect(pinnedBlock!.content).toContain('### Characters')
+    expect(pinnedBlock!.content).toContain('#### `ch-pin01` | Mentor | A wise mentor')
+    expect(pinnedBlock!.content).toContain('Mentor full sheet body.')
+    const catalog = blocks.find(b => b.id === 'fragment-catalog')
+    expect(catalog!.content).toContain('ch-oth01')
+    expect(catalog!.content).not.toContain('ch-pin01')
   })
 
-  it('analyze shows a pinned character once, in the pinned block, even when also in the recent cast', () => {
+  it('analyze shows a pinned character once, in the pinned block, even when also in recent context', () => {
     const def = agentBlockRegistry.get('librarian.analyze')!
     const hero = makeFragment({ id: 'ch-hero01', name: 'Hero', description: 'A brave hero', content: 'Hero sheet.' })
     const blocks = def.createDefaultBlocks(makeBaseContext({
@@ -210,20 +207,84 @@ describe('Librarian Analyze Blocks', () => {
       stickyCharacters: [hero], // pinned AND recent — pinned takes precedence
     }))
 
-    expect(blocks.find(b => b.id === 'character-sticky')!.content).toContain('Hero sheet.')
+    const pinnedBlock = blocks.find(b => b.id === 'fragment-pinned')
+    expect(pinnedBlock).toBeDefined()
+    expect((pinnedBlock!.content.match(/Hero sheet\./g) ?? [])).toHaveLength(1)
+    expect(blocks.find(b => b.id === 'fragment-recent')).toBeUndefined()
+    expect(blocks.find(b => b.id === 'character-sticky')).toBeUndefined()
     expect(blocks.find(b => b.id === 'character-recent')).toBeUndefined()
   })
 
-  it('includes knowledge block when allKnowledge provided', () => {
+  it('keeps unselected knowledge as catalog rows in online analyze', () => {
     const def = agentBlockRegistry.get('librarian.analyze')!
     const blocks = def.createDefaultBlocks(makeBaseContext({
       allKnowledge: [makeFragment({ id: 'kn-magic1', type: 'knowledge', name: 'Magic System', content: 'Elemental magic.' })],
     }))
-    const knBlock = blocks.find(b => b.id === 'knowledge')
-    expect(knBlock).toBeDefined()
-    expect(knBlock!.content).toContain('### `kn-magic1` | Magic System')
-    // Knowledge is delivered in full to analyze, not as a summary.
-    expect(knBlock!.content).toContain('Elemental magic.')
+    expect(blocks.find(b => b.id === 'fragment-pinned')).toBeUndefined()
+    expect(blocks.find(b => b.id === 'fragment-recent')).toBeUndefined()
+    expect(blocks.find(b => b.id === 'fragment-writer-context')).toBeUndefined()
+    expect(blocks.find(b => b.id === 'fragment-candidates')).toBeUndefined()
+    expect(blocks.find(b => b.id === 'knowledge')).toBeUndefined()
+    const catalog = blocks.find(b => b.id === 'fragment-catalog')
+    expect(catalog).toBeDefined()
+    expect(catalog!.content).toContain('### Knowledge')
+    expect(catalog!.content).toContain('`kn-magic1` | Magic System')
+    expect(catalog!.content).not.toContain('Elemental magic.')
+  })
+
+  it('does not cap sticky full knowledge bodies in online analyze', () => {
+    const def = agentBlockRegistry.get('librarian.analyze')!
+    const knowledge = Array.from({ length: 5 }, (_, i) => makeFragment({
+      id: `kn-cap0${i + 1}`,
+      type: 'knowledge',
+      name: `Lore ${i + 1}`,
+      content: `Full lore body ${i + 1}.`,
+      sticky: true,
+    }))
+    const blocks = def.createDefaultBlocks(makeBaseContext({
+      allKnowledge: knowledge,
+      stickyKnowledge: knowledge,
+    }))
+
+    const full = blocks.find(b => b.id === 'fragment-pinned')
+    expect(full).toBeDefined()
+    expect(full!.content).toContain('### Knowledge')
+    expect((full!.content.match(/Full lore body/g) ?? [])).toHaveLength(5)
+    expect(blocks.find(b => b.id === 'fragment-catalog')).toBeUndefined()
+  })
+
+  it('includes recent and sticky fragments without numeric demotion', () => {
+    const def = agentBlockRegistry.get('librarian.analyze')!
+    const stickyKnowledge = Array.from({ length: 6 }, (_, i) => makeFragment({
+      id: `kn-stick${i + 1}`,
+      type: 'knowledge',
+      name: `Sticky ${i + 1}`,
+      content: `Sticky body ${i + 1}.`,
+      sticky: true,
+    }))
+    const recentKnowledge = makeFragment({
+      id: 'kn-recent',
+      type: 'knowledge',
+      name: 'Recent Lore',
+      content: 'Recent body.',
+    })
+    const blocks = def.createDefaultBlocks(makeBaseContext({
+      allKnowledge: [...stickyKnowledge, recentKnowledge],
+      stickyKnowledge,
+      recentKnowledge: [recentKnowledge],
+      attentionCandidateIds: ['kn-recent'],
+    }))
+
+    const pinnedBlock = blocks.find(b => b.id === 'fragment-pinned')
+    expect(pinnedBlock).toBeDefined()
+    expect(pinnedBlock!.content).toContain('### Knowledge')
+    expect((pinnedBlock!.content.match(/Sticky body/g) ?? [])).toHaveLength(6)
+
+    const recent = blocks.find(b => b.id === 'fragment-recent')
+    expect(recent).toBeDefined()
+    expect(recent!.content).toContain('### Knowledge')
+    expect(recent!.content).toContain('Recent body.')
+    expect(blocks.find(b => b.id === 'fragment-catalog')).toBeUndefined()
   })
 
   it('includes prose-new block when newProse provided', () => {
@@ -233,7 +294,9 @@ describe('Librarian Analyze Blocks', () => {
     }))
     const proseBlock = blocks.find(b => b.id === 'prose-new')
     expect(proseBlock).toBeDefined()
+    expect(proseBlock!.content).toContain('## New Prose Fragment\n\nFragment ID: pr-test01\n\nThe hero drew their sword.')
     expect(proseBlock!.content).toContain('The hero drew their sword.')
+    expect(proseBlock!.content).not.toMatch(/\n{3,}/)
   })
 
   it('includes system-fragments when tagged fragments provided', () => {
@@ -244,7 +307,9 @@ describe('Librarian Analyze Blocks', () => {
     const sysBlock = blocks.find(b => b.id === 'system-fragments')
     expect(sysBlock).toBeDefined()
     expect(sysBlock!.role).toBe('system')
+    expect(sysBlock!.content).toContain('## System Prompt Fragments\n\n### Custom Rules\n\nAlways analyze mentions.')
     expect(sysBlock!.content).toContain('Custom Rules')
+    expect(sysBlock!.content).not.toMatch(/\n{3,}/)
   })
 
   it('maintains correct block ordering within roles', () => {
@@ -254,15 +319,13 @@ describe('Librarian Analyze Blocks', () => {
       allKnowledge: [makeFragment({ id: 'kn-test01', type: 'knowledge', name: 'Lore' })],
       newProse: { id: 'pr-test01', content: 'New content' },
     }))
-    // User blocks should be ordered: story-summary (100) < characters (200) < knowledge (300) < prose-new (400)
+    // User blocks should be ordered: story-summary (100) < fragment catalog (390) < prose-new (400)
     const userBlocks = blocks.filter(b => b.role === 'user')
     const summaryOrder = userBlocks.find(b => b.id === 'story-summary')!.order
-    const charsOrder = userBlocks.find(b => b.id === 'character-shortlist')!.order
-    const knowledgeOrder = userBlocks.find(b => b.id === 'knowledge')!.order
+    const catalogOrder = userBlocks.find(b => b.id === 'fragment-catalog')!.order
     const proseOrder = userBlocks.find(b => b.id === 'prose-new')!.order
-    expect(summaryOrder).toBeLessThan(charsOrder)
-    expect(charsOrder).toBeLessThan(knowledgeOrder)
-    expect(knowledgeOrder).toBeLessThan(proseOrder)
+    expect(summaryOrder).toBeLessThan(catalogOrder)
+    expect(catalogOrder).toBeLessThan(proseOrder)
 
     // System block: instructions should exist
     const systemBlocks = blocks.filter(b => b.role === 'system')
@@ -305,16 +368,16 @@ describe('Librarian Chat Blocks', () => {
     expect(proseBlock!.content).toContain('Hero begins journey')
   })
 
-  it('combines pinned, recent, and available fragment summaries into one index per type', () => {
+  it('combines pinned, recent, and available fragment summaries into one catalog', () => {
     const def = agentBlockRegistry.get('librarian.chat')!
     const blocks = def.createDefaultBlocks(makeBaseContext({
       stickyGuidelines: [makeFragment({ id: 'gl-stick1', name: 'Tone', description: 'Keep it dark' })],
       stickyKnowledge: [makeFragment({ id: 'kn-stick1', type: 'knowledge', name: 'Treaty', description: 'Binding lore' })],
       recentKnowledge: [makeFragment({ id: 'kn-recent1', type: 'knowledge', name: 'Omen', description: 'Recently mentioned lore' })],
       stickyCustomFragments: [makeFragment({ id: 'loc-stick1', type: 'location', name: 'Library', description: 'Pinned place' })],
-      guidelineShortlist: [makeFragment({ id: 'gl-other1', name: 'Style', description: 'Gothic' })],
-      knowledgeShortlist: [makeFragment({ id: 'kn-other1', type: 'knowledge', name: 'Crown', description: 'Available lore' })],
-      customFragmentShortlists: [
+      guidelineCatalog: [makeFragment({ id: 'gl-other1', name: 'Style', description: 'Gothic' })],
+      knowledgeCatalog: [makeFragment({ id: 'kn-other1', type: 'knowledge', name: 'Crown', description: 'Available lore' })],
+      customFragmentCatalogs: [
         {
           type: 'location',
           name: 'Locations',
@@ -327,30 +390,25 @@ describe('Librarian Chat Blocks', () => {
     expect(blocks.find(b => b.id === 'knowledge-pinned-summary-index')).toBeUndefined()
     expect(blocks.find(b => b.id === 'knowledge-shortlist')).toBeUndefined()
 
-    const guideline = blocks.find(b => b.id === 'guideline-summary-index')
-    expect(guideline).toBeDefined()
-    expect(guideline!.content).toContain('## Guidelines (Shortlist)')
-    expect(guideline!.content).toContain('not the full fragment')
-    expect(guideline!.content).not.toContain('| ID | Name | Description |')
-    expect(guideline!.content).toContain('`gl-stick1` | Tone (pinned) | Keep it dark')
-    expect(guideline!.content).toContain('`gl-other1` | Style | Gothic')
-
-    const knowledge = blocks.find(b => b.id === 'knowledge-summary-index')
-    expect(knowledge).toBeDefined()
-    expect(knowledge!.content).toContain('## Knowledge (Shortlist)')
-    expect(knowledge!.content).toContain('`kn-stick1` | Treaty (pinned) | Binding lore')
-    expect(knowledge!.content).toContain('`kn-recent1` | Omen (recent) | Recently mentioned lore')
-    expect(knowledge!.content).toContain('`kn-other1` | Crown | Available lore')
-
-    const locations = blocks.find(b => b.id === 'location-summary-index')
-    expect(locations).toBeDefined()
-    expect(locations!.content).toContain('## Locations (Shortlist)')
-    expect(locations!.content).toContain('`loc-stick1` | Library (pinned) | Pinned place')
-    expect(locations!.content).toContain('`loc-other1` | Bridge | Optional place')
-    expect(locations!.fragmentContext).toEqual({
+    const catalog = blocks.find(b => b.id === 'fragment-catalog')
+    expect(catalog).toBeDefined()
+    expect(catalog!.content).toContain('## Fragment Catalog')
+    expect(catalog!.content).toContain('one-line catalog row, not the full fragment')
+    expect(catalog!.content).not.toContain('| ID | Name | Description |')
+    expect(catalog!.content).toContain('### Guidelines')
+    expect(catalog!.content).toContain('`gl-stick1` | Tone (pinned) | Keep it dark')
+    expect(catalog!.content).toContain('`gl-other1` | Style | Gothic')
+    expect(catalog!.content).toContain('### Knowledge')
+    expect(catalog!.content).toContain('`kn-stick1` | Treaty (pinned) | Binding lore')
+    expect(catalog!.content).toContain('`kn-recent1` | Omen (recent) | Recently mentioned lore')
+    expect(catalog!.content).toContain('`kn-other1` | Crown | Available lore')
+    expect(catalog!.content).toContain('### Locations')
+    expect(catalog!.content).toContain('`loc-stick1` | Library (pinned) | Pinned place')
+    expect(catalog!.content).toContain('`loc-other1` | Bridge | Optional place')
+    expect(catalog!.fragmentContext).toEqual({
       mode: 'summary-index',
       scope: 'catalog',
-      fragmentType: 'location',
+      fragmentType: 'mixed',
     })
   })
 })
@@ -375,8 +433,11 @@ describe('Librarian Refine Blocks', () => {
     }))
     const target = blocks.find(b => b.id === 'target')
     expect(target).toBeDefined()
+    expect(target!.content).toContain('## Target fragment to refine\n\nID: ch-hero01')
+    expect(target!.content).toContain('### User Instructions\n\nUpdate the backstory')
     expect(target!.content).toContain('ch-hero01')
     expect(target!.content).toContain('Update the backstory')
+    expect(target!.content).not.toMatch(/\n{3,}/)
   })
 
   it('includes prose block when prose fragments provided', () => {
@@ -384,15 +445,80 @@ describe('Librarian Refine Blocks', () => {
     const blocks = def.createDefaultBlocks(makeBaseContext({
       proseFragments: [makeFragment({ id: 'pr-test01', type: 'prose', name: 'Ch 1', content: 'Story text.' })],
     }))
-    expect(blocks.find(b => b.id === 'prose-recent')).toBeDefined()
+    const prose = blocks.find(b => b.id === 'prose-recent')
+    expect(prose).toBeDefined()
+    expect(prose!.content).toContain('## Recent Prose\n\n### Ch 1 (pr-test01)\n\nStory text.')
+    expect(prose!.content).not.toMatch(/\n{3,}/)
+  })
+
+  it('aggregates pinned fragment summaries into one pinned catalog', () => {
+    const def = agentBlockRegistry.get('librarian.refine')!
+    const blocks = def.createDefaultBlocks(makeBaseContext({
+      stickyGuidelines: [makeFragment({ id: 'gl-pin01', type: 'guideline', name: 'Tone', description: 'Keep the prose sharp' })],
+      stickyKnowledge: [makeFragment({ id: 'kn-pin01', type: 'knowledge', name: 'Accord', description: 'A binding treaty' })],
+      stickyCharacters: [makeFragment({ id: 'ch-pin01', type: 'character', name: 'Mentor', description: 'Pinned mentor' })],
+    }))
+
+    expect(blocks.find(b => b.id === 'guideline-pinned-summary-index')).toBeUndefined()
+    expect(blocks.find(b => b.id === 'knowledge-pinned-summary-index')).toBeUndefined()
+    expect(blocks.find(b => b.id === 'character-pinned-summary-index')).toBeUndefined()
+
+    const catalog = blocks.find(b => b.id === 'fragment-pinned-catalog')
+    expect(catalog).toBeDefined()
+    expect(catalog!.content).toContain('## Pinned Fragment Catalog')
+    expect(catalog!.content).toContain('one-line catalog row, not the full fragment')
+    expect(catalog!.content).toContain('### Guidelines')
+    expect(catalog!.content).toContain('`gl-pin01` | Tone | Keep the prose sharp')
+    expect(catalog!.content).toContain('### Knowledge')
+    expect(catalog!.content).toContain('`kn-pin01` | Accord | A binding treaty')
+    expect(catalog!.content).toContain('### Characters')
+    expect(catalog!.content).toContain('`ch-pin01` | Mentor | Pinned mentor')
+    expect(catalog!.fragmentContext).toEqual({
+      mode: 'summary-index',
+      scope: 'pinned',
+      fragmentType: 'mixed',
+    })
   })
 })
 describe('Librarian Analyze Prompt', () => {
   it('reports named character references', () => {
     const prompt = buildAnalyzeSystemPrompt()
     expect(prompt).toContain('direct name, nickname, title, role')
-    expect(prompt).toContain('Scan the new prose against every fragment')
-    expect(prompt).toContain('ambiguous word refers to two entities')
+    expect(prompt).toContain('1. Scan the new prose against the provided context')
+    expect(prompt).toContain('2. Read any fragment')
+    expect(prompt).toContain('3. Call **proposeDirections**')
+    expect(prompt).toContain('4. Finally, call **finishAnalysis**')
+    expect(prompt).toContain('durable-memory candidateFragmentIds')
+    expect(prompt).toContain('Set needsProposalPass')
+    expect(prompt).toContain('If a surface term is ambiguous')
+    expect(prompt).not.toContain('final assistant text')
+    expect(prompt).not.toContain('Analysis complete')
+  })
+
+  it('makes the last enabled analyze action explicit without naming disabled tools', () => {
+    const noDirections = buildAnalyzeSystemPrompt({ disableDirections: true })
+    expect(noDirections).toContain('2. Read any fragment')
+    expect(noDirections).toContain('3. Finally, call **finishAnalysis**')
+    expect(noDirections).not.toContain('proposeDirections')
+
+    const noSuggestions = buildAnalyzeSystemPrompt({ disableSuggestions: true })
+    expect(noSuggestions).toContain('2. Call **proposeDirections**')
+    expect(noSuggestions).toContain('3. Finally, call **finishAnalysis**')
+    expect(noSuggestions).not.toContain('proposeFragmentChanges')
+
+    const noOptionalTools = buildAnalyzeSystemPrompt({
+      disabledTools: ['proposeDirections', 'proposeFragmentChanges'],
+    })
+    expect(noOptionalTools).toContain('1. Scan the new prose')
+    expect(noOptionalTools).toContain('2. Finally, call **finishAnalysis**')
+    expect(noOptionalTools).not.toContain('proposeDirections')
+    expect(noOptionalTools).not.toContain('proposeFragmentChanges')
+
+    const noFinishTool = buildAnalyzeSystemPrompt({
+      disabledTools: ['proposeDirections', 'proposeFragmentChanges', 'finishAnalysis'],
+    })
+    expect(noFinishTool).toContain('1. Finally, scan the new prose')
+    expect(noFinishTool).not.toContain('finishAnalysis')
   })
 
   it('includes custom fragment groups for mention detection', () => {
@@ -408,9 +534,10 @@ describe('Librarian Analyze Prompt', () => {
       newProse: { id: 'pr-0001', content: 'They crossed the Ash Market.' },
     }))
 
-    const custom = blocks.find(b => b.id === 'location-shortlist')
+    const custom = blocks.find(b => b.id === 'fragment-catalog')
     expect(custom).toBeDefined()
-    expect(custom!.content).toContain('## Locations (Shortlist)')
+    expect(custom!.content).toContain('## Fragment Catalog')
+    expect(custom!.content).toContain('### Locations')
     expect(custom!.content).toContain('loc-0001')
     expect(custom!.content).toContain('A market below the city')
   })
@@ -425,20 +552,36 @@ describe('Librarian Optimize Character Blocks', () => {
     expect(instructions.content).not.toContain('getCharacter')
   })
 
-  it('uses one all-character summary index instead of separate pinned character summaries', () => {
+  it('uses aggregate pinned support catalog and one all-character summary index', () => {
     const def = agentBlockRegistry.get('librarian.optimize-character')!
+    const guideline = makeFragment({ id: 'gl-pin01', type: 'guideline', name: 'Tone', description: 'Pinned tone', sticky: true })
+    const knowledge = makeFragment({ id: 'kn-pin01', type: 'knowledge', name: 'Accord', description: 'Pinned lore', sticky: true })
     const pinned = makeFragment({ id: 'ch-pin01', name: 'Mentor', description: 'Pinned mentor', sticky: true })
     const other = makeFragment({ id: 'ch-oth01', name: 'Rival', description: 'Other character' })
     const blocks = def.createDefaultBlocks(makeBaseContext({
+      stickyGuidelines: [guideline],
+      stickyKnowledge: [knowledge],
       stickyCharacters: [pinned],
       allCharacters: [pinned, other],
       targetFragment: pinned,
     }))
 
+    expect(blocks.find(b => b.id === 'guideline-pinned-summary-index')).toBeUndefined()
+    expect(blocks.find(b => b.id === 'knowledge-pinned-summary-index')).toBeUndefined()
     expect(blocks.find(b => b.id === 'character-pinned-summary-index')).toBeUndefined()
-    const allCharacters = blocks.find(b => b.id === 'character-shortlist')
+
+    const pinnedCatalog = blocks.find(b => b.id === 'fragment-pinned-catalog')
+    expect(pinnedCatalog).toBeDefined()
+    expect(pinnedCatalog!.content).toContain('## Pinned Fragment Catalog')
+    expect(pinnedCatalog!.content).toContain('### Guidelines')
+    expect(pinnedCatalog!.content).toContain('`gl-pin01` | Tone | Pinned tone')
+    expect(pinnedCatalog!.content).toContain('### Knowledge')
+    expect(pinnedCatalog!.content).toContain('`kn-pin01` | Accord | Pinned lore')
+    expect(pinnedCatalog!.content).not.toContain('ch-pin01')
+
+    const allCharacters = blocks.find(b => b.id === 'character-catalog')
     expect(allCharacters).toBeDefined()
-    expect(allCharacters!.content).toContain('## All Characters (Shortlist)')
+    expect(allCharacters!.content).toContain('## All Characters Catalog')
     expect(allCharacters!.content).toContain('ch-pin01')
     expect(allCharacters!.content).toContain('ch-oth01')
   })
@@ -469,106 +612,133 @@ describe('Prose Transform Blocks', () => {
     expect(ids).toContain('selection')
 
     const op = blocks.find(b => b.id === 'operation')!
+    expect(op.content).toContain('## Operation\n\nrewrite\n\n### Guidance\n\nMake it more dramatic')
+    expect(op.content).toContain('## Operation')
     expect(op.content).toContain('rewrite')
+    expect(op.content).toContain('### Guidance')
     expect(op.content).toContain('Make it more dramatic')
 
+    const source = blocks.find(b => b.id === 'source')!
+    expect(source.content).toContain('## Source Prose\n\n### Current Source\n\nFull paragraph with the hero walking.')
+    expect(source.content).toContain('## Source Prose')
+    expect(source.content).toContain('### Current Source')
+    expect(source.content).toContain('Full paragraph with the hero walking.')
+
     const sel = blocks.find(b => b.id === 'selection')!
+    expect(sel.content).toContain('## Selected Span\n\n### Text to Transform\n\nThe hero walked.')
+    expect(sel.content).toContain('## Selected Span')
+    expect(sel.content).toContain('### Text to Transform')
     expect(sel.content).toContain('The hero walked.')
+    expect(sel.content).toContain('### Context Before')
     expect(sel.content).toContain('Before text')
+    expect(sel.content).toContain('### Context After')
     expect(sel.content).toContain('After text')
+    expect(sel.content).not.toMatch(/\n{3,}/)
   })
 })
 
 describe('Directions Blocks', () => {
-  it('includes knowledge-sticky and knowledge-recent blocks when provided', () => {
+  it('uses pinned and recent knowledge in full without broad catalog rows', () => {
     const def = agentBlockRegistry.get('directions.suggest')!
     const stickyKnowledge = makeFragment({ id: 'kn-magic', type: 'knowledge', name: 'Magic System', content: 'Sticky lore', sticky: true })
-    const recentKnowledge = makeFragment({ id: 'kn-sword', type: 'knowledge', name: 'Sword', content: 'Recent lore', sticky: false })
+    const recentKnowledge = makeFragment({ id: 'kn-sword', type: 'knowledge', name: 'Sword', content: 'Recent lore\n', sticky: false })
 
     const blocks = def.createDefaultBlocks(makeBaseContext({
       stickyKnowledge: [stickyKnowledge],
       recentKnowledge: [recentKnowledge],
     }))
 
-    const stickyBlock = blocks.find(b => b.id === 'knowledge-sticky')
-    expect(stickyBlock).toBeDefined()
-    expect(stickyBlock!.content).toContain('Magic System')
-    expect(stickyBlock!.content).toContain('Sticky lore')
+    const pinnedBlock = blocks.find(b => b.id === 'fragment-pinned')
+    expect(pinnedBlock).toBeDefined()
+    expect(pinnedBlock!.content).toContain('## Pinned Fragments')
+    expect(pinnedBlock!.content).toContain('### Knowledge')
+    expect(pinnedBlock!.content).toContain('Magic System')
+    expect(pinnedBlock!.content).toContain('Sticky lore')
 
-    const recentBlock = blocks.find(b => b.id === 'knowledge-recent')
-    expect(recentBlock).toBeDefined()
-    expect(recentBlock!.content).toContain('Sword')
-    expect(recentBlock!.content).toContain('Recent lore')
+    const recent = blocks.find(b => b.id === 'fragment-recent')
+    expect(recent).toBeDefined()
+    expect(recent!.content).toContain('## Recent Fragments')
+    expect(recent!.content).toContain('Sword')
+    expect(recent!.content).toContain('Recent lore')
+
+    expect(blocks.find(b => b.id === 'knowledge-shortlist')).toBeUndefined()
+    expect(blocks.find(b => b.id === 'knowledge-sticky')).toBeUndefined()
+    expect(blocks.find(b => b.id === 'knowledge-recent')).toBeUndefined()
   })
 
-  it('includes custom sticky and recent context when provided', () => {
+  it('uses narrow custom context without broad catalog rows', () => {
     const def = agentBlockRegistry.get('directions.suggest')!
     const stickyLocation = makeFragment({ id: 'loc-sticky', type: 'location', name: 'Library', description: 'Pinned place', content: 'Pinned place lore', sticky: true })
     const recentLocation = makeFragment({ id: 'loc-recent', type: 'location', name: 'Market', description: 'Recent place', content: 'Recent place lore', sticky: false })
-    const shortlistLocation = makeFragment({ id: 'loc-short', type: 'location', name: 'Bridge', description: 'Optional place', content: 'Shortlist full lore', sticky: false })
+    const catalogLocation = makeFragment({ id: 'loc-short', type: 'location', name: 'Bridge', description: 'Optional place', content: 'Catalog row full lore', sticky: false })
 
     const blocks = def.createDefaultBlocks(makeBaseContext({
       stickyCustomFragments: [stickyLocation],
       recentCustomFragments: [{ type: 'location', name: 'Locations', fragments: [recentLocation] }],
-      customFragmentShortlists: [{ type: 'location', name: 'Locations', fragments: [shortlistLocation] }],
+      customFragmentCatalogs: [{ type: 'location', name: 'Locations', fragments: [catalogLocation] }],
     }))
 
-    const sticky = blocks.find(b => b.id === 'custom-sticky')
-    expect(sticky).toBeDefined()
-    expect(sticky!.content).toContain('Pinned place lore')
+    const pinnedBlock = blocks.find(b => b.id === 'fragment-pinned')
+    expect(pinnedBlock).toBeDefined()
+    expect(pinnedBlock!.content).toContain('### Locations')
+    expect(pinnedBlock!.content).toContain('Pinned place lore')
 
-    const recent = blocks.find(b => b.id === 'location-recent')
+    const recent = blocks.find(b => b.id === 'fragment-recent')
     expect(recent).toBeDefined()
+    expect(recent!.content).toContain('### Locations')
     expect(recent!.content).toContain('Recent place lore')
 
-    expect(blocks.find(b => b.id === 'location-shortlist')).toBeUndefined()
-    expect(blocks.map((block) => block.content).join('\n')).not.toContain('loc-short')
+    const catalog = blocks.find(b => b.id === 'fragment-catalog')
+    expect(catalog).toBeUndefined()
+    expect(blocks.find(b => b.id === 'custom-sticky')).toBeUndefined()
+    expect(blocks.find(b => b.id === 'location-recent')).toBeUndefined()
   })
 })
 
 describe('Writer Blocks', () => {
-  it('includes recent and shortlist blocks for built-in and custom fragments when provided', () => {
+  it('includes recent full blocks and one catalog for built-in and custom fragments when provided', () => {
     const def = agentBlockRegistry.get('generation.writer')!
     const recentKnowledge = makeFragment({ id: 'kn-sword', type: 'knowledge', name: 'Sword', content: 'Recent lore', sticky: false })
-    const knowledgeShortlist = [makeFragment({ id: 'kn-shield', type: 'knowledge', name: 'Shield', content: 'Shortlist lore', sticky: false })]
-    const recentLocation = makeFragment({ id: 'loc-market', type: 'location', name: 'Market', description: 'Recent place', content: 'Recent place lore', sticky: false })
-    const shortlistLocation = makeFragment({ id: 'loc-bridge', type: 'location', name: 'Bridge', description: 'Optional place', content: 'Shortlist full lore', sticky: false })
+    const knowledgeCatalog = [makeFragment({ id: 'kn-shield', type: 'knowledge', name: 'Shield', content: 'Catalog row lore', sticky: false })]
+    const recentLocation = makeFragment({ id: 'loc-market', type: 'location', name: 'Market', description: 'Recent place', content: 'Recent place lore\n\n', sticky: false })
+    const catalogLocation = makeFragment({ id: 'loc-bridge', type: 'location', name: 'Bridge', description: 'Optional place', content: 'Catalog row full lore', sticky: false })
 
     const blocks = def.createDefaultBlocks(makeBaseContext({
       recentKnowledge: [recentKnowledge],
-      knowledgeShortlist: knowledgeShortlist,
+      knowledgeCatalog: knowledgeCatalog,
       recentCustomFragments: [{ type: 'location', name: 'Locations', fragments: [recentLocation] }],
-      customFragmentShortlists: [{ type: 'location', name: 'Locations', fragments: [shortlistLocation] }],
+      customFragmentCatalogs: [{ type: 'location', name: 'Locations', fragments: [catalogLocation] }],
     }))
 
-    const recent = blocks.find(b => b.id === 'knowledge-recent')
+    const recent = blocks.find(b => b.id === 'fragment-recent')
     expect(recent).toBeDefined()
+    expect(recent!.content).toContain('## Recent Fragments')
+    expect(recent!.content).toContain('### Knowledge')
     expect(recent!.content).toContain('Recent lore')
 
-    const shortlist = blocks.find(b => b.id === 'knowledge-shortlist')
-    expect(shortlist).toBeDefined()
-    expect(shortlist!.content).toContain('## Knowledge (Shortlist)')
-    expect(shortlist!.content).toContain('Shield')
+    const catalog = blocks.find(b => b.id === 'fragment-catalog')
+    expect(catalog).toBeDefined()
+    expect(catalog!.content).toContain('## Fragment Catalog')
+    expect(catalog!.content).toContain('### Knowledge')
+    expect(catalog!.content).toContain('Shield')
 
-    const customRecent = blocks.find(b => b.id === 'location-recent')
-    expect(customRecent).toBeDefined()
-    expect(customRecent!.content).toContain('Recent place lore')
-    expect(customRecent!.fragmentContext).toEqual({
+    expect(recent!.content).toContain('### Locations')
+    expect(recent!.content).toContain('Recent place lore')
+    expect(recent!.content).not.toMatch(/\n{3,}/)
+    expect(recent!.fragmentContext).toEqual({
       mode: 'full',
       scope: 'recent',
-      fragmentType: 'location',
+      fragmentType: 'mixed',
     })
 
-    const customShortlist = blocks.find(b => b.id === 'location-shortlist')
-    expect(customShortlist).toBeDefined()
-    expect(customShortlist!.content).toContain('## Locations (Shortlist)')
-    expect(customShortlist!.content).toContain('loc-bridge')
-    expect(customShortlist!.content).toContain('Optional place')
-    expect(customShortlist!.content).not.toContain('Shortlist full lore')
-    expect(customShortlist!.fragmentContext).toEqual({
+    expect(catalog!.content).toContain('### Locations')
+    expect(catalog!.content).toContain('loc-bridge')
+    expect(catalog!.content).toContain('Optional place')
+    expect(catalog!.content).not.toContain('Catalog row full lore')
+    expect(catalog!.fragmentContext).toEqual({
       mode: 'summary-index',
-      scope: 'available',
-      fragmentType: 'location',
+      scope: 'catalog',
+      fragmentType: 'mixed',
     })
   })
 })
@@ -577,7 +747,11 @@ describe('Character Chat Blocks', () => {
   it('produces story-context block at minimum', () => {
     const def = agentBlockRegistry.get('character-chat.chat')!
     const blocks = def.createDefaultBlocks(makeBaseContext())
-    expect(blocks.find(b => b.id === 'story-context')).toBeDefined()
+    const story = blocks.find(b => b.id === 'story-context')
+    expect(story).toBeDefined()
+    expect(story!.content).toContain('## Story Context')
+    expect(story!.content).toContain('### Story')
+    expect(story!.content).toContain('Name: Test Story')
   })
 
   it('includes character block when character provided', () => {
@@ -592,8 +766,12 @@ describe('Character Chat Blocks', () => {
     const charBlock = blocks.find(b => b.id === 'character')
     expect(charBlock).toBeDefined()
     expect(charBlock!.role).toBe('user')
-    expect(charBlock!.content).toContain('Hero')
+    expect(charBlock!.content).toContain('## Character')
+    expect(charBlock!.content).toContain('### Character')
+    expect(charBlock!.content).toContain('#### `ch-hero01` | Hero | Main protagonist')
     expect(charBlock!.content).toContain('A brave hero.')
+    expect(charBlock!.content).not.toContain('## Character Details')
+    expect(charBlock!.content).not.toContain('## Character Description')
   })
 
   it('includes persona block when personaDescription provided', () => {
@@ -620,10 +798,11 @@ describe('Character Chat Blocks', () => {
     }))
     const ctx = blocks.find(b => b.id === 'story-context')!
     expect(ctx.role).toBe('user')
+    expect(ctx.content).toContain('### Story Events')
     expect(ctx.content).toContain('Hero arrives at village')
   })
 
-  it('labels pinned story context as summaries', () => {
+  it('uses an aggregate pinned catalog for story context fragments', () => {
     const def = agentBlockRegistry.get('character-chat.chat')!
     const blocks = def.createDefaultBlocks(makeBaseContext({
       stickyKnowledge: [makeFragment({
@@ -634,12 +813,14 @@ describe('Character Chat Blocks', () => {
         content: 'Full magic details should not be in this summary list.',
       })],
     }))
-    const ctx = blocks.find(b => b.id === 'story-context')!
-    expect(ctx.content).toContain('## Pinned Knowledge (Shortlist)')
-    expect(ctx.content).toContain('not the full fragment')
-    expect(ctx.content).toContain('kn-test01')
-    expect(ctx.content).toContain('Rules for magic')
-    expect(ctx.content).not.toContain('Full magic details should not be in this summary list.')
+    const catalog = blocks.find(b => b.id === 'fragment-pinned-catalog')!
+    expect(catalog).toBeDefined()
+    expect(catalog.content).toContain('## Pinned Fragment Catalog')
+    expect(catalog.content).toContain('one-line catalog row, not the full fragment')
+    expect(catalog.content).toContain('### Knowledge')
+    expect(catalog.content).toContain('kn-test01')
+    expect(catalog.content).toContain('Rules for magic')
+    expect(catalog.content).not.toContain('Full magic details should not be in this summary list.')
   })
 
   it('does not duplicate the active character in pinned character summaries', () => {
@@ -658,7 +839,7 @@ describe('Character Chat Blocks', () => {
     }))
 
     const ctx = blocks.find(b => b.id === 'story-context')!
-    expect(ctx.content).not.toContain('## Pinned Characters (Shortlist)')
-    expect(ctx.content).not.toContain('- ch-hero01:')
+    expect(ctx.content).not.toContain('ch-hero01')
+    expect(blocks.find(b => b.id === 'fragment-pinned-catalog')).toBeUndefined()
   })
 })

@@ -24,15 +24,17 @@ interface RuntimeState {
   stack: string[]
   callCount: number
   options: Required<AgentCallOptions>
+  abortController: AbortController
 }
 
 const runnerLogger = createLogger('agent-runner')
 
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number, agentName: string): Promise<T> {
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, agentName: string, abortController: AbortController): Promise<T> {
   if (timeoutMs <= 0) return promise
   let timer: ReturnType<typeof setTimeout> | null = null
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(() => {
+      abortController.abort()
       reject(new Error(`Agent timed out: ${agentName} (${timeoutMs}ms)`))
     }, timeoutMs)
   })
@@ -102,6 +104,7 @@ async function invokeInternal<TOutput>(args: {
       parentRunId: args.parentRunId,
       rootRunId: args.runtime.rootRunId,
       depth: args.depth,
+      abortSignal: args.runtime.abortController.signal,
       invokeAgent: async <_TInput, TNestedOutput>(name: string, input: _TInput) => {
         const nested = await invokeInternal<TNestedOutput>({
           dataDir: args.dataDir,
@@ -120,6 +123,7 @@ async function invokeInternal<TOutput>(args: {
       Promise.resolve(definition.run(context, parsedInput)),
       args.runtime.options.timeoutMs,
       args.agentName,
+      args.runtime.abortController,
     )
     const output = definition.outputSchema ? definition.outputSchema.parse(rawOutput) : rawOutput
     const finishedAt = new Date().toISOString()
@@ -189,7 +193,7 @@ export async function invokeAgent<TOutput = unknown>(args: {
   const options: Required<AgentCallOptions> = {
     maxDepth: args.options?.maxDepth ?? 3,
     maxCalls: args.options?.maxCalls ?? 20,
-    timeoutMs: args.options?.timeoutMs ?? 60000 * 5, 
+    timeoutMs: args.options?.timeoutMs ?? 60000 * 5,
   }
 
   const runtime: RuntimeState = {
@@ -198,6 +202,7 @@ export async function invokeAgent<TOutput = unknown>(args: {
     stack: [],
     callCount: 0,
     options,
+    abortController: new AbortController(),
   }
 
   const activityId = registerActiveAgent(args.storyId, args.agentName)

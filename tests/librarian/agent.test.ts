@@ -7,7 +7,9 @@ import {
   getFragment,
   listFragments,
 } from '@/server/fragments/storage'
-import { getState, getAnalysis, listAnalyses, saveAnalysis } from '@/server/librarian/storage'
+import { getState, getAnalysis, listAnalyses, saveAnalysis, getBackfillJob } from '@/server/librarian/storage'
+import { createBackfillJob, runBackfillJob } from '@/server/librarian/backfill'
+import { runContinuityAuditBatch } from '@/server/librarian/audit'
 import { saveAgentBlockConfig } from '@/server/agents/agent-block-storage'
 import { initProseChain, addProseSection } from '@/server/fragments/prose-chain'
 import { addTag } from '@/server/fragments/associations'
@@ -46,6 +48,7 @@ function makeStory(
   const now = new Date().toISOString()
   const defaultSettings: StoryMeta['settings'] = makeTestSettings({
     summarizationThreshold: 0,
+    disableLibrarianDirections: true,
   })
 
   const baseStory: StoryMeta = {
@@ -192,6 +195,7 @@ describe('librarian agent', () => {
       },
       blockOrder: [],
       disabledTools: [],
+      disableAutoAnalysis: false,
     })
 
     mockAgentStream.mockImplementation(async (
@@ -201,15 +205,17 @@ describe('librarian agent', () => {
     ) => {
       expect(opts?.instructions).toContain('CUSTOM PREPEND')
       expect(opts?.instructions).toContain('Never drop custom system fragments.')
-      expect(opts?.instructions).toContain('when the prose changes a lasting fact')
-      expect(opts?.instructions).toContain('create genuinely new characters, knowledge, locations')
+      if (tools.proposeFragmentChanges) {
+        expect(opts?.instructions).toContain('minimal durable updates')
+        expect(opts?.instructions).toContain('genuinely new characters, knowledge, locations')
+      }
 
       return {
         fullStream: (async function* () {
           const id = 'call-0'
           const input = { summary: 'They crossed a market.' }
           yield { type: 'tool-call' as const, toolCallId: id, toolName: 'reportAnalysis', input }
-          const output = await tools.reportAnalysis.execute(input)
+          const output = tools.reportAnalysis ? await tools.reportAnalysis.execute(input) : { ok: true }
           yield { type: 'tool-result' as const, toolCallId: id, toolName: 'reportAnalysis', output }
           yield { type: 'finish' as const, finishReason: 'stop' }
         })(),
@@ -320,7 +326,7 @@ describe('librarian agent', () => {
 
     let capturedPrompt = ''
     mockAgentStream.mockImplementation((args: { prompt?: string }) => {
-      capturedPrompt = args.prompt ?? ''
+      if (!capturedPrompt && args.prompt) capturedPrompt = args.prompt
       return {
         fullStream: (async function* () {
           yield { type: 'finish' as const, finishReason: 'stop' }
@@ -330,8 +336,9 @@ describe('librarian agent', () => {
 
     await runLibrarian(dataDir, storyId, 'pr-0001')
 
-    expect(capturedPrompt).toContain('## Characters in Recent Prose')
-    expect(capturedPrompt).toContain('### `ch-0001` | Alice | The protagonist')
+    expect(capturedPrompt).toContain('## Writer Context For This Passage')
+    expect(capturedPrompt).toContain('### Characters')
+    expect(capturedPrompt).toContain('#### `ch-0001` | Alice | The protagonist')
     expect(capturedPrompt).toContain('Alice carries a rune-etched blade.')
   })
 
@@ -573,6 +580,295 @@ describe('librarian agent', () => {
     expect(state.recentMentions['loc-0001']).toEqual(['pr-0001'])
   })
 
+  it('runs directions in the fused analyze pass when enabled', async () => {
+    await createStory(dataDir, makeStory({ settings: { disableLibrarianDirections: false } }))
+    await createFragment(dataDir, storyId, makeFragment({
+      id: 'pr-0001',
+      content: 'The road opened toward a quiet city gate.',
+    }))
+    await setupProseChain(dataDir, storyId, ['pr-0001'])
+
+    const directions = [
+      { title: 'Enter Quietly', description: 'The party slips into the city.', instruction: 'Write a restrained entry through the gate.' },
+      { title: 'Question the Guard', description: 'A guard blocks the way.', instruction: 'Write a tense exchange with the gate guard.' },
+      { title: 'Follow the Lanterns', description: 'Lanterns reveal a hidden route.', instruction: 'Write the discovery of a side path.' },
+      { title: 'Wait Until Dawn', description: 'The group pauses outside.', instruction: 'Write a watchful pause before sunrise.' },
+    ]
+
+    mockAgentStream.mockImplementation(async (
+      _args: unknown,
+      tools: Record<string, { execute: (args: unknown) => Promise<unknown> }>,
+    ) => {
+      return {
+        fullStream: (async function* () {
+          if (tools.reportAnalysis) {
+            const input = { summary: 'The road reached a quiet city gate.' }
+            yield { type: 'tool-call' as const, toolCallId: 'call-observe', toolName: 'reportAnalysis', input }
+            yield { type: 'tool-result' as const, toolCallId: 'call-observe', toolName: 'reportAnalysis', output: await tools.reportAnalysis.execute(input) }
+          }
+          if (tools.proposeDirections) {
+            const input = { directions }
+            yield { type: 'tool-call' as const, toolCallId: 'call-directions', toolName: 'proposeDirections', input }
+            yield { type: 'tool-result' as const, toolCallId: 'call-directions', toolName: 'proposeDirections', output: await tools.proposeDirections.execute(input) }
+          }
+          yield { type: 'finish' as const, finishReason: 'stop' }
+        })(),
+      }
+    })
+
+    const analysis = await runLibrarian(dataDir, storyId, 'pr-0001')
+
+    const analyzePass = analysis.passes?.find((pass) => pass.name === 'analyze')
+    expect(analyzePass?.status).toBe('complete')
+    expect(analyzePass?.diagnostics?.directionToolCallCount).toBe(1)
+    expect(analysis.directions).toEqual(directions)
+  })
+
+  it('uses candidate fragments for memory context without recording mention annotations', async () => {
+    await createStory(dataDir, makeStory())
+    await createFragment(dataDir, storyId, makeFragment({
+      id: 'ch-0001',
+      type: 'character',
+      name: 'Alice',
+      description: 'Captain of the guard',
+      content: 'Alice is captain of the guard.',
+    }))
+    await createFragment(dataDir, storyId, makeFragment({
+      id: 'pr-0001',
+      content: 'The captain resigned from the guard.',
+    }))
+    await setupProseChain(dataDir, storyId, ['pr-0001'])
+
+    mockStreamWithToolCalls([
+      {
+        toolName: 'reportAnalysis',
+        args: {
+          candidateFragmentIds: ['ch-0001'],
+          needsProposalPass: true,
+        },
+      },
+      {
+        toolName: 'proposeFragmentChanges',
+        args: {
+          operations: [{
+            action: 'append_paragraph',
+            fragmentId: 'ch-0001',
+            field: 'content',
+            text: 'Status: Alice resigned from the guard.',
+            reason: 'The prose changes Alice role.',
+          }],
+        },
+      },
+    ])
+
+    const analysis = await runLibrarian(dataDir, storyId, 'pr-0001')
+    expect(analysis.mentions).toEqual([])
+    expect(analysis.candidateFragmentIds).toEqual(['ch-0001'])
+    expect(analysis.fragmentChangeProposals).toHaveLength(1)
+
+    const analyzePass = analysis.passes?.find((pass) => pass.name === 'analyze')
+    expect(analyzePass?.status).toBe('complete')
+    expect(analyzePass?.diagnostics?.proposalToolCallCount).toBe(1)
+    expect(analyzePass?.diagnostics?.proposalToolFailureCount).toBe(0)
+    expect(analyzePass?.diagnostics?.proposalQueuedOperationCount).toBe(1)
+    expect(analyzePass?.diagnostics?.proposalInvalidOperationCount).toBe(0)
+    expect(analyzePass?.diagnostics?.attentionCandidateIds).toEqual([])
+    expect(analysis.passes?.find((pass) => pass.name === 'directions')).toBeUndefined()
+    expect(analysis.directions).toEqual([])
+
+    const fragment = await getFragment(dataDir, storyId, 'pr-0001')
+    expect(fragment!.meta.annotations).toBeUndefined()
+
+    const state = await getState(dataDir, storyId)
+    expect(state.recentMentions).toEqual({})
+  })
+
+  it('passes an abort signal into the online analyze stream', async () => {
+    await createStory(dataDir, makeStory())
+    await createFragment(dataDir, storyId, makeFragment({
+      id: 'pr-0001',
+      content: 'Alice checked the gate.',
+    }))
+    await setupProseChain(dataDir, storyId, ['pr-0001'])
+    mockStreamWithToolCalls([
+      { toolName: 'reportAnalysis', args: { summary: 'Alice checked the gate.' } },
+    ])
+
+    const controller = new AbortController()
+    await runLibrarian(dataDir, storyId, 'pr-0001', { abortSignal: controller.signal })
+
+    const streamArgs = mockAgentStream.mock.calls[0]?.[0] as { abortSignal?: AbortSignal } | undefined
+    expect(streamArgs?.abortSignal).toBeInstanceOf(AbortSignal)
+  })
+
+  it('records invalid proposal diagnostics on a completed analyze pass', async () => {
+    await createStory(dataDir, makeStory())
+    await createFragment(dataDir, storyId, makeFragment({
+      id: 'ch-0001',
+      type: 'character',
+      name: 'Alice',
+      description: 'Captain of the guard',
+      content: 'Alice is captain of the guard.',
+    }))
+    await createFragment(dataDir, storyId, makeFragment({
+      id: 'pr-0001',
+      content: 'Alice resigned from the guard.',
+    }))
+    await setupProseChain(dataDir, storyId, ['pr-0001'])
+
+    mockStreamWithToolCalls([
+      {
+        toolName: 'reportAnalysis',
+        args: {
+          summary: 'Alice resigned.',
+          candidateFragmentIds: ['ch-0001'],
+          needsProposalPass: true,
+        },
+      },
+      {
+        toolName: 'proposeFragmentChanges',
+        args: {
+          operations: [{
+            action: 'replace_text',
+            fragmentId: 'ch-0001',
+            field: 'content',
+            oldText: 'captain of the moon',
+            newText: 'former captain of the guard',
+          }],
+        },
+      },
+    ])
+
+    const analysis = await runLibrarian(dataDir, storyId, 'pr-0001')
+    const analyzePass = analysis.passes?.find((pass) => pass.name === 'analyze')
+
+    expect(analyzePass?.status).toBe('complete')
+    expect(analyzePass?.diagnostics?.proposalToolCallCount).toBe(1)
+    expect(analyzePass?.diagnostics?.proposalToolFailureCount).toBe(1)
+    expect(analyzePass?.diagnostics?.proposalQueuedOperationCount).toBe(0)
+    expect(analyzePass?.diagnostics?.proposalInvalidOperationCount).toBe(1)
+    expect(analysis.fragmentChangeProposals).toEqual([])
+  })
+
+  it('keeps writer provenance but does not create candidates from lexical matches', async () => {
+    await createStory(dataDir, makeStory())
+    await createFragment(dataDir, storyId, makeFragment({
+      id: 'ch-0001',
+      type: 'character',
+      name: 'Alice',
+      description: 'Captain of the guard',
+      content: 'Alice is captain of the guard.',
+    }))
+    await createFragment(dataDir, storyId, makeFragment({
+      id: 'kn-0001',
+      type: 'knowledge',
+      name: 'Guard Resignation',
+      description: 'Rules for captains leaving the guard',
+      content: 'Captains can only resign before the council.',
+    }))
+    await createFragment(dataDir, storyId, makeFragment({
+      id: 'pr-0001',
+      content: 'The captain resigned from the guard.',
+      meta: { writerContextIds: ['kn-0001'] },
+    }))
+    await setupProseChain(dataDir, storyId, ['pr-0001'])
+
+    mockAgentStream.mockImplementation(async (
+      _args: unknown,
+      tools: Record<string, { execute: (args: unknown) => Promise<unknown> }>,
+    ) => {
+      return {
+        fullStream: (async function* () {
+          if (tools.reportAnalysis) {
+            const input = { summary: 'The guard captain resigned.', needsProposalPass: true }
+            yield { type: 'tool-call' as const, toolCallId: 'call-observe', toolName: 'reportAnalysis', input }
+            yield { type: 'tool-result' as const, toolCallId: 'call-observe', toolName: 'reportAnalysis', output: await tools.reportAnalysis.execute(input) }
+          }
+          yield { type: 'finish' as const, finishReason: 'stop' }
+        })(),
+      }
+    })
+
+    const analysis = await runLibrarian(dataDir, storyId, 'pr-0001')
+    const byId = new Map(analysis.candidateFragments?.map((candidate) => [candidate.fragmentId, candidate]))
+
+    expect(analysis.candidateFragmentIds).toEqual(['kn-0001'])
+    expect(byId.has('ch-0001')).toBe(false)
+    expect(byId.get('kn-0001')?.sources).toEqual(expect.arrayContaining(['writer-context']))
+    expect(analysis.mentions).toEqual([])
+    expect((await getFragment(dataDir, storyId, 'pr-0001'))!.meta.annotations).toBeUndefined()
+    expect(analysis.passes?.find((pass) => pass.name === 'router')).toBeUndefined()
+  })
+
+  it('keeps writer provenance context when suggestion tools are disabled', async () => {
+    await createStory(dataDir, makeStory({ settings: { disableLibrarianSuggestions: true } }))
+    await createFragment(dataDir, storyId, makeFragment({
+      id: 'kn-0001',
+      type: 'knowledge',
+      name: 'Glass Accord',
+      description: 'Rare treaty context',
+      content: 'The Glass Accord binds witnesses to silence.',
+    }))
+    await createFragment(dataDir, storyId, makeFragment({
+      id: 'pr-0001',
+      content: 'The room went quiet after the oath.',
+      meta: { writerContextIds: ['kn-0001'] },
+    }))
+    await setupProseChain(dataDir, storyId, ['pr-0001'])
+
+    mockStreamWithToolCalls([
+      { toolName: 'reportAnalysis', args: { summary: 'An oath quieted the room.' } },
+    ])
+
+    const analysis = await runLibrarian(dataDir, storyId, 'pr-0001')
+    const analyzePass = analysis.passes?.find((pass) => pass.name === 'analyze')
+
+    expect(analysis.candidateFragmentIds).toEqual(['kn-0001'])
+    expect(analyzePass?.diagnostics?.attentionCandidateIds).toEqual(['kn-0001'])
+    expect(analyzePass?.diagnostics?.toolNames).toContain('reportAnalysis')
+    expect(analyzePass?.diagnostics?.toolNames).not.toContain('proposeFragmentChanges')
+    expect(analyzePass?.diagnostics?.toolNames).not.toContain('readFragments')
+  })
+
+  it('does not block online analysis on a synchronous router fallback', async () => {
+    await createStory(dataDir, makeStory())
+    await createFragment(dataDir, storyId, makeFragment({
+      id: 'ch-0001',
+      type: 'character',
+      name: 'Alice',
+      description: 'Captain of the guard',
+      content: 'Alice is captain of the guard.',
+    }))
+    await createFragment(dataDir, storyId, makeFragment({
+      id: 'pr-0001',
+      content: 'The masked figure abdicated before dawn.',
+    }))
+    await setupProseChain(dataDir, storyId, ['pr-0001'])
+
+    mockAgentStream.mockImplementation(async (
+      _args: unknown,
+      tools: Record<string, { execute: (args: unknown) => Promise<unknown> }>,
+    ) => {
+      return {
+        fullStream: (async function* () {
+          if (tools.reportAnalysis) {
+            const input = { summary: 'A masked figure abdicated.', needsProposalPass: true }
+            yield { type: 'tool-call' as const, toolCallId: 'call-observe', toolName: 'reportAnalysis', input }
+            yield { type: 'tool-result' as const, toolCallId: 'call-observe', toolName: 'reportAnalysis', output: await tools.reportAnalysis.execute(input) }
+          }
+          yield { type: 'finish' as const, finishReason: 'stop' }
+        })(),
+      }
+    })
+
+    const analysis = await runLibrarian(dataDir, storyId, 'pr-0001')
+
+    expect(analysis.candidateFragmentIds).toEqual([])
+    expect(analysis.fragmentChangeProposals).toEqual([])
+    expect(analysis.passes?.find((pass) => pass.name === 'router')).toBeUndefined()
+    expect(analysis.passes?.find((pass) => pass.name === 'analyze')?.status).toBe('complete')
+  })
+
   it('accumulates mentions across multiple runs', async () => {
     await createStory(dataDir, makeStory())
     await createFragment(dataDir, storyId, makeFragment({
@@ -689,7 +985,13 @@ describe('librarian agent', () => {
     await setupProseChain(dataDir, storyId, ['pr-0001'])
 
     mockStreamWithToolCalls([
-      { toolName: 'reportAnalysis', args: { summary: 'An ancient city called Valdris was revealed.' } },
+      {
+        toolName: 'reportAnalysis',
+        args: {
+          summary: 'An ancient city called Valdris was revealed.',
+          needsProposalPass: true,
+        },
+      },
       {
         toolName: 'proposeFragmentChanges',
         args: {
@@ -731,7 +1033,13 @@ describe('librarian agent', () => {
     await setupProseChain(dataDir, storyId, ['pr-0001', 'pr-0002'])
 
     mockStreamWithToolCalls([
-      { toolName: 'reportAnalysis', args: { summary: 'Valdris appears in old records.' } },
+      {
+        toolName: 'reportAnalysis',
+        args: {
+          summary: 'Valdris appears in old records.',
+          needsProposalPass: true,
+        },
+      },
       {
         toolName: 'proposeFragmentChanges',
         args: {
@@ -755,7 +1063,14 @@ describe('librarian agent', () => {
     expect(created).toBeTruthy()
 
     mockStreamWithToolCalls([
-      { toolName: 'reportAnalysis', args: { summary: 'Valdris defenses were revealed.' } },
+      {
+        toolName: 'reportAnalysis',
+        args: {
+          summary: 'Valdris defenses were revealed.',
+          candidateFragmentIds: [createdId!],
+          needsProposalPass: true,
+        },
+      },
       {
         toolName: 'proposeFragmentChanges',
         args: {
@@ -808,7 +1123,14 @@ describe('librarian agent', () => {
     const baseHash = fragmentBaseHash(existingKnowledge!)
 
     mockStreamWithToolCalls([
-      { toolName: 'reportAnalysis', args: { summary: 'Valdris defenses were revealed.' } },
+      {
+        toolName: 'reportAnalysis',
+        args: {
+          summary: 'Valdris defenses were revealed.',
+          candidateFragmentIds: ['kn-0001'],
+          needsProposalPass: true,
+        },
+      },
       {
         toolName: 'proposeFragmentChanges',
         args: {
@@ -857,7 +1179,14 @@ describe('librarian agent', () => {
     await setupProseChain(dataDir, storyId, ['pr-0001'])
 
     mockStreamWithToolCalls([
-      { toolName: 'reportAnalysis', args: { summary: 'Alice resigned from the guard.' } },
+      {
+        toolName: 'reportAnalysis',
+        args: {
+          summary: 'Alice resigned from the guard.',
+          candidateFragmentIds: ['ch-0001'],
+          needsProposalPass: true,
+        },
+      },
       {
         toolName: 'proposeFragmentChanges',
         args: {
@@ -906,7 +1235,14 @@ describe('librarian agent', () => {
     // propose time (different replacements, so no dedupe), but only the first
     // can apply — the second must end up stale, not pending.
     mockStreamWithToolCalls([
-      { toolName: 'reportAnalysis', args: { summary: 'Alice resigned.' } },
+      {
+        toolName: 'reportAnalysis',
+        args: {
+          summary: 'Alice resigned.',
+          candidateFragmentIds: ['ch-0001'],
+          needsProposalPass: true,
+        },
+      },
       {
         toolName: 'proposeFragmentChanges',
         args: {
@@ -968,7 +1304,14 @@ describe('librarian agent', () => {
     await setupProseChain(dataDir, storyId, ['pr-0001'])
 
     mockStreamWithToolCalls([
-      { toolName: 'reportAnalysis', args: { summary: 'Alice left the gate and took command.' } },
+      {
+        toolName: 'reportAnalysis',
+        args: {
+          summary: 'Alice left the gate and took command.',
+          candidateFragmentIds: ['ch-0001'],
+          needsProposalPass: true,
+        },
+      },
       {
         toolName: 'proposeFragmentChanges',
         args: {
@@ -1148,8 +1491,94 @@ describe('librarian agent', () => {
     ])
 
     await runLibrarian(dataDir, storyId, 'pr-0001')
-    expect(mockAgentStream).toHaveBeenCalledTimes(1)
+    expect(mockAgentStream).toHaveBeenCalled()
     const call = mockAgentStream.mock.calls[0]?.[0] as { prompt?: string } | undefined
     expect(typeof call?.prompt).toBe('string')
+  })
+
+  it('runs backfill jobs durably and resumes from the saved cursor', async () => {
+    await createStory(dataDir, makeStory())
+    await createFragment(dataDir, storyId, makeFragment({ id: 'pr-0001', content: 'First historical passage.' }))
+    await createFragment(dataDir, storyId, makeFragment({ id: 'pr-0002', content: 'Second historical passage.' }))
+    await setupProseChain(dataDir, storyId, ['pr-0001', 'pr-0002'])
+
+    mockStreamWithToolCalls([
+      { toolName: 'reportAnalysis', args: { summary: 'Backfilled passage.' } },
+    ])
+
+    const job = await createBackfillJob(dataDir, storyId, {
+      fragmentIds: ['pr-0001', 'pr-0002'],
+      source: 'historical',
+    })
+
+    const paused = await runBackfillJob(dataDir, storyId, job.id, { maxFragments: 1 })
+    expect(paused.status).toBe('paused')
+    expect(paused.cursor).toBe(1)
+    expect(paused.completedFragmentIds).toEqual(['pr-0001'])
+
+    const persisted = await getBackfillJob(dataDir, storyId, job.id)
+    expect(persisted?.cursor).toBe(1)
+
+    const complete = await runBackfillJob(dataDir, storyId, job.id)
+    expect(complete.status).toBe('complete')
+    expect(complete.cursor).toBe(2)
+    expect(complete.completedFragmentIds).toEqual(['pr-0001', 'pr-0002'])
+  })
+
+  it('audits continuity against an explicit knowledge batch only', async () => {
+    await createStory(dataDir, makeStory())
+    await createFragment(dataDir, storyId, makeFragment({ id: 'pr-0001', content: 'Alice opened the sealed gate.' }))
+    await createFragment(dataDir, storyId, makeFragment({
+      id: 'kn-0001',
+      type: 'knowledge',
+      name: 'Sealed Gate',
+      description: 'Rules for the old gate',
+      content: 'The sealed gate can only open under a red moon.',
+    }))
+    await createFragment(dataDir, storyId, makeFragment({
+      id: 'kn-0002',
+      type: 'knowledge',
+      name: 'Blue Harbor',
+      description: 'A distant port',
+      content: 'This content should not be in the full audit batch.',
+    }))
+
+    let capturedPrompt = ''
+    mockAgentStream.mockImplementation(async (
+      args: { prompt?: string },
+      tools: Record<string, { execute: (args: unknown) => Promise<unknown> }>,
+    ) => {
+      if (args.prompt) capturedPrompt = args.prompt
+      return {
+        fullStream: (async function* () {
+          const input = {
+            findings: [{
+              description: 'The prose opens a gate that should require a red moon.',
+              fragmentIds: ['pr-0001', 'kn-0001', 'kn-0002'],
+              severity: 'warning',
+            }],
+          }
+          yield { type: 'tool-call' as const, toolCallId: 'call-audit', toolName: 'reportContinuityAudit', input }
+          yield { type: 'tool-result' as const, toolCallId: 'call-audit', toolName: 'reportContinuityAudit', output: await tools.reportContinuityAudit.execute(input) }
+          yield { type: 'finish' as const, finishReason: 'stop' }
+        })(),
+      }
+    })
+
+    const result = await runContinuityAuditBatch(dataDir, storyId, (await getStory(dataDir, storyId))!, {
+      proseFragmentId: 'pr-0001',
+      knowledgeFragmentIds: ['kn-0001'],
+    })
+
+    expect(result.pass.status).toBe('complete')
+    expect(result.batchFragmentIds).toEqual(['kn-0001'])
+    expect(result.findings).toEqual([{
+      description: 'The prose opens a gate that should require a red moon.',
+      fragmentIds: ['pr-0001', 'kn-0001'],
+      severity: 'warning',
+    }])
+    expect(capturedPrompt).toContain('The sealed gate can only open under a red moon.')
+    expect(capturedPrompt).toContain('kn-0002 | Blue Harbor | A distant port')
+    expect(capturedPrompt).not.toContain('This content should not be in the full audit batch.')
   })
 })

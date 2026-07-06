@@ -1224,6 +1224,32 @@ function AnalysisItem({
             </div>
           )}
 
+          {analysis.passes && analysis.passes.length > 0 && (
+            <div className="space-y-1">
+              <span className="text-muted-foreground text-[0.625rem]">Passes</span>
+              <div className="flex flex-wrap gap-1">
+                {analysis.passes.map((pass, index) => (
+                  <span
+                    key={`${pass.name}-${index}`}
+                    className={cn(
+                      'inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[0.5625rem]',
+                      pass.status === 'complete' && 'border-emerald-500/15 bg-emerald-500/5 text-emerald-700 dark:text-emerald-300',
+                      pass.status === 'skipped' && 'border-muted bg-muted/20 text-muted-foreground',
+                      pass.status === 'failed' && 'border-destructive/15 bg-destructive/5 text-destructive/80',
+                    )}
+                    title={pass.error ?? pass.reason ?? undefined}
+                  >
+                    <span>{pass.name}</span>
+                    <span className="opacity-70">{pass.status}</span>
+                    {typeof pass.durationMs === 'number' && (
+                      <span className="opacity-60">{Math.round(pass.durationMs)}ms</span>
+                    )}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Stored analysis trace */}
           {analysis.trace && analysis.trace.length > 0 && (
             <StoredTraceViewer trace={analysis.trace} />

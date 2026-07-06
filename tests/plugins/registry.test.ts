@@ -76,7 +76,7 @@ describe('PluginRegistry', () => {
           prefix: 'tl',
           stickyByDefault: false,
           contextRenderer: (f) => f.content,
-          shortlistFields: ['id', 'name', 'description'],
+          catalogFields: ['id', 'name', 'description'],
         },
       ],
     })

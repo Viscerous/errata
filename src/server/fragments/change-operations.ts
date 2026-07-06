@@ -27,7 +27,7 @@ export const SET_FIELDS_DESCRIPTION = 'Whole replacement values for editable fie
  * site — edit here.
  */
 export const OPERATION_GUIDANCE =
-  '`replace_text` for localized edits — to insert detail, set `oldText` to an existing sentence and `newText` to that sentence plus the addition; `append_paragraph` for a new topic at the end; `set_fields` only for whole-field rewrites (requires `baseHash`); `archive_fragment` only to retire. Group related facts in cohesive paragraphs; change only the affected span, never restate existing content.'
+  'Use `set_fields` only for whole-field rewrites (requires `baseHash`); use `append_paragraph` for a new topic at the end; use `replace_text` for localized edits to existing text; use `archive_fragment` only to retire. For `replace_text`, `oldText` is the exact existing text to find and replace, and `newText` is the complete replacement for that text. The tool preserves the text before and after `oldText`, so include only the text that should replace `oldText`. To insert detail inside a sentence or paragraph, use that sentence or paragraph as `oldText` and the revised version as `newText`. Group related facts in cohesive paragraphs.'
 
 /** Tool description for `proposeFragmentChanges`, shared by the chat and analysis tools. */
 export const PROPOSE_FRAGMENT_CHANGES_DESCRIPTION =
@@ -149,6 +149,10 @@ export const llmInsertTextSchema = llmRawTextSchema.refine((val) => val.length >
   message: 'String must contain at least 1 character.',
 })
 
+const exactAnchorTextSchema = z.string().refine((val) => val.trim().length >= 1, {
+  message: 'oldText must contain the exact existing text to find and replace.',
+})
+
 /** A sanitized string schema for LLM-generated paragraphs, stripping leading/trailing literal and actual newlines. */
 export const llmTextSchema = z.string().transform((val) =>
   normalizeLlmEscapedText(val).trim()
@@ -191,8 +195,8 @@ const replaceTextOperationSchema = z.object({
   action: z.literal('replace_text'),
   fragmentId: z.string().min(1).describe('Target fragment ID.'),
   field: editableFieldSchema.describe('Editable field to change. Defaults to content.').default('content'),
-  oldText: z.string().default('').describe('Required exact current text span to replace. Match the stored text literally (whitespace included); do not escape newlines or quotes — anchors are matched byte-for-byte.'),
-  newText: llmRawTextSchema.describe('Required replacement text. Use an empty string only to delete oldText.'),
+  oldText: exactAnchorTextSchema.describe('Required exact existing text to find and replace. Copy it from the stored fragment text literally (whitespace included); do not escape newlines or quotes — anchors are matched byte-for-byte.'),
+  newText: llmRawTextSchema.describe('Required complete replacement for oldText. The tool preserves surrounding text, so include only the text that should replace oldText. To insert detail inside a sentence or paragraph, use the revised sentence or paragraph. Use an empty string only to delete oldText.'),
   occurrence: z.number().int().positive().optional().describe('1-based occurrence to replace when `oldText` appears multiple times. Omit only when unique or when `replaceAll` is true.'),
   replaceAll: z.boolean().default(false).describe('Replace every occurrence of `oldText` in the field. Defaults to false for fragment memory edits; use carefully.'),
   reason: z.string().max(500).optional(),
@@ -447,7 +451,23 @@ function localizedEditSizeError(
   if (text.length <= MAX_LOCALIZED_EDIT_CHARS) return null
   return makeOperationError(
     'localized_edit_too_large',
-    `${operation.action} text for ${fragmentId} is ${text.length} characters — far beyond a localized edit. Replace only the span that changes, or use set_fields with baseHash for a complete rewrite.`,
+    operation.action === 'replace_text'
+      ? `replace_text.newText for ${fragmentId} is ${text.length} characters, which is far beyond a localized edit. newText is the complete replacement for oldText; surrounding text is already preserved, so do not restate the whole fragment. Use append_paragraph for a new end topic, or set_fields with baseHash for a complete rewrite.`
+      : `${operation.action} text for ${fragmentId} is ${text.length} characters, which is far beyond a localized edit. Use shorter appended text, split the update into focused proposals, or use set_fields with baseHash for a complete rewrite.`,
+    'readFragments',
+  )
+}
+
+function wholeFieldReplaceTextError(
+  fragmentId: string,
+  field: EditableField,
+  current: string,
+  oldText: string,
+): OperationError | null {
+  if (current.trim().length === 0 || current.trim() !== oldText.trim()) return null
+  return makeOperationError(
+    'whole_field_replace_text',
+    `replace_text.oldText matches the entire current ${fragmentId}.${field}. This is a whole-field rewrite; use set_fields with baseHash, or split the update into smaller replace_text operations.`,
     'readFragments',
   )
 }
@@ -616,16 +636,23 @@ function applyOperationToDraft(
   }
 
   if (operation.action === 'replace_text') {
-    if (!operation.oldText) {
+    if (operation.oldText.trim().length === 0) {
       return {
         draft,
         errors: [makeOperationError(
           'old_text_missing',
-          `replace_text requires oldText — the exact current text to find and replace. To rewrite the whole field, use set_fields with baseHash instead.`,
+          `replace_text requires oldText — the exact existing text to find and replace. To rewrite the whole field, use set_fields with baseHash instead.`,
           'readFragments',
         )],
       }
     }
+    const wholeFieldError = wholeFieldReplaceTextError(
+      fragmentId,
+      operation.field,
+      fieldValue(draft, operation.field),
+      operation.oldText,
+    )
+    if (wholeFieldError) return { draft, errors: [wholeFieldError] }
     const replacement = replaceExactText({
       fragmentId,
       field: operation.field,
@@ -833,7 +860,7 @@ export async function validateOperations(
           action: operation.action,
           status: 'invalid',
           target: { fragmentId },
-          errors: [makeOperationError('conflicting_operations', `Submit set_fields and localized span edits for ${fragmentId} in separate proposals. Use either a single complete rewrite or localized edits.`)],
+          errors: [makeOperationError('conflicting_operations', `Submit set_fields and localized edits for ${fragmentId} in separate proposals. Use either a single complete rewrite or localized edits.`)],
         })
       }
       continue
@@ -868,10 +895,13 @@ export async function validateOperations(
           validation.diffs = applied.diffs
         }
       } else if (operation.action !== 'archive_fragment') {
-        const oversize = localizedEditSizeError(fragmentId, operation)
-        if (oversize) {
+        const wholeFieldError = operation.action === 'replace_text'
+          ? wholeFieldReplaceTextError(fragmentId, operation.field, fieldValue(draft, operation.field), operation.oldText)
+          : null
+        const oversize = wholeFieldError ? null : localizedEditSizeError(fragmentId, operation)
+        if (wholeFieldError || oversize) {
           validation.status = 'invalid'
-          validation.errors = [oversize]
+          validation.errors = [wholeFieldError ?? oversize!]
         } else {
           const applied = applyOperationToDraft(fragmentId, draft, operation)
           if (applied.errors) {

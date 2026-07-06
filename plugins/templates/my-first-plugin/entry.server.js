@@ -22,7 +22,7 @@ const plugin = definePlugin({
       contextRenderer(fragment) {
         return `### Idea: ${fragment.name}\n${fragment.content}`
       },
-      shortlistFields: ['id', 'name', 'description'],
+      catalogFields: ['id', 'name', 'description'],
       llmTools: true,
     },
   ],

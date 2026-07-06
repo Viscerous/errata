@@ -184,6 +184,18 @@ describe('LLM tools', () => {
     expect(updateProposal.operations[0].errors[0].code).toBe('fragment_name_invalid')
   })
 
+  it('rejects replace_text proposals with an empty oldText anchor', async () => {
+    await expect(proposeFragmentChangesSchema.parseAsync({
+      operations: [{
+        action: 'replace_text',
+        fragmentId: 'ch-0001',
+        field: 'content',
+        oldText: '',
+        newText: 'A replacement.',
+      }],
+    })).rejects.toThrow(/oldText/)
+  })
+
   it('requires baseHash for whole-field rewrites and applies with the current hash', async () => {
     await createFragment(dataDir, storyId, makeFragment({ id: 'ch-0001', type: 'character', content: 'Alice is wary.' }))
     const tools = createFragmentTools(dataDir, storyId, { readOnly: false })

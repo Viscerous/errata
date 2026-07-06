@@ -3,35 +3,35 @@ import type { ContextBlock } from '../llm/context-builder'
 import {
   buildFragmentContextLanes,
   findFragmentContextLane,
+  fragmentCatalogBlock,
   fragmentContextBlock,
-  fragmentContextBlocks,
-  isBuiltinContextFragmentType,
-  type FragmentContextGroup,
   type FragmentContextLane,
-  type FragmentContextScope,
 } from '../llm/fragment-context-blocks'
 import type { AgentBlockContext } from './agent-block-context'
 
-function summaryIndexBlock(
-  id: string,
-  type: string,
-  label: string,
-  items: Fragment[],
-  order: number,
-  scope: FragmentContextScope = 'available',
-): ContextBlock | null {
-  return fragmentContextBlock({
-    id,
-    type,
-    label,
-    fragments: items,
-    mode: 'summary-index',
-    scope,
-    order,
-  })
+type FragmentCatalogSection = { type: string; label: string; fragments: Fragment[] }
+
+function catalogSectionsForLanes(
+  lanes: FragmentContextLane[],
+  options: {
+    includeGuidelines?: boolean
+    includeKnowledge?: boolean
+    includeCharacters?: boolean
+    includeCustomFragments?: boolean
+  },
+  fragmentsForLane: (lane: FragmentContextLane) => Fragment[],
+): FragmentCatalogSection[] {
+  return lanes
+    .filter((lane) => includeLane(lane, options))
+    .sort((a, b) => laneOrder(a, 303) - laneOrder(b, 303))
+    .map((lane) => ({
+      type: lane.type,
+      label: lane.label,
+      fragments: fragmentsForLane(lane),
+    }))
 }
 
-export interface PinnedFragmentSummaryOptions {
+export interface PinnedFragmentCatalogOptions {
   includeGuidelines?: boolean
   includeKnowledge?: boolean
   includeCharacters?: boolean
@@ -62,59 +62,45 @@ function laneOrder(lane: FragmentContextLane, customBaseOrder: number): number {
   return customBaseOrder
 }
 
-/** Pinned guideline, knowledge, character, and custom fragment summary indexes. */
-export function pinnedFragmentSummaryGroups(
+/** Pinned guideline, knowledge, character, and custom fragments as one aggregate catalog. */
+function pinnedFragmentCatalogSections(
   ctx: AgentBlockContext,
-  options: PinnedFragmentSummaryOptions = {},
-): FragmentContextGroup[] {
+  options: PinnedFragmentCatalogOptions = {},
+): FragmentCatalogSection[] {
   const excludeIds = new Set(options.excludeIds ?? [])
-  const withoutExcluded = (fragments: Fragment[]): Fragment[] => fragments.filter((fragment) => !excludeIds.has(fragment.id))
-  const groups: FragmentContextGroup[] = []
-  let customOrder = 303
-  for (const lane of buildFragmentContextLanes(ctx)) {
-    if (!includeLane(lane, options)) continue
-    const fragments = withoutExcluded(lane.sticky)
-    if (fragments.length === 0) continue
-    const order = laneOrder(lane, customOrder)
-    if (!isBuiltinContextFragmentType(lane.type)) customOrder++
-    groups.push({
-      id: `${lane.type}-pinned-summary-index`,
-      type: lane.type,
-      label: lane.label,
-      fragments,
-      mode: 'summary-index',
-      scope: 'pinned',
-      order,
-    })
-  }
-
-  return groups
+  return catalogSectionsForLanes(
+    buildFragmentContextLanes(ctx),
+    options,
+    (lane) => lane.sticky.filter((fragment) => !excludeIds.has(fragment.id)),
+  ).filter((section) => section.fragments.length > 0)
 }
 
-export function pinnedFragmentSummaryBlocks(
+export function pinnedFragmentCatalogBlocks(
   ctx: AgentBlockContext,
-  options: PinnedFragmentSummaryOptions = {},
+  options: PinnedFragmentCatalogOptions = {},
 ): ContextBlock[] {
-  return fragmentContextBlocks(pinnedFragmentSummaryGroups(ctx, options))
+  const block = fragmentCatalogBlock({
+    id: 'fragment-pinned-catalog',
+    sections: pinnedFragmentCatalogSections(ctx, options),
+    order: 303,
+    heading: 'Pinned Fragment Catalog',
+    scope: 'pinned',
+  })
+  return block ? [block] : []
 }
 
-interface SummaryCatalogSet {
-  fragments: Fragment[]
-  note?: string
-}
-
-function summaryCatalogBlock(
-  id: string,
-  type: string,
-  label: string,
-  sets: SummaryCatalogSet[],
-  order: number,
-): ContextBlock | null {
+function summaryCatalogSection(
+  lane: FragmentContextLane,
+): { type: string; label: string; fragments: Fragment[]; summaryNote: (fragment: Fragment) => string | undefined } {
   const fragments: Fragment[] = []
   const notes = new Map<string, string>()
   const seen = new Set<string>()
 
-  for (const set of sets) {
+  for (const set of [
+    { fragments: lane.sticky, note: 'pinned' },
+    { fragments: lane.recent, note: 'recent' },
+    { fragments: lane.available },
+  ]) {
     for (const fragment of set.fragments) {
       if (seen.has(fragment.id)) continue
       seen.add(fragment.id)
@@ -123,16 +109,12 @@ function summaryCatalogBlock(
     }
   }
 
-  return fragmentContextBlock({
-    id,
-    type,
-    label,
+  return {
+    type: lane.type,
+    label: lane.label,
     fragments,
-    mode: 'summary-index',
-    scope: 'catalog',
-    order,
-    summaryNote: (fragment) => notes.get(fragment.id),
-  })
+    summaryNote: (fragment: Fragment) => notes.get(fragment.id),
+  }
 }
 
 export interface FragmentSummaryCatalogOptions {
@@ -143,40 +125,32 @@ export interface FragmentSummaryCatalogOptions {
 }
 
 /**
- * One summary index per fragment type for tool-using catalog contexts. Pinned
- * and recent entries stay visible as inline notes instead of becoming separate
- * duplicate-looking blocks of the same type.
+ * One aggregate catalog for tool-using contexts. Pinned and recent entries stay
+ * visible as inline notes instead of becoming separate duplicate-looking blocks
+ * of the same type.
  */
 export function fragmentSummaryCatalogBlocks(
   ctx: AgentBlockContext,
   options: FragmentSummaryCatalogOptions = {},
 ): ContextBlock[] {
-  const blocks: ContextBlock[] = []
-  const maybePush = (block: ContextBlock | null) => {
-    if (block) blocks.push(block)
-  }
-
-  let customOrder = 303
-  for (const lane of buildFragmentContextLanes(ctx)) {
-    if (!includeLane(lane, options)) continue
-    const order = laneOrder(lane, customOrder)
-    if (!isBuiltinContextFragmentType(lane.type)) customOrder++
-    maybePush(summaryCatalogBlock(`${lane.type}-summary-index`, lane.type, lane.label, [
-      { fragments: lane.sticky, note: 'pinned' },
-      { fragments: lane.recent, note: 'recent' },
-      { fragments: lane.available },
-    ], order))
-  }
-
-  return blocks
+  const sections = buildFragmentContextLanes(ctx)
+    .filter((lane) => includeLane(lane, options))
+    .sort((a, b) => laneOrder(a, 303) - laneOrder(b, 303))
+    .map(summaryCatalogSection)
+  const block = fragmentCatalogBlock({
+    id: 'fragment-catalog',
+    sections,
+    order: 303,
+  })
+  return block ? [block] : []
 }
 
-/** All characters list for cross-reference. */
-export function allCharactersBlock(ctx: AgentBlockContext): ContextBlock | null {
+/** All characters as a narrow one-type catalog for cross-reference. */
+export function allCharactersCatalogBlock(ctx: AgentBlockContext): ContextBlock | null {
   const characters = findFragmentContextLane(buildFragmentContextLanes(ctx), 'character')?.all ?? []
   if (characters.length === 0) return null
   return fragmentContextBlock({
-    id: 'character-shortlist',
+    id: 'character-catalog',
     type: 'character',
     label: 'Characters',
     fragments: characters,
@@ -186,29 +160,20 @@ export function allCharactersBlock(ctx: AgentBlockContext): ContextBlock | null 
   })
 }
 
-export interface ShortlistBlockOptions {
+export interface AvailableFragmentCatalogOptions {
   includeCustomFragments?: boolean
 }
 
-/** Shortlist fragments not already pinned or promoted to full recent context. */
-export function shortlistBlocks(ctx: AgentBlockContext, options: ShortlistBlockOptions = {}): ContextBlock[] {
-  const blocks: ContextBlock[] = []
-  const maybePush = (block: ContextBlock | null) => {
-    if (block) blocks.push(block)
-  }
-
+/** Available fragments not already pinned or promoted to full recent context. */
+export function availableFragmentCatalogBlocks(ctx: AgentBlockContext, options: AvailableFragmentCatalogOptions = {}): ContextBlock[] {
   const lanes = buildFragmentContextLanes(ctx)
-  maybePush(summaryIndexBlock('guideline-shortlist', 'guideline', 'Guidelines', findFragmentContextLane(lanes, 'guideline')?.available ?? [], 400))
-  maybePush(summaryIndexBlock('knowledge-shortlist', 'knowledge', 'Knowledge', findFragmentContextLane(lanes, 'knowledge')?.available ?? [], 401))
-  maybePush(summaryIndexBlock('character-shortlist', 'character', 'Characters', findFragmentContextLane(lanes, 'character')?.available ?? [], 402))
-
-  if (options.includeCustomFragments) {
-    let customOrder = 403
-    for (const lane of lanes) {
-      if (isBuiltinContextFragmentType(lane.type)) continue
-      maybePush(summaryIndexBlock(`${lane.type}-shortlist`, lane.type, lane.label, lane.available, customOrder++))
-    }
-  }
-
-  return blocks
+  const sections = catalogSectionsForLanes(lanes, {
+    includeCustomFragments: options.includeCustomFragments === true,
+  }, (lane) => lane.available)
+  const block = fragmentCatalogBlock({
+    id: 'fragment-catalog',
+    sections,
+    order: 400,
+  })
+  return block ? [block] : []
 }

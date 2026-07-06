@@ -1121,7 +1121,7 @@ export function FragmentList({
       <div className="px-3 py-2.5 border-b border-border/30">
         <p className="text-[0.625rem] text-muted-foreground leading-relaxed">
           <Pin className="size-2.5 inline -mt-0.5 mr-0.5" />
-          Pinned fragments are always sent to the model. Unpinned ones appear as a shortlist.
+          Pinned fragments are sent in full. Unpinned ones appear as catalog rows.
         </p>
       </div>
 

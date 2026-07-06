@@ -37,6 +37,8 @@ export interface DirectionProposalResult {
   suggestions: SuggestionDirection[]
   modelId: string
   durationMs: number
+  stepCount?: number
+  finishReason?: string
 }
 
 const suggestionDirectionSchema = z.object({
@@ -73,6 +75,9 @@ export async function proposeDirections(
   // Load story to get custom prompt if configured
   const story = await getStory(dataDir, storyId)
   if (!story) throw new Error(`Story not found: ${storyId}`)
+  if (story.settings.disableLibrarianDirections === true) {
+    throw new Error('Direction suggestions are disabled for this story')
+  }
 
   const { model, modelId, temperature, providerOptions, guards } = await resolveAgentRuntime(dataDir, storyId, 'directions.suggest', story)
 
@@ -117,7 +122,7 @@ export async function proposeDirections(
     ],
   })
 
-  const { fullText } = await drainAgentStream(result.fullStream)
+  const { fullText, stepCount, finishReason } = await drainAgentStream(result.fullStream)
 
   // Track token usage
   await resolveAndReportUsage(dataDir, storyId, 'directions.suggest', result.totalUsage, modelId)
@@ -129,5 +134,5 @@ export async function proposeDirections(
 
   requestLogger.info('Suggestions generated', { count: suggestions.length, durationMs })
 
-  return { suggestions, modelId, durationMs }
+  return { suggestions, modelId, durationMs, stepCount, finishReason }
 }

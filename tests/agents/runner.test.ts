@@ -52,14 +52,29 @@ const cycleAgentB: AgentDefinition = {
   run: async (ctx) => ctx.invokeAgent(`${prefix}.cycleA`, {}),
 }
 
+let timeoutAbortObserved = false
+const timeoutAgent: AgentDefinition = {
+  name: `${prefix}.timeout`,
+  description: 'Timeout-aware agent',
+  inputSchema: z.object({}),
+  run: async (ctx) => {
+    ctx.abortSignal?.addEventListener('abort', () => {
+      timeoutAbortObserved = true
+    }, { once: true })
+    await new Promise(() => {})
+  },
+}
+
 describe('agent runner', () => {
   beforeEach(() => {
     clearAgentRuns()
+    timeoutAbortObserved = false
     agentRegistry.register(childAgent)
     agentRegistry.register(parentAgent)
     agentRegistry.register(disallowedParentAgent)
     agentRegistry.register(cycleAgentA)
     agentRegistry.register(cycleAgentB)
+    agentRegistry.register(timeoutAgent)
   })
 
   it('executes nested agent calls and returns trace', async () => {
@@ -99,5 +114,17 @@ describe('agent runner', () => {
       agentName: `${prefix}.cycleA`,
       input: {},
     })).rejects.toThrow('cycle detected')
+  })
+
+  it('aborts the invocation context when an agent times out', async () => {
+    await expect(invokeAgent({
+      dataDir: '/tmp',
+      storyId: 'story-test',
+      agentName: `${prefix}.timeout`,
+      input: {},
+      options: { timeoutMs: 5 },
+    })).rejects.toThrow('Agent timed out')
+
+    expect(timeoutAbortObserved).toBe(true)
   })
 })

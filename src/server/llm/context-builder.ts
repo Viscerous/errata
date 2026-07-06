@@ -7,30 +7,39 @@ import {
   buildFragmentContextLanes,
   customContextFragmentTypes,
   findFragmentContextLane,
-  fragmentContextBlock,
+  fragmentCatalogBlock,
+  fragmentFullContextBlock,
   isBuiltinContextFragmentType,
   fragmentTypeLabel,
+  markdownSection,
   proseWindowBlock,
   renderContextFragment,
-  renderFragmentContextGroup,
   storyHeaderContent,
   storySummaryBlock,
   type FragmentContextLane,
   type FragmentContextMetadata,
 } from './fragment-context-blocks'
+import { collectRecentContextSignals } from './context-selection'
 import type { ModelMessage } from 'ai'
 
 export {
   buildFragmentContextLanes,
   customContextFragmentTypes,
   findFragmentContextLane,
+  fragmentCatalogBlock,
+  fragmentCatalogContent,
   fragmentContextBlock,
   fragmentContextBlocks,
+  fragmentFullContextBlock,
+  fragmentFullContextContent,
   fragmentSummaryIndexHeading,
   fragmentSummaryList,
   fragmentTypeLabel,
   groupFragmentsByType,
   isBuiltinContextFragmentType,
+  joinMarkdownBlocks,
+  markdownHeading,
+  markdownSection,
   proseWindowBlock,
   renderContextFragment,
   renderFragmentContextGroup,
@@ -58,10 +67,18 @@ export interface ContextBuildState {
   stickyCharacters: Fragment[]
   // Pinned custom fragments are author intent and can be injected with other sticky context.
   stickyCustomFragments?: Fragment[]
-  guidelineShortlist: Fragment[]
-  knowledgeShortlist: Fragment[]
-  characterShortlist: Fragment[]
-  // Summary candidates for broad-context agents, mirroring knowledge/character shortlists.
+  guidelineCatalog: Fragment[]
+  knowledgeCatalog: Fragment[]
+  characterCatalog: Fragment[]
+  // Catalog candidates for broad-context agents, mirroring knowledge/character catalog rows.
+  customFragmentCatalogs?: CustomFragmentGroup[]
+  /** @deprecated Use guidelineCatalog. Kept for existing custom block scripts. */
+  guidelineShortlist?: Fragment[]
+  /** @deprecated Use knowledgeCatalog. Kept for existing custom block scripts. */
+  knowledgeShortlist?: Fragment[]
+  /** @deprecated Use characterCatalog. Kept for existing custom block scripts. */
+  characterShortlist?: Fragment[]
+  /** @deprecated Use customFragmentCatalogs. Kept for existing custom block scripts. */
   customFragmentShortlists?: CustomFragmentGroup[]
   // Writer-specific; other agents (which extend this via AgentBlockContext) omit them.
   chapterSummaries?: Array<{
@@ -425,7 +442,7 @@ export async function buildContextState(
     effectiveSummary = await loadSummaryContent(dataDir, storyId)
   }
 
-  // Split guidelines, knowledge, and characters into sticky (full) vs shortlist
+  // Split guidelines, knowledge, and characters into sticky full context vs catalog rows.
   const sortByOrder = (a: Fragment, b: Fragment) => a.order - b.order || a.createdAt.localeCompare(b.createdAt)
   const stickyGuidelines = allGuidelines.filter((f) => f.sticky).sort(sortByOrder)
   const nonStickyGuidelines = allGuidelines.filter((f) => !f.sticky)
@@ -437,31 +454,25 @@ export async function buildContextState(
     .flatMap((group) => group.fragments.filter((f) => f.sticky))
     .sort(sortByOrder)
 
-  // Characters the librarian recorded as appearing in the recent prose ride along
-  // in full, so the writer continues them from their current sheet rather than a
-  // one-line summary. Everyone else stays in the summary shortlist; sticky
-  // characters are already full, so only non-sticky ones are promoted here.
-  const recentlyMentionedIds = new Set<string>()
-  for (const p of recentProse) {
-    const annotations = Array.isArray(p.meta?.annotations)
-      ? (p.meta.annotations as Array<{ type?: string; fragmentId?: string }>)
-      : []
-    for (const a of annotations) {
-      if (a.type === 'mention' && a.fragmentId) recentlyMentionedIds.add(a.fragmentId)
-    }
-  }
-  const recentCharacters = nonStickyCharacters.filter((f) => recentlyMentionedIds.has(f.id)).sort(sortByOrder)
-  const characterShortlist = nonStickyCharacters.filter((f) => !recentlyMentionedIds.has(f.id))
-  const recentKnowledge = nonStickyKnowledge.filter((f) => recentlyMentionedIds.has(f.id)).sort(sortByOrder)
-  const knowledgeShortlist = nonStickyKnowledge.filter((f) => !recentlyMentionedIds.has(f.id))
+  // Fragments known to be active in recent prose ride along in full, so the
+  // writer continues them from their current sheets rather than one-line
+  // summaries. The set is intentionally broader than annotations: recent
+  // writerContextIds bridge rapid follow-up generation before the background
+  // librarian has finished writing mention annotations.
+  const recentSignals = collectRecentContextSignals(recentProse)
+  const recentContextIds = new Set(recentSignals.keys())
+  const recentCharacters = nonStickyCharacters.filter((f) => recentContextIds.has(f.id)).sort(sortByOrder)
+  const characterCatalog = nonStickyCharacters.filter((f) => !recentContextIds.has(f.id))
+  const recentKnowledge = nonStickyKnowledge.filter((f) => recentContextIds.has(f.id)).sort(sortByOrder)
+  const knowledgeCatalog = nonStickyKnowledge.filter((f) => !recentContextIds.has(f.id))
   const recentCustomFragments: CustomFragmentGroup[] = []
-  const customFragmentShortlists: CustomFragmentGroup[] = []
+  const customFragmentCatalogs: CustomFragmentGroup[] = []
   for (const group of customFragmentGroups) {
     const nonSticky = group.fragments.filter((f) => !f.sticky)
-    const recent = nonSticky.filter((f) => recentlyMentionedIds.has(f.id)).sort(sortByOrder)
-    const shortlist = nonSticky.filter((f) => !recentlyMentionedIds.has(f.id)).sort(sortByOrder)
+    const recent = nonSticky.filter((f) => recentContextIds.has(f.id)).sort(sortByOrder)
+    const catalog = nonSticky.filter((f) => !recentContextIds.has(f.id)).sort(sortByOrder)
     if (recent.length > 0) recentCustomFragments.push({ ...group, fragments: recent })
-    if (shortlist.length > 0) customFragmentShortlists.push({ ...group, fragments: shortlist })
+    if (catalog.length > 0) customFragmentCatalogs.push({ ...group, fragments: catalog })
   }
 
   const state = {
@@ -475,10 +486,14 @@ export async function buildContextState(
     recentCharacters,
     recentKnowledge,
     recentCustomFragments,
+    guidelineCatalog: nonStickyGuidelines,
+    knowledgeCatalog,
+    characterCatalog,
+    customFragmentCatalogs,
     guidelineShortlist: nonStickyGuidelines,
-    knowledgeShortlist,
-    characterShortlist,
-    customFragmentShortlists,
+    knowledgeShortlist: knowledgeCatalog,
+    characterShortlist: characterCatalog,
+    customFragmentShortlists: customFragmentCatalogs,
     authorInput,
   }
 
@@ -491,20 +506,16 @@ export async function buildContextState(
     recentCharacters: recentCharacters.length,
     recentKnowledge: recentKnowledge.length,
     recentCustomFragments: recentCustomFragments.reduce((sum, group) => sum + group.fragments.length, 0),
-    guidelineShortlist: nonStickyGuidelines.length,
-    knowledgeShortlist: knowledgeShortlist.length,
-    characterShortlist: characterShortlist.length,
-    customFragmentShortlists: customFragmentShortlists.reduce((sum, group) => sum + group.fragments.length, 0),
+    guidelineCatalog: nonStickyGuidelines.length,
+    knowledgeCatalog: knowledgeCatalog.length,
+    characterCatalog: characterCatalog.length,
+    customFragmentCatalogs: customFragmentCatalogs.reduce((sum, group) => sum + group.fragments.length, 0),
   })
 
   return state
 }
 
-/**
- * Renders sticky fragments grouped by type, one `## <Type>` group per type,
- * through the shared group renderer so the writer and the agents cannot drift.
- */
-function renderFragmentGroups(fragments: Fragment[], story: StoryMeta): string[] {
+function fragmentFullSectionsByType(fragments: Fragment[], story: StoryMeta): Array<{ type: string; label: string; fragments: Fragment[] }> {
   const groups = new Map<string, Fragment[]>()
   for (const fragment of fragments) {
     const group = groups.get(fragment.type)
@@ -515,25 +526,14 @@ function renderFragmentGroups(fragments: Fragment[], story: StoryMeta): string[]
     }
   }
 
-  const parts: string[] = []
-  for (const [type, group] of groups) {
-    parts.push(renderFragmentContextGroup({
-      id: `sticky-${type}`,
+  return [...groups.entries()].map(([type, group]) => ({
       type,
       label: fragmentTypeLabel(story, type),
       fragments: group,
-      mode: 'full',
-      scope: 'all',
-      order: 0,
     }))
-  }
-  return parts
 }
 
-/**
- * Renders sticky fragments in a custom order under a single heading.
- */
-function renderAdvancedOrder(fragments: Fragment[], fragmentOrder: string[]): string[] {
+function orderFragments(fragments: Fragment[], fragmentOrder: string[]): Fragment[] {
   if (fragments.length === 0) return []
 
   // Build a map for quick lookup
@@ -555,16 +555,24 @@ function renderAdvancedOrder(fragments: Fragment[], fragmentOrder: string[]): st
     }
   }
 
-  return [renderFragmentContextGroup({
-    id: 'sticky-ordered',
-    type: 'mixed',
-    label: 'Context',
-    heading: 'Context',
-    fragments: ordered,
-    mode: 'full',
-    scope: 'all',
-    order: 0,
-  })]
+  return ordered
+}
+
+function stickyFragmentSections(
+  fragments: Fragment[],
+  story: StoryMeta,
+  contextOrderMode: string,
+  fragmentOrder: string[],
+): Array<{ type: string; label: string; fragments: Fragment[] }> {
+  if (contextOrderMode === 'advanced') {
+    return [{
+      type: 'mixed',
+      label: 'Context',
+      fragments: orderFragments(fragments, fragmentOrder),
+    }]
+  }
+
+  return fragmentFullSectionsByType(fragments, story)
 }
 
 /**
@@ -616,21 +624,14 @@ export function createDefaultBlocks(state: ContextBuildState): ContextBlock[] {
   })
 
   if (systemPlaced.length > 0) {
-    let parts: string[]
-    if (contextOrderMode === 'advanced') {
-      parts = renderAdvancedOrder(systemPlaced, fragmentOrder)
-    } else {
-      parts = renderFragmentGroups(systemPlaced, story)
-    }
-    blocks.push({
+    pushFragmentBlock(fragmentFullContextBlock({
       id: 'system-fragments',
       role: 'system',
-      // Blank lines separate fragments — the id markers that used to double as
-      // visual boundaries are gone, so the spacing must carry the separation.
-      content: parts.join('\n\n'),
+      heading: 'System Fragments',
+      scope: 'all',
       order: 300,
-      source: 'builtin',
-    })
+      sections: stickyFragmentSections(systemPlaced, story, contextOrderMode, fragmentOrder),
+    }))
   }
 
   // --- User blocks ---
@@ -654,114 +655,53 @@ export function createDefaultBlocks(state: ContextBuildState): ContextBlock[] {
     blocks.push({
       id: 'chapter-summaries',
       role: 'user',
-      content: [
-        '## Chapter/Arc Summaries',
-        ...chapterSummaries.map((c) => `### ${c.name}\n${c.summary}`),
-      ].join('\n\n'),
+      content: markdownSection(2, 'Chapter/Arc Summaries',
+        chapterSummaries.map((c) => markdownSection(3, c.name, c.summary))
+      ),
       order: 410,
       source: 'builtin',
     })
   }
 
   if (userPlaced.length > 0) {
-    let parts: string[]
-    if (contextOrderMode === 'advanced') {
-      parts = renderAdvancedOrder(userPlaced, fragmentOrder)
-    } else {
-      parts = renderFragmentGroups(userPlaced, story)
-    }
-    blocks.push({
+    pushFragmentBlock(fragmentFullContextBlock({
       id: 'user-fragments',
       role: 'user',
-      content: parts.join('\n\n'),
+      heading: 'User Fragments',
+      scope: 'all',
       order: 200,
-      source: 'builtin',
-    })
+      sections: stickyFragmentSections(userPlaced, story, contextOrderMode, fragmentOrder),
+    }))
   }
 
-  pushFragmentBlock(fragmentContextBlock({
-    id: 'guideline-shortlist',
-    type: 'guideline',
-    label: 'Guidelines',
-    fragments: lane('guideline')?.available ?? [],
-    mode: 'summary-index',
-    scope: 'available',
-    order: 300,
-  }))
-
-  // Full sheets for knowledge active in the recent prose — the writer continues
-  // them from current state. The shortlist below carries everyone else as summaries.
-  pushFragmentBlock(fragmentContextBlock({
-    id: 'knowledge-recent',
-    type: 'knowledge',
-    label: 'Knowledge',
-    fragments: lane('knowledge')?.recent ?? [],
-    mode: 'full',
+  // Fragments active in recent prose ride along in full so the writer
+  // continues from their current sheets. One aggregate block keeps the full
+  // context structured by type, matching the compact catalog shape below.
+  pushFragmentBlock(fragmentFullContextBlock({
+    id: 'fragment-recent',
+    heading: 'Recent Fragments',
     scope: 'recent',
     order: 308,
+    sections: [
+      { type: 'knowledge', label: 'Knowledge', fragments: lane('knowledge')?.recent ?? [] },
+      { type: 'character', label: 'Characters', fragments: lane('character')?.recent ?? [] },
+      ...lanes
+        .filter((entry) => !isBuiltinContextFragmentType(entry.type))
+        .map((entry) => ({ type: entry.type, label: entry.label, fragments: entry.recent })),
+    ],
   }))
 
-  pushFragmentBlock(fragmentContextBlock({
-    id: 'knowledge-shortlist',
-    type: 'knowledge',
-    label: 'Knowledge',
-    fragments: lane('knowledge')?.available ?? [],
-    mode: 'summary-index',
-    scope: 'available',
-    order: 310,
+  pushFragmentBlock(fragmentCatalogBlock({
+    sections: [
+      { type: 'guideline', label: 'Guidelines', fragments: lane('guideline')?.available ?? [] },
+      { type: 'knowledge', label: 'Knowledge', fragments: lane('knowledge')?.available ?? [] },
+      { type: 'character', label: 'Characters', fragments: lane('character')?.available ?? [] },
+      ...lanes
+        .filter((entry) => !isBuiltinContextFragmentType(entry.type))
+        .map((entry) => ({ type: entry.type, label: entry.label, fragments: entry.available })),
+    ],
+    order: 330,
   }))
-
-  // Full sheets for characters active in the recent prose — the writer continues
-  // them from current state. The shortlist below carries everyone else as summaries.
-  pushFragmentBlock(fragmentContextBlock({
-    id: 'character-recent',
-    type: 'character',
-    label: 'Characters',
-    fragments: lane('character')?.recent ?? [],
-    mode: 'full',
-    scope: 'recent',
-    order: 315,
-  }))
-
-  pushFragmentBlock(fragmentContextBlock({
-    id: 'character-shortlist',
-    type: 'character',
-    label: 'Characters',
-    fragments: lane('character')?.available ?? [],
-    mode: 'summary-index',
-    scope: 'available',
-    order: 320,
-  }))
-
-  // Custom fragment types follow the same routing as built-in knowledge and
-  // characters without pretending to be either: recently mentioned items are
-  // full context, and the rest are one-line summaries.
-  let customOrder = 330
-  for (const customLane of lanes.filter((entry) => !isBuiltinContextFragmentType(entry.type))) {
-    if (customLane.recent.length > 0) {
-      pushFragmentBlock(fragmentContextBlock({
-        id: `${customLane.type}-recent`,
-        type: customLane.type,
-        label: customLane.label,
-        fragments: customLane.recent,
-        mode: 'full',
-        scope: 'recent',
-        order: customOrder++,
-      }))
-    }
-
-    if (customLane.available.length > 0) {
-      pushFragmentBlock(fragmentContextBlock({
-        id: `${customLane.type}-shortlist`,
-        type: customLane.type,
-        label: customLane.label,
-        fragments: customLane.available,
-        mode: 'summary-index',
-        scope: 'available',
-        order: customOrder++,
-      }))
-    }
-  }
 
   {
     const prose = proseWindowBlock(proseFragments, {
@@ -778,7 +718,7 @@ export function createDefaultBlocks(state: ContextBuildState): ContextBlock[] {
     blocks.push({
       id: 'author-input',
       role: 'user',
-      content: `Author's direction for what happens next:\n${authorInput}`,
+      content: markdownSection(2, 'Author Direction', authorInput),
       order: 600,
       source: 'builtin',
     })
@@ -974,7 +914,7 @@ export async function expandMessagesFragmentTags(
  * - System message: adds providerOptions with Anthropic cache control so the
  *   entire system prompt is treated as a cacheable prefix.
  * - User message: splits at the [@block=author-input] marker into two TextParts.
- *   The stable prefix (story info, fragments, shortlists, summary, prose) gets
+ *   The stable prefix (story info, fragments, catalogs, summary, prose) gets
  *   cache control; the volatile suffix (author input) does not.
  * - Other messages: passed through unchanged.
  *

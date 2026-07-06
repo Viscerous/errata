@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import {
   createAnalysisTools,
   createEmptyCollector,
-  createLibrarianAnalyzeTools,
+  createLibrarianOnlineTools,
   listLibrarianAnalyzeToolNames,
   mentionInputSchema,
   reportAnalysisInputSchema,
@@ -52,24 +52,31 @@ describe('analysis-tools', () => {
     expect(collector.summaryUpdate).toBe('')
     expect(collector.structuredSummary).toEqual({ events: [], stateChanges: [], openThreads: [] })
     expect(collector.mentions).toEqual([])
+    expect(collector.candidateFragmentIds).toEqual([])
+    expect(collector.needsProposalPass).toBe(false)
     expect(collector.contradictions).toEqual([])
     expect(collector.fragmentChangeProposals).toEqual([])
     expect(collector.timelineEvents).toEqual([])
     expect(collector.directions).toEqual([])
   })
 
-  it('exposes the new analysis tool names', () => {
+  it('exposes the online analysis tool names', () => {
     const tools = createAnalysisTools(createEmptyCollector())
     expect(Object.keys(tools)).toEqual([
       'reportAnalysis',
       'proposeFragmentChanges',
       'proposeDirections',
+      'finishAnalysis',
     ])
 
-    const analyzeTools = createLibrarianAnalyzeTools(createEmptyCollector(), { dataDir: '/tmp', storyId: 'story-test' })
-    expect(Object.keys(analyzeTools)).toContain('readFragments')
-    expect(Object.keys(analyzeTools)).toContain('reportAnalysis')
-    expect(listLibrarianAnalyzeToolNames()).toContain('reportAnalysis')
+    const onlineTools = createLibrarianOnlineTools(createEmptyCollector(), { dataDir: '/tmp', storyId: 'story-test' })
+    expect(Object.keys(onlineTools)).toContain('reportAnalysis')
+    expect(Object.keys(onlineTools)).toContain('readFragments')
+    expect(Object.keys(onlineTools)).toContain('proposeFragmentChanges')
+    expect(Object.keys(onlineTools)).toContain('proposeDirections')
+    expect(Object.keys(onlineTools)).toContain('finishAnalysis')
+
+    expect(listLibrarianAnalyzeToolNames()).toEqual(Object.keys(onlineTools))
   })
 
   it('omits suggestion and direction tools when disabled', () => {
@@ -82,8 +89,26 @@ describe('analysis-tools', () => {
 
     expect(Object.keys(tools)).toContain('reportAnalysis')
     expect(Object.keys(tools)).toContain('readFragments')
+    expect(Object.keys(tools)).toContain('finishAnalysis')
     expect(tools).not.toHaveProperty('proposeFragmentChanges')
     expect(tools).not.toHaveProperty('proposeDirections')
+  })
+
+  it('finishAnalysis returns a terminal success marker without mutating analysis data', async () => {
+    const collector = createEmptyCollector()
+    const tools = createAnalysisTools(collector)
+
+    const result = await tools.finishAnalysis.execute!({
+      completed: ['reportAnalysis'],
+      skipped: [{ toolName: 'proposeDirections', reason: 'No useful branches yet.' }],
+    }, { toolCallId: 'finish', messages: [], abortSignal: undefined as unknown as AbortSignal })
+
+    expect(result).toEqual({
+      ok: true,
+      completed: ['reportAnalysis'],
+      skipped: [{ toolName: 'proposeDirections', reason: 'No useful branches yet.' }],
+    })
+    expect(collector).toEqual(createEmptyCollector())
   })
 
   it('reportAnalysis sets summary, structured signals, mentions, contradictions, and timeline events', async () => {
@@ -113,6 +138,28 @@ describe('analysis-tools', () => {
     ])
     expect(collector.contradictions[0].description).toBe('Eye color mismatch')
     expect(collector.timelineEvents[0]).toEqual({ event: 'Alice arms herself', position: 'during' })
+  })
+
+  it('reportAnalysis records validated candidate fragments for proposal context', async () => {
+    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, fragmentId) => (
+      fragmentId === 'ch-0001' ? mockFragment({ id: fragmentId }) : null
+    ))
+    const collector = createEmptyCollector()
+    const tools = createAnalysisTools(collector, {
+      dataDir: '/tmp',
+      storyId: 'story-test',
+      proseFragmentId: 'pr-0001',
+    })
+
+    const result = await tools.reportAnalysis.execute!({
+      candidateFragmentIds: ['ch-0001', 'ch-0001'],
+      needsProposalPass: true,
+    }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
+
+    expect(result).toMatchObject({ ok: true, candidateFragmentCount: 1, needsProposalPass: true })
+    expect(collector.candidateFragmentIds).toEqual(['ch-0001'])
+    expect(collector.needsProposalPass).toBe(true)
+    expect(collector.mentions).toEqual([])
   })
 
   it('reportAnalysis derives a summary from structured signals when summary text is empty', async () => {
@@ -462,6 +509,54 @@ describe('analysis-tools', () => {
     expect(result.skipped.map((s: { reason: string }) => s.reason).join('\n')).toContain('locked')
   })
 
+  it('proposeFragmentChanges does not queue replace_text operations with empty oldText', async () => {
+    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) =>
+      id === 'ch-0001' ? mockFragment({ id }) : null,
+    )
+    const collector = createEmptyCollector()
+    const tools = createAnalysisTools(collector, { dataDir: '/tmp', storyId: 'story-test' })
+
+    const result = await tools.proposeFragmentChanges.execute!({
+      operations: [{
+        action: 'replace_text',
+        fragmentId: 'ch-0001',
+        field: 'content',
+        oldText: '',
+        newText: 'Inserted text.',
+      }],
+    }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
+
+    expect(result).toMatchObject({ ok: false, proposalCount: 0, queuedOperationCount: 0, invalid: 1 })
+    expect(collector.fragmentChangeProposals).toHaveLength(0)
+    expect(result.operations[0].errors[0].code).toBe('old_text_missing')
+    expect(result.skipped[0].reason).toContain('replace_text requires oldText')
+  })
+
+  it('proposeFragmentChanges does not queue whole-field replace_text operations', async () => {
+    const content = 'Alice is a brave warrior with blue eyes. Currently twenty years old.'
+    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) =>
+      id === 'ch-0001' ? mockFragment({ id, content }) : null,
+    )
+    const collector = createEmptyCollector()
+    const tools = createAnalysisTools(collector, { dataDir: '/tmp', storyId: 'story-test' })
+
+    const result = await tools.proposeFragmentChanges.execute!({
+      operations: [{
+        action: 'replace_text',
+        fragmentId: 'ch-0001',
+        field: 'content',
+        oldText: content,
+        newText: 'Alice is a brave warrior with hazel eyes. Currently twenty-one years old.',
+      }],
+    }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
+
+    expect(result).toMatchObject({ ok: false, proposalCount: 0, queuedOperationCount: 0, invalid: 1 })
+    expect(collector.fragmentChangeProposals).toHaveLength(0)
+    expect(result.operations[0].errors[0].code).toBe('whole_field_replace_text')
+    expect(result.skipped[0].reason).toContain('whole-field rewrite')
+    expect(result.skipped[0].reason).toContain('set_fields with baseHash')
+  })
+
   it('proposeFragmentChanges records set_fields as a whole-field proposal', async () => {
     const target = mockFragment({ id: 'ch-0001' })
     vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) =>
@@ -530,7 +625,7 @@ describe('analysis-tools', () => {
 
     expect(result).toMatchObject({ ok: false, proposalCount: 0, queuedOperationCount: 0 })
     expect(collector.fragmentChangeProposals).toHaveLength(0)
-    expect(result.skipped.map((s: { reason: string }) => s.reason).join('\n')).toContain('Submit set_fields and localized span edits')
+    expect(result.skipped.map((s: { reason: string }) => s.reason).join('\n')).toContain('Submit set_fields and localized edits')
   })
 
   it('treats a resubmitted identical proposal as a success, not an error', async () => {

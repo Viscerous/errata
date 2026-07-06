@@ -225,7 +225,7 @@ describe('end-to-end generation integration', () => {
       }),
     })
 
-    // Create non-sticky guideline (should NOT be in context, just shortlist)
+    // Create non-sticky guideline (should NOT be in full context, just catalog)
     await api(`/stories/${sid}/fragments`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -267,7 +267,7 @@ describe('end-to-end generation integration', () => {
     // Test passed - context assembly is tested at unit level
   })
 
-  it('character shortlist appears in context but full content is optional', async () => {
+  it('character catalog appears in context but full content is optional', async () => {
     // Create story
     const storyRes = await api('/stories', {
       method: 'POST',

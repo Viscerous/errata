@@ -8,7 +8,7 @@ export const fragmentTypeRecipe = [
     contextRenderer(fragment) {
       return `### Location: ${fragment.name}\n${fragment.content}`
     },
-    shortlistFields: ['id', 'name', 'description'],
+    catalogFields: ['id', 'name', 'description'],
     llmTools: true,
   },
 ]

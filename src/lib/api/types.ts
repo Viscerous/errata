@@ -257,6 +257,13 @@ export interface LibrarianAnalysis {
     openThreads: string[]
   }
   mentions: LibrarianMention[]
+  candidateFragmentIds?: string[]
+  candidateFragments?: Array<{
+    fragmentId: string
+    sources: Array<'current-observation' | 'writer-context' | 'router'>
+    reasons?: string[]
+    score?: number
+  }>
   contradictions: Array<{
     description: string
     fragmentIds: string[]
@@ -267,6 +274,18 @@ export interface LibrarianAnalysis {
     position: 'before' | 'during' | 'after'
   }>
   directions?: SuggestionDirection[]
+  passes?: Array<{
+    name: string
+    status: 'complete' | 'skipped' | 'failed'
+    startedAt: string
+    durationMs?: number
+    modelId?: string
+    stepCount?: number
+    finishReason?: string
+    reason?: string
+    error?: string
+    diagnostics?: Record<string, unknown>
+  }>
   trace?: Array<{
     type: string
     [key: string]: unknown
