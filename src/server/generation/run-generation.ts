@@ -386,20 +386,18 @@ export async function runGeneration(
         const finishEvent = { type: 'finish' as const, finishReason: lastFinishReason, stepCount }
         emit(finishEvent)
         writerRun.pushEvent(finishEvent)
-        controller.close()
       } catch (err) {
         const wasAborted = abortController.signal.aborted
         if (wasAborted) {
           requestLogger.info('Generation aborted by client', { textLength: fullText.length })
           lastFinishReason = 'stop'
           try {
-            controller.enqueue(encoder.encode(JSON.stringify({
+            emit({
               type: 'finish',
               finishReason: 'stop',
               stepCount,
               stopped: true,
-            }) + '\n'))
-            controller.close()
+            })
           } catch {
             // Controller may already be closed
           }
@@ -440,8 +438,7 @@ export async function runGeneration(
           // Forward the writer's character/knowledge working set to the
           // librarian via the prose meta — its full-context cast plus anything
           // it looked up — so analyze audits against the same sheets the writer
-          // had. Analyze consumes the character IDs today; knowledge rides along
-          // for when its full block is dropped.
+          // had.
           const fragmentLookupIds = (calls: ToolCallLog[]) => calls.flatMap((tc) => {
             if (tc.toolName !== 'readFragments') return []
             const ids = (tc.args as Record<string, unknown>)?.fragmentIds
@@ -461,113 +458,75 @@ export async function runGeneration(
             ...lookedUpIds,
           ])]
 
-          if ((mode === 'regenerate' || mode === 'refine') && existingFragment) {
-            // Create a NEW fragment as a variation (don't overwrite)
-            const id = generateFragmentId('prose')
-            const fragment: Fragment = {
-              id,
-              type: 'prose',
-              name: proseFragmentName,
-              description: body.input.slice(0, 250),
-              content: genResult.text,
-              tags: [...existingFragment.tags],
-              refs: [...existingFragment.refs],
-              sticky: existingFragment.sticky,
-              placement: existingFragment.placement ?? 'user',
-              createdAt: now,
-              updatedAt: now,
-              order: existingFragment.order,
-              meta: {
-                ...existingFragment.meta,
-                generatedFrom: body.input,
-                generationMode: mode,
-                previousFragmentId: existingFragment.id,
-                variationOf: existingFragment.id,
-                ...(writerContextIds.length ? { writerContextIds } : {}),
-              },
-              version: 1,
-              versions: [],
-            }
-            await createFragment(dataDir, storyId, fragment)
-            savedFragmentId = id
-            requestLogger.info('Fragment variation created', { fragmentId: savedFragmentId, mode, originalId: existingFragment.id })
+          const isRegenOrRefine = (mode === 'regenerate' || mode === 'refine') && existingFragment
+          const id = generateFragmentId('prose')
 
-            // Add to prose chain as a variation. Roll back the fragment if
-            // the chain write fails, so we don't leave an unreferenced orphan.
-            try {
-              const sectionIndex = await findSectionIndex(dataDir, storyId, existingFragment.id)
+          const fragment: Fragment = {
+            id,
+            type: 'prose',
+            name: proseFragmentName,
+            description: body.input.slice(0, 250),
+            content: genResult.text,
+            tags: isRegenOrRefine ? [...existingFragment!.tags] : [],
+            refs: isRegenOrRefine ? [...existingFragment!.refs] : [],
+            sticky: isRegenOrRefine ? existingFragment!.sticky : false,
+            placement: isRegenOrRefine ? (existingFragment!.placement ?? 'user') : 'user',
+            createdAt: now,
+            updatedAt: now,
+            order: isRegenOrRefine ? existingFragment!.order : 0,
+            meta: {
+              ...(isRegenOrRefine ? existingFragment!.meta : {}),
+              generatedFrom: body.input,
+              ...(isRegenOrRefine ? {
+                generationMode: mode,
+                previousFragmentId: existingFragment!.id,
+                variationOf: existingFragment!.id,
+              } : {}),
+              ...(writerContextIds.length ? { writerContextIds } : {}),
+            },
+            version: 1,
+            versions: [],
+          }
+
+          await createFragment(dataDir, storyId, fragment)
+          savedFragmentId = id
+          requestLogger.info(isRegenOrRefine ? 'Fragment variation created' : 'New fragment created', {
+            fragmentId: savedFragmentId,
+            mode,
+            originalId: existingFragment?.id,
+          })
+
+          // Add to prose chain
+          try {
+            if (isRegenOrRefine) {
+              const sectionIndex = await findSectionIndex(dataDir, storyId, existingFragment!.id)
               if (sectionIndex !== -1) {
                 await addProseVariation(dataDir, storyId, sectionIndex, id)
                 requestLogger.info('Added as variation to prose chain', { sectionIndex })
               } else {
-                // Original isn't in the chain (e.g. it was removed): append as
-                // a new section so the regenerated prose isn't lost.
                 requestLogger.warn('Original fragment not found in prose chain, creating new section')
                 await addProseSection(dataDir, storyId, id)
               }
-            } catch (chainErr) {
-              await deleteFragment(dataDir, storyId, id).catch(() => {})
-              throw chainErr
-            }
-
-            // Run afterSave hooks
-            await runAfterSave(enabledPlugins, fragment, storyId)
-            requestLogger.info('AfterSave hooks completed')
-
-            if (!disableLibrarianAutoAnalysis) {
-              triggerLibrarian(dataDir, storyId, fragment).catch((err) => {
-                requestLogger.error('triggerLibrarian failed', { error: err instanceof Error ? err.message : String(err) })
-              })
-              requestLogger.info('Librarian analysis triggered')
             } else {
-              requestLogger.info('Librarian auto analysis disabled; skipping trigger')
-            }
-          } else {
-            // Create new fragment (default generate mode)
-            const id = generateFragmentId('prose')
-            const fragment: Fragment = {
-              id,
-              type: 'prose',
-              name: proseFragmentName,
-              description: body.input.slice(0, 250),
-              content: genResult.text,
-              tags: [],
-              refs: [],
-              sticky: false,
-              placement: 'user',
-              createdAt: now,
-              updatedAt: now,
-              order: 0,
-              meta: { generatedFrom: body.input, ...(writerContextIds.length ? { writerContextIds } : {}) },
-              version: 1,
-              versions: [],
-            }
-            await createFragment(dataDir, storyId, fragment)
-            savedFragmentId = id
-            requestLogger.info('New fragment created', { fragmentId: savedFragmentId })
-
-            // Add to prose chain as a new section. Roll back the fragment if
-            // the chain write fails, so we don't leave an unreferenced orphan.
-            try {
               await addProseSection(dataDir, storyId, id)
-            } catch (chainErr) {
-              await deleteFragment(dataDir, storyId, id).catch(() => {})
-              throw chainErr
+              requestLogger.info('Added as new section to prose chain')
             }
-            requestLogger.info('Added as new section to prose chain')
+          } catch (chainErr) {
+            await deleteFragment(dataDir, storyId, id).catch(() => {})
+            throw chainErr
+          }
 
-            // Run afterSave hooks
-            await runAfterSave(enabledPlugins, fragment, storyId)
-            requestLogger.info('AfterSave hooks completed')
+          // Run afterSave hooks
+          await runAfterSave(enabledPlugins, fragment, storyId)
+          requestLogger.info('AfterSave hooks completed')
 
-            if (!disableLibrarianAutoAnalysis) {
-              triggerLibrarian(dataDir, storyId, fragment).catch((err) => {
-                requestLogger.error('triggerLibrarian failed', { error: err instanceof Error ? err.message : String(err) })
-              })
-              requestLogger.info('Librarian analysis triggered')
-            } else {
-              requestLogger.info('Librarian auto analysis disabled; skipping trigger')
-            }
+          if (!disableLibrarianAutoAnalysis) {
+            triggerLibrarian(dataDir, storyId, fragment).catch((err) => {
+              requestLogger.error('triggerLibrarian failed', { error: err instanceof Error ? err.message : String(err) })
+            })
+            requestLogger.info('Librarian analysis triggered')
+          } else {
+            requestLogger.info('Librarian auto analysis disabled; skipping trigger')
           }
 
           // Capture finish reason, step count, and token usage
@@ -612,6 +571,15 @@ export async function runGeneration(
           requestLogger.info('Generation log saved', { logId, stepCount, finishReason, stepsExceeded })
         } catch (err) {
           requestLogger.error('Error saving generation result', { error: err instanceof Error ? err.message : String(err) })
+        }
+      }
+
+      // Close the stream controller after saving completes (or abort concludes)
+      if (!runError) {
+        try {
+          controller.close()
+        } catch {
+          // Ignore if already closed or errored
         }
       }
     },
