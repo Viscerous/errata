@@ -81,7 +81,7 @@ export function buildAnalyzeSystemPrompt(opts?: {
     const readGuidance = canReadFragments
       ? 'read any fragment that is not already shown in full before proposing edits, or when validation asks for current content/baseHash.'
       : 'use only fragments already shown in full when proposing edits; readFragments is disabled.'
-    actions.push(`${readGuidance}; then call **proposeFragmentChanges** for minimal durable updates or genuinely new ${typeNamesList}; use create_fragment operations with plain names, and the system assigns IDs.`)
+    actions.push(`${readGuidance} Use **proposeFragmentChanges** to update existing fragments when the prose changes a lasting fact (such as changes to state, location, relationships, allegiances, or titles) — keep edits minimal — and to create genuinely new ${typeNamesList}.`)
   }
   if (canSuggestDirections) {
     actions.push('call **proposeDirections** with next directions for the story.')

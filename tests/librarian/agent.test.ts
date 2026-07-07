@@ -206,7 +206,7 @@ describe('librarian agent', () => {
       expect(opts?.instructions).toContain('CUSTOM PREPEND')
       expect(opts?.instructions).toContain('Never drop custom system fragments.')
       if (tools.proposeFragmentChanges) {
-        expect(opts?.instructions).toContain('minimal durable updates')
+        expect(opts?.instructions).toContain('keep edits minimal')
         expect(opts?.instructions).toContain('genuinely new characters, knowledge, locations')
       }
 
