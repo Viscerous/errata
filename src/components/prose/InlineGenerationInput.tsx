@@ -9,6 +9,7 @@ import { invalidateStoryContent } from '@/lib/branch-cache'
 import { qk, useActiveBranchId } from '@/lib/query-keys'
 import type { SuggestionDirection, ClarifyQuestion, Clarification } from '@/lib/api/types'
 import { QuestionCard } from '@/components/generation/QuestionCard'
+import { mergeDirectionSuggestions } from './direction-suggestions'
 
 // A round high enough that the server withholds the ask tool and must write —
 // used by "Skip & write" to proceed without answering.
@@ -83,6 +84,7 @@ export function InlineGenerationInput({
   // Suggestion state
   const [suggestions, setSuggestions] = useState<SuggestionDirection[]>([])
   const [manualSuggestions, setManualSuggestions] = useState<SuggestionDirection[] | null>(null)
+  const [invalidatedAnalysisId, setInvalidatedAnalysisId] = useState<string | null>(null)
   // The head passage the manual/prewriter directions were produced for. They
   // stay live only while that passage is still the head (same rule as analysis
   // directions), so advancing the timeline retires them too.
@@ -141,15 +143,20 @@ export function InlineGenerationInput({
   )
 
   // Merge: prewriter/manual directions first, then append analysis directions
-  // (deduplicated by title). Manual directions only count while their anchor is
-  // still the head; analysisDirections is already head-gated via latestAnalysisId.
-  // Always replace (never just append) so directions clear once the head moves on.
+  // unless the user explicitly refreshed directions for this analysis. Manual
+  // directions only count while their anchor is still the head; analysisDirections
+  // is already head-gated via latestAnalysisId. Always replace (never just append)
+  // so directions clear once the head moves on.
   useEffect(() => {
-    const base = manualSuggestions && manualAnchor === latestFragmentId ? manualSuggestions : []
-    const baseTitles = new Set(base.map(s => s.title))
-    const extra = analysisDirections.filter(s => !baseTitles.has(s.title))
-    setSuggestions([...base, ...extra])
-  }, [manualSuggestions, manualAnchor, analysisDirections, latestFragmentId])
+    setSuggestions(mergeDirectionSuggestions({
+      manualSuggestions,
+      manualAnchor,
+      latestFragmentId,
+      analysisDirections,
+      latestAnalysisId,
+      invalidatedAnalysisId,
+    }))
+  }, [manualSuggestions, manualAnchor, analysisDirections, latestFragmentId, latestAnalysisId, invalidatedAnalysisId])
 
   const updateActiveSuggestion = useCallback((nextIndex: number | null) => {
     setActiveSuggestionIndex(nextIndex)
@@ -377,6 +384,11 @@ export function InlineGenerationInput({
   const handleFetchSuggestions = async () => {
     setIsFetchingSuggestions(true)
     setSuggestionError(null)
+    setInvalidatedAnalysisId(latestAnalysisId)
+    setManualAnchor(undefined)
+    setManualSuggestions(null)
+    setSuggestions([])
+    updateActiveSuggestion(null)
     try {
       const result = await api.generation.proposeDirections(storyId)
       // proposeDirections is computed from the current story state, i.e. the
