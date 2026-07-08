@@ -151,16 +151,15 @@ describe('Agent Block Config Storage', () => {
     const config = await updateAgentDisabledTools(dataDir, STORY_ID, AGENT_NAME, [
       'getFragment',
       'editFragment',
-      'editProse',
+      'proposeProseChanges',
       'suggestDirections',
       'reanalyzeFragment',
     ])
 
     expect(config.disabledTools).toEqual([
       'readFragments',
-      'proposeFragmentChanges',
-      'applyProposedChanges',
-      'proposeProseChanges',
+      'editFragments',
+      'editProse',
       'proposeDirections',
       'invokeAgent',
     ])

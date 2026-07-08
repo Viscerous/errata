@@ -460,7 +460,7 @@ describe('librarian chat endpoint', () => {
     expect(mockAgentCtor).toHaveBeenCalled()
     const config = mockAgentCtor.mock.calls[0][0]
     expect(config.instructions).toContain('Librarian')
-    expect(config.instructions).toContain('proposeProseChanges')
+    expect(config.instructions).toContain('editProse')
   })
 
   it('includes story context in messages', async () => {

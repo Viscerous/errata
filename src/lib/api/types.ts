@@ -165,7 +165,7 @@ export type FragmentEditableField = 'name' | 'description' | 'content'
 export interface FragmentOperationError {
   code: string
   message: string
-  nextAction?: 'readFragments' | 'listFragments' | 'proposeProseChanges'
+  nextAction?: 'readFragments' | 'listFragments' | 'editProse'
 }
 
 export interface FragmentDiffPreview {

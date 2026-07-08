@@ -27,6 +27,7 @@ import { renameFragmentIdAcrossStory } from '../fragments/rename'
 import { registry } from '../fragments/registry'
 import { reanalyzeAfterProseChange } from '../librarian/scheduler'
 import { installFragmentBundle } from '../erratanet/pack-install'
+import { revertAppliedChanges, RevertConflictError, type AppliedChange } from '../fragments/change-apply'
 import type { Fragment } from '../fragments/schema'
 import type { FragmentBundleData } from '@/lib/fragment-clipboard'
 
@@ -535,4 +536,27 @@ export function fragmentRoutes(dataDir: string) {
       await updateFragment(dataDir, params.storyId, updated)
       return updated
     }, { detail: { summary: 'Revert to previous version' } })
+
+    // Reverse a batch of applied fragment changes (the chat edit-card Undo).
+    // Shares the hash-guarded revert core with the librarian proposal revert.
+    .post('/stories/:storyId/fragments/revert-applied', async ({ params, body, set }) => {
+      const story = await getStory(dataDir, params.storyId)
+      if (!story) {
+        set.status = 404
+        return { error: 'Story not found' }
+      }
+      try {
+        return await revertAppliedChanges(dataDir, params.storyId, body.appliedChanges as AppliedChange[])
+      } catch (error) {
+        if (error instanceof RevertConflictError) {
+          set.status = 409
+          return { error: error.message, ...(error.partial ? { partial: error.partial } : {}) }
+        }
+        set.status = 422
+        return { error: error instanceof Error ? error.message : String(error) }
+      }
+    }, {
+      body: t.Object({ appliedChanges: t.Array(t.Any()) }),
+      detail: { summary: 'Reverse a batch of applied fragment changes' },
+    })
 }

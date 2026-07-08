@@ -502,7 +502,7 @@ describe('analysis-tools', () => {
     expect(result.readFragmentIds).toEqual(['ch-0001'])
     expect(result.operations[0].errors[0].nextAction).toBe('readFragments')
     expect(result.skipped.map((s: { reason: string }) => s.reason).join('\n')).toContain('oldText was not found')
-    expect(result.skipped.map((s: { reason: string }) => s.reason).join('\n')).toContain('Use proposeProseChanges')
+    expect(result.skipped.map((s: { reason: string }) => s.reason).join('\n')).toContain('Use editProse')
     expect(result.skipped.map((s: { reason: string }) => s.reason).join('\n')).toContain('locked')
   })
 

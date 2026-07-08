@@ -2,6 +2,11 @@ import { useState } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { ChevronDown, ChevronRight, Brain, Loader2, Wrench } from 'lucide-react'
 import { StreamMarkdown } from '@/components/ui/stream-markdown'
+import { LibrarianEditCard, isAppliedEditResult } from '@/components/chat/LibrarianEditCard'
+
+/** The direct edit tools render as a legible diff card (with Undo) instead of a
+ * raw tool-call card whenever they actually changed storage. */
+const EDIT_TOOLS = new Set(['editFragments', 'editProse'])
 
 export interface ToolCallInfo {
   id: string
@@ -100,17 +105,30 @@ export function ReasoningSection({ reasoning, streaming }: { reasoning: string; 
   )
 }
 
-export function AssistantMessageView({ msg, streaming }: { msg: AssistantMessage; streaming: boolean }) {
+export function AssistantMessageView({
+  msg,
+  streaming,
+  storyId,
+}: {
+  msg: AssistantMessage
+  streaming: boolean
+  storyId?: string
+}) {
+  const toolCalls = msg.toolCalls ?? []
+
   return (
     <div className="break-words">
       {msg.reasoning && (
         <ReasoningSection reasoning={msg.reasoning} streaming={streaming && !msg.content} />
       )}
-      {msg.toolCalls && msg.toolCalls.length > 0 && (
+      {toolCalls.length > 0 && (
         <div>
-          {msg.toolCalls.map((tc) => (
-            <ToolCallCard key={tc.id} tc={tc} />
-          ))}
+          {toolCalls.map((tc) => {
+            if (EDIT_TOOLS.has(tc.toolName) && isAppliedEditResult(tc.result) && storyId) {
+              return <LibrarianEditCard key={tc.id} storyId={storyId} result={tc.result} />
+            }
+            return <ToolCallCard key={tc.id} tc={tc} />
+          })}
         </div>
       )}
       {msg.content && (
