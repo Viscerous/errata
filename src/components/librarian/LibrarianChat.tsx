@@ -247,6 +247,7 @@ export function LibrarianChat({ storyId, conversationId, initialInput }: Librari
                   <AssistantMessageView
                     msg={msg}
                     streaming={isStreaming && i === messages.length - 1}
+                    storyId={storyId}
                   />
                 ) : (
                   <div className="break-words whitespace-pre-wrap">{msg.content}</div>

@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto'
 import { tool, type ToolSet } from 'ai'
 import { z } from 'zod/v4'
 import {
@@ -14,27 +13,21 @@ import type { Fragment } from '../fragments/schema'
 import { reanalyzeAfterProseChange } from '../librarian/scheduler'
 import {
   MAX_BATCH_OPERATIONS,
+  OPERATION_GUIDANCE,
   type EditableField,
   type FragmentChangeOperation,
-  type OperationError,
   type OperationValidation,
-  applyOperations,
-  countOperationErrors,
   editableFieldSchema,
   excerptAround,
   findOccurrences,
   fragmentBaseHash,
-  makeOperationError,
-  normalizeOperations,
-  operationEchoFields,
-  operationsInputSchema,
-  PROPOSE_FRAGMENT_CHANGES_DESCRIPTION,
   proposeFragmentChangesSchema,
+  recommendedReadFragmentIds,
   sanitizeOperationValidationsForTool,
   sanitizeTextForToolEcho,
   truncateText,
-  validateOperations,
 } from '../fragments/change-operations'
+import { applyOperationsWithSnapshot, type AppliedChange } from '../fragments/change-apply'
 import { loadSummaryContent, STORY_SUMMARY_PLACEHOLDER } from './context-builder'
 
 export {
@@ -52,16 +45,6 @@ const logger = createLogger('llm-tools')
 const TOOL_LOG_MAX_CHARS = 1200
 const MAX_READ_FRAGMENTS = 30
 const MAX_LIST_LIMIT = 100
-const PROPOSAL_TTL_MS = 1000 * 60 * 60
-
-interface StoredProposal {
-  storyId: string
-  createdAt: number
-  operations: FragmentChangeOperation[]
-  allowProseEdits?: boolean
-}
-
-const proposals = new Map<string, StoredProposal>()
 
 function safeStringify(value: unknown): string {
   try {
@@ -126,22 +109,8 @@ const proseReplaceSchema = z.object({
 })
 
 export interface FragmentToolsOptions {
-  /** true: read tools only. false: add proposal/apply tools. Defaults to true. */
+  /** true: read tools only. false: add the direct edit tools. Defaults to true. */
   readOnly?: boolean
-}
-
-function cleanExpiredProposals(): void {
-  const now = Date.now()
-  for (const [id, proposal] of proposals) {
-    if (now - proposal.createdAt > PROPOSAL_TTL_MS) {
-      proposals.delete(id)
-    }
-  }
-}
-
-function createProposalId(): string {
-  cleanExpiredProposals()
-  return `chg-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`
 }
 
 function summarizeFragment(fragment: Fragment) {
@@ -167,26 +136,6 @@ function fullFragmentForTool(fragment: Fragment) {
   }
 }
 
-function operationsForApply(
-  storyId: string,
-  input: z.infer<typeof operationsInputSchema>,
-): { operations?: FragmentChangeOperation[]; allowProseEdits?: boolean; error?: OperationError } {
-  if (input.operations?.length) {
-    return { operations: normalizeOperations(input.operations) }
-  }
-
-  cleanExpiredProposals()
-  const proposal = input.proposalId ? proposals.get(input.proposalId) : undefined
-  if (!proposal) {
-    return { error: makeOperationError('proposal_not_found', `Proposal not found or expired: ${input.proposalId}`) }
-  }
-  if (proposal.storyId !== storyId) {
-    return { error: makeOperationError('proposal_story_mismatch', `Proposal ${input.proposalId} belongs to another story.`) }
-  }
-
-  return { operations: proposal.operations, allowProseEdits: proposal.allowProseEdits }
-}
-
 async function loadActiveProseFragments(dataDir: string, storyId: string): Promise<Fragment[]> {
   const activeIds = await getActiveProseIds(dataDir, storyId)
   if (activeIds.length > 0) {
@@ -203,12 +152,24 @@ async function loadActiveProseFragments(dataDir: string, storyId: string): Promi
   return allProse.filter((fragment) => !fragment.archived)
 }
 
-function proposalResponse(proposalId: string, results: OperationValidation[]) {
+/**
+ * Common shape for the direct edit tools: what applied, what was skipped, the
+ * per-operation diffs the model (and the chat card) render, and the
+ * `appliedChanges` revert token the Undo button reverses through the shared core.
+ */
+function editResponse(
+  appliedResults: OperationValidation[],
+  appliedChanges: AppliedChange[],
+  extra: Record<string, unknown> = {},
+) {
   return {
-    ok: countOperationErrors(results) === 0,
-    proposalId,
-    invalid: results.filter((result) => result.status === 'invalid').length,
-    ...operationEchoFields(results),
+    ok: appliedResults.length > 0 && appliedResults.every((result) => result.status === 'applied'),
+    applied: appliedResults.filter((result) => result.status === 'applied').length,
+    skipped: appliedResults.filter((result) => result.status !== 'applied').length,
+    readFragmentIds: recommendedReadFragmentIds(appliedResults),
+    operations: sanitizeOperationValidationsForTool(appliedResults),
+    appliedChanges,
+    ...extra,
   }
 }
 
@@ -217,7 +178,7 @@ export function coreReadToolNames(): string[] {
 }
 
 export function coreProposalToolNames(): string[] {
-  return ['proposeFragmentChanges', 'proposeProseChanges', 'applyProposedChanges']
+  return ['editFragments', 'editProse']
 }
 
 /**
@@ -236,7 +197,7 @@ export function createFragmentTools(
   const tools: ToolSet = {}
 
   tools.readFragments = tool({
-    description: 'Read one or more fragments by ID. Returns full editable fields and `baseHash`. Use `baseHash` when proposing `set_fields` whole-field rewrites.',
+    description: 'Read one or more fragments by ID. Returns full editable fields and `baseHash`. Use `baseHash` when applying `set_fields` whole-field rewrites.',
     inputSchema: z.object({
       fragmentIds: z.array(z.string()).min(1).max(MAX_READ_FRAGMENTS).describe('Fragment IDs to read. Batch related reads in one call.'),
     }),
@@ -256,7 +217,7 @@ export function createFragmentTools(
   })
 
   tools.findFragments = tool({
-    description: 'Search fragments by case-insensitive substring. Returns matching IDs and excerpts; call `readFragments` before relying on details or proposing edits.',
+    description: 'Search fragments by case-insensitive substring. Returns matching IDs and excerpts; call `readFragments` before relying on details or editing.',
     inputSchema: z.object({
       query: z.string().min(1).describe('Case-insensitive text to search for in name, description, or content.'),
       types: z.array(z.string()).optional().describe('Optional fragment types to include. Omit to search all textual fragment types.'),
@@ -331,7 +292,7 @@ export function createFragmentTools(
   })
 
   tools.readProseChain = tool({
-    description: 'Read the active prose chain in order. Use this for continuity and for scoping prose proposals to active prose only.',
+    description: 'Read the active prose chain in order. Use this for continuity and for scoping prose edits to active prose only.',
     inputSchema: z.object({
       includeContent: z.boolean().default(false).describe('When true, include full content. Otherwise returns summaries and `baseHash` only.'),
       limit: z.number().int().min(1).max(MAX_LIST_LIMIT).default(50),
@@ -381,7 +342,7 @@ export function createFragmentTools(
   })
 
   tools.readStorySummary = tool({
-    description: 'Read the current rolling story summary. Summary fragments are still editable through `readFragments` and proposal tools.',
+    description: 'Read the current rolling story summary. Summary fragments are still editable through `readFragments` and the edit tools.',
     inputSchema: z.object({}),
     execute: withToolLogging('readStorySummary', storyId, async () => {
       const story = await getStory(dataDir, storyId)
@@ -397,34 +358,29 @@ export function createFragmentTools(
   })
 
   if (!readOnly) {
-    tools.proposeFragmentChanges = tool({
-      description: PROPOSE_FRAGMENT_CHANGES_DESCRIPTION,
+    tools.editFragments = tool({
+      description: `Create, edit, append to, whole-field rewrite, or archive memory fragments via \`operations\`. ${OPERATION_GUIDANCE} Applies atomically per target fragment and returns per-operation diffs; invalid targets are skipped and reported. Not for prose — use editProse.`,
       inputSchema: proposeFragmentChangesSchema,
-      execute: withToolLogging('proposeFragmentChanges', storyId, async ({ title, rationale, operations }) => {
-        const validation = await validateOperations(dataDir, storyId, operations)
-        const proposalId = createProposalId()
-        proposals.set(proposalId, {
-          storyId,
-          createdAt: Date.now(),
-          operations: validation.operations,
+      execute: withToolLogging('editFragments', storyId, async ({ title, rationale, operations }) => {
+        const { appliedResults, appliedChanges } = await applyOperationsWithSnapshot(dataDir, storyId, operations, {
+          onFragmentUpdated: reanalyzeAfterProseChange.bind(null, dataDir, storyId),
         })
-        return {
-          ...proposalResponse(proposalId, validation.results),
+        return editResponse(appliedResults, appliedChanges, {
           ...(title?.trim() ? { title: title.trim() } : {}),
           ...(rationale?.trim() ? { rationale: rationale.trim() } : {}),
-        }
+        })
       }),
     })
 
-    tools.proposeProseChanges = tool({
-      description: 'Propose exact search/replace edits across active prose only. It scans active prose, expands matches into fragment-specific `operations`, validates them, and returns diffs without applying.',
+    tools.editProse = tool({
+      description: 'Apply exact search/replace edits across active prose only. Scans active prose, expands each match into fragment-specific edits, applies them atomically, and returns diffs. Edits whose oldText matches no active prose are reported as unmatched.',
       inputSchema: z.object({
         edits: z.array(proseReplaceSchema).min(1).max(MAX_BATCH_OPERATIONS),
       }),
-      execute: withToolLogging('proposeProseChanges', storyId, async ({ edits }) => {
+      execute: withToolLogging('editProse', storyId, async ({ edits }) => {
         const active = await loadActiveProseFragments(dataDir, storyId)
         const operations: FragmentChangeOperation[] = []
-        const skipped: Array<{ oldText: string; reason: string }> = []
+        const unmatched: Array<{ oldText: string; reason: string }> = []
         for (const edit of edits) {
           let matchCount = 0
           for (const fragment of active) {
@@ -443,52 +399,19 @@ export function createFragmentTools(
             })
           }
           if (matchCount === 0) {
-            skipped.push({ oldText: truncateText(edit.oldText, 120), reason: 'No active prose fragment contains oldText.' })
+            unmatched.push({ oldText: truncateText(edit.oldText, 120), reason: 'No active prose fragment contains oldText.' })
           }
         }
 
         if (operations.length === 0) {
-          return {
-            ok: false,
-            proposalId: null,
-            valid: 0,
-            invalid: 0,
-            skipped,
-            operations: [],
-            error: 'No active prose matches found.',
-          }
+          return { ok: false, applied: 0, skipped: 0, operations: [], appliedChanges: [], unmatched, error: 'No active prose matches found.' }
         }
 
-        const validation = await validateOperations(dataDir, storyId, operations, { allowProseEdits: true })
-        const proposalId = createProposalId()
-        proposals.set(proposalId, {
-          storyId,
-          createdAt: Date.now(),
-          operations: validation.operations,
+        const { appliedResults, appliedChanges } = await applyOperationsWithSnapshot(dataDir, storyId, operations, {
           allowProseEdits: true,
-        })
-        return { ...proposalResponse(proposalId, validation.results), skipped }
-      }),
-    })
-
-    tools.applyProposedChanges = tool({
-      description: 'Apply a proposal by `proposalId` (from a propose tool) or inline `operations`. Re-validates against current state and applies atomically per target fragment; invalid targets are skipped and reported.',
-      inputSchema: operationsInputSchema,
-      execute: withToolLogging('applyProposedChanges', storyId, async (input: z.infer<typeof operationsInputSchema>) => {
-        const resolved = operationsForApply(storyId, input)
-        if (resolved.error || !resolved.operations) {
-          return { ok: false, errors: [resolved.error] }
-        }
-        const results = await applyOperations(dataDir, storyId, resolved.operations, {
-          allowProseEdits: resolved.allowProseEdits,
           onFragmentUpdated: reanalyzeAfterProseChange.bind(null, dataDir, storyId),
         })
-        return {
-          ok: results.every((result) => result.status === 'applied'),
-          applied: results.filter((result) => result.status === 'applied').length,
-          skipped: results.filter((result) => result.status !== 'applied').length,
-          operations: sanitizeOperationValidationsForTool(results),
-        }
+        return editResponse(appliedResults, appliedChanges, unmatched.length > 0 ? { unmatched } : {})
       }),
     })
   }

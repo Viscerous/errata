@@ -178,13 +178,12 @@ export const HELP_SECTIONS: HelpSection[] = [
             </div>
 
             <div className="mt-4 mb-1">
-              <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wider mb-2">Proposal tools (librarian chat/refine)</p>
+              <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wider mb-2">Edit tools (librarian chat/refine)</p>
               <P>
-                These are available in explicit librarian editing flows. They validate changes and show diffs before applying:
+                These are available in explicit librarian editing flows. They apply changes atomically and return diffs you can undo:
               </P>
-              <ToolCard name="proposeFragmentChanges(operations)" description="Batch create, exact-edit, append, whole-field rewrite, or archive fragment proposals." />
-              <ToolCard name="proposeProseChanges(edits)" description="Scan active prose and propose exact search/replace diffs." />
-              <ToolCard name="applyProposedChanges(proposalId)" description="Re-validate and apply proposals atomically per target fragment." />
+              <ToolCard name="editFragments(operations)" description="Batch create, exact-edit, append, whole-field rewrite, or archive fragments." />
+              <ToolCard name="editProse(edits)" description="Scan active prose and apply exact search/replace edits." />
             </div>
           </>
         ),

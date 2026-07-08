@@ -39,7 +39,7 @@ export type OperationStatus = 'valid' | 'invalid' | 'applied' | 'skipped'
 export interface OperationError {
   code: string
   message: string
-  nextAction?: 'readFragments' | 'listFragments' | 'proposeProseChanges'
+  nextAction?: 'readFragments' | 'listFragments' | 'editProse'
 }
 
 export interface DiffPreview {
@@ -846,7 +846,7 @@ export async function validateOperations(
           action: operation.action,
           status: 'invalid',
           target: { fragmentId },
-          errors: [makeOperationError('prose_requires_prose_tool', 'Use proposeProseChanges for prose edits so scope is explicit and active-prose constrained.', 'proposeProseChanges')],
+          errors: [makeOperationError('prose_requires_prose_tool', 'Use editProse for prose edits so scope is explicit and active-prose constrained.', 'editProse')],
         })
       }
       continue

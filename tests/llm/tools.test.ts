@@ -86,15 +86,17 @@ describe('LLM tools', () => {
   it('exposes the compact read-only surface by default', () => {
     const tools = createFragmentTools(dataDir, storyId)
     expect(Object.keys(tools)).toEqual(coreReadToolNames())
-    for (const oldName of ['getFragment', 'searchFragments', 'createFragment', 'updateFragment', 'editFragment', 'deleteFragment', 'editProse']) {
+    for (const oldName of ['getFragment', 'searchFragments', 'createFragment', 'updateFragment', 'editFragment', 'deleteFragment', 'editFragments', 'editProse']) {
       expect(tools).not.toHaveProperty(oldName)
     }
   })
 
-  it('adds proposal/apply tools, not direct write tools, when write-enabled', () => {
+  it('adds the direct edit tools, not the old propose/apply or granular write tools, when write-enabled', () => {
     const tools = createFragmentTools(dataDir, storyId, { readOnly: false })
     expect(Object.keys(tools)).toEqual([...coreReadToolNames(), ...coreProposalToolNames()])
-    for (const oldName of ['createFragment', 'updateFragment', 'editFragment', 'deleteFragment', 'editProse', 'getStorySummary', 'updateStorySummary']) {
+    expect(tools).toHaveProperty('editFragments')
+    expect(tools).toHaveProperty('editProse')
+    for (const oldName of ['proposeFragmentChanges', 'proposeProseChanges', 'applyProposedChanges', 'createFragment', 'updateFragment', 'editFragment', 'deleteFragment']) {
       expect(tools).not.toHaveProperty(oldName)
     }
   })
@@ -124,10 +126,10 @@ describe('LLM tools', () => {
     expect(listed.fragments[0]).not.toHaveProperty('content')
   })
 
-  it('validates and applies a create_fragment proposal', async () => {
+  it('applies a create_fragment edit directly', async () => {
     const tools = createFragmentTools(dataDir, storyId, { readOnly: false })
 
-    const proposal = await execTool(tools.proposeFragmentChanges, {
+    const applied = await execTool(tools.editFragments, {
       operations: [{
         action: 'create_fragment',
         type: 'knowledge',
@@ -137,11 +139,10 @@ describe('LLM tools', () => {
       }],
     })
 
-    expect(proposal.ok).toBe(true)
-    expect(proposal.valid).toBe(1)
-
-    const applied = await execTool(tools.applyProposedChanges, { proposalId: proposal.proposalId })
     expect(applied.ok).toBe(true)
+    expect(applied.applied).toBe(1)
+    expect(applied.appliedChanges).toHaveLength(1)
+
     const fragments = await listFragments(dataDir, storyId, 'knowledge')
     expect(fragments[0]).toMatchObject({ name: 'Moon Ritual', content: 'Moon ritual requires silver ash and river water.' })
   })
@@ -150,7 +151,7 @@ describe('LLM tools', () => {
     await createFragment(dataDir, storyId, makeFragment({ id: 'ch-0001', type: 'character', name: 'Alice' }))
     const tools = createFragmentTools(dataDir, storyId, { readOnly: false })
 
-    const createProposal = await execTool(tools.proposeFragmentChanges, {
+    const createProposal = await execTool(tools.editFragments, {
       operations: [{
         action: 'create_fragment',
         type: 'character',
@@ -172,7 +173,7 @@ describe('LLM tools', () => {
     })).rejects.toThrow()
 
     const read = await execTool(tools.readFragments, { fragmentIds: ['ch-0001'] })
-    const updateProposal = await execTool(tools.proposeFragmentChanges, {
+    const updateProposal = await execTool(tools.editFragments, {
       operations: [{
         action: 'set_fields',
         fragmentId: 'ch-0001',
@@ -200,7 +201,7 @@ describe('LLM tools', () => {
     await createFragment(dataDir, storyId, makeFragment({ id: 'ch-0001', type: 'character', content: 'Alice is wary.' }))
     const tools = createFragmentTools(dataDir, storyId, { readOnly: false })
 
-    const missingHash = await execTool(tools.proposeFragmentChanges, {
+    const missingHash = await execTool(tools.editFragments, {
       operations: [{
         action: 'set_fields',
         fragmentId: 'ch-0001',
@@ -211,9 +212,11 @@ describe('LLM tools', () => {
     expect(missingHash.operations[0].errors[0].code).toBe('base_hash_required')
     expect(missingHash.operations[0].errors[0].nextAction).toBe('readFragments')
     expect(missingHash.readFragmentIds).toEqual(['ch-0001'])
+    // Nothing was written on the failed edit.
+    expect((await getFragment(dataDir, storyId, 'ch-0001'))?.content).toBe('Alice is wary.')
 
     const read = await execTool(tools.readFragments, { fragmentIds: ['ch-0001'] })
-    const proposal = await execTool(tools.proposeFragmentChanges, {
+    const applied = await execTool(tools.editFragments, {
       operations: [{
         action: 'set_fields',
         fragmentId: 'ch-0001',
@@ -221,9 +224,8 @@ describe('LLM tools', () => {
         fields: { description: 'New queen', content: 'Alice is wary and newly crowned.' },
       }],
     })
-    expect(proposal.ok).toBe(true)
+    expect(applied.ok).toBe(true)
 
-    await execTool(tools.applyProposedChanges, { proposalId: proposal.proposalId })
     const updated = await getFragment(dataDir, storyId, 'ch-0001')
     expect(updated?.description).toBe('New queen')
     expect(updated?.content).toBe('Alice is wary and newly crowned.')
@@ -234,15 +236,12 @@ describe('LLM tools', () => {
     await createFragment(dataDir, storyId, makeFragment({ id: 'ch-0001', type: 'character', content: 'Alice has blue eyes. Alice serves the guard.' }))
     const tools = createFragmentTools(dataDir, storyId, { readOnly: false })
 
-    const proposal = await execTool(tools.proposeFragmentChanges, {
+    const applied = await execTool(tools.editFragments, {
       operations: [
         { action: 'replace_text', fragmentId: 'ch-0001', field: 'content', oldText: 'blue eyes', newText: 'hazel eyes' },
         { action: 'replace_text', fragmentId: 'ch-0001', field: 'content', oldText: 'serves the guard', newText: 'left the guard' },
       ],
     })
-    expect(proposal.ok).toBe(true)
-
-    const applied = await execTool(tools.applyProposedChanges, { proposalId: proposal.proposalId })
     expect(applied.ok).toBe(true)
     const updated = await getFragment(dataDir, storyId, 'ch-0001')
     expect(updated?.content).toBe('Alice has hazel eyes. Alice left the guard.')
@@ -259,7 +258,7 @@ describe('LLM tools', () => {
     const read = await execTool<any>(tools.readFragments, { fragmentIds: ['ch-0001'] })
     expect(read.fragments[0].content).toBe('Alice has blue eyes.')
 
-    const proposal = await execTool<any>(tools.proposeFragmentChanges, {
+    const proposal = await execTool<any>(tools.editFragments, {
       operations: [{
         action: 'replace_text',
         fragmentId: 'ch-0001',
@@ -278,21 +277,19 @@ describe('LLM tools', () => {
     await createFragment(dataDir, storyId, makeFragment({ id: 'kn-0001', type: 'knowledge', content: 'Opening.\nClosing.' }))
     const tools = createFragmentTools(dataDir, storyId, { readOnly: false })
 
-    const proposal = await execTool(tools.proposeFragmentChanges, {
+    const applied = await execTool(tools.editFragments, {
       operations: [
         { action: 'replace_text', fragmentId: 'kn-0001', field: 'content', oldText: 'Closing.', newText: 'Middle.\nClosing.' },
         { action: 'append_paragraph', fragmentId: 'kn-0001', field: 'content', text: 'Afterword.' },
       ],
     })
-    expect(proposal.ok).toBe(true)
-    expect(proposal.operations[1].diffs?.[0]).toMatchObject({
+    expect(applied.ok).toBe(true)
+    expect(applied.operations[1].diffs?.[0]).toMatchObject({
       field: 'content',
       before: '',
       after: 'Afterword.',
     })
 
-    const applied = await execTool(tools.applyProposedChanges, { proposalId: proposal.proposalId })
-    expect(applied.ok).toBe(true)
     const updated = await getFragment(dataDir, storyId, 'kn-0001')
     expect(updated?.content).toBe('Opening.\nMiddle.\nClosing.\n\nAfterword.')
   })
@@ -340,7 +337,7 @@ describe('LLM tools', () => {
     await createFragment(dataDir, storyId, makeFragment({ id: 'ch-0001', type: 'character', content: 'Alice waits. Alice listens.' }))
     const tools = createFragmentTools(dataDir, storyId, { readOnly: false })
 
-    const proposal = await execTool(tools.proposeFragmentChanges, {
+    const proposal = await execTool(tools.editFragments, {
       operations: [{ action: 'replace_text', fragmentId: 'ch-0001', field: 'content', oldText: 'Alice', newText: 'Alicia' }],
     })
 
@@ -354,26 +351,24 @@ describe('LLM tools', () => {
     await createFragment(dataDir, storyId, makeFragment({ id: 'ch-0001', type: 'character', content: 'Alice waits. Alice listens. Alice leaves.' }))
     const tools = createFragmentTools(dataDir, storyId, { readOnly: false })
 
-    const occurrenceProposal = await execTool(tools.proposeFragmentChanges, {
+    const occurrence = await execTool(tools.editFragments, {
       operations: [{ action: 'replace_text', fragmentId: 'ch-0001', field: 'content', oldText: 'Alice', newText: 'Alicia', occurrence: 2 }],
     })
-    expect(occurrenceProposal.ok).toBe(true)
-    await execTool(tools.applyProposedChanges, { proposalId: occurrenceProposal.proposalId })
+    expect(occurrence.ok).toBe(true)
     expect((await getFragment(dataDir, storyId, 'ch-0001'))?.content).toBe('Alice waits. Alicia listens. Alice leaves.')
 
-    const replaceAllProposal = await execTool(tools.proposeFragmentChanges, {
+    const replaceAll = await execTool(tools.editFragments, {
       operations: [{ action: 'replace_text', fragmentId: 'ch-0001', field: 'content', oldText: 'Alice', newText: 'Alicia', replaceAll: true }],
     })
-    expect(replaceAllProposal.ok).toBe(true)
-    await execTool(tools.applyProposedChanges, { proposalId: replaceAllProposal.proposalId })
+    expect(replaceAll.ok).toBe(true)
     expect((await getFragment(dataDir, storyId, 'ch-0001'))?.content).toBe('Alicia waits. Alicia listens. Alicia leaves.')
   })
 
-  it('routes prose edits through the prose-specific proposal tool', async () => {
+  it('rejects prose edits through editFragments, steering to editProse', async () => {
     await createFragment(dataDir, storyId, makeFragment({ id: 'pr-0001', type: 'prose', content: 'The Cabinet agent arrived.' }))
     const tools = createFragmentTools(dataDir, storyId, { readOnly: false })
 
-    const proposal = await execTool(tools.proposeFragmentChanges, {
+    const proposal = await execTool(tools.editFragments, {
       operations: [{ action: 'replace_text', fragmentId: 'pr-0001', field: 'content', oldText: 'Cabinet', newText: 'NOCTURNAL' }],
     })
 
@@ -381,28 +376,39 @@ describe('LLM tools', () => {
     expect(proposal.operations[0].errors[0].code).toBe('prose_requires_prose_tool')
   })
 
-  it('scans active prose for prose changes and applies only active fragments', async () => {
+  it('scans active prose and applies edits only to active fragments', async () => {
     await createFragment(dataDir, storyId, makeFragment({ id: 'pr-0001', type: 'prose', content: 'The Cabinet agent arrived.' }))
     await createFragment(dataDir, storyId, makeFragment({ id: 'pr-0002', type: 'prose', content: 'The Cabinet agent waited.' }))
     await initProseChain(dataDir, storyId, 'pr-0001')
     const tools = createFragmentTools(dataDir, storyId, { readOnly: false })
 
-    const proposal = await execTool(tools.proposeProseChanges, {
+    const applied = await execTool(tools.editProse, {
       edits: [{ oldText: 'The Cabinet agent', newText: 'The NOCTURNAL operative' }],
     })
-    expect(proposal.ok).toBe(true)
-    expect(proposal.valid).toBe(1)
-
-    await execTool(tools.applyProposedChanges, { proposalId: proposal.proposalId })
+    expect(applied.ok).toBe(true)
+    expect(applied.applied).toBe(1)
     expect((await getFragment(dataDir, storyId, 'pr-0001'))?.content).toBe('The NOCTURNAL operative arrived.')
     expect((await getFragment(dataDir, storyId, 'pr-0002'))?.content).toBe('The Cabinet agent waited.')
+  })
+
+  it('reports prose edits whose anchor matches no active prose as unmatched', async () => {
+    await createFragment(dataDir, storyId, makeFragment({ id: 'pr-0001', type: 'prose', content: 'The Cabinet agent arrived.' }))
+    await initProseChain(dataDir, storyId, 'pr-0001')
+    const tools = createFragmentTools(dataDir, storyId, { readOnly: false })
+
+    const result = await execTool(tools.editProse, {
+      edits: [{ oldText: 'nonexistent phrase', newText: 'whatever' }],
+    })
+    expect(result.ok).toBe(false)
+    expect(result.unmatched).toHaveLength(1)
+    expect((await getFragment(dataDir, storyId, 'pr-0001'))?.content).toBe('The Cabinet agent arrived.')
   })
 
   it('archives instead of deleting fragments', async () => {
     await createFragment(dataDir, storyId, makeFragment({ id: 'kn-0001', type: 'knowledge' }))
     const tools = createFragmentTools(dataDir, storyId, { readOnly: false })
 
-    const applied = await execTool(tools.applyProposedChanges, {
+    const applied = await execTool(tools.editFragments, {
       operations: [{ action: 'archive_fragment', fragmentId: 'kn-0001' }],
     })
     expect(applied.ok).toBe(true)

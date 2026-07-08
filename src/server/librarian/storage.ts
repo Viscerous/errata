@@ -5,8 +5,18 @@ import { getContentRoot } from '../fragments/branches'
 import { generateConversationId } from '@/lib/fragment-ids'
 import { writeJsonAtomic } from '../fs-utils'
 import { withKeyLock } from '../async-lock'
-import type { EditableField, FragmentChangeOperation, OperationValidation } from '../fragments/change-operations'
+import type { FragmentChangeOperation, OperationValidation } from '../fragments/change-operations'
+import type { AppliedChange, AppliedFieldChange, RevertResult } from '../fragments/change-apply'
 import type { MergedFragmentCandidate } from './candidates'
+
+/**
+ * The librarian analysis proposals reuse the shared apply/revert snapshot types.
+ * Aliased here so existing references (and the client type mirror) keep their
+ * librarian-flavoured names while the shape lives in one place.
+ */
+export type LibrarianAppliedFieldChange = AppliedFieldChange
+export type LibrarianAppliedProposalChange = AppliedChange
+export type LibrarianProposalRevertResult = RevertResult
 
 /** Serializes read-modify-write of a story's analysis index against concurrent saves. */
 function withIndexLock<T>(storyId: string, fn: () => Promise<T>): Promise<T> {
@@ -32,41 +42,6 @@ export interface LibrarianFragmentChangeProposal {
   reverted?: boolean
   revertedAt?: string
   revertResults?: LibrarianProposalRevertResult[]
-}
-
-export interface LibrarianAppliedFieldChange {
-  before: string
-  after: string
-}
-
-export type LibrarianAppliedProposalChange =
-  | {
-      kind: 'create'
-      fragmentId: string
-      afterHash: string
-      fields: Partial<Record<EditableField, LibrarianAppliedFieldChange>>
-    }
-  | {
-      kind: 'update'
-      fragmentId: string
-      beforeHash: string
-      afterHash: string
-      fields: Partial<Record<EditableField, LibrarianAppliedFieldChange>>
-      addedRefs?: string[]
-      previousLastLibrarianChangeProposal?: unknown
-    }
-  | {
-      kind: 'archive'
-      fragmentId: string
-      beforeHash: string
-      afterHash: string
-    }
-
-export interface LibrarianProposalRevertResult {
-  kind: LibrarianAppliedProposalChange['kind']
-  fragmentId: string
-  status: 'reverted' | 'skipped'
-  message?: string
 }
 
 export interface LibrarianAnalysis {

@@ -54,6 +54,11 @@ export const fragments = {
   // Revert
   revert: (storyId: string, fragmentId: string) =>
     apiFetch<Fragment>(`/stories/${storyId}/fragments/${fragmentId}/revert`, { method: 'POST' }),
+  revertApplied: (storyId: string, appliedChanges: unknown[]) =>
+    apiFetch<{ revertResults: Array<{ fragmentId: string; status: string }> }>(
+      `/stories/${storyId}/fragments/revert-applied`,
+      { method: 'POST', body: JSON.stringify({ appliedChanges }) },
+    ),
   listVersions: (storyId: string, fragmentId: string, branchId?: string) =>
     apiFetch<{ versions: FragmentVersion[] }>(`/stories/${storyId}/fragments/${fragmentId}/versions${branchId ? `?branch=${encodeURIComponent(branchId)}` : ''}`),
   revertToVersion: (storyId: string, fragmentId: string, version: number) =>

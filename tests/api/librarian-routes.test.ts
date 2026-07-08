@@ -765,7 +765,7 @@ describe('librarian API routes', () => {
       )
       expect(revertRes.status).toBe(409)
       const data = await revertRes.json()
-      expect(data.error).toContain('ch-drift changed since this proposal was applied')
+      expect(data.error).toContain('ch-drift changed since it was applied')
 
       const drifted = await getFragment(dataDir, storyId, 'ch-drift')
       expect(drifted?.content).toBe('Alice left the guard entirely.')

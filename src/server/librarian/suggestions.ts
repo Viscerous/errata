@@ -1,27 +1,26 @@
 import {
-  archiveFragment,
   getFragment,
-  restoreFragment,
   updateFragment,
-  updateFragmentVersioned,
 } from '../fragments/storage'
 import type { Fragment } from '../fragments/schema'
-import type { EditableField, FragmentChangeOperation, OperationValidation } from '../fragments/change-operations'
+import type { OperationValidation } from '../fragments/change-operations'
 import {
-  applyOperations,
   fragmentBaseHash,
   recommendedReadFragmentIds,
   validateOperations,
 } from '../fragments/change-operations'
-import type {
-  LibrarianAnalysis,
-  LibrarianAppliedProposalChange,
-  LibrarianProposalRevertResult,
-} from './storage'
+import {
+  applyOperationsWithSnapshot,
+  revertAppliedChanges,
+  RevertConflictError,
+  type AppliedChange,
+  type RevertResult,
+} from '../fragments/change-apply'
+import type { LibrarianAnalysis } from './storage'
 
 export interface ApplyFragmentChangeProposalResult {
   appliedResults: OperationValidation[]
-  appliedChanges: LibrarianAppliedProposalChange[]
+  appliedChanges: AppliedChange[]
   createdFragmentIds: string[]
   updatedFragmentIds: string[]
   archivedFragmentIds: string[]
@@ -29,15 +28,15 @@ export interface ApplyFragmentChangeProposalResult {
 }
 
 export interface RevertFragmentChangeProposalResult {
-  revertResults: LibrarianProposalRevertResult[]
+  revertResults: RevertResult[]
   updatedFragmentIds: string[]
   archivedFragmentIds: string[]
   restoredFragmentIds: string[]
 }
 
-export class ProposalRevertConflictError extends Error {
-  partial?: RevertFragmentChangeProposalResult
-}
+/** Analysis-flavoured alias of the shared {@link RevertConflictError}, kept so the
+ * accept/revert route handlers catch the same type they always did. */
+export { RevertConflictError as ProposalRevertConflictError }
 
 /**
  * Thrown when `applyOperations` wrote some targets to disk before a later target
@@ -64,24 +63,9 @@ export class ProposalValidationError extends Error {
   }
 }
 
-const EDITABLE_FIELDS: EditableField[] = ['name', 'description', 'content']
-
-type EditAction = FragmentChangeOperation['action']
-
-const isProposalUpdateAction = (action: EditAction): boolean =>
-  action !== 'create_fragment' && action !== 'archive_fragment'
-const isProposalArchiveAction = (action: EditAction): boolean =>
-  action === 'archive_fragment'
-
-/** Applied target fragment IDs whose operation action matches `match`. */
-function appliedTargetIds(
-  results: OperationValidation[],
-  match: (action: EditAction) => boolean,
-): string[] {
-  return unique(results
-    .filter((result) => result.status === 'applied' && match(result.action))
-    .map((result) => result.target?.fragmentId)
-    .filter((id): id is string => Boolean(id)))
+/** Fragment IDs recorded in an applied-change snapshot for a given change kind. */
+function changedIdsOfKind(changes: AppliedChange[], kind: AppliedChange['kind']): string[] {
+  return unique(changes.filter((change) => change.kind === kind).map((change) => change.fragmentId))
 }
 
 function sourceFragmentIdForProposal(
@@ -102,118 +86,6 @@ function invalidValidationMessage(results: OperationValidation[]): string {
 
 function unique<T>(values: T[]): T[] {
   return [...new Set(values)]
-}
-
-function operationTargetIds(operations: FragmentChangeOperation[]): string[] {
-  return unique(operations
-    .filter((operation): operation is Exclude<FragmentChangeOperation, { action: 'create_fragment' }> =>
-      operation.action !== 'create_fragment',
-    )
-    .map((operation) => operation.fragmentId))
-}
-
-async function snapshotTargets(
-  dataDir: string,
-  storyId: string,
-  operations: FragmentChangeOperation[],
-): Promise<Map<string, Fragment>> {
-  const snapshots = new Map<string, Fragment>()
-  for (const fragmentId of operationTargetIds(operations)) {
-    const fragment = await getFragment(dataDir, storyId, fragmentId)
-    if (fragment) snapshots.set(fragmentId, fragment)
-  }
-  return snapshots
-}
-
-function changedFields(
-  before: Pick<Fragment, EditableField>,
-  after: Pick<Fragment, EditableField>,
-): Partial<Record<EditableField, { before: string; after: string }>> {
-  const fields: Partial<Record<EditableField, { before: string; after: string }>> = {}
-  for (const field of EDITABLE_FIELDS) {
-    if (before[field] !== after[field]) {
-      fields[field] = {
-        before: before[field],
-        after: after[field],
-      }
-    }
-  }
-  return fields
-}
-
-function createdFields(fragment: Pick<Fragment, EditableField>): Partial<Record<EditableField, { before: string; after: string }>> {
-  return {
-    name: { before: '', after: fragment.name },
-    description: { before: '', after: fragment.description },
-    content: { before: '', after: fragment.content },
-  }
-}
-
-async function captureAppliedChanges(args: {
-  dataDir: string
-  storyId: string
-  beforeById: Map<string, Fragment>
-  appliedResults: OperationValidation[]
-}): Promise<LibrarianAppliedProposalChange[]> {
-  const { dataDir, storyId, beforeById, appliedResults } = args
-  const changes: LibrarianAppliedProposalChange[] = []
-
-  for (const result of appliedResults) {
-    if (result.status !== 'applied' || result.action !== 'create_fragment' || !result.createdFragmentId) continue
-    const created = await getFragment(dataDir, storyId, result.createdFragmentId)
-    if (!created) continue
-    changes.push({
-      kind: 'create',
-      fragmentId: created.id,
-      afterHash: fragmentBaseHash(created),
-      fields: createdFields(created),
-    })
-  }
-
-  const updatedFragmentIds = appliedTargetIds(appliedResults, isProposalUpdateAction)
-
-  for (const fragmentId of updatedFragmentIds) {
-    const before = beforeById.get(fragmentId)
-    const after = await getFragment(dataDir, storyId, fragmentId)
-    if (!before || !after) continue
-    const fields = changedFields(before, after)
-    if (Object.keys(fields).length === 0) continue
-    changes.push({
-      kind: 'update',
-      fragmentId,
-      beforeHash: fragmentBaseHash(before),
-      afterHash: fragmentBaseHash(after),
-      fields,
-      addedRefs: after.refs.filter((ref) => !before.refs.includes(ref)),
-      ...('lastLibrarianChangeProposal' in before.meta
-        ? { previousLastLibrarianChangeProposal: before.meta.lastLibrarianChangeProposal }
-        : {}),
-    })
-  }
-
-  const archivedFragmentIds = appliedTargetIds(appliedResults, isProposalArchiveAction)
-
-  for (const fragmentId of archivedFragmentIds) {
-    const before = beforeById.get(fragmentId)
-    const after = await getFragment(dataDir, storyId, fragmentId)
-    if (!before || !after) continue
-    changes.push({
-      kind: 'archive',
-      fragmentId,
-      beforeHash: fragmentBaseHash(before),
-      afterHash: fragmentBaseHash(after),
-    })
-  }
-
-  return changes
-}
-
-function conflict(message: string): never {
-  throw new ProposalRevertConflictError(message)
-}
-
-function currentHashMatches(fragment: Fragment, expectedHash: string): boolean {
-  return fragmentBaseHash(fragment) === expectedHash
 }
 
 function currentProposalMarkerMatches(
@@ -253,13 +125,14 @@ export async function applyFragmentChangeProposal(args: {
       validation.results,
     )
   }
-  const beforeById = await snapshotTargets(dataDir, storyId, validation.operations)
-
   const appliedAt = new Date().toISOString()
   const sourceFragmentId = sourceFragmentIdForProposal(analysis, proposal)
   const sourceRefs = sourceFragmentId ? [sourceFragmentId] : []
 
-  const appliedResults = await applyOperations(dataDir, storyId, validation.operations, {
+  // Shared core validates, applies atomically per target, and captures the
+  // revert snapshot. The onFragmentUpdated hook layers analysis-specific
+  // bookkeeping (source refs + proposal marker) onto each edited fragment.
+  const { appliedResults, appliedChanges } = await applyOperationsWithSnapshot(dataDir, storyId, validation.operations, {
     reason: `librarian-${reason}`,
     createMetaSource: 'librarian-proposal',
     onFragmentUpdated: async (_before, updated) => {
@@ -281,13 +154,10 @@ export async function applyFragmentChangeProposal(args: {
     },
   })
 
-  // Any operation that reached 'applied' has already written to disk, so build
-  // the full applied-change record for whatever landed before deciding whether
-  // to throw. A partial failure must not discard that record (see
-  // ProposalApplyError) or the on-disk change becomes invisible and unrevertible.
-  const createdFragmentIds = appliedResults
-    .map((result) => result.createdFragmentId)
-    .filter((id): id is string => Boolean(id))
+  // Any operation that reached 'applied' has already written to disk. Layer the
+  // proposal provenance onto created fragments (baseHash ignores refs/meta, so
+  // this does not disturb the captured snapshot).
+  const createdFragmentIds = changedIdsOfKind(appliedChanges, 'create')
   for (const fragmentId of createdFragmentIds) {
     const fragment = await getFragment(dataDir, storyId, fragmentId)
     if (!fragment) continue
@@ -307,22 +177,12 @@ export async function applyFragmentChangeProposal(args: {
     })
   }
 
-  const updatedFragmentIds = appliedTargetIds(appliedResults, isProposalUpdateAction)
-  const archivedFragmentIds = appliedTargetIds(appliedResults, isProposalArchiveAction)
-
-  const appliedChanges = await captureAppliedChanges({
-    dataDir,
-    storyId,
-    beforeById,
-    appliedResults,
-  })
-
   const result: ApplyFragmentChangeProposalResult = {
     appliedResults,
     appliedChanges,
     createdFragmentIds,
-    updatedFragmentIds,
-    archivedFragmentIds,
+    updatedFragmentIds: changedIdsOfKind(appliedChanges, 'update'),
+    archivedFragmentIds: changedIdsOfKind(appliedChanges, 'archive'),
     readFragmentIds,
   }
 
@@ -449,124 +309,13 @@ export async function revertFragmentChangeProposal(args: {
     throw new Error('Fragment change proposal has no applied-change snapshot and cannot be reverted safely.')
   }
 
-  const revertResults: LibrarianProposalRevertResult[] = []
-  const updatedFragmentIds: string[] = []
-  const archivedFragmentIds: string[] = []
-  const restoredFragmentIds: string[] = []
-
-  const buildResult = (): RevertFragmentChangeProposalResult => ({
-    revertResults,
-    updatedFragmentIds: unique(updatedFragmentIds),
-    archivedFragmentIds: unique(archivedFragmentIds),
-    restoredFragmentIds: unique(restoredFragmentIds),
-  })
-
-  try {
-    for (const change of [...proposal.appliedChanges].reverse()) {
-      if (change.kind === 'create') {
-        const current = await getFragment(dataDir, storyId, change.fragmentId)
-        if (!current) {
-          revertResults.push({
-            kind: change.kind,
-            fragmentId: change.fragmentId,
-            status: 'skipped',
-            message: 'Created fragment no longer exists.',
-          })
-          continue
-        }
-        if (current.archived) {
-          revertResults.push({
-            kind: change.kind,
-            fragmentId: change.fragmentId,
-            status: 'skipped',
-            message: 'Created fragment is already archived.',
-          })
-          continue
-        }
-        if (!currentHashMatches(current, change.afterHash)) {
-          conflict(`Cannot revert fragment change proposal: created fragment ${change.fragmentId} changed since this proposal was applied.`)
-        }
-        const archived = await archiveFragment(dataDir, storyId, change.fragmentId)
-        if (!archived) {
-          conflict(`Cannot revert fragment change proposal: created fragment ${change.fragmentId} disappeared before revert.`)
-        }
-        archivedFragmentIds.push(change.fragmentId)
-        revertResults.push({
-          kind: change.kind,
-          fragmentId: change.fragmentId,
-          status: 'reverted',
-        })
-        continue
-      }
-
-      if (change.kind === 'archive') {
-        const current = await getFragment(dataDir, storyId, change.fragmentId)
-        if (!current) {
-          conflict(`Cannot revert fragment change proposal: archived fragment ${change.fragmentId} no longer exists.`)
-        }
-        if (!current.archived) {
-          revertResults.push({
-            kind: change.kind,
-            fragmentId: change.fragmentId,
-            status: 'skipped',
-            message: 'Fragment is already restored.',
-          })
-          continue
-        }
-        if (!currentHashMatches(current, change.beforeHash)) {
-          conflict(`Cannot revert fragment change proposal: archived fragment ${change.fragmentId} changed since this proposal was applied.`)
-        }
-        const restored = await restoreFragment(dataDir, storyId, change.fragmentId)
-        if (!restored) {
-          conflict(`Cannot revert fragment change proposal: archived fragment ${change.fragmentId} disappeared before revert.`)
-        }
-        restoredFragmentIds.push(change.fragmentId)
-        revertResults.push({
-          kind: change.kind,
-          fragmentId: change.fragmentId,
-          status: 'reverted',
-        })
-        continue
-      }
-
-      const current = await getFragment(dataDir, storyId, change.fragmentId)
-      if (!current) {
-        conflict(`Cannot revert fragment change proposal: updated fragment ${change.fragmentId} no longer exists.`)
-      }
-      if (current.archived) {
-        conflict(`Cannot revert fragment change proposal: updated fragment ${change.fragmentId} is archived.`)
-      }
-      // Already back at its pre-proposal field values — e.g. retrying after a
-      // partial revert, or the author restored it by hand. Skip idempotently
-      // rather than conflicting on the stale afterHash.
-      const alreadyReverted = EDITABLE_FIELDS.every((field) => {
-        const fieldChange = change.fields[field]
-        return !fieldChange || current[field] === fieldChange.before
-      })
-      if (alreadyReverted) {
-        revertResults.push({
-          kind: change.kind,
-          fragmentId: change.fragmentId,
-          status: 'skipped',
-          message: 'Fragment already matches its pre-proposal values.',
-        })
-        continue
-      }
-      if (!currentHashMatches(current, change.afterHash)) {
-        conflict(`Cannot revert fragment change proposal: updated fragment ${change.fragmentId} changed since this proposal was applied.`)
-      }
-
-      const updates: Partial<Pick<Fragment, EditableField>> = {}
-      for (const field of EDITABLE_FIELDS) {
-        const fieldChange = change.fields[field]
-        if (fieldChange) updates[field] = fieldChange.before
-      }
-      const updated = await updateFragmentVersioned(dataDir, storyId, change.fragmentId, updates, {
-        reason: 'librarian-revert-proposal',
-      })
-      if (!updated) {
-        conflict(`Cannot revert fragment change proposal: updated fragment ${change.fragmentId} disappeared before revert.`)
-      }
+  // Shared core reverses the snapshot (archive creates, restore archives, roll
+  // updates back to `before`) with hash-guarded conflict detection. The hook
+  // undoes the analysis-specific bookkeeping the apply layered on: source refs
+  // and the proposal marker.
+  return revertAppliedChanges(dataDir, storyId, proposal.appliedChanges, {
+    reason: 'librarian-revert-proposal',
+    onFragmentReverted: async (change, updated) => {
       const nextRefs = change.addedRefs?.length
         ? updated.refs.filter((ref) => !change.addedRefs?.includes(ref))
         : updated.refs
@@ -588,23 +337,8 @@ export async function revertFragmentChangeProposal(args: {
           meta: nextMeta,
         })
       }
-      updatedFragmentIds.push(change.fragmentId)
-      revertResults.push({
-        kind: change.kind,
-        fragmentId: change.fragmentId,
-        status: 'reverted',
-      })
-    }
-  } catch (error) {
-    // A conflict aborts the remaining reverts, but earlier ones already wrote to
-    // disk. Attach what was reverted so the caller can surface and record it.
-    if (error instanceof ProposalRevertConflictError) {
-      error.partial = buildResult()
-    }
-    throw error
-  }
-
-  return buildResult()
+    },
+  })
 }
 
 export async function markFragmentChangeProposalReverted(args: {
