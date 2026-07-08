@@ -2,35 +2,20 @@ import { mkdtemp, rm, writeFile, mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach } from 'vitest'
-import type { StoryMeta } from '../src/server/fragments/schema'
+import { z } from 'zod'
+import { StoryMetaSchema, type StoryMeta } from '../src/server/fragments/schema'
+import { GlobalConfigSchema, type GlobalConfig } from '../src/server/config/schema'
 
 type StorySettings = StoryMeta['settings']
 
 /**
  * Creates a default test story settings object.
- * Accepts optional overrides for any field.
+ * Derived from the schema's own defaults so it can never drift behind a
+ * newly added setting. Accepts optional overrides for any field.
  */
 export function makeTestSettings(overrides?: Partial<StorySettings>): StorySettings {
   return {
-    outputFormat: 'markdown',
-    enabledPlugins: [],
-    summarizationThreshold: 4,
-    maxSteps: 10,
-    modelOverrides: {},
-    generationMode: 'standard' as const,
-    clarifyBeforeGenerate: false,
-    prewriterReasoning: 'normal' as const,
-    disableLibrarianAutoAnalysis: false,
-    autoApplyLibrarianSuggestions: false,
-    disableLibrarianDirections: false,
-    disableLibrarianSuggestions: false,
-    disableThinking: false,
-    contextOrderMode: 'simple',
-    fragmentOrder: [],
-    customFragmentTypes: [],
-    contextCompact: { type: 'proseLimit', value: 10 },
-    summaryCompact: { maxCharacters: 12000, targetCharacters: 9000 },
-    enableHierarchicalSummary: false,
+    ...StoryMetaSchema.shape.settings.parse(undefined),
     ...overrides,
   }
 }
@@ -51,12 +36,23 @@ export async function createTempDir(): Promise<{
 }
 
 /**
+ * Builds a full global config from partial input, filling every field
+ * (providers/sharing/erratanet defaults) from the schema so test literals
+ * never have to enumerate config sections they don't care about.
+ */
+export function makeTestGlobalConfig(
+  overrides?: Partial<z.input<typeof GlobalConfigSchema>>,
+): GlobalConfig {
+  return GlobalConfigSchema.parse(overrides ?? {})
+}
+
+/**
  * Writes a minimal provider config to the test data directory.
  * Required because getModel() throws when no provider is configured.
  */
 export async function seedTestProvider(dataDir: string): Promise<void> {
   await mkdir(dataDir, { recursive: true })
-  const config = {
+  const config = makeTestGlobalConfig({
     providers: [{
       id: 'test-provider',
       name: 'Test',
@@ -69,7 +65,7 @@ export async function seedTestProvider(dataDir: string): Promise<void> {
       createdAt: new Date().toISOString(),
     }],
     defaultProviderId: 'test-provider',
-  }
+  })
   await writeFile(join(dataDir, 'config.json'), JSON.stringify(config))
 }
 
