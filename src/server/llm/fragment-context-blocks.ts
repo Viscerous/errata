@@ -1,3 +1,4 @@
+import { uniqueFragments } from './utils'
 import { registry } from '../fragments/registry'
 import { FRAGMENT_TYPES, type Fragment, type StoryMeta } from '../fragments/schema'
 import type { ContextBlock } from './context-builder'
@@ -73,14 +74,7 @@ export interface FragmentContextLaneSource {
   knowledgeCatalog?: Fragment[]
   characterCatalog?: Fragment[]
   customFragmentCatalogs?: Array<{ type: string; name: string; fragments: Fragment[] }>
-  /** @deprecated Use guidelineCatalog. */
-  guidelineShortlist?: Fragment[]
-  /** @deprecated Use knowledgeCatalog. */
-  knowledgeShortlist?: Fragment[]
-  /** @deprecated Use characterCatalog. */
-  characterShortlist?: Fragment[]
-  /** @deprecated Use customFragmentCatalogs. */
-  customFragmentShortlists?: Array<{ type: string; name: string; fragments: Fragment[] }>
+
   allKnowledge?: Fragment[]
   allCharacters?: Fragment[]
   allCustomFragments?: Array<{ type: string; name: string; fragments: Fragment[] }>
@@ -166,19 +160,6 @@ export function groupFragmentsByType(story: StoryMeta, fragments: Fragment[]): A
   }))
 }
 
-function uniqueFragments(groups: Fragment[][]): Fragment[] {
-  const seen = new Set<string>()
-  const fragments: Fragment[] = []
-  for (const group of groups) {
-    for (const fragment of group) {
-      if (seen.has(fragment.id)) continue
-      seen.add(fragment.id)
-      fragments.push(fragment)
-    }
-  }
-  return fragments
-}
-
 function mergeLaneFragments(existing: Fragment[], incoming: Fragment[]): Fragment[] {
   return uniqueFragments([existing, incoming])
 }
@@ -225,9 +206,9 @@ export function buildFragmentContextLanes(source: FragmentContextLaneSource): Fr
   setSticky('character', 'Characters', source.stickyCharacters)
   setRecent('knowledge', 'Knowledge', source.recentKnowledge)
   setRecent('character', 'Characters', source.recentCharacters)
-  setAvailable('guideline', 'Guidelines', source.guidelineCatalog ?? source.guidelineShortlist)
-  setAvailable('knowledge', 'Knowledge', source.knowledgeCatalog ?? source.knowledgeShortlist)
-  setAvailable('character', 'Characters', source.characterCatalog ?? source.characterShortlist)
+  setAvailable('guideline', 'Guidelines', source.guidelineCatalog)
+  setAvailable('knowledge', 'Knowledge', source.knowledgeCatalog)
+  setAvailable('character', 'Characters', source.characterCatalog)
   setAll('knowledge', 'Knowledge', source.allKnowledge)
   setAll('character', 'Characters', source.allCharacters)
 
@@ -240,7 +221,7 @@ export function buildFragmentContextLanes(source: FragmentContextLaneSource): Fr
   for (const group of source.recentCustomFragments ?? []) {
     setRecent(group.type, group.name, group.fragments)
   }
-  for (const group of source.customFragmentCatalogs ?? source.customFragmentShortlists ?? []) {
+  for (const group of source.customFragmentCatalogs ?? []) {
     setAvailable(group.type, group.name, group.fragments)
   }
   for (const group of source.allCustomFragments ?? []) {

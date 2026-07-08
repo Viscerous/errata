@@ -1,3 +1,4 @@
+import { uniqueFragments } from './utils'
 import type { Fragment } from '../fragments/schema'
 import type { FragmentContextLane } from './fragment-context-blocks'
 
@@ -98,10 +99,6 @@ export function collectRecentContextSignals(proseFragments: Fragment[]): Map<str
   return signals
 }
 
-export function recentContextSignalIds(proseFragments: Fragment[]): Set<string> {
-  return new Set(collectRecentContextSignals(proseFragments).keys())
-}
-
 function sourcesFor(
   fragment: Fragment,
   lane: FragmentContextLane,
@@ -116,19 +113,6 @@ function sourcesFor(
     sources.add('catalog')
   }
   return [...sources]
-}
-
-function uniqueFragments(groups: Fragment[][]): Fragment[] {
-  const seen = new Set<string>()
-  const out: Fragment[] = []
-  for (const group of groups) {
-    for (const fragment of group) {
-      if (seen.has(fragment.id)) continue
-      seen.add(fragment.id)
-      out.push(fragment)
-    }
-  }
-  return out
 }
 
 function sourceRank(source: ContextSelectionSource): number {

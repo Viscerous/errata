@@ -72,26 +72,30 @@ export function recentProseBlock(ctx: AgentBlockContext): ContextBlock | null {
   }
 }
 
+/** Render prose summaries with librarian-summary fallback to string. */
+export function renderProseSummariesText(proseFragments: Fragment[], header: string): string {
+  if (proseFragments.length === 0) return ''
+  const rows: string[] = []
+  for (const p of proseFragments) {
+    const summary = (p.meta._librarian as { summary?: string } | undefined)?.summary
+    if (summary) {
+      rows.push(`- ${p.id}: ${summary}`)
+    } else if (p.content.length < 600) {
+      rows.push(`- ${p.id}: \n${p.content}`)
+    } else {
+      rows.push(`- ${p.id}: ${p.content.slice(0, 500).replace(/\n/g, ' ')}... [truncated]`)
+    }
+  }
+  return joinMarkdownBlocks([header, rows.join('\n')])
+}
+
 /** Prose summaries with librarian-summary fallback (for chat-style contexts). */
 export function proseSummariesBlock(ctx: AgentBlockContext, header: string): ContextBlock | null {
   if (ctx.proseFragments.length === 0) return null
-  const parts = [header]
-  for (const p of ctx.proseFragments) {
-    if ((p.meta._librarian as { summary?: string })?.summary) {
-      parts.push(`- ${p.id}: ${(p.meta._librarian as { summary?: string }).summary ?? 'No summary available'}`)
-    } else if (p.content.length < 600) {
-      parts.push(`- ${p.id}: \n${p.content}`)
-    } else {
-      parts.push(`- ${p.id}: ${p.content.slice(0, 500).replace(/\n/g, ' ')}... [truncated]`)
-    }
-  }
   return {
     id: 'prose-summaries',
     role: 'user',
-    content: joinMarkdownBlocks([
-      parts[0],
-      parts.slice(1).join('\n'),
-    ]),
+    content: renderProseSummariesText(ctx.proseFragments, header),
     order: 200,
     source: 'builtin',
   }

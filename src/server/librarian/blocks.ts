@@ -72,7 +72,7 @@ export function buildAnalyzeSystemPrompt(opts?: {
   const actions: string[] = []
 
   actions.push(canReport
-    ? 'scan the new prose against the provided context and call **reportAnalysis** once with the prose summary, exact fragment mentions, durable-memory candidateFragmentIds, and continuity signals. Mentions must use the fragment\'s exact ID plus exact prose text: a direct name, nickname, title, role, or distinctive key term; never a bare pronoun ("I", "she", "they"). If a surface term is ambiguous, include enough surrounding words to identify the intended fragment. Set needsProposalPass when the prose changes lasting facts or introduces durable story memory.'
+    ? 'scan the new prose against the provided context and call **reportAnalysis** once with the prose summary, exact fragment mentions, durable-memory candidateFragmentIds, and continuity signals. Mentions must use the fragment\'s exact ID plus exact prose text: a direct name, nickname, title, role, or distinctive key term; never a bare pronoun ("I", "she", "they"). If a surface term is ambiguous, include enough surrounding words to identify the intended fragment.'
     : 'scan the new prose against the provided context. The reportAnalysis tool is disabled, so do not invent a replacement reporting tool.')
 
   if (canSuggest) {

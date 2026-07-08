@@ -489,7 +489,6 @@ describe('Librarian Analyze Prompt', () => {
     expect(prompt).toContain('3. Call **proposeDirections**')
     expect(prompt).toContain('4. Finally, call **finishAnalysis**')
     expect(prompt).toContain('durable-memory candidateFragmentIds')
-    expect(prompt).toContain('Set needsProposalPass')
     expect(prompt).toContain('If a surface term is ambiguous')
     expect(prompt).not.toContain('final assistant text')
     expect(prompt).not.toContain('Analysis complete')

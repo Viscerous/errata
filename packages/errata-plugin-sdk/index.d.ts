@@ -109,8 +109,6 @@ export interface FragmentTypeDefinition {
   stickyByDefault: boolean
   contextRenderer: (fragment: Fragment) => string
   catalogFields?: Array<'id' | 'name' | 'description'>
-  /** @deprecated Use catalogFields. */
-  shortlistFields?: Array<'id' | 'name' | 'description'>
   llmTools?: boolean
 }
 

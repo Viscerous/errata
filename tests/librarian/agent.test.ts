@@ -644,7 +644,6 @@ describe('librarian agent', () => {
         toolName: 'reportAnalysis',
         args: {
           candidateFragmentIds: ['ch-0001'],
-          needsProposalPass: true,
         },
       },
       {
@@ -722,7 +721,6 @@ describe('librarian agent', () => {
         args: {
           summary: 'Alice resigned.',
           candidateFragmentIds: ['ch-0001'],
-          needsProposalPass: true,
         },
       },
       {
@@ -780,7 +778,7 @@ describe('librarian agent', () => {
       return {
         fullStream: (async function* () {
           if (tools.reportAnalysis) {
-            const input = { summary: 'The guard captain resigned.', needsProposalPass: true }
+            const input = { summary: 'The guard captain resigned.' }
             yield { type: 'tool-call' as const, toolCallId: 'call-observe', toolName: 'reportAnalysis', input }
             yield { type: 'tool-result' as const, toolCallId: 'call-observe', toolName: 'reportAnalysis', output: await tools.reportAnalysis.execute(input) }
           }
@@ -852,7 +850,7 @@ describe('librarian agent', () => {
       return {
         fullStream: (async function* () {
           if (tools.reportAnalysis) {
-            const input = { summary: 'A masked figure abdicated.', needsProposalPass: true }
+            const input = { summary: 'A masked figure abdicated.' }
             yield { type: 'tool-call' as const, toolCallId: 'call-observe', toolName: 'reportAnalysis', input }
             yield { type: 'tool-result' as const, toolCallId: 'call-observe', toolName: 'reportAnalysis', output: await tools.reportAnalysis.execute(input) }
           }
@@ -989,7 +987,6 @@ describe('librarian agent', () => {
         toolName: 'reportAnalysis',
         args: {
           summary: 'An ancient city called Valdris was revealed.',
-          needsProposalPass: true,
         },
       },
       {
@@ -1037,7 +1034,6 @@ describe('librarian agent', () => {
         toolName: 'reportAnalysis',
         args: {
           summary: 'Valdris appears in old records.',
-          needsProposalPass: true,
         },
       },
       {
@@ -1068,7 +1064,6 @@ describe('librarian agent', () => {
         args: {
           summary: 'Valdris defenses were revealed.',
           candidateFragmentIds: [createdId!],
-          needsProposalPass: true,
         },
       },
       {
@@ -1128,7 +1123,6 @@ describe('librarian agent', () => {
         args: {
           summary: 'Valdris defenses were revealed.',
           candidateFragmentIds: ['kn-0001'],
-          needsProposalPass: true,
         },
       },
       {
@@ -1184,7 +1178,6 @@ describe('librarian agent', () => {
         args: {
           summary: 'Alice resigned from the guard.',
           candidateFragmentIds: ['ch-0001'],
-          needsProposalPass: true,
         },
       },
       {
@@ -1240,7 +1233,6 @@ describe('librarian agent', () => {
         args: {
           summary: 'Alice resigned.',
           candidateFragmentIds: ['ch-0001'],
-          needsProposalPass: true,
         },
       },
       {
@@ -1309,7 +1301,6 @@ describe('librarian agent', () => {
         args: {
           summary: 'Alice left the gate and took command.',
           candidateFragmentIds: ['ch-0001'],
-          needsProposalPass: true,
         },
       },
       {

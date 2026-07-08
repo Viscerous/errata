@@ -74,10 +74,6 @@ export function baseBlockContext(ctxState: ContextBuildState | null | undefined,
     knowledgeCatalog: [],
     characterCatalog: [],
     customFragmentCatalogs: [],
-    guidelineShortlist: [],
-    knowledgeShortlist: [],
-    characterShortlist: [],
-    customFragmentShortlists: [],
     recentCustomFragments: [],
   }
 }
