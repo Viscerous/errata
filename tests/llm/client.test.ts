@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { createTempDir, makeTestSettings } from '../setup'
+import { createTempDir, makeTestSettings, makeTestGlobalConfig } from '../setup'
 import { createStory } from '@/server/fragments/storage'
 import { saveGlobalConfig } from '@/server/config/storage'
 import {
@@ -52,7 +52,7 @@ describe('llm client model resolution', () => {
   })
 
   it('uses librarian-specific provider/model when configured', async () => {
-    await saveGlobalConfig(dataDir, {
+    await saveGlobalConfig(dataDir, makeTestGlobalConfig({
       defaultProviderId: 'gen',
       providers: [
         {
@@ -80,7 +80,7 @@ describe('llm client model resolution', () => {
           createdAt: new Date().toISOString(),
         },
       ],
-    })
+    }))
 
     const story = makeStory()
     story.settings.providerId = 'gen'
@@ -95,7 +95,7 @@ describe('llm client model resolution', () => {
   })
 
   it('falls back to generation provider/model when librarian settings are unset', async () => {
-    await saveGlobalConfig(dataDir, {
+    await saveGlobalConfig(dataDir, makeTestGlobalConfig({
       defaultProviderId: 'gen',
       providers: [
         {
@@ -111,7 +111,7 @@ describe('llm client model resolution', () => {
           createdAt: new Date().toISOString(),
         },
       ],
-    })
+    }))
 
     const story = makeStory()
     story.settings.providerId = 'gen'
@@ -124,7 +124,7 @@ describe('llm client model resolution', () => {
   })
 
   it('uses a model-only override with the inherited provider', async () => {
-    await saveGlobalConfig(dataDir, {
+    await saveGlobalConfig(dataDir, makeTestGlobalConfig({
       defaultProviderId: 'openrouter',
       providers: [
         {
@@ -140,7 +140,7 @@ describe('llm client model resolution', () => {
           createdAt: new Date().toISOString(),
         },
       ],
-    })
+    }))
 
     const story = makeStory()
     story.settings.modelOverrides = {

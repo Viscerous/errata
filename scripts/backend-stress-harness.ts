@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { performance } from 'node:perf_hooks'
 import { createStory, createFragment } from '../src/server/fragments/storage'
+import { StoryMetaSchema } from '../src/server/fragments/schema'
 import { addProseSection } from '../src/server/fragments/prose-chain'
 import { buildContextState } from '../src/server/llm/context-builder'
 import {
@@ -234,22 +235,8 @@ async function seedStory(dataDir: string, options: HarnessOptions): Promise<{
     createdAt: now,
     updatedAt: now,
     settings: {
-      outputFormat: 'markdown',
-      enabledPlugins: [],
-      summarizationThreshold: 4,
-      maxSteps: 10,
-      modelOverrides: {},
-      generationMode: 'standard' as const,
-      clarifyBeforeGenerate: false,
-      prewriterReasoning: 'normal' as const,
-      autoApplyLibrarianSuggestions: false,
-      disableLibrarianDirections: false,
-      disableLibrarianSuggestions: false,
-      contextOrderMode: 'simple',
-      fragmentOrder: [],
-      customFragmentTypes: [],
+      ...StoryMetaSchema.shape.settings.parse(undefined),
       contextCompact: { type: options.compactType, value: options.compactValue },
-      summaryCompact: { maxCharacters: 12000, targetCharacters: 9000 },
       enableHierarchicalSummary: true,
     },
   })

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { createTempDir, makeTestSettings } from '../setup'
+import { createTempDir, makeTestSettings, makeTestGlobalConfig } from '../setup'
 import { createStory, createFragment, getFragment } from '@/server/fragments/storage'
 import { saveGlobalConfig } from '@/server/config/storage'
 import { getModel } from '@/server/llm/client'
@@ -171,7 +171,7 @@ describe('getModel provider fallback', () => {
   })
 
   it('falls back to the global default when the story provider is disabled', async () => {
-    await saveGlobalConfig(dataDir, {
+    await saveGlobalConfig(dataDir, makeTestGlobalConfig({
       defaultProviderId: 'def',
       providers: [
         {
@@ -199,7 +199,7 @@ describe('getModel provider fallback', () => {
           createdAt: new Date().toISOString(),
         },
       ],
-    })
+    }))
 
     const story = makeStory()
     story.settings.providerId = 'old'
@@ -214,7 +214,7 @@ describe('getModel provider fallback', () => {
   })
 
   it('still throws when no provider is usable', async () => {
-    await saveGlobalConfig(dataDir, {
+    await saveGlobalConfig(dataDir, makeTestGlobalConfig({
       defaultProviderId: null,
       providers: [
         {
@@ -230,7 +230,7 @@ describe('getModel provider fallback', () => {
           createdAt: new Date().toISOString(),
         },
       ],
-    })
+    }))
 
     const story = makeStory()
     story.settings.providerId = 'old'

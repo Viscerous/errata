@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdir, writeFile, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { existsSync } from 'node:fs'
-import { createTempDir } from '../setup'
+import { createTempDir, makeTestSettings } from '../setup'
 import {
   getBranchesIndex,
   getContentRoot,
@@ -36,25 +36,7 @@ function makeStory(id: string = TEST_STORY_ID): StoryMeta {
     summary: '',
     createdAt: now,
     updatedAt: now,
-    settings: {
-      outputFormat: 'markdown',
-      enabledPlugins: [],
-      summarizationThreshold: 4,
-      maxSteps: 10,
-      modelOverrides: {},
-      generationMode: 'standard' as const,
-      clarifyBeforeGenerate: false,
-      prewriterReasoning: 'normal' as const,
-      autoApplyLibrarianSuggestions: false,
-      disableLibrarianDirections: false,
-      disableLibrarianSuggestions: false,
-      contextOrderMode: 'simple',
-      fragmentOrder: [],
-      customFragmentTypes: [],
-      contextCompact: { type: 'proseLimit', value: 10 },
-      summaryCompact: { maxCharacters: 12000, targetCharacters: 9000 },
-      enableHierarchicalSummary: false,
-    },
+    settings: makeTestSettings(),
   }
 }
 

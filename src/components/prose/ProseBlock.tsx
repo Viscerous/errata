@@ -428,7 +428,7 @@ export const ProseBlock = memo(function ProseBlock({
 
   const textTransformKey = useMemo(() => {
     const types = enabledMentionTypes ? Array.from(enabledMentionTypes).sort().join(',') : ''
-    const anns = annotations ? annotations.map(a => `${a.id}-${a.type}`).join(',') : ''
+    const anns = annotations ? annotations.map(a => `${a.fragmentId}:${a.type}:${a.text}`).join(',') : ''
     return `${types}::${anns}`
   }, [enabledMentionTypes, annotations])
 
