@@ -1,6 +1,7 @@
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useMemo, useState, useRef, useCallback } from 'react'
+import { useMemo, useState, useRef, useCallback, useEffect } from 'react'
+import { useWindowFileDrop } from '@/hooks/use-window-file-drop'
 import { useNavigate } from '@tanstack/react-router'
 import { api, type StoryMeta } from '@/lib/api'
 import {
@@ -60,8 +61,6 @@ function StoryListPage() {
   const [showImportDialog, setShowImportDialog] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   const [showProviders, setShowProviders] = useState(false)
-  const [fileDragOver, setFileDragOver] = useState(false)
-  const dragCounter = useRef(0)
 
   // Options section state
   const [showOptions, setShowOptions] = useState(false)
@@ -234,43 +233,14 @@ function StoryListPage() {
   const [manualWizard, setManualWizard] = useState(false)
   const showOnboarding = manualWizard || (!configLoading && globalConfig && globalConfig.providers.length === 0)
 
+  // Surfaces a failed drag-and-drop import (e.g. a corrupt .zip). Cleared on the
+  // next drop and auto-dismissed after a few seconds.
+  const [dropError, setDropError] = useState<string | null>(null)
+
   // Global drag-and-drop for story archives (ZIP) and character card files (JSON + PNG)
-  useEffect(() => {
-    const hasFiles = (e: DragEvent) => {
-      if (!e.dataTransfer) return false
-      for (let i = 0; i < e.dataTransfer.types.length; i++) {
-        if (e.dataTransfer.types[i] === 'Files') return true
-      }
-      return false
-    }
-
-    const handleDragEnter = (e: DragEvent) => {
-      if (!hasFiles(e)) return
-      e.preventDefault()
-      dragCounter.current++
-      if (dragCounter.current === 1) setFileDragOver(true)
-    }
-
-    const handleDragLeave = (e: DragEvent) => {
-      if (!hasFiles(e)) return
-      e.preventDefault()
-      dragCounter.current--
-      if (dragCounter.current === 0) setFileDragOver(false)
-    }
-
-    const handleDragOver = (e: DragEvent) => {
-      if (!hasFiles(e)) return
-      e.preventDefault()
-    }
-
-    const handleDrop = async (e: DragEvent) => {
-      e.preventDefault()
-      dragCounter.current = 0
-      setFileDragOver(false)
-
-      const files = e.dataTransfer?.files
-      if (!files || files.length === 0) return
-
+  const handleFileDrop = useCallback(
+    async (files: File[]) => {
+      setDropError(null)
       // Try PNG character cards first
       for (let i = 0; i < files.length; i++) {
         const file = files[i]
@@ -368,24 +338,26 @@ function StoryListPage() {
             await queryClient.invalidateQueries({ queryKey: ['stories'] })
             navigate({ to: '/story/$storyId', params: { storyId: newStory.id } })
             return
-          } catch {
-            // Not a valid story archive
+          } catch (err) {
+            // A file that is clearly a .zip but fails to import is a real error,
+            // not a format mismatch — surface it rather than silently doing nothing.
+            setDropError(
+              `Couldn't import "${file.name}": ${err instanceof Error ? err.message : 'invalid story archive'}`,
+            )
+            return
           }
         }
       }
-    }
+    },
+    [navigate, queryClient],
+  )
+  const isFileDragging = useWindowFileDrop(handleFileDrop)
 
-    document.addEventListener('dragenter', handleDragEnter)
-    document.addEventListener('dragleave', handleDragLeave)
-    document.addEventListener('dragover', handleDragOver)
-    document.addEventListener('drop', handleDrop)
-    return () => {
-      document.removeEventListener('dragenter', handleDragEnter)
-      document.removeEventListener('dragleave', handleDragLeave)
-      document.removeEventListener('dragover', handleDragOver)
-      document.removeEventListener('drop', handleDrop)
-    }
-  }, [navigate, queryClient])
+  useEffect(() => {
+    if (!dropError) return
+    const timer = setTimeout(() => setDropError(null), 6000)
+    return () => clearTimeout(timer)
+  }, [dropError])
 
   if (showOnboarding) {
     return (
@@ -674,13 +646,27 @@ function StoryListPage() {
       </main>
 
       {/* Global file drag-drop overlay */}
-      {fileDragOver && (
+      {isFileDragging && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm pointer-events-none">
           <div className="flex flex-col items-center gap-3 rounded-2xl border-2 border-dashed border-primary/40 bg-primary/5 px-16 py-12">
             <Upload className="size-8 text-primary/50" />
             <p className="text-sm font-medium text-primary/70">Drop to import</p>
             <p className="text-xs text-muted-foreground">Story archive (.zip), character card (.json / .png)</p>
           </div>
+        </div>
+      )}
+
+      {dropError && (
+        <div className="fixed bottom-6 left-1/2 z-50 flex max-w-md -translate-x-1/2 items-start gap-2 rounded-lg border border-destructive/30 bg-background px-4 py-3 shadow-lg" role="alert">
+          <AlertCircle className="size-4 mt-0.5 shrink-0 text-destructive" />
+          <span className="text-sm text-foreground">{dropError}</span>
+          <button
+            onClick={() => setDropError(null)}
+            className="ml-1 shrink-0 text-muted-foreground hover:text-foreground"
+            aria-label="Dismiss"
+          >
+            <X className="size-4" />
+          </button>
         </div>
       )}
 

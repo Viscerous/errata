@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useMemo, useState, useCallback, useRef } from 'react'
+import { useEffect, useMemo, useState, useCallback } from 'react'
 import { api, type Fragment } from '@/lib/api'
 import type { FragmentPrefill } from '@/components/fragments/FragmentEditor'
 import { Button } from '@/components/ui/button'
@@ -46,6 +46,7 @@ import {
 } from '@/components/ui/dialog'
 import { Upload, BookOpen, MessageSquare, List } from 'lucide-react'
 import { useIsMobile } from '@/hooks/use-mobile'
+import { useWindowFileDrop } from '@/hooks/use-window-file-drop'
 import { TimelineTabs } from '@/components/prose/TimelineTabs'
 import { CharacterChatView } from '@/components/character-chat/CharacterChatView'
 import { AgentActivityIndicator } from '@/components/AgentActivityIndicator'
@@ -83,7 +84,6 @@ function StoryEditorPage() {
   const [editSelectionText, setEditSelectionText] = useState<string | null>(null)
   const [askLibrarianFragmentId, setAskLibrarianFragmentId] = useState<string | null>(null)
   const [askLibrarianPrefill, setAskLibrarianPrefill] = useState<string | null>(null)
-  const [fileDragOver, setFileDragOver] = useState(false)
   const [pendingAgentConfigImport, setPendingAgentConfigImport] = useState<{ agentName: string; displayName?: string; config: unknown } | null>(null)
   const [timelineBarVisible, setTimelineBarVisible] = useTimelineBar()
   const OUTLINE_OPEN_KEY = 'errata:passages-panel-open'
@@ -107,8 +107,6 @@ function StoryEditorPage() {
       notifyPluginPanelOpen({ panel: 'providers' }, { storyId })
     }
   }, [storyId])
-
-  const dragCounter = useRef(0)
 
   const { data: story, isLoading } = useQuery({
     queryKey: ['story', storyId],
@@ -379,38 +377,7 @@ function StoryEditorPage() {
   }, [])
 
   // Global drag-and-drop for .json file import and PNG character card import
-  useEffect(() => {
-    const hasFiles = (e: DragEvent) => {
-      if (!e.dataTransfer) return false
-      for (let i = 0; i < e.dataTransfer.types.length; i++) {
-        if (e.dataTransfer.types[i] === 'Files') return true
-      }
-      return false
-    }
-
-    const handleDragEnter = (e: DragEvent) => {
-      if (!hasFiles(e)) return
-      e.preventDefault()
-      dragCounter.current++
-      if (dragCounter.current === 1) {
-        setFileDragOver(true)
-      }
-    }
-
-    const handleDragLeave = (e: DragEvent) => {
-      if (!hasFiles(e)) return
-      e.preventDefault()
-      dragCounter.current--
-      if (dragCounter.current === 0) {
-        setFileDragOver(false)
-      }
-    }
-
-    const handleDragOver = (e: DragEvent) => {
-      if (!hasFiles(e)) return
-      e.preventDefault()
-    }
-
+  const handleFileDrop = useCallback(async (files: File[]) => {
     // Parse JSON text once and route to the right importer based on shape
     const routeJsonImport = async (text: string) => {
       // Try tavern card JSON
@@ -441,77 +408,58 @@ function StoryEditorPage() {
       }
     }
 
-    const handleDrop = async (e: DragEvent) => {
-      e.preventDefault()
-      dragCounter.current = 0
-      setFileDragOver(false)
+    // Collect all PNG tavern card buffers from the drop
+    const cardBuffers: ArrayBuffer[] = []
+    let nonCardFile: File | null = null
 
-      const files = e.dataTransfer?.files
-      if (!files || files.length === 0) return
-
-      // Collect all PNG tavern card buffers from the drop
-      const cardBuffers: ArrayBuffer[] = []
-      let nonCardFile: File | null = null
-
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i]
-        if (file.type === 'image/png' || file.name.toLowerCase().endsWith('.png')) {
-          try {
-            const buffer = await file.arrayBuffer()
-            if (isTavernCardPng(buffer)) {
-              cardBuffers.push(buffer)
-              continue
-            }
-          } catch {
-            // Not a valid tavern card PNG
-          }
-        }
-        if (!nonCardFile) nonCardFile = file
-      }
-
-      if (cardBuffers.length > 0) {
-        // Check if the first card has a character_book — route to full import dialog
-        const parsed = extractParsedCard(cardBuffers[0])
-        if (parsed && parsed.book && parsed.book.entries.length > 0) {
-          // PNG with lorebook → CharacterCardImportDialog
-          const bytes = new Uint8Array(cardBuffers[0])
-          let binary = ''
-          for (let i = 0; i < bytes.length; i++) {
-            binary += String.fromCharCode(bytes[i])
-          }
-          setCardImportImageUrl(`data:image/png;base64,${btoa(binary)}`)
-          setCardImportData(parsed)
-          setShowCardImport(true)
-        } else {
-          // PNG without lorebook → existing TavernCardImportDialog
-          setTavernImportBuffers(cardBuffers)
-          setShowTavernImport(true)
-        }
-        return
-      }
-
-      // Fall through to JSON/text file import
-      if (nonCardFile) {
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i]
+      if (file.type === 'image/png' || file.name.toLowerCase().endsWith('.png')) {
         try {
-          const text = await readFileAsText(nonCardFile)
-          await routeJsonImport(text)
+          const buffer = await file.arrayBuffer()
+          if (isTavernCardPng(buffer)) {
+            cardBuffers.push(buffer)
+            continue
+          }
         } catch {
-          // Not a valid file, ignore
+          // Not a valid tavern card PNG
         }
       }
+      if (!nonCardFile) nonCardFile = file
     }
 
-    document.addEventListener('dragenter', handleDragEnter)
-    document.addEventListener('dragleave', handleDragLeave)
-    document.addEventListener('dragover', handleDragOver)
-    document.addEventListener('drop', handleDrop)
-    return () => {
-      document.removeEventListener('dragenter', handleDragEnter)
-      document.removeEventListener('dragleave', handleDragLeave)
-      document.removeEventListener('dragover', handleDragOver)
-      document.removeEventListener('drop', handleDrop)
+    if (cardBuffers.length > 0) {
+      // Check if the first card has a character_book — route to full import dialog
+      const parsed = extractParsedCard(cardBuffers[0])
+      if (parsed && parsed.book && parsed.book.entries.length > 0) {
+        // PNG with lorebook → CharacterCardImportDialog
+        const bytes = new Uint8Array(cardBuffers[0])
+        let binary = ''
+        for (let i = 0; i < bytes.length; i++) {
+          binary += String.fromCharCode(bytes[i])
+        }
+        setCardImportImageUrl(`data:image/png;base64,${btoa(binary)}`)
+        setCardImportData(parsed)
+        setShowCardImport(true)
+      } else {
+        // PNG without lorebook → existing TavernCardImportDialog
+        setTavernImportBuffers(cardBuffers)
+        setShowTavernImport(true)
+      }
+      return
     }
-  }, [storyId, queryClient])
+
+    // Fall through to JSON/text file import
+    if (nonCardFile) {
+      try {
+        const text = await readFileAsText(nonCardFile)
+        await routeJsonImport(text)
+      } catch {
+        // Not a valid file, ignore
+      }
+    }
+  }, [])
+  const isFileDragging = useWindowFileDrop(handleFileDrop)
 
   if (isLoading) {
     return (
@@ -799,7 +747,7 @@ function StoryEditorPage() {
       </SidebarInset>
 
       {/* Global file drag-drop overlay */}
-      {fileDragOver && (
+      {isFileDragging && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm pointer-events-none">
           <div className="flex flex-col items-center gap-3 rounded-2xl border-2 border-dashed border-primary/40 bg-primary/5 px-16 py-12">
             <Upload className="size-8 text-primary/50" />
