@@ -3,7 +3,7 @@ import { join, dirname } from 'node:path'
 import { existsSync } from 'node:fs'
 import { zipSync, unzipSync } from 'fflate'
 import { generateFragmentId } from '@/lib/fragment-ids'
-import { createStory } from './fragments/storage'
+import { createStory, deleteStory } from './fragments/storage'
 import { saveProseChain } from './fragments/prose-chain'
 import { saveAssociations } from './fragments/associations'
 import { getBranchesIndex, getContentRoot } from './fragments/branches'
@@ -84,7 +84,13 @@ export async function importStoryFromZip(
   dataDir: string,
   zipBuffer: Uint8Array,
 ): Promise<StoryMeta> {
-  const extracted = unzipSync(zipBuffer)
+  // fflate surfaces zip directory entries as keys ending in '/'. They carry no
+  // content and must never be written as files — writing one raises EISDIR when
+  // the path is an existing directory (e.g. an archive that bundles `branches/main/`).
+  // Drop them up front so every downstream copy loop only ever sees real files.
+  const extracted = Object.fromEntries(
+    Object.entries(unzipSync(zipBuffer)).filter(([path]) => !path.endsWith('/')),
+  )
 
   const paths = Object.keys(extracted)
   const decoder = new TextDecoder()
@@ -122,10 +128,18 @@ export async function importStoryFromZip(
   // Create story (sets up branches/main/ + branches.json)
   await createStory(dataDir, newMeta)
 
-  if (branchesKey) {
-    await importNewFormat(dataDir, newStoryId, extracted, decoder, branchesKey)
-  } else {
-    await importLegacyFormat(dataDir, newStoryId, extracted, paths, decoder)
+  // Roll the story back if content import fails, so a botched archive can't leave
+  // a half-written story on disk — which otherwise surfaces as a ghost entry the
+  // next time the story list refetches.
+  try {
+    if (branchesKey) {
+      await importNewFormat(dataDir, newStoryId, extracted, decoder, branchesKey)
+    } else {
+      await importLegacyFormat(dataDir, newStoryId, extracted, paths, decoder)
+    }
+  } catch (err) {
+    await deleteStory(dataDir, newStoryId).catch(() => {})
+    throw err
   }
 
   return newMeta
