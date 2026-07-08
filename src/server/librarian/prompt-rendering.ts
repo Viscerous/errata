@@ -5,7 +5,6 @@ export interface LibrarianObservationPrompt {
   openThreads?: string[]
   mentionedFragmentIds?: string[]
   candidateFragmentIds?: string[]
-  needsProposalPass?: boolean
 }
 
 export function renderLibrarianObservation(
@@ -13,7 +12,6 @@ export function renderLibrarianObservation(
   options: {
     emptyText?: string
     candidateLabel?: string
-    includeProposalReviewFlag?: boolean
   } = {},
 ): string {
   const emptyText = options.emptyText ?? '(none)'
@@ -28,7 +26,6 @@ export function renderLibrarianObservation(
     observation.candidateFragmentIds?.length
       ? `${options.candidateLabel ?? 'Candidate fragments'}: ${observation.candidateFragmentIds.join(', ')}`
       : undefined,
-    options.includeProposalReviewFlag && observation.needsProposalPass ? 'Observation requested proposal review.' : undefined,
   ].filter((part): part is string => Boolean(part))
 
   return parts.join('\n\n') || emptyText

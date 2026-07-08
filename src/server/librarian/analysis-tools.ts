@@ -77,7 +77,6 @@ export interface AnalysisCollector {
   }
   mentions: LibrarianMention[]
   candidateFragmentIds: string[]
-  needsProposalPass: boolean
   contradictions: Array<{ description: string; fragmentIds: string[] }>
   fragmentChangeProposals: LibrarianFragmentChangeProposal[]
   timelineEvents: Array<{ event: string; position: 'before' | 'during' | 'after' }>
@@ -94,7 +93,6 @@ export function createEmptyCollector(): AnalysisCollector {
     },
     mentions: [],
     candidateFragmentIds: [],
-    needsProposalPass: false,
     contradictions: [],
     fragmentChangeProposals: [],
     timelineEvents: [],
@@ -173,8 +171,6 @@ export const reportAnalysisInputSchema = z.object({
     .describe('Distinct mentions of listed fragments in the new prose — at most one entry per fragment/text pair; a single mention highlights every occurrence of that text. Use exact prose text; never a bare pronoun.'),
   candidateFragmentIds: z.array(FragmentIdSchema).max(120).default([])
     .describe('Existing fragment IDs that may need full context for memory proposals or continuity audit even if they were not exactly mentioned. Use this only for durable-memory candidates.'),
-  needsProposalPass: z.boolean().default(false)
-    .describe('Set true when the prose changes lasting facts or introduces durable story memory that may need fragment proposals.'),
   contradictions: z.array(z.object({
     description: z.string().describe('What the contradiction is'),
     fragmentIds: z.array(z.string()).describe('IDs of the fragments involved'),
@@ -303,7 +299,6 @@ export function createAnalysisTools(
         openThreads = [],
         mentions = [],
         candidateFragmentIds = [],
-        needsProposalPass = false,
         contradictions = [],
         timelineEvents = [],
       }) => {
@@ -316,7 +311,6 @@ export function createAnalysisTools(
           openThreads.length +
           mentions.length +
           candidateFragmentIds.length +
-          Number(needsProposalPass) +
           contradictions.length +
           timelineEvents.length
         if (signalCount === 0) {
@@ -403,7 +397,7 @@ export function createAnalysisTools(
           existingCandidates.add(fragmentId)
           collector.candidateFragmentIds.push(fragmentId)
         }
-        collector.needsProposalPass ||= needsProposalPass
+
         // Persist annotations now so the prose highlights appear as soon as
         // mentions resolve, not at the end of the run.
         if (opts?.proseFragmentId && collector.mentions.length > 0) {
@@ -415,7 +409,6 @@ export function createAnalysisTools(
           ok: true,
           mentionCount: collector.mentions.length,
           candidateFragmentCount: collector.candidateFragmentIds.length,
-          needsProposalPass: collector.needsProposalPass,
           contradictionCount: collector.contradictions.length,
           timelineEventCount: collector.timelineEvents.length,
           ...(skippedMentions.length > 0 ? {

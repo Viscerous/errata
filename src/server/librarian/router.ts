@@ -8,8 +8,7 @@ import { FragmentIdSchema } from '../fragments/schema'
 import { runToolLoopPass } from './tool-runner'
 import type { FragmentCandidate, MergedFragmentCandidate } from './candidates'
 import { mergeFragmentCandidates } from './candidates'
-import type { LibrarianPassRecord } from './storage'
-import { passRecord } from './pass-records'
+import { passRecord, type LibrarianPassRecord } from './storage'
 import { renderLibrarianObservation, type LibrarianObservationPrompt } from './prompt-rendering'
 
 export interface FragmentRouterInput {
@@ -63,7 +62,6 @@ function buildRouterPrompt(input: FragmentRouterInput): string {
     markdownSection(2, 'Observation', renderLibrarianObservation(input.observation, {
       emptyText: '(no structured observation)',
       candidateLabel: 'Observation candidates',
-      includeProposalReviewFlag: true,
     })),
     markdownSection(2, 'Existing Candidate Seeds', seedRows(input.seedCandidates)),
     markdownSection(2, 'Mutable Fragment Catalog', catalogRows(input.catalog)),

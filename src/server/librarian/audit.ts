@@ -7,8 +7,7 @@ import { FragmentIdSchema } from '../fragments/schema'
 import { resolveAndReportUsage } from '../llm/usage-normalizer'
 import { joinMarkdownBlocks, markdownSection } from '../llm/fragment-context-blocks'
 import { runToolLoopPass } from './tool-runner'
-import type { LibrarianPassRecord } from './storage'
-import { passRecord } from './pass-records'
+import { passRecord, type LibrarianPassRecord } from './storage'
 import { renderLibrarianObservation, type LibrarianObservationPrompt } from './prompt-rendering'
 
 export interface ContinuityAuditFinding {

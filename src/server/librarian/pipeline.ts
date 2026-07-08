@@ -22,8 +22,7 @@ import {
   writerProvenanceFragmentCandidates,
   type MergedFragmentCandidate,
 } from './candidates'
-import { passRecord } from './pass-records'
-import type { LibrarianPassRecord } from './storage'
+import { passRecord, type LibrarianPassRecord } from './storage'
 import { runToolLoopPass, type ToolLoopPassArgs } from './tool-runner'
 
 type LibrarianRuntime = Awaited<ReturnType<typeof resolveAgentRuntime>>
@@ -320,7 +319,6 @@ export async function runLibrarianPipeline(input: LibrarianPipelineInput): Promi
     mentionedFragments: mentionedFragmentIds.length,
     candidateFragments: currentCandidateState.candidateFragmentIds.length,
     observedFragments: currentCandidateState.observedFragmentIds.length,
-    needsProposalPass: collector.needsProposalPass,
     contradictions: collector.contradictions.length,
     fragmentChangeProposals: collector.fragmentChangeProposals.length,
     directions: collector.directions.length,

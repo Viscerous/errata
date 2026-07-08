@@ -53,7 +53,6 @@ describe('analysis-tools', () => {
     expect(collector.structuredSummary).toEqual({ events: [], stateChanges: [], openThreads: [] })
     expect(collector.mentions).toEqual([])
     expect(collector.candidateFragmentIds).toEqual([])
-    expect(collector.needsProposalPass).toBe(false)
     expect(collector.contradictions).toEqual([])
     expect(collector.fragmentChangeProposals).toEqual([])
     expect(collector.timelineEvents).toEqual([])
@@ -153,12 +152,10 @@ describe('analysis-tools', () => {
 
     const result = await tools.reportAnalysis.execute!({
       candidateFragmentIds: ['ch-0001', 'ch-0001'],
-      needsProposalPass: true,
     }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
 
-    expect(result).toMatchObject({ ok: true, candidateFragmentCount: 1, needsProposalPass: true })
+    expect(result).toMatchObject({ ok: true, candidateFragmentCount: 1 })
     expect(collector.candidateFragmentIds).toEqual(['ch-0001'])
-    expect(collector.needsProposalPass).toBe(true)
     expect(collector.mentions).toEqual([])
   })
 

@@ -409,9 +409,7 @@ buildContextState() → beforeContext hooks → createDefaultBlocks() → applyB
 | `story-info` | user | 100 | Story name + description |
 | `summary` | user | 200 | Rolling story summary |
 | `user-fragments` | user | 300 | User-placed sticky fragments |
-| `shortlist-guidelines` | user | 400 | Non-sticky guideline shortlist |
-| `shortlist-knowledge` | user | 410 | Non-sticky knowledge shortlist |
-| `shortlist-characters` | user | 420 | Non-sticky character shortlist |
+| `fragment-catalog` | user | 330 | Aggregate catalog of non-sticky, non-recent guidelines/knowledge/characters (one row per fragment) |
 | `prose` | user | 500 | Recent prose chain |
 | `author-input` | user | 600 | Author's direction |
 

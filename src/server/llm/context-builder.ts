@@ -72,14 +72,6 @@ export interface ContextBuildState {
   characterCatalog: Fragment[]
   // Catalog candidates for broad-context agents, mirroring knowledge/character catalog rows.
   customFragmentCatalogs?: CustomFragmentGroup[]
-  /** @deprecated Use guidelineCatalog. Kept for existing custom block scripts. */
-  guidelineShortlist?: Fragment[]
-  /** @deprecated Use knowledgeCatalog. Kept for existing custom block scripts. */
-  knowledgeShortlist?: Fragment[]
-  /** @deprecated Use characterCatalog. Kept for existing custom block scripts. */
-  characterShortlist?: Fragment[]
-  /** @deprecated Use customFragmentCatalogs. Kept for existing custom block scripts. */
-  customFragmentShortlists?: CustomFragmentGroup[]
   // Writer-specific; other agents (which extend this via AgentBlockContext) omit them.
   chapterSummaries?: Array<{
     markerId: string
@@ -490,10 +482,6 @@ export async function buildContextState(
     knowledgeCatalog,
     characterCatalog,
     customFragmentCatalogs,
-    guidelineShortlist: nonStickyGuidelines,
-    knowledgeShortlist: knowledgeCatalog,
-    characterShortlist: characterCatalog,
-    customFragmentShortlists: customFragmentCatalogs,
     authorInput,
   }
 

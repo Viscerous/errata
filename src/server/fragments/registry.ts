@@ -6,8 +6,6 @@ export interface FragmentTypeDefinition {
   stickyByDefault: boolean
   contextRenderer: (fragment: Fragment) => string
   catalogFields?: (keyof Fragment)[]
-  /** @deprecated Use catalogFields. */
-  shortlistFields?: (keyof Fragment)[]
   /** Whether to generate type-specific LLM tools (get/list) for this type. Defaults to true. */
   llmTools?: boolean
   /**

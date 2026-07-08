@@ -8,7 +8,7 @@ import {
 } from '../llm/fragment-context-blocks'
 import type { AgentBlockContext } from '../agents/agent-block-context'
 import { instructionRegistry } from '../instructions'
-import { buildBasePreviewContext } from '../agents/block-helpers'
+import { buildBasePreviewContext, renderProseSummariesText } from '../agents/block-helpers'
 import { pinnedFragmentCatalogBlocks } from '../agents/fragment-summary-blocks'
 
 export function createCharacterChatBlocks(ctx: AgentBlockContext): ContextBlock[] {
@@ -68,17 +68,8 @@ export function createCharacterChatBlocks(ctx: AgentBlockContext): ContextBlock[
   }
 
   if (ctx.proseFragments.length > 0) {
-    const eventRows: string[] = ['Use readFragments or readProseChain to inspect full prose.']
-    for (const p of ctx.proseFragments) {
-      if ((p.meta._librarian as { summary?: string })?.summary) {
-        eventRows.push(`- ${p.id}: ${(p.meta._librarian as { summary?: string }).summary}`)
-      } else if (p.content.length < 600) {
-        eventRows.push(`- ${p.id}: \n${p.content}`)
-      } else {
-        eventRows.push(`- ${p.id}: ${p.content.slice(0, 500).replace(/\n/g, ' ')}... [truncated]`)
-      }
-    }
-    storyContextParts.push(markdownSection(3, 'Story Events', eventRows.join('\n')))
+    const content = renderProseSummariesText(ctx.proseFragments, 'Use readFragments or readProseChain to inspect full prose.')
+    storyContextParts.push(markdownSection(3, 'Story Events', content))
   }
 
   blocks.push({
