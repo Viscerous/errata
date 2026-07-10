@@ -1195,7 +1195,7 @@ export function ProseChainView({
           </MentionProvider>
         </ScrollArea>
 
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 px-3 pb-2 sm:px-6">
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 px-3 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:px-6">
           <div
             ref={composerOverlayRef}
             className="pointer-events-auto mx-auto w-full"
