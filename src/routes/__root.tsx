@@ -93,7 +93,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
         <script dangerouslySetInnerHTML={{ __html: fontScript }} />
         <script dangerouslySetInnerHTML={{ __html: fontLoaderScript }} />
       </head>
-      <body className="min-h-screen bg-background text-foreground antialiased">
+      <body className="min-h-dvh bg-background text-foreground antialiased">
         {children}
         <Scripts />
       </body>
