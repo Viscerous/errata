@@ -78,7 +78,7 @@ export async function renameFragmentIdAcrossStory(
       if (mapped.meta?.annotations && Array.isArray(mapped.meta.annotations)) {
         let annModified = false
         const newAnns = mapped.meta.annotations.map(ann => {
-          if (typeof ann === 'object' && ann !== null && 'fragmentId' in ann && (ann as any).fragmentId === oldId) {
+          if (typeof ann === 'object' && ann !== null && 'fragmentId' in ann && (ann as Record<string, unknown>).fragmentId === oldId) {
             annModified = true
             return { ...ann, fragmentId: newId }
           }

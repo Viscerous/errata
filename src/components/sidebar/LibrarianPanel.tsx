@@ -50,6 +50,15 @@ import {
   inferFragmentTypeFromId,
   type FragmentTypeVisual,
 } from '@/components/fragments/fragment-type-icons'
+import {
+  clipDiffText,
+  mentionLinkCount,
+  mentionSourceCount,
+  operationActionLabel,
+  proposalOperationDiffItems,
+  proposalOperationTarget,
+  type ProposalDiffItem,
+} from './librarian-panel-helpers'
 
 interface LibrarianPanelProps {
   storyId: string
@@ -61,104 +70,6 @@ interface LibrarianPanelProps {
 type TabValue = 'chat' | 'story' | 'summaries'
 type MentionEntry = [string, string[]]
 type MentionGroup = { type: string; visual: FragmentTypeVisual; entries: MentionEntry[] }
-type ProposalDiffItem = {
-  key: string
-  fieldLabel?: string
-  before: string
-  after: string
-}
-
-const DIFF_TEXT_LIMIT = 4000
-
-function mentionSourceCount(sourceFragmentIds: string[]): number {
-  return new Set(sourceFragmentIds).size
-}
-
-function mentionLinkCount(entries: MentionEntry[]): number {
-  return entries.reduce((sum, [, sourceFragmentIds]) => sum + mentionSourceCount(sourceFragmentIds), 0)
-}
-
-function operationActionLabel(action: string): string {
-  switch (action) {
-    case 'create_fragment':
-      return 'create'
-    case 'replace_text':
-      return 'replace'
-    case 'append_paragraph':
-      return 'append'
-    case 'set_fields':
-      return 'rewrite'
-    case 'archive_fragment':
-      return 'archive'
-    default:
-      return action
-  }
-}
-
-function clipDiffText(text: string): string {
-  if (text.length <= DIFF_TEXT_LIMIT) return text
-  return `${text.slice(0, DIFF_TEXT_LIMIT)}\n...`
-}
-
-
-
-function proposalOperationTarget(
-  operation: LibrarianAnalysis['fragmentChangeProposals'][number]['operations'][number],
-  validation: LibrarianAnalysis['fragmentChangeProposals'][number]['validation'][number] | undefined,
-  fragmentById: Map<string, Fragment>,
-): string {
-  if (operation.action === 'create_fragment') {
-    const name = operation.name
-    return typeof name === 'string' ? name : 'New fragment'
-  }
-
-  const fragmentId = typeof operation.fragmentId === 'string'
-    ? operation.fragmentId
-    : validation?.target?.fragmentId
-  if (!fragmentId) return 'Fragment'
-  return fragmentById.get(fragmentId)?.name ?? fragmentId
-}
-
-function proposalOperationDiffItems(
-  proposal: LibrarianAnalysis['fragmentChangeProposals'][number],
-): Map<number, ProposalDiffItem[]> {
-  const byOperation = new Map<number, ProposalDiffItem[]>()
-  const validations = proposal.appliedResults?.length ? proposal.appliedResults : proposal.validation
-
-  validations.forEach((validation, validationIndex) => {
-    const operation = proposal.operations.find((candidate) =>
-      candidate.operationId && candidate.operationId === validation.operationId,
-    ) ?? proposal.operations[validationIndex]
-    const operationIndex = operation
-      ? proposal.operations.indexOf(operation)
-      : validationIndex
-    const items = byOperation.get(operationIndex) ?? []
-
-    if (validation.action === 'archive_fragment' && validation.status !== 'invalid') {
-      items.push({
-        key: `${validation.operationId}-${validationIndex}-archive`,
-        fieldLabel: 'state',
-        before: 'Active fragment',
-        after: 'Archived fragment',
-      })
-      byOperation.set(operationIndex, items)
-      return
-    }
-
-    for (const [diffIndex, diff] of (validation.diffs ?? []).entries()) {
-      items.push({
-        key: `${validation.operationId}-${diff.field}-${diffIndex}`,
-        fieldLabel: diff.field,
-        before: diff.before,
-        after: diff.after,
-      })
-    }
-    if (items.length > 0) byOperation.set(operationIndex, items)
-  })
-
-  return byOperation
-}
-
 function tabStorageKey(storyId: string): string {
   return `errata.librarian.activeTab.${storyId}`
 }

@@ -1,5 +1,5 @@
 import { Elysia, t } from 'elysia'
-import { getStory, getFragment, updateFragment, updateStory } from '../fragments/storage'
+import { getStory, getFragment, mutateFragment, updateFragmentVersioned } from '../fragments/storage'
 import {
   getGenerationLog,
   listGenerationLogs,
@@ -108,15 +108,9 @@ export function librarianRoutes(dataDir: string) {
     }, { detail: { summary: 'Get an analysis by ID' } })
 
     /**
-     * @deprecated DEPRECATED (summary-fragments migration). Edits the
-     * analysis's `summaryUpdate` field (the librarian's stated intent)
-     * and performs a legacy string-replace into `story.summary`. Both
-     * the intent write and the string-replace are no longer read by
-     * downstream code — the artifact is the linked summary fragment
-     * (`analysis.summaryFragmentId`). The correct edit surface is the
-     * Summaries section in LibrarianPanel, which updates the fragment
-     * directly via PUT /fragments/:id. Kept for backward compatibility
-     * until the legacy inline edit UI is migrated or removed.
+     * Updates both the analysis intent and its canonical summary-fragment
+     * artifact. Analyses created before summary fragments existed have no
+     * linked artifact and remain editable as historical records only.
      */
     .patch('/stories/:storyId/librarian/analyses/:analysisId', async ({ params, body, set }) => {
       const analysis = await getLibrarianAnalysis(dataDir, params.storyId, params.analysisId)
@@ -133,30 +127,42 @@ export function librarianRoutes(dataDir: string) {
 
       const previousSummary = analysis.summaryUpdate
       const nextSummary = body.summaryUpdate.trim()
+
+      // With an empty previous intent there is no text to locate in the
+      // fragment, so only the analysis record is updated below.
+      if (analysis.summaryFragmentId && previousSummary && previousSummary !== nextSummary) {
+        const summaryFragment = await getFragment(dataDir, params.storyId, analysis.summaryFragmentId)
+        if (!summaryFragment) {
+          set.status = 409
+          return { error: 'Linked summary fragment not found' }
+        }
+        const occurrenceCount = summaryFragment.content.split(previousSummary).length - 1
+        if (occurrenceCount !== 1) {
+          set.status = 409
+          return { error: 'Summary fragment changed; edit it from the Summaries panel' }
+        }
+        await updateFragmentVersioned(
+          dataDir,
+          params.storyId,
+          summaryFragment.id,
+          { content: summaryFragment.content.replace(previousSummary, nextSummary) },
+          { reason: 'librarian-summary-edit' },
+        )
+      }
+
       analysis.summaryUpdate = nextSummary
       await saveLibrarianAnalysis(dataDir, params.storyId, analysis)
 
       const latestByFragment = await getLatestAnalysisIdsByFragment(dataDir, params.storyId)
       if (latestByFragment.get(analysis.fragmentId) === analysis.id) {
-        const fragment = await getFragment(dataDir, params.storyId, analysis.fragmentId)
-        if (fragment) {
+        await mutateFragment(dataDir, params.storyId, analysis.fragmentId, (fragment) => {
           const meta = { ...fragment.meta }
           const existing = (meta._librarian ?? {}) as Record<string, unknown>
           meta._librarian = { ...existing, summary: nextSummary, analysisId: analysis.id }
-          await updateFragment(dataDir, params.storyId, {
+          return {
             ...fragment,
             meta,
-          })
-        }
-      }
-
-      // Legacy no-op: story.summary is no longer read by production code.
-      // The replace runs only if story.summary still holds migration-stale content.
-      if (previousSummary !== nextSummary && previousSummary && story.summary.includes(previousSummary)) {
-        await updateStory(dataDir, {
-          ...story,
-          summary: story.summary.replace(previousSummary, nextSummary),
-          updatedAt: new Date().toISOString(),
+          }
         })
       }
 
@@ -165,7 +171,7 @@ export function librarianRoutes(dataDir: string) {
       body: t.Object({
         summaryUpdate: t.String(),
       }),
-      detail: { summary: 'Update an analysis summary (deprecated — edit the linked summary fragment instead)' },
+      detail: { summary: 'Update an analysis summary and its linked summary fragment' },
     })
 
     .post('/stories/:storyId/librarian/analyses/:analysisId/change-proposals/:index/accept', async ({ params, set }) => {

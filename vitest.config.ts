@@ -30,8 +30,10 @@ export default defineConfig({
     sequence: {
       hooks: 'stack',
     },
-    deps: {
-      inline: [/ai/, /@ai-sdk/],
+    server: {
+      deps: {
+        inline: [/ai/, /@ai-sdk/],
+      },
     },
   },
 })

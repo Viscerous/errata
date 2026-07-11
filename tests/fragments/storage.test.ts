@@ -196,6 +196,20 @@ describe('Fragment CRUD', () => {
     expect(updated!.versions![1].reason).toBe('test-refine')
   })
 
+  it('serializes concurrent versioned updates without reusing a version number', async () => {
+    const storyId = 'story-versions-race'
+    await createStory(dataDir, makeStory({ id: storyId }))
+    await createFragment(dataDir, storyId, makeFragment({ id: 'pr-race', content: 'v1' }))
+
+    await Promise.all([
+      updateFragmentVersioned(dataDir, storyId, 'pr-race', { content: 'concurrent-a' }, { reason: 'manual-update' }),
+      updateFragmentVersioned(dataDir, storyId, 'pr-race', { content: 'concurrent-b' }, { reason: 'manual-update' }),
+    ])
+
+    const versions = await listFragmentVersions(dataDir, storyId, 'pr-race')
+    expect(versions?.map((version) => version.version)).toEqual([1, 2, 3])
+  })
+
   it("folds a new fragment's opening autosaves into its created v1", async () => {
     // Mirrors the create route, which seeds v1 with reason 'created' so the opening
     // editing session stays v1 instead of jumping to v2 on the first autosave.

@@ -4,7 +4,7 @@ import { existsSync } from 'node:fs'
 import type { Fragment, FragmentVersion, StoryMeta } from './schema'
 import { getContentRoot, initBranches } from './branches'
 import { createLogger } from '../logging'
-import { writeJsonAtomic } from '../fs-utils'
+import { writeJsonAtomic, withStorageLock } from '../fs-utils'
 
 const requestLogger = createLogger('fragment-storage')
 
@@ -188,15 +188,11 @@ export async function archiveFragment(
   storyId: string,
   fragmentId: string
 ): Promise<Fragment | null> {
-  const fragment = await getFragment(dataDir, storyId, fragmentId)
-  if (!fragment) return null
-  const updated: Fragment = {
+  return mutateFragment(dataDir, storyId, fragmentId, (fragment) => ({
     ...fragment,
     archived: true,
     updatedAt: new Date().toISOString(),
-  }
-  await writeJson(await fragmentPath(dataDir, storyId, fragmentId), updated)
-  return updated
+  }))
 }
 
 export async function restoreFragment(
@@ -204,15 +200,29 @@ export async function restoreFragment(
   storyId: string,
   fragmentId: string
 ): Promise<Fragment | null> {
-  const fragment = await getFragment(dataDir, storyId, fragmentId)
-  if (!fragment) return null
-  const updated: Fragment = {
+  return mutateFragment(dataDir, storyId, fragmentId, (fragment) => ({
     ...fragment,
     archived: false,
     updatedAt: new Date().toISOString(),
-  }
-  await writeJson(await fragmentPath(dataDir, storyId, fragmentId), updated)
-  return updated
+  }))
+}
+
+/** Run a fragment read-modify-write as one path-keyed transaction. */
+export async function mutateFragment(
+  dataDir: string,
+  storyId: string,
+  fragmentId: string,
+  mutate: (fragment: Fragment) => Fragment,
+): Promise<Fragment | null> {
+  const path = await fragmentPath(dataDir, storyId, fragmentId)
+  return withStorageLock(path, async () => {
+    const existing = normalizeFragment(await readJson<Fragment>(path))
+    if (!existing) return null
+    const updated = normalizeFragment(mutate(existing))
+    if (!updated) return null
+    await writeJson(path, updated)
+    return updated
+  })
 }
 
 export async function updateFragment(
@@ -223,7 +233,7 @@ export async function updateFragment(
   const normalized = normalizeFragment(fragment)
   const path = await fragmentPath(dataDir, storyId, fragment.id)
   requestLogger.info('Updating fragment', { path })
-  await writeJson(path, normalized)
+  await withStorageLock(path, () => writeJson(path, normalized))
 }
 
 // How long an autosave stays "open" for coalescing. Consecutive autosaves within
@@ -237,6 +247,18 @@ export async function updateFragmentVersioned(
   fragmentId: string,
   updates: Partial<Pick<Fragment, 'name' | 'description' | 'content'>>,
   opts?: { reason?: string }
+): Promise<Fragment | null> {
+  const path = await fragmentPath(dataDir, storyId, fragmentId)
+  return withStorageLock(path, () => updateFragmentVersionedUnlocked(dataDir, storyId, fragmentId, path, updates, opts))
+}
+
+async function updateFragmentVersionedUnlocked(
+  dataDir: string,
+  storyId: string,
+  fragmentId: string,
+  path: string,
+  updates: Partial<Pick<Fragment, 'name' | 'description' | 'content'>>,
+  opts?: { reason?: string },
 ): Promise<Fragment | null> {
   const existing = await getFragment(dataDir, storyId, fragmentId)
   if (!existing) return null
@@ -324,7 +346,7 @@ export async function updateFragmentVersioned(
     }
   }
 
-  await updateFragment(dataDir, storyId, updated)
+  await writeJson(path, normalizeFragment(updated))
   return updated
 }
 

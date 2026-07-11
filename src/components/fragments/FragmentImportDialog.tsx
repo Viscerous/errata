@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
+import type { AgentBlockConfig, ImportConfigsPayload } from '@/contracts/block-config'
 import {
   parseErrataExport,
   readFileAsText,
@@ -219,12 +220,12 @@ export function FragmentImportDialog({
           importAgentConfigs.size > 0
 
         if (hasConfigsToImport) {
-          const payload: Record<string, unknown> = {}
+          const payload: ImportConfigsPayload = {}
           if (importBlockConfig && data.blockConfig) {
             payload.blockConfig = data.blockConfig
           }
           if (importAgentConfigs.size > 0 && data.agentBlockConfigs) {
-            const selected: Record<string, unknown> = {}
+            const selected: Record<string, AgentBlockConfig> = {}
             for (const name of importAgentConfigs) {
               if (data.agentBlockConfigs[name]) {
                 selected[name] = data.agentBlockConfigs[name]
@@ -235,7 +236,7 @@ export function FragmentImportDialog({
             }
           }
           if (Object.keys(payload).length > 0) {
-            await api.blocks.importConfigs(storyId, payload as any)
+            await api.blocks.importConfigs(storyId, payload)
           }
         }
 

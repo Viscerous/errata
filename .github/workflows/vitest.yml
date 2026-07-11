@@ -27,6 +27,15 @@ jobs:
         id: vitest
         run: bun run test -- --reporter=verbose --reporter=junit --outputFile=junit.xml --reporter=github-actions
 
+      - name: Typecheck app and desktop
+        run: bun run typecheck
+
+      - name: Check architectural boundaries
+        run: bun run lint:architecture
+
+      - name: Build production application
+        run: bunx vite build
+
       # Artifacts to be consumed by the Test Results workflow (vitest-results.yml)
 
       - name: Upload test artifacts

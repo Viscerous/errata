@@ -19,6 +19,10 @@
     "electron:release": "bun install --frozen-lockfile && bun scripts/build-electron.mjs --publish=always",
     "stress:backend": "bun install --frozen-lockfile && bun scripts/backend-stress-harness.ts",
     "docs:sync": "bun scripts/sync-docs-from-commits.ts",
+    "typecheck": "tsc --noEmit && tsc -p desktop/tsconfig.json --noEmit",
+    "lint:architecture": "bun scripts/lint-architecture.ts",
+    "check:contracts": "vitest run --config vitest.config.ts tests/contracts",
+    "check": "bun run typecheck && bun run lint:architecture && bun run test && bun run build",
     "preview": "bun install --frozen-lockfile && vite preview",
     "test": "bun install --frozen-lockfile && vitest run --config vitest.config.ts",
     "test:watch": "bun install --frozen-lockfile && vitest --config vitest.config.ts"

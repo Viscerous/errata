@@ -29,6 +29,7 @@ import {
   Download,
   Upload,
 } from 'lucide-react'
+import { AgentBlockConfigSchema, type AgentBlockConfig } from '@/contracts/block-config'
 import { BlockCreateDialog } from '@/components/blocks/BlockCreateDialog'
 import { BlockContentView } from '@/components/blocks/BlockContentView'
 import { ScriptBlockEditor, FragmentReference } from '@/components/blocks/ScriptBlockEditor'
@@ -266,7 +267,8 @@ function AgentBlockEditor({ storyId, agentName, agents, onBack }: AgentBlockEdit
   const dragItem = useRef<number | null>(null)
   const dragOverItem = useRef<number | null>(null)
   const [dragIndex, setDragIndex] = useState<number | null>(null)
-  const [pendingImportConfig, setPendingImportConfig] = useState<unknown>(null)
+  const [pendingImportConfig, setPendingImportConfig] = useState<AgentBlockConfig | null>(null)
+  const [transferError, setTransferError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const agent = agents.find(a => a.agentName === agentName)
@@ -476,6 +478,7 @@ function AgentBlockEditor({ storyId, agentName, agents, onBack }: AgentBlockEdit
   }, [mergedBlocks, configMutation])
 
   const handleExport = useCallback(async () => {
+    setTransferError(null)
     try {
       const exported = await api.agentBlocks.exportConfig(storyId, agentName)
       const blob = new Blob([JSON.stringify(exported, null, 2)], { type: 'application/json' })
@@ -485,31 +488,37 @@ function AgentBlockEditor({ storyId, agentName, agents, onBack }: AgentBlockEdit
       a.download = `${agentName}-context.json`
       a.click()
       URL.revokeObjectURL(url)
-    } catch {
-      // silently fail
+    } catch (error) {
+      setTransferError(error instanceof Error ? error.message : 'Could not export agent configuration')
     }
   }, [storyId, agentName])
 
   const importFile = useCallback(async (file: File) => {
+    setTransferError(null)
     try {
       const text = await file.text()
-      const parsed = JSON.parse(text)
-      const config = parsed.config ?? parsed
-      setPendingImportConfig(config)
-    } catch {
-      // silently fail
+      const json: unknown = JSON.parse(text)
+      const candidate = typeof json === 'object' && json !== null && 'config' in json
+        ? (json as { config: unknown }).config
+        : json
+      const parsed = AgentBlockConfigSchema.safeParse(candidate)
+      if (!parsed.success) throw new Error('This file is not a valid agent configuration')
+      setPendingImportConfig(parsed.data)
+    } catch (error) {
+      setTransferError(error instanceof Error ? error.message : 'Could not read agent configuration')
     }
   }, [])
 
   const confirmImport = useCallback(async () => {
     if (!pendingImportConfig) return
+    setTransferError(null)
     try {
-      await api.agentBlocks.importConfig(storyId, agentName, pendingImportConfig as any)
+      await api.agentBlocks.importConfig(storyId, agentName, pendingImportConfig)
       queryClient.invalidateQueries({ queryKey: ['agent-blocks', storyId, agentName] })
-    } catch {
-      // silently fail
+      setPendingImportConfig(null)
+    } catch (error) {
+      setTransferError(error instanceof Error ? error.message : 'Could not import agent configuration')
     }
-    setPendingImportConfig(null)
   }, [pendingImportConfig, storyId, agentName, queryClient])
 
   const handleImport = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -597,6 +606,12 @@ function AgentBlockEditor({ storyId, agentName, agents, onBack }: AgentBlockEdit
           </Button>
         </div>
       </div>
+
+      {transferError && (
+        <p className="px-3 py-2 border-b border-destructive/20 bg-destructive/5 text-[0.6875rem] text-destructive">
+          {transferError}
+        </p>
+      )}
 
       <ScrollArea className="flex-1 min-h-0 [&>[data-slot=scroll-area-viewport]>div]:!block">
         <div className="px-3 py-3 space-y-3">

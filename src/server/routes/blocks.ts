@@ -5,6 +5,7 @@ import { createScriptHelpers } from '../blocks/script-context'
 import { ensureCoreAgentsRegistered } from '../agents/register-core'
 import { agentBlockRegistry } from '../agents/agent-block-registry'
 import { getAgentBlockConfig, saveAgentBlockConfig, type AgentBlockConfig } from '../agents/agent-block-storage'
+import { ImportConfigsPayloadSchema } from '@/contracts/block-config'
 
 /**
  * Block-related routes that are NOT scoped to a specific agent.
@@ -85,12 +86,15 @@ export function blockRoutes(dataDir: string) {
         return { error: 'Story not found' }
       }
 
-      // Legacy payloads may carry a top-level `blockConfig`; it's silently
-      // ignored because the storage it targeted no longer exists.
-      const { agentBlockConfigs } = body as {
-        blockConfig?: unknown
-        agentBlockConfigs?: Record<string, AgentBlockConfig>
+      const parsed = ImportConfigsPayloadSchema.safeParse(body)
+      if (!parsed.success) {
+        set.status = 422
+        return { error: 'Invalid block configuration bundle', issues: parsed.error.issues }
       }
+
+      // Legacy blockConfig is accepted for archive compatibility, but there is
+      // no generation-wide destination after the per-agent migration.
+      const { agentBlockConfigs } = parsed.data
 
       if (agentBlockConfigs) {
         for (const [agentName, cfg] of Object.entries(agentBlockConfigs)) {

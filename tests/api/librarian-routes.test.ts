@@ -202,7 +202,7 @@ describe('librarian API routes', () => {
   })
 
   describe('PATCH /stories/:storyId/librarian/analyses/:analysisId', () => {
-    it('updates the saved summary and syncs latest fragment/story summary text', async () => {
+    it('updates the saved summary and its canonical summary fragment', async () => {
       await createFragment(dataDir, storyId, {
         id: 'pr-0001',
         type: 'prose',
@@ -228,12 +228,23 @@ describe('librarian API routes', () => {
         id: 'analysis-edit',
         fragmentId: 'pr-0001',
         summaryUpdate: 'Something happened.',
+        summaryFragmentId: 'sm-0001',
       }))
 
-      const story = await getStory(dataDir, storyId)
-      await updateStory(dataDir, {
-        ...story!,
-        summary: 'Earlier events. Something happened. Later events.',
+      await createFragment(dataDir, storyId, {
+        id: 'sm-0001',
+        type: 'summary',
+        name: 'Story summary',
+        description: 'Canonical memory',
+        content: 'Earlier events. Something happened. Later events.',
+        tags: [],
+        refs: [],
+        sticky: false,
+        placement: 'system',
+        createdAt: '2025-01-01T00:00:00.000Z',
+        updatedAt: '2025-01-01T00:00:00.000Z',
+        order: 0,
+        meta: {},
       })
 
       const res = await app.fetch(
@@ -260,8 +271,8 @@ describe('librarian API routes', () => {
         analysisId: 'analysis-edit',
       })
 
-      const updatedStory = await getStory(dataDir, storyId)
-      expect(updatedStory?.summary).toBe('Earlier events. Something more precise happened. Later events.')
+      const updatedSummary = await getFragment(dataDir, storyId, 'sm-0001')
+      expect(updatedSummary?.content).toBe('Earlier events. Something more precise happened. Later events.')
     })
   })
 

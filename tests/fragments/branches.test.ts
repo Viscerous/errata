@@ -230,6 +230,17 @@ describe('branches', () => {
       expect(chain!.entries).toHaveLength(1)
     })
 
+    it('serializes concurrent branch creation without losing index entries', async () => {
+      await createStory(dataDir, makeStory())
+      const [first, second] = await Promise.all([
+        createBranch(dataDir, TEST_STORY_ID, 'Concurrent A', 'main'),
+        createBranch(dataDir, TEST_STORY_ID, 'Concurrent B', 'main'),
+      ])
+      const index = await getBranchesIndex(dataDir, TEST_STORY_ID)
+      expect(index.branches.map((branch) => branch.id)).toEqual(expect.arrayContaining(['main', first.id, second.id]))
+      expect(index.branches).toHaveLength(3)
+    })
+
     it('creates a branch with prose chain truncation', async () => {
       await createStory(dataDir, makeStory())
 

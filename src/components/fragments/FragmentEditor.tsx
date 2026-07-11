@@ -29,30 +29,12 @@ import {
   compareFragmentTypeVisuals,
   getFragmentTypeVisual,
 } from '@/components/fragments/fragment-type-icons'
+import { describeVersionReason } from './fragment-version-label'
 
 export interface FragmentPrefill {
   name: string
   description: string
   content: string
-}
-
-// Human-readable label for why a version was recorded: known reasons map to friendly
-// text, anything else (e.g. an LLM rationale) shows verbatim, null when a pre-versioning
-// version has no reason. `isLatest` (the tip) shows a still-current autosave as
-// "Autosaved"; once a newer version seals over it, it reads as "Edited".
-function describeVersionReason(reason?: string, isLatest = false): string | null {
-  if (!reason) return null
-  switch (reason) {
-    case 'created': return 'Created'
-    case 'autosave': return isLatest ? 'Autosaved' : 'Edited'
-    case 'manual-update': return 'Edited'
-    case 'llm-applyProposedChanges': return 'AI edit'
-    case 'librarian-manual-accept': return 'Librarian'
-    case 'librarian-auto-apply': return 'Librarian (auto)'
-    case 'librarian-revert-proposal': return 'Librarian revert'
-  }
-  if (reason.startsWith('librarian-')) return 'Librarian'
-  return reason
 }
 
 interface FragmentEditorProps {
