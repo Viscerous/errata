@@ -3,6 +3,8 @@ import { createTempDir, makeTestSettings } from '../setup'
 import { createStory } from '@/server/fragments/storage'
 import type { StoryMeta } from '@/server/fragments/schema'
 import type { CustomBlockDefinition } from '@/server/blocks/schema'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
 import {
   getAgentBlockConfig,
   saveAgentBlockConfig,
@@ -186,5 +188,31 @@ describe('Agent Block Config Storage', () => {
     expect(analyzeConfig.disabledTools).toEqual(['reportAnalysis'])
     expect(chatConfig.overrides.instructions).toBeUndefined()
     expect(chatConfig.blockOrder).toEqual(['instructions'])
+  })
+
+  it('serializes concurrent mutations without losing blocks', async () => {
+    const block = (id: string): CustomBlockDefinition => ({
+      id,
+      name: id,
+      role: 'user',
+      order: 1,
+      enabled: true,
+      type: 'simple',
+      content: id,
+    })
+    await Promise.all([
+      addAgentCustomBlock(dataDir, STORY_ID, AGENT_NAME, block('cb-race01')),
+      addAgentCustomBlock(dataDir, STORY_ID, AGENT_NAME, block('cb-race02')),
+    ])
+    const config = await getAgentBlockConfig(dataDir, STORY_ID, AGENT_NAME)
+    expect(config.customBlocks.map((entry) => entry.id).sort()).toEqual(['cb-race01', 'cb-race02'])
+  })
+
+  it('preserves and reports a corrupt configuration file', async () => {
+    const path = join(dataDir, 'stories', STORY_ID, 'branches', 'main', 'agent-blocks', `${AGENT_NAME}.json`)
+    await mkdir(dirname(path), { recursive: true })
+    await writeFile(path, '{broken', 'utf-8')
+    await expect(getAgentBlockConfig(dataDir, STORY_ID, AGENT_NAME)).rejects.toThrow('original file was left untouched')
+    await expect(readFile(path, 'utf-8')).resolves.toBe('{broken')
   })
 })

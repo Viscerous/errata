@@ -1,17 +1,13 @@
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useMemo, useState, useCallback } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useState, useCallback } from 'react'
 import { api, type Fragment } from '@/lib/api'
 import type { FragmentPrefill } from '@/components/fragments/FragmentEditor'
 import { Button } from '@/components/ui/button'
 import { SidebarProvider, SidebarInset, SidebarTrigger } from '@/components/ui/sidebar'
 import { FragmentEditor } from '@/components/fragments/FragmentEditor'
-import { FragmentExportPanel } from '@/components/fragments/FragmentExportPanel'
-import { DebugPanel } from '@/components/generation/DebugPanel'
-import { ProviderPanel } from '@/components/settings/ProviderManager'
 import { ProseChainView } from '@/components/prose/ProseChainView'
 import { ProseWritingPanel } from '@/components/prose/ProseWritingPanel'
-import { StoryWizard } from '@/components/wizard/StoryWizard'
 import { StorySidebar, type SidebarSection } from '@/components/sidebar/StorySidebar'
 import { DetailPanel } from '@/components/sidebar/DetailPanel'
 import { componentId } from '@/lib/dom-ids'
@@ -21,9 +17,6 @@ import {
   notifyPluginPanelOpen,
   notifyPluginPanelClose,
 } from '@/lib/plugin-panels'
-import { FragmentImportDialog } from '@/components/fragments/FragmentImportDialog'
-import { TavernCardImportDialog } from '@/components/fragments/TavernCardImportDialog'
-import { CharacterCardImportDialog } from '@/components/fragments/CharacterCardImportDialog'
 import {
   parseErrataExport,
   readFileAsText,
@@ -48,11 +41,20 @@ import { Upload, BookOpen, MessageSquare, List } from 'lucide-react'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { useWindowFileDrop } from '@/hooks/use-window-file-drop'
 import { TimelineTabs } from '@/components/prose/TimelineTabs'
-import { CharacterChatView } from '@/components/character-chat/CharacterChatView'
 import { AgentActivityIndicator } from '@/components/AgentActivityIndicator'
 import { useTimelineBar } from '@/lib/theme'
 import { initClientPluginPanels } from '@/lib/plugin-panel-init'
-import { ErratanetIntroPrompt } from '@/components/erratanet/ErratanetIntroPrompt'
+import { AgentBlockConfigSchema, type AgentBlockConfig } from '@/contracts/block-config'
+
+const DebugPanel = lazy(() => import('@/components/generation/DebugPanel').then((module) => ({ default: module.DebugPanel })))
+const ProviderPanel = lazy(() => import('@/components/settings/ProviderManager').then((module) => ({ default: module.ProviderPanel })))
+const StoryWizard = lazy(() => import('@/components/wizard/StoryWizard').then((module) => ({ default: module.StoryWizard })))
+const FragmentExportPanel = lazy(() => import('@/components/fragments/FragmentExportPanel').then((module) => ({ default: module.FragmentExportPanel })))
+const FragmentImportDialog = lazy(() => import('@/components/fragments/FragmentImportDialog').then((module) => ({ default: module.FragmentImportDialog })))
+const TavernCardImportDialog = lazy(() => import('@/components/fragments/TavernCardImportDialog').then((module) => ({ default: module.TavernCardImportDialog })))
+const CharacterCardImportDialog = lazy(() => import('@/components/fragments/CharacterCardImportDialog').then((module) => ({ default: module.CharacterCardImportDialog })))
+const CharacterChatView = lazy(() => import('@/components/character-chat/CharacterChatView').then((module) => ({ default: module.CharacterChatView })))
+const ErratanetIntroPrompt = lazy(() => import('@/components/erratanet/ErratanetIntroPrompt').then((module) => ({ default: module.ErratanetIntroPrompt })))
 
 export const Route = createFileRoute('/story/$storyId')({
   component: StoryEditorPage,
@@ -84,7 +86,8 @@ function StoryEditorPage() {
   const [editSelectionText, setEditSelectionText] = useState<string | null>(null)
   const [askLibrarianFragmentId, setAskLibrarianFragmentId] = useState<string | null>(null)
   const [askLibrarianPrefill, setAskLibrarianPrefill] = useState<string | null>(null)
-  const [pendingAgentConfigImport, setPendingAgentConfigImport] = useState<{ agentName: string; displayName?: string; config: unknown } | null>(null)
+  const [pendingAgentConfigImport, setPendingAgentConfigImport] = useState<{ agentName: string; displayName?: string; config: AgentBlockConfig } | null>(null)
+  const [agentConfigImportError, setAgentConfigImportError] = useState<string | null>(null)
   const [timelineBarVisible, setTimelineBarVisible] = useTimelineBar()
   const OUTLINE_OPEN_KEY = 'errata:passages-panel-open'
   const [outlineOpen, setOutlineOpen] = useState(() => {
@@ -401,7 +404,17 @@ function StoryEditorPage() {
       try {
         const json = JSON.parse(text)
         if (json && typeof json.agentName === 'string' && json.config) {
-          setPendingAgentConfigImport(json)
+          const parsed = AgentBlockConfigSchema.safeParse(json.config)
+          if (!parsed.success) {
+            setAgentConfigImportError('The dropped agent configuration is invalid.')
+            return
+          }
+          setAgentConfigImportError(null)
+          setPendingAgentConfigImport({
+            agentName: json.agentName,
+            displayName: typeof json.displayName === 'string' ? json.displayName : undefined,
+            config: parsed.data,
+          })
         }
       } catch {
         // not valid JSON
@@ -674,51 +687,61 @@ function StoryEditorPage() {
             }}
           />
         ) : (
-          <CharacterChatView
-            storyId={storyId}
-            onClose={() => setMainView('prose')}
-          />
+          <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-muted-foreground">Loading chat…</div>}>
+            <CharacterChatView
+              storyId={storyId}
+              onClose={() => setMainView('prose')}
+            />
+          </Suspense>
         )}
 
         {/* Overlay panels render on top */}
         {showWizard && (
           <div className="absolute inset-0 z-30 bg-background" data-component-id="overlay-story-wizard">
-            <StoryWizard storyId={storyId} onComplete={() => {
-              setShowWizard(false)
-              notifyPluginPanelClose({ panel: 'wizard' }, { storyId })
-            }} />
+            <Suspense fallback={null}>
+              <StoryWizard storyId={storyId} onComplete={() => {
+                setShowWizard(false)
+                notifyPluginPanelClose({ panel: 'wizard' }, { storyId })
+              }} />
+            </Suspense>
           </div>
         )}
         {debugLogId && (
           <div className="absolute inset-0 z-30 bg-background" data-component-id="overlay-debug-panel">
-            <DebugPanel
-              storyId={storyId}
-              fragmentId={debugLogId === '__browse__' ? undefined : debugLogId}
-              onClose={() => {
-                setDebugLogId(null)
-                notifyPluginPanelClose({ panel: 'debug' }, { storyId })
-              }}
-            />
+            <Suspense fallback={null}>
+              <DebugPanel
+                storyId={storyId}
+                fragmentId={debugLogId === '__browse__' ? undefined : debugLogId}
+                onClose={() => {
+                  setDebugLogId(null)
+                  notifyPluginPanelClose({ panel: 'debug' }, { storyId })
+                }}
+              />
+            </Suspense>
           </div>
         )}
         {showProviders && (
           <div className="absolute inset-0 z-30 bg-background" data-component-id="overlay-provider-panel">
-            <ProviderPanel onClose={() => {
-              setShowProviders(false)
-              notifyPluginPanelClose({ panel: 'providers' }, { storyId })
-            }} />
+            <Suspense fallback={null}>
+              <ProviderPanel onClose={() => {
+                setShowProviders(false)
+                notifyPluginPanelClose({ panel: 'providers' }, { storyId })
+              }} />
+            </Suspense>
           </div>
         )}
         {showExportPanel && (
           <div className="absolute inset-0 z-30 bg-background" data-component-id="overlay-export-panel">
-            <FragmentExportPanel
-              storyId={storyId}
-              storyName={story.name}
-              onClose={() => {
-                setShowExportPanel(false)
-                notifyPluginPanelClose({ panel: 'export' }, { storyId })
-              }}
-            />
+            <Suspense fallback={null}>
+              <FragmentExportPanel
+                storyId={storyId}
+                storyName={story.name}
+                onClose={() => {
+                  setShowExportPanel(false)
+                  notifyPluginPanelClose({ panel: 'export' }, { storyId })
+                }}
+              />
+            </Suspense>
           </div>
         )}
         {editingProseId && (
@@ -757,30 +780,44 @@ function StoryEditorPage() {
         </div>
       )}
 
-      <FragmentImportDialog
-        storyId={storyId}
-        open={showImportDialog}
-        onOpenChange={setShowImportDialog}
-        initialData={importInitialData}
-      />
+      {showImportDialog && (
+        <Suspense fallback={null}>
+          <FragmentImportDialog
+            storyId={storyId}
+            open
+            onOpenChange={setShowImportDialog}
+            initialData={importInitialData}
+          />
+        </Suspense>
+      )}
 
-      <TavernCardImportDialog
-        storyId={storyId}
-        open={showTavernImport}
-        onOpenChange={setShowTavernImport}
-        initialBuffers={tavernImportBuffers}
-        onJsonCardDetected={handleJsonCardDetected}
-      />
+      {showTavernImport && (
+        <Suspense fallback={null}>
+          <TavernCardImportDialog
+            storyId={storyId}
+            open
+            onOpenChange={setShowTavernImport}
+            initialBuffers={tavernImportBuffers}
+            onJsonCardDetected={handleJsonCardDetected}
+          />
+        </Suspense>
+      )}
 
-      <CharacterCardImportDialog
-        storyId={storyId}
-        open={showCardImport}
-        onOpenChange={setShowCardImport}
-        initialCardData={cardImportData}
-        imageDataUrl={cardImportImageUrl}
-      />
+      {showCardImport && (
+        <Suspense fallback={null}>
+          <CharacterCardImportDialog
+            storyId={storyId}
+            open
+            onOpenChange={setShowCardImport}
+            initialCardData={cardImportData}
+            imageDataUrl={cardImportImageUrl}
+          />
+        </Suspense>
+      )}
 
-      <ErratanetIntroPrompt />
+      <Suspense fallback={null}>
+        <ErratanetIntroPrompt />
+      </Suspense>
 
       <Dialog open={!!pendingAgentConfigImport} onOpenChange={(open) => { if (!open) setPendingAgentConfigImport(null) }}>
         <DialogContent>
@@ -796,13 +833,26 @@ function StoryEditorPage() {
               if (!pendingAgentConfigImport) return
               const { agentName, config } = pendingAgentConfigImport
               try {
-                await api.agentBlocks.importConfig(storyId, agentName, config as any)
+                await api.agentBlocks.importConfig(storyId, agentName, config)
                 queryClient.invalidateQueries({ queryKey: ['agent-blocks', storyId, agentName] })
-              } catch {
-                // import failed silently
+              } catch (error) {
+                setAgentConfigImportError(error instanceof Error ? error.message : 'Agent configuration import failed.')
+                return
               }
               setPendingAgentConfigImport(null)
             }}>Import</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!agentConfigImportError} onOpenChange={(open) => { if (!open) setAgentConfigImportError(null) }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Import failed</DialogTitle>
+            <DialogDescription>{agentConfigImportError}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button onClick={() => setAgentConfigImportError(null)}>Close</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

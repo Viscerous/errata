@@ -53,7 +53,6 @@ export function StoryInfoPanel({ storyId, story, onLaunchWizard, onExport, onDow
   const [editing, setEditing] = useState(false)
   const [name, setName] = useState(story.name)
   const [description, setDescription] = useState(story.description)
-  const [summary, setSummary] = useState(story.summary ?? '')
   const [coverImage, setCoverImage] = useState<string | null>(story.coverImage ?? null)
   const coverInputRef = useRef<HTMLInputElement>(null)
 
@@ -113,7 +112,7 @@ export function StoryInfoPanel({ storyId, story, onLaunchWizard, onExport, onDow
   }, [allFragmentsQuery.data, proseChainQuery.data, genLogsQuery.data])
 
   const updateMutation = useMutation({
-    mutationFn: (data: { name: string; description: string; summary?: string; coverImage?: string | null }) =>
+    mutationFn: (data: { name: string; description: string; coverImage?: string | null }) =>
       api.stories.update(storyId, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['story', storyId] })
@@ -123,13 +122,12 @@ export function StoryInfoPanel({ storyId, story, onLaunchWizard, onExport, onDow
   })
 
   const handleSave = () => {
-    updateMutation.mutate({ name: name.trim(), description: description.trim(), summary: summary.trim(), coverImage })
+    updateMutation.mutate({ name: name.trim(), description: description.trim(), coverImage })
   }
 
   const handleCancel = () => {
     setName(story.name)
     setDescription(story.description)
-    setSummary(story.summary ?? '')
     setCoverImage(story.coverImage ?? null)
     setEditing(false)
   }
@@ -204,16 +202,6 @@ export function StoryInfoPanel({ storyId, story, onLaunchWizard, onExport, onDow
             data-component-id="story-info-description"
           />
         </div>
-        <div>
-          <label className="text-[0.625rem] text-muted-foreground uppercase tracking-wider mb-1.5 block">Summary</label>
-          <Textarea
-            value={summary}
-            onChange={(e) => setSummary(e.target.value)}
-            className="min-h-[120px] resize-none text-sm bg-transparent"
-            placeholder="Story summary..."
-            data-component-id="story-info-summary"
-          />
-        </div>
         <div className="flex gap-1.5">
           <Button size="sm" className="h-7 text-xs" onClick={handleSave} disabled={updateMutation.isPending} data-component-id="story-info-save">
             {updateMutation.isPending ? 'Saving...' : 'Save'}
@@ -283,8 +271,19 @@ export function StoryInfoPanel({ storyId, story, onLaunchWizard, onExport, onDow
       {/* Divider */}
       <div className="mx-5 border-t border-border/40" />
 
-      {/* Summary */}
-      <SummarySection summary={story.summary} />
+      {/* Summary — ordering mirrors the server's loadSummaryContent so the panel
+          shows the same concatenation the LLM receives: era summaries first, then createdAt. */}
+      <SummarySection
+        summary={(allFragmentsQuery.data ?? [])
+          .filter((fragment) => fragment.type === 'summary' && !fragment.archived)
+          .sort((a, b) => {
+            const eraOrder = Number(!a.meta?.isEraSummary) - Number(!b.meta?.isEraSummary)
+            return eraOrder || a.createdAt.localeCompare(b.createdAt)
+          })
+          .map((fragment) => fragment.content.trim())
+          .filter(Boolean)
+          .join('\n\n')}
+      />
 
       {/* Divider */}
       <div className="mx-5 border-t border-border/40" />
@@ -309,7 +308,7 @@ export function StoryInfoPanel({ storyId, story, onLaunchWizard, onExport, onDow
         <ActionTile
           icon={Pencil}
           label="Edit"
-          description="Name, description & summary"
+          description="Name & description"
           onClick={() => setEditing(true)}
           dataComponentId="story-info-edit-action"
         />

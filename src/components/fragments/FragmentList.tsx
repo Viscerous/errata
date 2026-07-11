@@ -3,7 +3,7 @@ import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 import { api, type Fragment, type Folder } from '@/lib/api'
 import { qk, q, useActiveBranchId } from '@/lib/query-keys'
 import { componentId, fragmentComponentId } from '@/lib/dom-ids'
-import { resolveFragmentVisual, generateBubbles, hexagonPoints, diamondPoints, type Bubble } from '@/lib/fragment-visuals'
+import { resolveFragmentVisual, generateBubbles } from '@/lib/fragment-visuals'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -20,6 +20,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Plus, Pin, GripVertical, FileDown, UserPlus, Archive, FolderPlus, ChevronRight, MoreHorizontal, Pencil, Trash2, FolderOpen, ListFilter } from 'lucide-react'
 import { Caption } from '@/components/ui/prose-text'
+import { FragmentBubbleShape } from './FragmentBubbleShape'
 
 interface FragmentListProps {
   storyId: string
@@ -31,22 +32,6 @@ interface FragmentListProps {
   onImport?: () => void
   onImportCard?: () => void
   selectedId?: string
-}
-
-function BubbleSvgShape({ b }: { b: Bubble; i: number }) {
-  const transform = b.shape !== 'circle' ? `rotate(${b.rotation} ${b.cx} ${b.cy})` : undefined
-  switch (b.shape) {
-    case 'rounded-rect':
-      return <rect key={`${b.cx}-${b.cy}`} x={b.cx - b.r * 0.8} y={b.cy - b.r * 0.6} width={b.r * 1.6} height={b.r * 1.2} rx={b.r * 0.2} fill={b.color} opacity={b.opacity} transform={transform} />
-    case 'hexagon':
-      return <polygon key={`${b.cx}-${b.cy}`} points={hexagonPoints(b.cx, b.cy, b.r)} fill={b.color} opacity={b.opacity} transform={transform} />
-    case 'ellipse':
-      return <ellipse key={`${b.cx}-${b.cy}`} cx={b.cx} cy={b.cy} rx={b.r * 1.2} ry={b.r * 0.7} fill={b.color} opacity={b.opacity} transform={transform} />
-    case 'diamond':
-      return <polygon key={`${b.cx}-${b.cy}`} points={diamondPoints(b.cx, b.cy, b.r)} fill={b.color} opacity={b.opacity} transform={transform} />
-    default:
-      return <circle key={`${b.cx}-${b.cy}`} cx={b.cx} cy={b.cy} r={b.r} fill={b.color} opacity={b.opacity} />
-  }
 }
 
 // --- Memoized fragment row ---
@@ -132,8 +117,8 @@ const FragmentRow = memo(function FragmentRow({
         <div className="size-9 shrink-0 rounded-lg overflow-hidden">
           <svg viewBox="0 0 36 36" className="size-full" aria-hidden>
             <rect width="36" height="36" fill={bubbleSet.bg} />
-            {bubbleSet.bubbles.map((b, i) => (
-              <BubbleSvgShape key={`${b.cx}-${b.cy}`} b={b} i={i} />
+            {bubbleSet.bubbles.map((bubble) => (
+              <FragmentBubbleShape key={`${bubble.cx}-${bubble.cy}`} bubble={bubble} />
             ))}
           </svg>
         </div>

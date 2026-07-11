@@ -1,22 +1,23 @@
-import { useState, useEffect, useRef } from 'react'
+import { lazy, Suspense, useState, useEffect, useRef } from 'react'
 import { useIsMobile } from '@/hooks/use-mobile'
 import type { Fragment, StoryMeta } from '@/lib/api'
 import type { SidebarSection } from './StorySidebar'
 import { getPluginPanel } from '@/lib/plugin-panels'
-import { FragmentList } from '@/components/fragments/FragmentList'
-import { ContextOrderPanel } from '@/components/fragments/ContextOrderPanel'
-import { AgentsPanel } from '@/components/agents/AgentsPanel'
-import { StoryInfoPanel } from './StoryInfoPanel'
-import { SettingsView } from './SettingsView'
-import { LibrarianPanel } from './LibrarianPanel'
-import { ArchivePanel } from './ArchivePanel'
-import { TimelineManagerPanel } from './TimelineManagerPanel'
-import { FragmentTypesPanel } from './FragmentTypesPanel'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { ErratanetPanel } from '@/components/erratanet/ErratanetPanel'
 import { X, ChevronsLeftRight, ChevronsRightLeft } from 'lucide-react'
 import { componentId } from '@/lib/dom-ids'
+
+const FragmentList = lazy(() => import('@/components/fragments/FragmentList').then((module) => ({ default: module.FragmentList })))
+const ContextOrderPanel = lazy(() => import('@/components/fragments/ContextOrderPanel').then((module) => ({ default: module.ContextOrderPanel })))
+const AgentsPanel = lazy(() => import('@/components/agents/AgentsPanel').then((module) => ({ default: module.AgentsPanel })))
+const StoryInfoPanel = lazy(() => import('./StoryInfoPanel').then((module) => ({ default: module.StoryInfoPanel })))
+const SettingsView = lazy(() => import('./SettingsView').then((module) => ({ default: module.SettingsView })))
+const LibrarianPanel = lazy(() => import('./LibrarianPanel').then((module) => ({ default: module.LibrarianPanel })))
+const ArchivePanel = lazy(() => import('./ArchivePanel').then((module) => ({ default: module.ArchivePanel })))
+const TimelineManagerPanel = lazy(() => import('./TimelineManagerPanel').then((module) => ({ default: module.TimelineManagerPanel })))
+const FragmentTypesPanel = lazy(() => import('./FragmentTypesPanel').then((module) => ({ default: module.FragmentTypesPanel })))
+const ErratanetPanel = lazy(() => import('@/components/erratanet/ErratanetPanel').then((module) => ({ default: module.ErratanetPanel })))
 
 interface DetailPanelProps {
   storyId: string
@@ -77,6 +78,10 @@ const SECTION_LIST_IDS: Record<string, string> = {
   characters: 'character-sidebar-list',
   guidelines: 'guideline-sidebar-list',
   knowledge: 'knowledge-sidebar-list',
+}
+
+function PanelLoading() {
+  return <div className="flex h-full items-center justify-center text-xs text-muted-foreground">Loading panel…</div>
 }
 
 export function DetailPanel({
@@ -192,22 +197,24 @@ export function DetailPanel({
   // inline detail panel.
   if (activeSection === 'settings') {
     return (
-      <SettingsView
-        storyId={storyId}
-        story={story}
-        visible={visible}
-        onClose={onClose}
-        onTransitionEnd={handleTransitionEnd}
-        onManageProviders={onManageProviders}
-        onOpenPluginPanel={onOpenPluginPanel}
-        onTogglePluginSidebar={onTogglePluginSidebar}
-        pluginSidebarVisibility={pluginSidebarVisibility}
-      />
+      <Suspense fallback={<PanelLoading />}>
+        <SettingsView
+          storyId={storyId}
+          story={story}
+          visible={visible}
+          onClose={onClose}
+          onTransitionEnd={handleTransitionEnd}
+          onManageProviders={onManageProviders}
+          onOpenPluginPanel={onOpenPluginPanel}
+          onTogglePluginSidebar={onTogglePluginSidebar}
+          pluginSidebarVisibility={pluginSidebarVisibility}
+        />
+      </Suspense>
     )
   }
 
   const panelContent = (
-    <>
+    <Suspense fallback={<PanelLoading />}>
       {activeSection === 'story-info' && (
         <ScrollArea className="h-full">
           <StoryInfoPanel storyId={storyId} story={story} onLaunchWizard={onLaunchWizard} onExport={onExport} onDownloadStory={onDownloadStory} onExportProse={onExportProse} />
@@ -314,7 +321,7 @@ export function DetailPanel({
           <p className="p-4 text-sm text-muted-foreground">Plugin panel not found</p>
         )
       })()}
-    </>
+    </Suspense>
   )
 
   // Mobile: full-screen overlay

@@ -1,4 +1,15 @@
 // API Types
+import type {
+  AgentBlockConfig,
+  BlockConfig,
+} from '@/contracts/block-config'
+export type {
+  AgentBlockConfig,
+  BlockConfig,
+  BlockOverride,
+  CustomBlockDefinition,
+  ImportConfigsPayload,
+} from '@/contracts/block-config'
 
 export interface CustomFragmentType {
   type: string
@@ -436,30 +447,6 @@ export interface PluginManifestInfo {
   }
 }
 
-// Block Config types
-export interface BlockOverride {
-  enabled?: boolean
-  order?: number
-  contentMode?: 'override' | 'prepend' | 'append' | null
-  customContent?: string
-}
-
-export interface CustomBlockDefinition {
-  id: string
-  name: string
-  role: 'system' | 'user'
-  order: number
-  enabled: boolean
-  type: 'simple' | 'script'
-  content: string
-}
-
-export interface BlockConfig {
-  customBlocks: CustomBlockDefinition[]
-  overrides: Record<string, BlockOverride>
-  blockOrder: string[]
-}
-
 export interface BuiltinBlockMeta {
   id: string
   role: 'system' | 'user'
@@ -496,11 +483,6 @@ export interface AgentBlockInfo {
   availableTools: string[]
 }
 
-export interface AgentBlockConfig extends BlockConfig {
-  disabledTools: string[]
-  disableAutoAnalysis?: boolean
-}
-
 export interface AgentBlocksResponse {
   config: AgentBlockConfig
   builtinBlocks: BuiltinBlockMeta[]
@@ -515,11 +497,6 @@ export interface ExportedAgentConfig {
 
 // Config export/import types
 export interface ExportedConfigs {
-  blockConfig?: BlockConfig
-  agentBlockConfigs?: Record<string, AgentBlockConfig>
-}
-
-export interface ImportConfigsPayload {
   blockConfig?: BlockConfig
   agentBlockConfigs?: Record<string, AgentBlockConfig>
 }

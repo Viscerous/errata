@@ -2,6 +2,7 @@ import { promises as fs } from 'node:fs'
 import { join } from 'node:path'
 import { GlobalConfigSchema, type GlobalConfig, type ProviderConfig, type SharingConfig, type ErratanetConfig } from './schema'
 import { writeJsonAtomic } from '../fs-utils'
+import { withStorageLock } from '../fs-utils'
 
 function configPath(dataDir: string): string {
   return join(dataDir, 'config.json')
@@ -11,9 +12,29 @@ export async function getGlobalConfig(dataDir: string): Promise<GlobalConfig> {
   try {
     const raw = await fs.readFile(configPath(dataDir), 'utf-8')
     return GlobalConfigSchema.parse(JSON.parse(raw))
-  } catch {
-    return GlobalConfigSchema.parse({})
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return GlobalConfigSchema.parse({})
+    }
+    throw new Error(`Unable to read configuration at ${configPath(dataDir)}; the original file was left untouched`, { cause: error })
   }
+}
+
+async function writeGlobalConfigUnlocked(dataDir: string, config: GlobalConfig): Promise<void> {
+  await fs.mkdir(dataDir, { recursive: true })
+  await writeJsonAtomic(configPath(dataDir), GlobalConfigSchema.parse(config))
+}
+
+export async function mutateGlobalConfig(
+  dataDir: string,
+  mutate: (config: GlobalConfig) => void,
+): Promise<GlobalConfig> {
+  return withStorageLock(configPath(dataDir), async () => {
+    const config = await getGlobalConfig(dataDir)
+    mutate(config)
+    await writeGlobalConfigUnlocked(dataDir, config)
+    return config
+  })
 }
 
 export async function getSharingConfig(dataDir: string): Promise<SharingConfig> {
@@ -21,9 +42,9 @@ export async function getSharingConfig(dataDir: string): Promise<SharingConfig> 
 }
 
 export async function updateSharingConfig(dataDir: string, patch: Partial<SharingConfig>): Promise<SharingConfig> {
-  const config = await getGlobalConfig(dataDir)
-  config.sharing = { ...config.sharing, ...patch }
-  await saveGlobalConfig(dataDir, config)
+  const config = await mutateGlobalConfig(dataDir, (current) => {
+    current.sharing = { ...current.sharing, ...patch }
+  })
   return config.sharing
 }
 
@@ -32,45 +53,36 @@ export async function getErratanetConfig(dataDir: string): Promise<ErratanetConf
 }
 
 export async function updateErratanetConfig(dataDir: string, patch: Partial<ErratanetConfig>): Promise<ErratanetConfig> {
-  const config = await getGlobalConfig(dataDir)
-  config.erratanet = { ...config.erratanet, ...patch }
-  await saveGlobalConfig(dataDir, config)
+  const config = await mutateGlobalConfig(dataDir, (current) => {
+    current.erratanet = { ...current.erratanet, ...patch }
+  })
   return config.erratanet
 }
 
 export async function saveGlobalConfig(dataDir: string, config: GlobalConfig): Promise<void> {
-  await fs.mkdir(dataDir, { recursive: true })
-  await writeJsonAtomic(configPath(dataDir), config)
+  await withStorageLock(configPath(dataDir), () => writeGlobalConfigUnlocked(dataDir, config))
 }
 
 export async function addProvider(dataDir: string, provider: ProviderConfig): Promise<GlobalConfig> {
-  const config = await getGlobalConfig(dataDir)
-  config.providers.push(provider)
-  // Auto-set as default if it's the first provider
-  if (config.providers.length === 1) {
-    config.defaultProviderId = provider.id
-  }
-  await saveGlobalConfig(dataDir, config)
-  return config
+  return mutateGlobalConfig(dataDir, (config) => {
+    config.providers.push(provider)
+    if (config.providers.length === 1) config.defaultProviderId = provider.id
+  })
 }
 
 export async function updateProvider(dataDir: string, providerId: string, updates: Partial<Omit<ProviderConfig, 'id' | 'createdAt'>>): Promise<GlobalConfig> {
-  const config = await getGlobalConfig(dataDir)
-  const idx = config.providers.findIndex((p) => p.id === providerId)
-  if (idx === -1) throw new Error(`Provider ${providerId} not found`)
-  config.providers[idx] = { ...config.providers[idx], ...updates }
-  await saveGlobalConfig(dataDir, config)
-  return config
+  return mutateGlobalConfig(dataDir, (config) => {
+    const idx = config.providers.findIndex((p) => p.id === providerId)
+    if (idx === -1) throw new Error(`Provider ${providerId} not found`)
+    config.providers[idx] = { ...config.providers[idx], ...updates }
+  })
 }
 
 export async function deleteProvider(dataDir: string, providerId: string): Promise<GlobalConfig> {
-  const config = await getGlobalConfig(dataDir)
-  config.providers = config.providers.filter((p) => p.id !== providerId)
-  if (config.defaultProviderId === providerId) {
-    config.defaultProviderId = config.providers[0]?.id ?? null
-  }
-  await saveGlobalConfig(dataDir, config)
-  return config
+  return mutateGlobalConfig(dataDir, (config) => {
+    config.providers = config.providers.filter((p) => p.id !== providerId)
+    if (config.defaultProviderId === providerId) config.defaultProviderId = config.providers[0]?.id ?? null
+  })
 }
 
 export async function getProvider(dataDir: string, providerId: string): Promise<ProviderConfig | undefined> {
@@ -79,19 +91,16 @@ export async function getProvider(dataDir: string, providerId: string): Promise<
 }
 
 export async function duplicateProvider(dataDir: string, providerId: string): Promise<GlobalConfig> {
-  const config = await getGlobalConfig(dataDir)
-  const source = config.providers.find((p) => p.id === providerId)
-  if (!source) throw new Error(`Provider ${providerId} not found`)
-  const newId = `prov-${Date.now().toString(36)}`
-  const duplicate: ProviderConfig = {
-    ...source,
-    id: newId,
-    name: `${source.name} (copy)`,
-    createdAt: new Date().toISOString(),
-  }
-  config.providers.push(duplicate)
-  await saveGlobalConfig(dataDir, config)
-  return config
+  return mutateGlobalConfig(dataDir, (config) => {
+    const source = config.providers.find((p) => p.id === providerId)
+    if (!source) throw new Error(`Provider ${providerId} not found`)
+    config.providers.push({
+      ...source,
+      id: `prov-${Date.now().toString(36)}`,
+      name: `${source.name} (copy)`,
+      createdAt: new Date().toISOString(),
+    })
+  })
 }
 
 export function maskApiKey(key: string): string {

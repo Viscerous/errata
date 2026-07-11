@@ -85,7 +85,6 @@ export function storyRoutes(dataDir: string) {
         ...existing,
         name: body.name,
         description: body.description,
-        ...(body.summary !== undefined ? { summary: body.summary } : {}),
         ...(body.coverImage !== undefined ? { coverImage: body.coverImage } : {}),
         updatedAt: new Date().toISOString(),
       }
@@ -95,7 +94,6 @@ export function storyRoutes(dataDir: string) {
       body: t.Object({
         name: t.String(),
         description: t.String(),
-        summary: t.Optional(t.String()),
         coverImage: t.Optional(t.Union([t.String(), t.Null()])),
       }),
       detail: { summary: 'Update story metadata' },

@@ -5,8 +5,7 @@ import {
   updateProvider as updateProviderConfig,
   deleteProvider as deleteProviderConfig,
   duplicateProvider as duplicateProviderConfig,
-  getGlobalConfig,
-  saveGlobalConfig,
+  mutateGlobalConfig,
   getProvider,
   maskApiKey,
 } from '../config/storage'
@@ -139,9 +138,9 @@ export function configRoutes(dataDir: string) {
     })
 
     .patch('/config/default-provider', async ({ body }) => {
-      const config = await getGlobalConfig(dataDir)
-      config.defaultProviderId = body.providerId
-      await saveGlobalConfig(dataDir, config)
+      await mutateGlobalConfig(dataDir, (config) => {
+        config.defaultProviderId = body.providerId
+      })
       return { ok: true, defaultProviderId: body.providerId }
     }, {
       detail: { summary: 'Set the default provider' },

@@ -10,13 +10,14 @@ import { useQuickSwitch, useProseWidth, PROSE_WIDTH_VALUES, useMentionTypes, BAS
 import { parseVisualRefs } from '@/lib/fragment-visuals'
 import { ProseBlock } from './ProseBlock'
 import { ChapterMarker } from './ChapterMarker'
-import { InlineGenerationInput, type ThoughtStep } from './InlineGenerationInput'
+import { InlineGenerationInput } from './InlineGenerationInput'
 import { GenerationThoughts } from './GenerationThoughts'
 import { ProseOutlinePanel } from './ProseOutlinePanel'
 import { MentionProvider } from './MentionContext'
 import { formatDialogue } from '@/lib/fragment-mentions'
 import { onActiveBranchChanged, invalidateStoryContent } from '@/lib/branch-cache'
 import { qk, q, useActiveBranchId } from '@/lib/query-keys'
+import { createGenerationStreamStore, EMPTY_STREAM_SNAPSHOT, type GenerationStreamStore } from './generation-stream-store'
 
 interface ProseChainViewProps {
   storyId: string
@@ -37,84 +38,11 @@ interface PendingGenerationMeta {
   fragmentCountBefore: number
 }
 
-interface GenerationStreamSnapshot {
-  text: string
-  thoughts: ThoughtStep[]
-  version: number
-}
-
 interface GenerationViewportAnchor {
   generationId: number
   blockIndex: number
   offsetY: number
   targetY: number
-}
-
-interface GenerationStreamStore {
-  subscribe: (listener: () => void) => () => void
-  getSnapshot: () => GenerationStreamSnapshot
-  reset: () => void
-  setText: (text: string) => void
-  setThoughts: (thoughts: ThoughtStep[]) => void
-}
-
-const EMPTY_STREAM_SNAPSHOT: GenerationStreamSnapshot = {
-  text: '',
-  thoughts: [],
-  version: 0,
-}
-
-function createGenerationStreamStore(): GenerationStreamStore {
-  let snapshot = EMPTY_STREAM_SNAPSHOT
-  const listeners = new Set<() => void>()
-  let emitScheduled = false
-
-  const emit = () => {
-    emitScheduled = false
-    for (const listener of listeners) listener()
-  }
-
-  const scheduleEmit = () => {
-    if (emitScheduled) return
-    emitScheduled = true
-    if (typeof requestAnimationFrame === 'function') {
-      requestAnimationFrame(emit)
-    } else {
-      Promise.resolve().then(emit)
-    }
-  }
-
-  const replaceSnapshot = (next: Omit<GenerationStreamSnapshot, 'version'>) => {
-    snapshot = {
-      ...next,
-      version: snapshot.version + 1,
-    }
-    scheduleEmit()
-  }
-
-  return {
-    subscribe(listener) {
-      listeners.add(listener)
-      return () => {
-        listeners.delete(listener)
-      }
-    },
-    getSnapshot() {
-      return snapshot
-    },
-    reset() {
-      if (!snapshot.text && snapshot.thoughts.length === 0) return
-      replaceSnapshot({ text: '', thoughts: [] })
-    },
-    setText(text) {
-      if (snapshot.text === text) return
-      replaceSnapshot({ text, thoughts: snapshot.thoughts })
-    },
-    setThoughts(thoughts) {
-      if (snapshot.thoughts === thoughts) return
-      replaceSnapshot({ text: snapshot.text, thoughts })
-    },
-  }
 }
 
 type ProseListRow =
