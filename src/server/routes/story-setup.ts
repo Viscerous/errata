@@ -54,7 +54,12 @@ export function storySetupRoutes(dataDir: string) {
       }
 
       try {
-        const plan = await generateStorySetupPlan(dataDir, params.storyId, body.messages)
+        const plan = await generateStorySetupPlan(
+          dataDir,
+          params.storyId,
+          body.messages,
+          body.draftFragments ?? [],
+        )
         const result = await applyStorySetupPlan(dataDir, params.storyId, plan)
         return { plan, ...result }
       } catch (error) {
@@ -71,6 +76,17 @@ export function storySetupRoutes(dataDir: string) {
           role: t.Union([t.Literal('user'), t.Literal('assistant')]),
           content: t.String(),
         })),
+        draftFragments: t.Optional(t.Array(t.Object({
+          type: t.Union([
+            t.Literal('guideline'),
+            t.Literal('knowledge'),
+            t.Literal('character'),
+            t.Literal('prose'),
+          ]),
+          name: t.String({ minLength: 1, maxLength: 100 }),
+          description: t.String({ minLength: 1, maxLength: 50 }),
+          content: t.String({ minLength: 1 }),
+        }))),
       }),
       detail: { summary: 'Create starter fragments from the setup conversation' },
     })

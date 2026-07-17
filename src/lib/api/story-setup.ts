@@ -5,6 +5,28 @@ export interface StorySetupMessage {
   content: string
 }
 
+export type StorySetupChecklistKey =
+  | 'starting-point'
+  | 'premise'
+  | 'characters'
+  | 'goal'
+  | 'setting'
+  | 'voice'
+  | 'opening'
+
+export interface StorySetupChecklistItem {
+  key: StorySetupChecklistKey
+  status: 'missing' | 'partial' | 'covered'
+  note: string
+}
+
+export interface StorySetupDraftFragment {
+  type: 'guideline' | 'knowledge' | 'character' | 'prose'
+  name: string
+  description: string
+  content: string
+}
+
 export interface StorySetupPlan {
   name: string
   description: string
@@ -23,9 +45,13 @@ export const storySetup = {
   chat: (storyId: string, messages: StorySetupMessage[], signal?: AbortSignal) =>
     fetchEventStream(`/stories/${storyId}/setup/chat`, { messages }, signal),
 
-  complete: (storyId: string, messages: StorySetupMessage[]) =>
+  complete: (
+    storyId: string,
+    messages: StorySetupMessage[],
+    draftFragments: StorySetupDraftFragment[],
+  ) =>
     apiFetch<StorySetupResult>(`/stories/${storyId}/setup/complete`, {
       method: 'POST',
-      body: JSON.stringify({ messages }),
+      body: JSON.stringify({ messages, draftFragments }),
     }),
 }

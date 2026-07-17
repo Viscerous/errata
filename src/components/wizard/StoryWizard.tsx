@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { ArrowUp, Check, LoaderCircle, Square, X } from 'lucide-react'
-import { api, type StorySetupMessage, type StorySetupResult } from '@/lib/api'
+import { ArrowUp, Check, Circle, FileText, LoaderCircle, Minus, Square, X } from 'lucide-react'
+import {
+  api,
+  type StorySetupChecklistItem,
+  type StorySetupChecklistKey,
+  type StorySetupDraftFragment,
+  type StorySetupMessage,
+  type StorySetupResult,
+} from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { StreamMarkdown } from '@/components/ui/stream-markdown'
@@ -18,6 +25,22 @@ const STARTING_POINTS = [
   { label: 'A scene', message: 'I have a scene I can picture.' },
   { label: 'Only a mood', message: 'I only have a mood or feeling so far.' },
 ] as const
+
+const CHECKLIST: Array<{ key: StorySetupChecklistKey; label: string }> = [
+  { key: 'starting-point', label: 'Starting point' },
+  { key: 'premise', label: 'What it is about' },
+  { key: 'characters', label: 'Characters' },
+  { key: 'goal', label: 'Goal and stakes' },
+  { key: 'setting', label: 'Setting' },
+  { key: 'voice', label: 'Voice and tone' },
+  { key: 'opening', label: 'Opening direction' },
+]
+
+const INITIAL_CHECKLIST: StorySetupChecklistItem[] = CHECKLIST.map(item => ({
+  key: item.key,
+  status: 'missing',
+  note: '',
+}))
 
 function AssistantTurn({ content, streaming = false }: { content: string; streaming?: boolean }) {
   return (
@@ -49,6 +72,102 @@ function WriterTurn({ content }: { content: string }) {
         {content}
       </p>
     </article>
+  )
+}
+
+function ChecklistStatus({ status }: { status: StorySetupChecklistItem['status'] }) {
+  if (status === 'covered') {
+    return (
+      <span className="flex size-4 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground" aria-label="Covered">
+        <Check className="size-2.5" aria-hidden />
+      </span>
+    )
+  }
+  if (status === 'partial') {
+    return (
+      <span className="flex size-4 shrink-0 items-center justify-center rounded-full bg-primary/15 text-primary" aria-label="Partly covered">
+        <Minus className="size-2.5" aria-hidden />
+      </span>
+    )
+  }
+  return <Circle className="size-4 shrink-0 text-muted-foreground/45" aria-label="Not covered yet" />
+}
+
+function StorySetupRail({
+  checklist,
+  draftFragments,
+  updating,
+}: {
+  checklist: StorySetupChecklistItem[]
+  draftFragments: StorySetupDraftFragment[]
+  updating: boolean
+}) {
+  const covered = checklist.filter(item => item.status === 'covered').length
+  const checklistByKey = new Map(checklist.map(item => [item.key, item]))
+
+  return (
+    <aside className="space-y-7 lg:sticky lg:top-8" data-component-id="story-setup-progress">
+      <section aria-labelledby="story-checklist-heading">
+        <div className="flex items-baseline justify-between gap-3">
+          <h2 id="story-checklist-heading" className="text-sm font-semibold text-foreground">Story checklist</h2>
+          <span className="text-xs tabular-nums text-muted-foreground">{covered} of {CHECKLIST.length}</span>
+        </div>
+        <p className="mt-1 text-xs leading-5 text-muted-foreground">A guide for the conversation, not a requirement.</p>
+        <ul className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 lg:grid-cols-1">
+          {CHECKLIST.map(definition => {
+            const item = checklistByKey.get(definition.key) ?? {
+              key: definition.key,
+              status: 'missing' as const,
+              note: '',
+            }
+            return (
+              <li key={definition.key} className="flex min-w-0 items-start gap-2.5">
+                <span className="mt-0.5"><ChecklistStatus status={item.status} /></span>
+                <div className="min-w-0">
+                  <p className={`text-xs leading-5 ${item.status === 'missing' ? 'text-muted-foreground' : 'text-foreground/85'}`}>
+                    {definition.label}
+                  </p>
+                  {item.note && <p className="line-clamp-2 text-[0.6875rem] leading-4 text-muted-foreground">{item.note}</p>}
+                </div>
+              </li>
+            )
+          })}
+        </ul>
+      </section>
+
+      <section aria-labelledby="draft-fragments-heading">
+        <div className="flex items-center justify-between gap-3">
+          <h2 id="draft-fragments-heading" className="text-sm font-semibold text-foreground">Draft fragments</h2>
+          {updating && <span className="text-[0.6875rem] text-muted-foreground">Updating</span>}
+        </div>
+        <p className="mt-1 text-xs leading-5 text-muted-foreground">Previews only. Open one to read its current content.</p>
+
+        {draftFragments.length === 0 ? (
+          <div className="mt-4 flex items-start gap-2.5 text-xs leading-5 text-muted-foreground">
+            <FileText className="mt-0.5 size-4 shrink-0 opacity-50" aria-hidden />
+            <p>Fragments will appear here as the idea takes shape.</p>
+          </div>
+        ) : (
+          <div className="mt-3 divide-y divide-border/30 border-y border-border/30">
+            {draftFragments.map((fragment, index) => (
+              <details key={`${fragment.type}-${fragment.name}-${index}`} className="group py-3">
+                <summary className="cursor-pointer list-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 [&::-webkit-details-marker]:hidden">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-xs font-medium text-foreground/90">{fragment.name}</p>
+                      <p className="mt-0.5 text-[0.6875rem] text-muted-foreground">{fragment.type}</p>
+                    </div>
+                    <span className="mt-0.5 text-xs text-muted-foreground transition-transform group-open:rotate-90" aria-hidden>›</span>
+                  </div>
+                  <p className="mt-1.5 text-[0.6875rem] leading-4 text-muted-foreground">{fragment.description}</p>
+                </summary>
+                <p className="mt-3 whitespace-pre-wrap font-prose text-xs leading-5 text-foreground/75">{fragment.content}</p>
+              </details>
+            ))}
+          </div>
+        )}
+      </section>
+    </aside>
   )
 }
 
@@ -95,6 +214,8 @@ export function StoryWizard({ storyId, onComplete }: StoryWizardProps) {
   const [isCreating, setIsCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<StorySetupResult | null>(null)
+  const [checklist, setChecklist] = useState<StorySetupChecklistItem[]>(INITIAL_CHECKLIST)
+  const [draftFragments, setDraftFragments] = useState<StorySetupDraftFragment[]>([])
   const abortRef = useRef<AbortController | null>(null)
   const initialRequestRef = useRef(false)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
@@ -120,6 +241,22 @@ export function StoryWizard({ storyId, onComplete }: StoryWizardProps) {
         if (value.type === 'text') {
           accumulated += value.text
           setStreamingText(accumulated)
+        } else if (value.type === 'tool-call' && value.toolName === 'updateStorySetup') {
+          const snapshot = value.args as {
+            checklist?: StorySetupChecklistItem[]
+            fragments?: StorySetupDraftFragment[]
+          }
+          if (Array.isArray(snapshot.checklist)) {
+            const incoming = new Map(snapshot.checklist.map(item => [item.key, item]))
+            setChecklist(CHECKLIST.map(definition => incoming.get(definition.key) ?? {
+              key: definition.key,
+              status: 'missing',
+              note: '',
+            }))
+          }
+          if (Array.isArray(snapshot.fragments)) {
+            setDraftFragments(snapshot.fragments)
+          }
         }
       }
     } catch (caught) {
@@ -181,7 +318,7 @@ export function StoryWizard({ storyId, onComplete }: StoryWizardProps) {
     setIsCreating(true)
     setError(null)
     try {
-      const setup = await api.storySetup.complete(storyId, messages)
+      const setup = await api.storySetup.complete(storyId, messages, draftFragments)
       setResult(setup)
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['story', storyId] }),
@@ -237,46 +374,52 @@ export function StoryWizard({ storyId, onComplete }: StoryWizardProps) {
       ) : (
         <>
           <main className="min-h-0 flex-1 overflow-y-auto" data-component-id="story-setup-transcript">
-            <div className="mx-auto w-full max-w-3xl space-y-8 px-5 py-8 sm:px-8 sm:py-12" aria-live="polite">
-              {messages.map((message, index) => message.role === 'assistant' ? (
-                <AssistantTurn key={`assistant-${index}`} content={message.content} />
-              ) : (
-                <WriterTurn key={`user-${index}`} content={message.content} />
-              ))}
+            <div className="mx-auto grid w-full max-w-5xl gap-10 px-5 py-8 sm:px-8 sm:py-12 lg:grid-cols-[minmax(0,1fr)_17rem]">
+              <div className="order-2 space-y-8 lg:order-1" aria-live="polite">
+                {messages.map((message, index) => message.role === 'assistant' ? (
+                  <AssistantTurn key={`assistant-${index}`} content={message.content} />
+                ) : (
+                  <WriterTurn key={`user-${index}`} content={message.content} />
+                ))}
 
-              {isStreaming && <AssistantTurn content={streamingText} streaming={Boolean(streamingText)} />}
+                {isStreaming && <AssistantTurn content={streamingText} streaming={Boolean(streamingText)} />}
 
-              {userTurnCount === 0 && !isStreaming && messages.some(message => message.role === 'assistant') && (
-                <div className="ml-10 space-y-3 sm:ml-11">
-                  <p className="text-xs text-muted-foreground">You can start anywhere</p>
-                  <div className="flex flex-wrap gap-2">
-                    {STARTING_POINTS.map(point => (
-                      <button
-                        key={point.label}
-                        type="button"
-                        onClick={() => send(point.message)}
-                        className="rounded-md border border-border/50 px-3 py-2 text-sm text-foreground/75 transition-colors hover:border-foreground/30 hover:bg-muted/40 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-                      >
-                        {point.label}
-                      </button>
-                    ))}
+                {userTurnCount === 0 && !isStreaming && messages.some(message => message.role === 'assistant') && (
+                  <div className="ml-10 space-y-3 sm:ml-11">
+                    <p className="text-xs text-muted-foreground">You can start anywhere</p>
+                    <div className="flex flex-wrap gap-2">
+                      {STARTING_POINTS.map(point => (
+                        <button
+                          key={point.label}
+                          type="button"
+                          onClick={() => send(point.message)}
+                          className="rounded-md border border-border/50 px-3 py-2 text-sm text-foreground/75 transition-colors hover:border-foreground/30 hover:bg-muted/40 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                        >
+                          {point.label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                </div>
-              )}
+                )}
 
-              {error && (
-                <div className="ml-10 rounded-lg bg-destructive/8 px-4 py-3 text-sm text-destructive sm:ml-11" role="alert">
-                  <p>{error}</p>
-                  <button
-                    type="button"
-                    onClick={() => requestAssistant(messages)}
-                    className="mt-2 font-medium underline underline-offset-4 hover:no-underline"
-                  >
-                    Try the conversation again
-                  </button>
-                </div>
-              )}
-              <div ref={endRef} />
+                {error && (
+                  <div className="ml-10 rounded-lg bg-destructive/8 px-4 py-3 text-sm text-destructive sm:ml-11" role="alert">
+                    <p>{error}</p>
+                    <button
+                      type="button"
+                      onClick={() => requestAssistant(messages)}
+                      className="mt-2 font-medium underline underline-offset-4 hover:no-underline"
+                    >
+                      Try the conversation again
+                    </button>
+                  </div>
+                )}
+                <div ref={endRef} />
+              </div>
+
+              <div className="order-1 lg:order-2">
+                <StorySetupRail checklist={checklist} draftFragments={draftFragments} updating={isStreaming} />
+              </div>
             </div>
           </main>
 

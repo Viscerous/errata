@@ -91,10 +91,86 @@ describe('story setup routes', () => {
     expect(response.status).toBe(200)
     expect(await response.text()).toContain('What are you starting with')
     expect(mockAgentCtor).toHaveBeenCalledWith(expect.objectContaining({
-      instructions: expect.stringContaining('one focused question at a time'),
+      instructions: expect.stringMatching(/one focused question at a time[\s\S]*Starting point[\s\S]*Opening direction/),
+      tools: expect.objectContaining({
+        updateStorySetup: expect.anything(),
+      }),
     }))
     expect(mockAgentStream).toHaveBeenCalledWith(expect.objectContaining({
       messages: [{ role: 'user', content: expect.stringContaining('Begin the story setup conversation') }],
+    }))
+  })
+
+  it('streams checklist progress and draft fragments with the next question', async () => {
+    async function* checklistStream() {
+      yield {
+        type: 'tool-call',
+        toolCallId: 'checklist-1',
+        toolName: 'updateStorySetup',
+        input: {
+          checklist: [
+            { key: 'starting-point', status: 'covered', note: 'A stolen memory premise' },
+            { key: 'characters', status: 'partial', note: 'Mara needs motivation' },
+          ],
+          fragments: [{
+            type: 'character',
+            name: 'Mara',
+            description: 'Courier carrying a stolen memory',
+            content: 'Mara is a courier whose motivation is still undecided.',
+          }],
+        },
+      }
+      yield {
+        type: 'tool-result',
+        toolCallId: 'checklist-1',
+        toolName: 'updateStorySetup',
+        output: { accepted: true },
+      }
+      yield { type: 'text-delta', text: 'What does Mara want badly enough to take this risk?' }
+      yield { type: 'finish', finishReason: 'stop' }
+    }
+
+    mockAgentStream.mockResolvedValue({
+      fullStream: checklistStream(),
+      text: Promise.resolve('What does Mara want badly enough to take this risk?'),
+      reasoning: Promise.resolve(''),
+      toolCalls: Promise.resolve([]),
+      finishReason: Promise.resolve('stop'),
+      steps: Promise.resolve([]),
+      totalUsage: Promise.resolve(undefined),
+    })
+
+    const response = await app.fetch(new Request(
+      'http://localhost/api/stories/story-setup-test/setup/chat',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: [{ role: 'user', content: 'A courier named Mara carrying a stolen memory.' }],
+        }),
+      },
+    ))
+
+    const events = (await response.text())
+      .trim()
+      .split('\n')
+      .map(line => JSON.parse(line) as Record<string, unknown>)
+
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'tool-call',
+      toolName: 'updateStorySetup',
+      args: expect.objectContaining({
+        checklist: expect.arrayContaining([
+          expect.objectContaining({ key: 'starting-point', status: 'covered' }),
+        ]),
+        fragments: expect.arrayContaining([
+          expect.objectContaining({ type: 'character', name: 'Mara' }),
+        ]),
+      }),
+    }))
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'text',
+      text: expect.stringContaining('What does Mara want'),
     }))
   })
 
@@ -149,11 +225,18 @@ describe('story setup routes', () => {
             { role: 'assistant', content: 'What are you starting with?' },
             { role: 'user', content: 'A courier named Mara carrying a stolen memory.' },
           ],
+          draftFragments: [{
+            type: 'character',
+            name: 'Mara Venn',
+            description: 'Courier with a missing past',
+            content: 'Mara is a careful black-market courier.',
+          }],
         }),
       },
     ))
 
     expect(response.status).toBe(200)
+    expect(mockGenerateText.mock.calls[0][0].system).toContain('Mara Venn')
     const body = await response.json() as { created: Array<{ type: string; name: string }> }
     expect(body.created.map(item => item.type)).toEqual([
       'guideline',

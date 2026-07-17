@@ -45,7 +45,7 @@ export function registerStorySetupAgents(): void {
     displayName: 'Story Setup',
     description: 'Helps the writer shape an idea before creating starter fragments.',
     createDefaultBlocks: createStorySetupBlocks,
-    availableTools: [],
+    availableTools: ['updateStorySetup'],
     buildPreviewContext: buildStorySetupPreviewContext,
   })
 

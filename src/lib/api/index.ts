@@ -23,7 +23,14 @@ export { folders } from './folders'
 export { sharing } from './sharing'
 export { erratanet } from './erratanet'
 export { storySetup } from './story-setup'
-export type { StorySetupMessage, StorySetupPlan, StorySetupResult } from './story-setup'
+export type {
+  StorySetupChecklistItem,
+  StorySetupChecklistKey,
+  StorySetupDraftFragment,
+  StorySetupMessage,
+  StorySetupPlan,
+  StorySetupResult,
+} from './story-setup'
 
 // HTTP Client utilities (exported for advanced use cases)
 export { apiFetch, fetchStream, fetchEventStream, ApiError } from './client'

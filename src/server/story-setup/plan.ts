@@ -5,6 +5,7 @@ import { getModel, buildProviderOptions } from '../llm/client'
 import { createFragment, getStory, listFragments, updateStory } from '../fragments/storage'
 import { addProseSection } from '../fragments/prose-chain'
 import type { Fragment } from '../fragments/schema'
+import type { StorySetupDraftFragment } from './schema'
 
 const StarterFragmentSchema = z.object({
   name: z.string().min(1).max(100),
@@ -45,6 +46,7 @@ export async function generateStorySetupPlan(
   dataDir: string,
   storyId: string,
   messages: StorySetupMessage[],
+  draftFragments: StorySetupDraftFragment[] = [],
 ): Promise<StorySetupPlan> {
   const story = await getStory(dataDir, storyId)
   if (!story) throw new Error(`Story ${storyId} not found`)
@@ -70,7 +72,12 @@ Do not recreate information already represented by an existing fragment unless t
 Current story: ${story.name}
 Current description: ${story.description || '(None)'}
 Existing fragments:
-${summarizeExistingFragments(existingFragments)}`,
+${summarizeExistingFragments(existingFragments)}
+
+Provisional fragments already shown to the writer:
+${draftFragments.length > 0 ? JSON.stringify(draftFragments, null, 2) : '(None yet.)'}
+
+Treat the provisional fragments as reviewed working material. Preserve their supported decisions and improve their completeness without silently changing their meaning.`,
     messages: [
       ...messages,
       {
