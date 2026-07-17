@@ -157,10 +157,11 @@ export function ProseOutlinePanel({
                   <TooltipTrigger asChild>
                     <button
                       onClick={toggleEditMode}
-                      className={`flex items-center justify-center size-5 rounded transition-colors duration-200 ${
+                      aria-label={editMode ? 'Exit reorder mode' : 'Reorder sections'}
+                      className={`flex items-center justify-center size-7 rounded transition-colors duration-200 ${
                         editMode
                           ? 'text-primary bg-accent/70'
-                          : 'text-muted-foreground/40 hover:text-muted-foreground hover:bg-accent/40'
+                          : 'text-muted-foreground hover:text-foreground hover:bg-accent/40'
                       }`}
                     >
                       <ArrowUpDown className="size-3" />
@@ -175,7 +176,8 @@ export function ProseOutlinePanel({
                     <button
                       onClick={() => addChapterMutation.mutate()}
                       disabled={addChapterMutation.isPending}
-                      className="flex items-center justify-center size-5 rounded text-amber-500/40 hover:text-amber-400 hover:bg-amber-500/10 transition-colors duration-200"
+                      aria-label="Add chapter"
+                      className="flex items-center justify-center size-7 rounded text-amber-500/70 hover:text-amber-400 hover:bg-amber-500/10 transition-colors duration-200"
                     >
                       <Bookmark className="size-3" />
                     </button>
@@ -199,7 +201,7 @@ export function ProseOutlinePanel({
                 exist in the story. Disappears the moment the first one is added. */}
             {!fragments.some(f => f.type === 'marker') && fragments.length > 1 && (
               <div className="shrink-0 px-4 pb-3">
-                <p className="text-[0.6875rem] font-display italic text-muted-foreground/70 leading-relaxed">
+                <p className="text-[0.6875rem] font-display italic text-muted-foreground leading-relaxed">
                   No chapters yet. Add one to group your summaries and find your place.
                 </p>
                 <button
@@ -208,7 +210,7 @@ export function ProseOutlinePanel({
                   className="mt-1.5 text-[0.6875rem] font-display italic text-muted-foreground hover:text-foreground transition-colors inline-flex items-center gap-1.5"
                 >
                   <Bookmark className="size-2.5" aria-hidden />
-                  <span>add first chapter</span>
+                  <span>Add first chapter</span>
                 </button>
               </div>
             )}
@@ -311,10 +313,10 @@ export function ProseOutlinePanel({
               <div className="shrink-0 border-t border-border/30 px-3 py-2">
                 <button
                   onClick={() => onJump(fragments.length - 1)}
-                  className="w-full flex items-center justify-center gap-1.5 text-[0.6875rem] font-display italic text-muted-foreground/80 hover:text-foreground transition-colors focus-visible:outline-none focus-visible:text-foreground"
+                  className="w-full flex items-center justify-center gap-1.5 text-[0.6875rem] font-display italic text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:text-foreground"
                 >
                   <ArrowDown className="size-2.5" aria-hidden />
-                  <span>jump to the latest</span>
+                  <span>Jump to latest passage</span>
                 </button>
               </div>
             )}

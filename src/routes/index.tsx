@@ -38,6 +38,7 @@ import { ProviderList, ProviderPanel } from '@/components/settings/ProviderManag
 import { AboutSection } from '@/components/settings/AboutPanel'
 import { DesktopUpdatesControls } from '@/components/settings/DesktopUpdatesPanel'
 import { SectionHeading } from '@/components/settings/primitives'
+import { getStoryDisplayName } from '@/lib/story-display'
 
 const THEME_OPTIONS = [
   { value: 'light' as const, label: 'Light', Icon: Sun },
@@ -400,7 +401,7 @@ function StoryListPage() {
     <div className="min-h-screen bg-background" data-component-id="stories-page">
       {/* Header */}
       <header className="border-b border-border/50" data-component-id="stories-header">
-        <div className="max-w-6xl mx-auto flex items-center justify-between px-4 sm:px-8 py-4 sm:py-6">
+        <div className="max-w-6xl mx-auto flex items-center justify-between gap-3 px-4 sm:px-8 py-4 sm:py-6">
           <div>
             <h1><ErrataLogo variant="full" size={28} /></h1>
           </div>
@@ -408,28 +409,30 @@ function StoryListPage() {
             <Button
               size="sm"
               variant="ghost"
-              className="gap-1.5"
+              className="size-11 gap-1.5 sm:h-8 sm:w-auto sm:px-3"
               onClick={() => setShowSettings(true)}
+              aria-label="Open settings"
               data-component-id="story-settings-button"
             >
               <Settings className="size-3.5" />
-              Settings
+              <span className="hidden sm:inline">Settings</span>
             </Button>
             <Button
               size="sm"
               variant="ghost"
-              className="gap-1.5"
+              className="size-11 gap-1.5 sm:h-8 sm:w-auto sm:px-3"
               onClick={() => setShowImportDialog(true)}
+              aria-label="Import a story or character card"
               data-component-id="story-import-button"
             >
               <Upload className="size-3.5" />
-              Import
+              <span className="hidden sm:inline">Import</span>
             </Button>
           <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) resetDialog() }}>
             <DialogTrigger asChild>
-              <Button size="sm" className="gap-1.5" data-component-id="story-create-open">
+              <Button size="sm" className="h-11 gap-1.5 px-3 sm:h-8" data-component-id="story-create-open">
                 <Plus className="size-3.5" />
-                New Story
+                New story
               </Button>
             </DialogTrigger>
             <DialogContent className="max-w-lg max-h-[85vh] flex flex-col overflow-hidden">
@@ -620,7 +623,7 @@ function StoryListPage() {
 
                 <div className="flex justify-end">
                   <Button type="submit" disabled={createMutation.isPending} data-component-id="story-create-submit">
-                    {createMutation.isPending ? 'Creating...' : 'Create'}
+                    {createMutation.isPending ? 'Creating story...' : 'Create story'}
                   </Button>
                 </div>
               </form>
@@ -652,8 +655,7 @@ function StoryListPage() {
         )}
 
         <div
-          className="grid gap-x-4 gap-y-7"
-          style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(190px, 1fr))' }}
+          className="grid grid-cols-2 gap-x-3 gap-y-7 sm:grid-cols-3 sm:gap-x-4 lg:grid-cols-4 xl:grid-cols-5"
           data-component-id="story-list"
         >
           {sortedStories.map((story, i) => (
@@ -662,7 +664,7 @@ function StoryListPage() {
               story={story}
               isRecent={i === 0 && sortedStories.length > 1}
               onDelete={() => {
-                if (confirm(`Delete "${story.name}"?`)) {
+                if (confirm(`Delete "${getStoryDisplayName(story.name)}"?`)) {
                   deleteMutation.mutate(story.id)
                 }
               }}
@@ -722,21 +724,27 @@ function StoryListPage() {
 
             <DesktopUpdatesControls />
             <AboutSection />
+
+            <section>
+              <SectionHeading label="Setup" />
+              <Button
+                type="button"
+                variant="outline"
+                className="mt-2 w-full justify-start gap-2"
+                onClick={() => {
+                  setShowSettings(false)
+                  setManualWizard(true)
+                }}
+              >
+                <Sparkles className="size-3.5" />
+                Run setup wizard
+              </Button>
+            </section>
           </div>
         </DialogContent>
       </Dialog>
 
       {showProviders && <ProviderPanel onClose={() => setShowProviders(false)} />}
-
-      {/* Re-run onboarding */}
-      <button
-        data-component-id="onboarding-launch-button"
-        onClick={() => setManualWizard(true)}
-        className="fixed bottom-4 left-4 sm:bottom-4 sm:left-4 flex items-center gap-1.5 text-[0.6875rem] text-muted-foreground hover:text-muted-foreground transition-colors safe-area-bottom"
-      >
-        <Sparkles className="size-3" />
-        Setup wizard
-      </button>
     </div>
   )
 }
@@ -792,6 +800,7 @@ function StoryCard({ story, onDelete, isRecent }: { story: StoryMeta; onDelete: 
 
   const hasStats = stats && (stats.prose + stats.characters + stats.knowledge + stats.guidelines) > 0
   const hasCover = !!story.coverImage
+  const displayName = getStoryDisplayName(story.name)
 
   return (
     <div className="relative group">
@@ -807,7 +816,7 @@ function StoryCard({ story, onDelete, isRecent }: { story: StoryMeta; onDelete: 
       <Link
         to="/story/$storyId"
         params={{ storyId: story.id }}
-        className="block"
+        className="block rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-4 focus-visible:ring-offset-background"
         onClick={() => {
           localStorage.setItem(`errata:last-accessed:${story.id}`, new Date().toISOString())
         }}
@@ -819,11 +828,12 @@ function StoryCard({ story, onDelete, isRecent }: { story: StoryMeta; onDelete: 
           {hasCover ? (
             <img src={story.coverImage!} alt="" className="absolute inset-0 h-full w-full object-cover" />
           ) : (
-            <GeneratedCover token={story.name} className="absolute inset-0" />
+            <GeneratedCover token={displayName} className="absolute inset-0" />
           )}
           {isRecent && (
-            <span className="absolute left-2 top-2 rounded-full bg-background/85 px-2 py-0.5 text-[0.625rem] font-medium text-muted-foreground">
-              Last opened
+            <span className="absolute bottom-2 left-2 rounded-full bg-background/90 px-2 py-0.5 text-[0.625rem] font-medium text-foreground/75 sm:bottom-auto sm:top-2">
+              <span className="sm:hidden">Recent</span>
+              <span className="hidden sm:inline">Last opened</span>
             </span>
           )}
         </div>
@@ -831,14 +841,14 @@ function StoryCard({ story, onDelete, isRecent }: { story: StoryMeta; onDelete: 
         {/* Caption below the cover — no overlay, no gradient. */}
         <div className="mt-2.5 px-0.5">
           <h2 className="font-display text-base leading-snug line-clamp-1 transition-colors group-hover:text-primary">
-            {story.name}
+            {displayName}
           </h2>
           {story.description && (
             <p className="mt-0.5 line-clamp-1 text-[0.8125rem] leading-snug text-muted-foreground">
               {story.description}
             </p>
           )}
-          <div className="mt-1.5 flex items-center gap-3 text-[0.6875rem] text-muted-foreground">
+          <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[0.6875rem] text-muted-foreground sm:gap-x-3">
             {hasStats ? (
               <>
                 {stats.prose > 0 && (
@@ -877,28 +887,31 @@ function StoryCard({ story, onDelete, isRecent }: { story: StoryMeta; onDelete: 
       {/* Hover action buttons — over the cover, outside the Link to prevent navigation */}
       <div className="absolute right-2 top-2 z-10 flex items-center gap-1 opacity-0 transition-opacity duration-150 group-hover:opacity-100">
         <button
-          className="grid size-7 place-items-center rounded-full bg-black/55 text-white/85 transition-colors hover:bg-black/75 hover:text-white"
+          className="grid size-11 place-items-center rounded-full bg-black/60 text-white/90 transition-colors hover:bg-black/80 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white sm:size-7"
           title="Set cover image"
+          aria-label={`Set cover image for ${displayName}`}
           onClick={() => coverInputRef.current?.click()}
         >
-          <Camera className="size-3.5" />
+          <Camera className="size-4 sm:size-3.5" />
         </button>
         {hasCover && (
           <button
-            className="grid size-7 place-items-center rounded-full bg-black/55 text-white/85 transition-colors hover:bg-black/75 hover:text-white"
+            className="grid size-11 place-items-center rounded-full bg-black/60 text-white/90 transition-colors hover:bg-black/80 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white sm:size-7"
             title="Remove cover"
+            aria-label={`Remove cover image from ${displayName}`}
             onClick={() => updateCoverMutation.mutate(null)}
           >
-            <X className="size-3.5" />
+            <X className="size-4 sm:size-3.5" />
           </button>
         )}
         <button
-          className="grid size-7 place-items-center rounded-full bg-black/55 text-white/85 transition-colors hover:bg-red-600/85 hover:text-white"
-          title={`Delete "${story.name}"`}
+          className="grid size-11 place-items-center rounded-full bg-black/60 text-white/90 transition-colors hover:bg-red-600/85 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white sm:size-7"
+          title={`Delete "${displayName}"`}
+          aria-label={`Delete ${displayName}`}
           data-component-id={`story-${story.id}-delete-button`}
           onClick={onDelete}
         >
-          <Trash2 className="size-3.5" />
+          <Trash2 className="size-4 sm:size-3.5" />
         </button>
       </div>
     </div>

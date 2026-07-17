@@ -485,7 +485,7 @@ export const ProseBlock = memo(function ProseBlock({
             </div>
           ) : canQuickRegenerate ? (
             <button
-              className="group/prompt flex items-start gap-2.5 w-full text-left transition-all"
+              className="group/prompt flex min-h-6 items-start gap-2.5 w-full text-left transition-all"
               onClick={(e) => {
                 e.stopPropagation()
                 setActionInput(generatedFrom || fragment.description || '')

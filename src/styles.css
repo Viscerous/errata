@@ -122,7 +122,7 @@ code {
   --secondary: oklch(0.215 0.012 55);
   --secondary-foreground: oklch(0.895 0.015 75);
   --muted: oklch(0.215 0.012 55);
-  --muted-foreground: oklch(0.555 0.018 60);
+  --muted-foreground: oklch(0.595 0.018 60);
   --accent: oklch(0.235 0.015 55);
   --accent-foreground: oklch(0.895 0.015 75);
   --destructive: oklch(0.605 0.155 25);
@@ -201,6 +201,11 @@ code {
   }
   body {
     @apply bg-background text-foreground;
+  }
+
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
   }
 
   /* Refined scrollbars */
@@ -604,5 +609,16 @@ code {
   [class*="group-hover"][class*=":opacity-50"],
   [class*="group-hover"][class*=":opacity-40"] {
     opacity: 1 !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }
