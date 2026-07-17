@@ -77,6 +77,7 @@ export function storySetupRoutes(dataDir: string) {
           content: t.String(),
         })),
         draftFragments: t.Optional(t.Array(t.Object({
+          key: t.String({ minLength: 1, maxLength: 50, pattern: '^[a-z0-9][a-z0-9-]*$' }),
           type: t.Union([
             t.Literal('guideline'),
             t.Literal('knowledge'),

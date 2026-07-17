@@ -113,6 +113,7 @@ describe('story setup routes', () => {
             { key: 'characters', status: 'partial', note: 'Mara needs motivation' },
           ],
           fragments: [{
+            key: 'mara',
             type: 'character',
             name: 'Mara',
             description: 'Courier carrying a stolen memory',
@@ -196,7 +197,9 @@ describe('story setup routes', () => {
 
   it('turns the conversation into validated story fragments only when requested', async () => {
     mockGenerateText.mockResolvedValue({
-      output: {
+      toolCalls: [{
+        toolName: 'submitStorySetupPlan',
+        input: {
         name: 'The Memory Courier',
         description: 'A courier must deliver a stolen memory before it rewrites her past.',
         guideline: 'Close third person through Mara. Tense, tactile prose with restrained exposition.',
@@ -211,7 +214,8 @@ describe('story setup routes', () => {
           content: 'Mara is a careful black-market courier who has gaps in her own childhood memories.',
         }],
         opening: 'Mara knew the memory was stolen because it was still warm.',
-      },
+        },
+      }],
       totalUsage: undefined,
     })
 
@@ -226,6 +230,7 @@ describe('story setup routes', () => {
             { role: 'user', content: 'A courier named Mara carrying a stolen memory.' },
           ],
           draftFragments: [{
+            key: 'mara',
             type: 'character',
             name: 'Mara Venn',
             description: 'Courier with a missing past',
@@ -236,7 +241,12 @@ describe('story setup routes', () => {
     ))
 
     expect(response.status).toBe(200)
-    expect(mockGenerateText.mock.calls[0][0].system).toContain('Mara Venn')
+    expect(mockGenerateText).toHaveBeenCalledWith(expect.objectContaining({
+      system: expect.stringContaining('Mara Venn'),
+      tools: expect.objectContaining({ submitStorySetupPlan: expect.anything() }),
+      toolChoice: { type: 'tool', toolName: 'submitStorySetupPlan' },
+    }))
+    expect(mockGenerateText.mock.calls[0][0]).not.toHaveProperty('output')
     const body = await response.json() as { created: Array<{ type: string; name: string }> }
     expect(body.created.map(item => item.type)).toEqual([
       'guideline',

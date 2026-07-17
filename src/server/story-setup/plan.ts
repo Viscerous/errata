@@ -1,4 +1,4 @@
-import { generateText, Output } from 'ai'
+import { generateText, tool } from 'ai'
 import { z } from 'zod/v4'
 import { generateFragmentId } from '@/lib/fragment-ids'
 import { getModel, buildProviderOptions } from '../llm/client'
@@ -57,6 +57,11 @@ export async function generateStorySetupPlan(
     | Record<string, Record<string, string>>
     | undefined
 
+  const submitStorySetupPlan = tool({
+    description: 'Submit the validated story setup plan for Errata to save.',
+    inputSchema: StorySetupPlanSchema,
+  })
+
   const result = await generateText({
     model,
     temperature,
@@ -82,17 +87,19 @@ Treat the provisional fragments as reviewed working material. Preserve their sup
       ...messages,
       {
         role: 'user',
-        content: 'Create the validated starter plan now. Return only the structured result.',
+        content: 'Create the validated starter plan now and submit it with the provided tool.',
       },
     ],
-    output: Output.object({
-      name: 'story_setup_plan',
-      description: 'A grounded starter set derived from the setup conversation.',
-      schema: StorySetupPlanSchema,
-    }),
+    tools: { submitStorySetupPlan },
+    toolChoice: { type: 'tool', toolName: 'submitStorySetupPlan' },
   })
 
-  return StorySetupPlanSchema.parse(result.output)
+  const submission = result.toolCalls.find(call => call.toolName === 'submitStorySetupPlan')
+  if (!submission) {
+    throw new Error('The story setup model did not submit a plan.')
+  }
+
+  return StorySetupPlanSchema.parse(submission.input)
 }
 
 function makeFragment(

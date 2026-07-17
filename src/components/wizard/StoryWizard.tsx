@@ -1,13 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { ArrowUp, Check, Circle, FileText, LoaderCircle, Minus, Square, X } from 'lucide-react'
+import { ArrowUp, Check, Circle, FileText, Minus, Square, X } from 'lucide-react'
 import {
   api,
   type StorySetupChecklistItem,
   type StorySetupChecklistKey,
   type StorySetupDraftFragment,
   type StorySetupMessage,
-  type StorySetupResult,
 } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
@@ -137,10 +136,10 @@ function StorySetupRail({
 
       <section aria-labelledby="draft-fragments-heading">
         <div className="flex items-center justify-between gap-3">
-          <h2 id="draft-fragments-heading" className="text-sm font-semibold text-foreground">Draft fragments</h2>
+          <h2 id="draft-fragments-heading" className="text-sm font-semibold text-foreground">Story fragments</h2>
           {updating && <span className="text-[0.6875rem] text-muted-foreground">Updating</span>}
         </div>
-        <p className="mt-1 text-xs leading-5 text-muted-foreground">Previews only. Open one to read its current content.</p>
+        <p className="mt-1 text-xs leading-5 text-muted-foreground">Saved as the conversation develops. Open one to read it.</p>
 
         {draftFragments.length === 0 ? (
           <div className="mt-4 flex items-start gap-2.5 text-xs leading-5 text-muted-foreground">
@@ -149,8 +148,8 @@ function StorySetupRail({
           </div>
         ) : (
           <div className="mt-3 divide-y divide-border/30 border-y border-border/30">
-            {draftFragments.map((fragment, index) => (
-              <details key={`${fragment.type}-${fragment.name}-${index}`} className="group py-3">
+            {draftFragments.map(fragment => (
+              <details key={fragment.id ?? fragment.key} className="group py-3">
                 <summary className="cursor-pointer list-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 [&::-webkit-details-marker]:hidden">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
@@ -171,49 +170,13 @@ function StorySetupRail({
   )
 }
 
-function SetupComplete({ result, onOpen }: { result: StorySetupResult; onOpen: () => void }) {
-  const grouped = useMemo(() => {
-    const counts = new Map<string, number>()
-    for (const fragment of result.created) {
-      counts.set(fragment.type, (counts.get(fragment.type) ?? 0) + 1)
-    }
-    return [...counts.entries()]
-  }, [result.created])
-
-  return (
-    <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col items-center justify-center px-6 py-16 text-center" data-component-id="story-setup-complete">
-      <div className="mb-6 flex size-12 items-center justify-center rounded-full bg-primary/10 text-primary">
-        <Check className="size-5" aria-hidden />
-      </div>
-      <h2 className="font-display text-3xl italic text-balance sm:text-4xl">{result.plan.name}</h2>
-      {result.plan.description && (
-        <p className="mt-4 max-w-[60ch] font-prose text-base leading-7 text-foreground/70">
-          {result.plan.description}
-        </p>
-      )}
-      <div className="mt-8 flex flex-wrap justify-center gap-x-5 gap-y-2 text-sm text-muted-foreground">
-        {grouped.map(([type, count]) => (
-          <span key={type}>{count} {type}{count === 1 ? '' : 's'}</span>
-        ))}
-        {grouped.length === 0 && <span>Story details saved</span>}
-      </div>
-      <Button className="mt-10" onClick={onOpen}>
-        Open story
-      </Button>
-      <p className="mt-3 text-xs text-muted-foreground">Everything created here remains editable.</p>
-    </div>
-  )
-}
-
 export function StoryWizard({ storyId, onComplete }: StoryWizardProps) {
   const queryClient = useQueryClient()
   const [messages, setMessages] = useState<StorySetupMessage[]>([])
   const [input, setInput] = useState('')
   const [streamingText, setStreamingText] = useState('')
   const [isStreaming, setIsStreaming] = useState(false)
-  const [isCreating, setIsCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [result, setResult] = useState<StorySetupResult | null>(null)
   const [checklist, setChecklist] = useState<StorySetupChecklistItem[]>(INITIAL_CHECKLIST)
   const [draftFragments, setDraftFragments] = useState<StorySetupDraftFragment[]>([])
   const abortRef = useRef<AbortController | null>(null)
@@ -221,7 +184,6 @@ export function StoryWizard({ storyId, onComplete }: StoryWizardProps) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const endRef = useRef<HTMLDivElement | null>(null)
 
-  const hasUserAnswer = messages.some(message => message.role === 'user' && message.content.trim())
   const userTurnCount = messages.filter(message => message.role === 'user').length
 
   const requestAssistant = useCallback(async (history: StorySetupMessage[]) => {
@@ -257,6 +219,18 @@ export function StoryWizard({ storyId, onComplete }: StoryWizardProps) {
           if (Array.isArray(snapshot.fragments)) {
             setDraftFragments(snapshot.fragments)
           }
+        } else if (value.type === 'tool-result' && value.toolName === 'updateStorySetup') {
+          const saved = value.result as { fragments?: StorySetupDraftFragment[] }
+          if (Array.isArray(saved.fragments)) {
+            setDraftFragments(saved.fragments)
+          }
+          await Promise.all([
+            queryClient.invalidateQueries({ queryKey: ['story', storyId] }),
+            queryClient.invalidateQueries({ queryKey: ['fragments', storyId] }),
+            queryClient.invalidateQueries({ queryKey: ['wizard-fragments', storyId] }),
+            queryClient.invalidateQueries({ queryKey: ['fragment-count', storyId] }),
+            queryClient.invalidateQueries({ queryKey: ['proseChain', storyId] }),
+          ])
         }
       }
     } catch (caught) {
@@ -272,7 +246,7 @@ export function StoryWizard({ storyId, onComplete }: StoryWizardProps) {
       abortRef.current = null
       requestAnimationFrame(() => textareaRef.current?.focus())
     }
-  }, [storyId])
+  }, [queryClient, storyId])
 
   useEffect(() => {
     if (initialRequestRef.current) return
@@ -294,12 +268,12 @@ export function StoryWizard({ storyId, onComplete }: StoryWizardProps) {
 
   const send = useCallback((content: string) => {
     const trimmed = content.trim()
-    if (!trimmed || isStreaming || isCreating) return
+    if (!trimmed || isStreaming) return
     const history: StorySetupMessage[] = [...messages, { role: 'user', content: trimmed }]
     setMessages(history)
     setInput('')
     requestAssistant(history)
-  }, [isCreating, isStreaming, messages, requestAssistant])
+  }, [isStreaming, messages, requestAssistant])
 
   const handleSubmit = (event: React.FormEvent) => {
     event.preventDefault()
@@ -310,27 +284,6 @@ export function StoryWizard({ storyId, onComplete }: StoryWizardProps) {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault()
       send(input)
-    }
-  }
-
-  const handleCreate = async () => {
-    if (!hasUserAnswer || isStreaming || isCreating) return
-    setIsCreating(true)
-    setError(null)
-    try {
-      const setup = await api.storySetup.complete(storyId, messages, draftFragments)
-      setResult(setup)
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['story', storyId] }),
-        queryClient.invalidateQueries({ queryKey: ['fragments', storyId] }),
-        queryClient.invalidateQueries({ queryKey: ['wizard-fragments', storyId] }),
-        queryClient.invalidateQueries({ queryKey: ['fragment-count', storyId] }),
-        queryClient.invalidateQueries({ queryKey: ['proseChain', storyId] }),
-      ])
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Errata could not create the story setup.')
-    } finally {
-      setIsCreating(false)
     }
   }
 
@@ -347,33 +300,20 @@ export function StoryWizard({ storyId, onComplete }: StoryWizardProps) {
             <ErrataMark size={22} className="shrink-0 text-primary" />
             <div className="min-w-0">
               <h1 className="truncate font-display text-xl italic leading-tight sm:text-2xl">Shape your story</h1>
-              <p className="hidden text-xs text-muted-foreground sm:block">Talk it through, then create only what feels useful.</p>
+              <p className="hidden text-xs text-muted-foreground sm:block">Talk it through; your story takes shape as you go.</p>
             </div>
           </div>
 
           <div className="flex shrink-0 items-center gap-2">
-            {!result && (
-              <Button
-                size="sm"
-                onClick={handleCreate}
-                disabled={!hasUserAnswer || isStreaming || isCreating}
-              >
-                {isCreating && <LoaderCircle className="size-3.5 motion-safe:animate-spin" aria-hidden />}
-                {isCreating ? 'Creating story' : 'Create story'}
-              </Button>
-            )}
-            <Button variant="ghost" size="icon-sm" onClick={handleClose} aria-label="Skip setup and close">
+            <Button size="sm" onClick={handleClose}>Open story</Button>
+            <Button variant="ghost" size="icon-sm" onClick={handleClose} aria-label="Close story setup">
               <X className="size-4" aria-hidden />
             </Button>
           </div>
         </div>
       </header>
 
-      {result ? (
-        <SetupComplete result={result} onOpen={onComplete} />
-      ) : (
-        <>
-          <main className="min-h-0 flex-1 overflow-y-auto" data-component-id="story-setup-transcript">
+      <main className="min-h-0 flex-1 overflow-y-auto" data-component-id="story-setup-transcript">
             <div className="mx-auto grid w-full max-w-5xl gap-10 px-5 py-8 sm:px-8 sm:py-12 lg:grid-cols-[minmax(0,1fr)_17rem]">
               <div className="order-2 space-y-8 lg:order-1" aria-live="polite">
                 {messages.map((message, index) => message.role === 'assistant' ? (
@@ -421,17 +361,22 @@ export function StoryWizard({ storyId, onComplete }: StoryWizardProps) {
                 <StorySetupRail checklist={checklist} draftFragments={draftFragments} updating={isStreaming} />
               </div>
             </div>
-          </main>
+      </main>
 
-          <footer className="shrink-0 border-t border-border/25 bg-background px-4 py-3 sm:px-6 sm:py-4">
-            <form onSubmit={handleSubmit} className="mx-auto max-w-3xl">
+      <footer className="shrink-0 border-t border-border/25 bg-background">
+        <div className="mx-auto grid w-full max-w-5xl gap-10 px-5 py-3 sm:px-8 sm:py-4 lg:grid-cols-[minmax(0,1fr)_17rem]">
+          <form
+            onSubmit={handleSubmit}
+            className="min-w-0 lg:col-start-1"
+            data-component-id="story-setup-composer-column"
+          >
               <div className="flex items-end gap-2 rounded-xl border border-border/55 bg-card/25 p-2 focus-within:border-foreground/35">
                 <Textarea
                   ref={textareaRef}
                   value={input}
                   onChange={event => setInput(event.target.value)}
                   onKeyDown={handleKeyDown}
-                  disabled={isStreaming || isCreating}
+                  disabled={isStreaming}
                   rows={1}
                   autoFocus
                   aria-label="Your story idea"
@@ -449,19 +394,18 @@ export function StoryWizard({ storyId, onComplete }: StoryWizardProps) {
                     <Square className="size-3 fill-current" aria-hidden />
                   </Button>
                 ) : (
-                  <Button type="submit" size="icon-sm" disabled={!input.trim() || isCreating} aria-label="Send message">
+                  <Button type="submit" size="icon-sm" disabled={!input.trim()} aria-label="Send message">
                     <ArrowUp className="size-4" aria-hidden />
                   </Button>
                 )}
               </div>
               <div className="mt-2 flex items-center justify-between gap-4 px-1 text-[0.6875rem] text-muted-foreground">
-                <p>Nothing is saved until you create the story.</p>
+                <p>Fragments are saved as the conversation develops.</p>
                 <p className="hidden sm:block">Enter to send, Shift+Enter for a new line</p>
               </div>
-            </form>
-          </footer>
-        </>
-      )}
+          </form>
+        </div>
+      </footer>
     </div>
   )
 }

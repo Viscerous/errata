@@ -21,6 +21,8 @@ export interface StorySetupChecklistItem {
 }
 
 export interface StorySetupDraftFragment {
+  id?: string
+  key: string
   type: 'guideline' | 'knowledge' | 'character' | 'prose'
   name: string
   description: string

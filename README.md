@@ -26,7 +26,7 @@ Join the community on Discord: https://discord.gg/ywVFKvdH49
 
 ### Story Wizard
 
-Talk through any starting point with Errata, from a rough premise to a character, scene, or mood. When the idea feels ready, Errata turns the conversation into editable story details, guidelines, characters, knowledge, and an opening when appropriate.
+Talk through any starting point with Errata, from a rough premise to a character, scene, or mood. A live checklist tracks useful gaps while editable guidelines, characters, knowledge, and opening prose are created and revised as the conversation develops. Open the story whenever you are ready; there is no separate creation step.
 
 ### Characters & Fragments
 
