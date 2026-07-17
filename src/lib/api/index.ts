@@ -22,6 +22,8 @@ export { tokenUsage } from './token-usage'
 export { folders } from './folders'
 export { sharing } from './sharing'
 export { erratanet } from './erratanet'
+export { storySetup } from './story-setup'
+export type { StorySetupMessage, StorySetupPlan, StorySetupResult } from './story-setup'
 
 // HTTP Client utilities (exported for advanced use cases)
 export { apiFetch, fetchStream, fetchEventStream, ApiError } from './client'
@@ -45,6 +47,7 @@ import { tokenUsage } from './token-usage'
 import { folders } from './folders'
 import { sharing } from './sharing'
 import { erratanet } from './erratanet'
+import { storySetup } from './story-setup'
 
 export const api = {
   stories,
@@ -65,4 +68,5 @@ export const api = {
   folders,
   sharing,
   erratanet,
+  storySetup,
 }
