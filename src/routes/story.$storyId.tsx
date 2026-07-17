@@ -292,6 +292,11 @@ function StoryEditorPage() {
     notifyPluginPanelOpen({ panel: 'debug' }, { storyId })
   }
 
+  const handleLaunchWizard = useCallback(() => {
+    setShowWizard(true)
+    notifyPluginPanelOpen({ panel: 'wizard' }, { storyId })
+  }, [storyId])
+
   const handleSectionChange = useCallback((section: SidebarSection) => {
     setPluginCloseReturnSection(null)
     setActiveSection(section)
@@ -541,6 +546,7 @@ function StoryEditorPage() {
         story={story}
         activeSection={activeSection}
         onSectionChange={handleSectionChange}
+        onLaunchWizard={handleLaunchWizard}
         enabledPanelPlugins={sidebarPanelPlugins}
       />
 
@@ -563,10 +569,7 @@ function StoryEditorPage() {
         onOpenPluginPanel={handleOpenPluginPanelFromSettings}
         onTogglePluginSidebar={setPluginSidebarVisible}
         pluginSidebarVisibility={pluginSidebarVisibility}
-        onLaunchWizard={() => {
-          setShowWizard(true)
-          notifyPluginPanelOpen({ panel: 'wizard' }, { storyId })
-        }}
+        onLaunchWizard={handleLaunchWizard}
         onImportFragment={handleOpenImport}
         onImportCard={handleOpenTavernImport}
         onExport={() => {
@@ -714,10 +717,7 @@ function StoryEditorPage() {
               setEditSelectionText(selectedText ?? null)
             }}
             onDebugLog={handleDebugLog}
-            onLaunchWizard={() => {
-              setShowWizard(true)
-              notifyPluginPanelOpen({ panel: 'wizard' }, { storyId })
-            }}
+            onLaunchWizard={handleLaunchWizard}
             onAskLibrarian={(fragmentId, prefill) => {
               setActiveSection('agent-activity')
               setAskLibrarianFragmentId(fragmentId)

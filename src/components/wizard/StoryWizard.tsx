@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { StreamMarkdown } from '@/components/ui/stream-markdown'
 import { ErrataMark } from '@/components/ErrataLogo'
+import { readStorySetupSession, writeStorySetupSession } from './story-setup-session'
 
 interface StoryWizardProps {
   storyId: string
@@ -179,6 +180,7 @@ export function StoryWizard({ storyId, onComplete }: StoryWizardProps) {
   const [error, setError] = useState<string | null>(null)
   const [checklist, setChecklist] = useState<StorySetupChecklistItem[]>(INITIAL_CHECKLIST)
   const [draftFragments, setDraftFragments] = useState<StorySetupDraftFragment[]>([])
+  const [sessionLoaded, setSessionLoaded] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
   const initialRequestRef = useRef(false)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
@@ -249,11 +251,30 @@ export function StoryWizard({ storyId, onComplete }: StoryWizardProps) {
   }, [queryClient, storyId])
 
   useEffect(() => {
+    const saved = readStorySetupSession(window.localStorage, storyId)
+    if (saved) {
+      const savedByKey = new Map(saved.checklist.map(item => [item.key, item]))
+      setMessages(saved.messages)
+      setChecklist(CHECKLIST.map(item => savedByKey.get(item.key) ?? { ...item, status: 'missing', note: '' }))
+      setDraftFragments(saved.draftFragments)
+    }
+    setSessionLoaded(true)
+  }, [storyId])
+
+  useEffect(() => {
+    if (!sessionLoaded) return
     if (initialRequestRef.current) return
     initialRequestRef.current = true
-    requestAssistant([])
+    if (messages.length === 0 || messages.at(-1)?.role === 'user') {
+      requestAssistant(messages)
+    }
     return () => abortRef.current?.abort()
-  }, [requestAssistant])
+  }, [messages, requestAssistant, sessionLoaded])
+
+  useEffect(() => {
+    if (!sessionLoaded) return
+    writeStorySetupSession(window.localStorage, storyId, { messages, checklist, draftFragments })
+  }, [checklist, draftFragments, messages, sessionLoaded, storyId])
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: isStreaming ? 'auto' : 'smooth', block: 'end' })

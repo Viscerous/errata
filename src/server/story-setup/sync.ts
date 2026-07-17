@@ -25,6 +25,11 @@ export interface PersistedStorySetupFragment extends StorySetupDraftFragment {
   id: string
 }
 
+export async function listStorySetupFragments(dataDir: string, storyId: string): Promise<Fragment[]> {
+  return (await listFragments(dataDir, storyId))
+    .filter(fragment => typeof fragment.meta.storySetupKey === 'string')
+}
+
 function makeSetupFragment(draft: StorySetupDraftFragment, order: number): Fragment {
   const now = new Date().toISOString()
   return {

@@ -38,6 +38,7 @@ import {
   GitBranch,
   Radio,
   Library,
+  WandSparkles,
 } from 'lucide-react'
 import { useHelp } from '@/hooks/use-help'
 import { componentId } from '@/lib/dom-ids'
@@ -67,6 +68,7 @@ interface StorySidebarProps {
   story: StoryMeta | undefined
   activeSection: SidebarSection
   onSectionChange: (section: SidebarSection) => void
+  onLaunchWizard?: () => void
   enabledPanelPlugins: Array<{
     name: string
     title: string
@@ -110,6 +112,7 @@ export function StorySidebar({
   story,
   activeSection,
   onSectionChange,
+  onLaunchWizard,
   enabledPanelPlugins,
 }: StorySidebarProps) {
   const { openHelp } = useHelp()
@@ -175,6 +178,18 @@ export function StorySidebar({
                   <span>Story</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
+              {onLaunchWizard && (
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    onClick={() => { onLaunchWizard(); dismissMobileSheet() }}
+                    tooltip="Story setup"
+                    data-component-id="sidebar-story-setup"
+                  >
+                    <WandSparkles className="size-4" />
+                    <span>Story setup</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              )}
               <SidebarMenuItem>
                 <SidebarMenuButton
                   isActive={activeSection === 'story-info'}

@@ -24,6 +24,9 @@ export interface AgentBlockContext {
   // System prompt fragments (tagged pass-to-librarian-system-prompt)
   systemPromptFragments: Fragment[]
 
+  // Story setup
+  storySetupFragments?: Fragment[]
+
   // Librarian analyze
   allCharacters?: Fragment[]
   allKnowledge?: Fragment[]

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createTempDir, makeTestSettings, seedTestProvider } from '../setup'
 import { createStory, getStory, listFragments } from '@/server/fragments/storage'
 import { getProseChain } from '@/server/fragments/prose-chain'
+import { syncStorySetupSnapshot } from '@/server/story-setup/sync'
 import type { StoryMeta } from '@/server/fragments/schema'
 
 const { mockAgentCtor, mockAgentStream, mockGenerateText } = vi.hoisted(() => ({
@@ -98,6 +99,34 @@ describe('story setup routes', () => {
     }))
     expect(mockAgentStream).toHaveBeenCalledWith(expect.objectContaining({
       messages: [{ role: 'user', content: expect.stringContaining('Begin the story setup conversation') }],
+    }))
+  })
+
+  it('includes existing setup fragments when the writer returns to refine the story', async () => {
+    await syncStorySetupSnapshot(dataDir, 'story-setup-test', {
+      story: { name: 'The Memory Courier', description: 'A courier carries a stolen memory.' },
+      fragments: [{
+        key: 'mara',
+        type: 'character',
+        name: 'Mara',
+        description: 'Courier with a stolen memory',
+        content: 'Mara is cautious and wants to learn who altered her childhood.',
+      }],
+    })
+    mockChatResponse('What would you like to sharpen about Mara?')
+
+    const response = await app.fetch(new Request(
+      'http://localhost/api/stories/story-setup-test/setup/chat',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: [] }),
+      },
+    ))
+
+    expect(response.status).toBe(200)
+    expect(mockAgentCtor).toHaveBeenCalledWith(expect.objectContaining({
+      instructions: expect.stringMatching(/Existing story setup fragments[\s\S]*Mara[\s\S]*altered her childhood/),
     }))
   })
 

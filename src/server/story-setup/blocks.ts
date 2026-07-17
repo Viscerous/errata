@@ -2,6 +2,7 @@ import type { ContextBlock } from '../llm/context-builder'
 import type { AgentBlockContext } from '../agents/agent-block-context'
 import { buildBasePreviewContext } from '../agents/block-helpers'
 import { instructionRegistry } from '../instructions'
+import { listStorySetupFragments } from './sync'
 
 export const STORY_SETUP_SYSTEM_PROMPT = `You are Errata's story setup collaborator. Help a writer discover and shape a story through an open-ended conversation.
 
@@ -29,15 +30,30 @@ export function createStorySetupBlocks(ctx: AgentBlockContext): ContextBlock[] {
     ? `\n\nThis story currently has the working title "${ctx.story.name}"${ctx.story.description ? ` and description: ${ctx.story.description}` : ''}. Treat these as editable starting material.`
     : ''
 
+  const setupFragments = ctx.storySetupFragments ?? []
+  const existingFragments = setupFragments.length > 0
+    ? `\n\nExisting story setup fragments follow. The writer is returning to refine the story. Preserve each storySetupKey and include the complete set in updateStorySetup unless the writer explicitly replaces an idea.\n\n${setupFragments.map(fragment => [
+      `### ${fragment.name}`,
+      `storySetupKey: ${fragment.meta.storySetupKey}`,
+      `type: ${fragment.type}`,
+      `description: ${fragment.description}`,
+      fragment.content,
+    ].join('\n')).join('\n\n')}`
+    : ''
+
   return [{
     id: 'story-setup-instructions',
     role: 'system',
-    content: `${instructionRegistry.resolve('story-setup.system', ctx.modelId)}${existingStory}`,
+    content: `${instructionRegistry.resolve('story-setup.system', ctx.modelId)}${existingStory}${existingFragments}`,
     order: 100,
     source: 'builtin',
   }]
 }
 
 export async function buildStorySetupPreviewContext(dataDir: string, storyId: string): Promise<AgentBlockContext> {
-  return buildBasePreviewContext(dataDir, storyId)
+  const [context, storySetupFragments] = await Promise.all([
+    buildBasePreviewContext(dataDir, storyId),
+    listStorySetupFragments(dataDir, storyId),
+  ])
+  return { ...context, storySetupFragments }
 }
