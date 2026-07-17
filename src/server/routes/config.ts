@@ -37,14 +37,18 @@ function isGeminiProvider(provider: { preset?: string; baseURL: string }) {
   return provider.preset === 'gemini' || provider.baseURL.includes('generativelanguage.googleapis.com')
 }
 
+function normalizeGeminiBaseURL(baseURL: string) {
+  return baseURL.replace(/\/+$/, '').replace(/\/openai$/, '')
+}
+
 async function fetchProviderModels(provider: {
   preset?: string
   baseURL: string
   apiKey: string
   customHeaders?: Record<string, string>
 }) {
-  const base = provider.baseURL.replace(/\/+$/, '')
   if (isGeminiProvider(provider)) {
+    const base = normalizeGeminiBaseURL(provider.baseURL)
     const res = await fetch(`${base}/models`, {
       headers: {
         'x-goog-api-key': provider.apiKey,
@@ -68,6 +72,8 @@ async function fetchProviderModels(provider: {
       .sort((a, b) => a.id.localeCompare(b.id))
     return { models }
   }
+
+  const base = provider.baseURL.replace(/\/+$/, '')
 
   const url = /\/v\d+$/.test(base) ? `${base}/models` : `${base}/v1/models`
   const res = await fetch(url, {
@@ -257,8 +263,8 @@ export function configRoutes(dataDir: string) {
       }
 
       try {
-        const base = baseURL.replace(/\/+$/, '')
         if (isGeminiProvider({ preset, baseURL })) {
+          const base = normalizeGeminiBaseURL(baseURL)
           const model = body.model.replace(/^models\//, '')
           const res = await fetch(`${base}/models/${encodeURIComponent(model)}:generateContent`, {
             method: 'POST',
@@ -284,6 +290,8 @@ export function configRoutes(dataDir: string) {
             .join('') ?? ''
           return { ok: true, reply }
         }
+
+        const base = baseURL.replace(/\/+$/, '')
 
         const url = /\/v\d+$/.test(base) ? `${base}/chat/completions` : `${base}/v1/chat/completions`
         const res = await fetch(url, {

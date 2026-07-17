@@ -159,4 +159,28 @@ describe('llm client model resolution', () => {
     expect(resolved.modelId).toBe('gemini-3.5-flash')
     expect((resolved.model as unknown as { provider: string }).provider).toBe('google.generative-ai')
   })
+
+  it('migrates Google OpenAI-compatible endpoints to the native Gemini provider', async () => {
+    await saveGlobalConfig(dataDir, {
+      defaultProviderId: 'legacy-gemini',
+      providers: [{
+        id: 'legacy-gemini',
+        name: 'Gemini (legacy)',
+        preset: 'custom',
+        baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai',
+        apiKey: 'test-gemini-key',
+        defaultModel: 'gemini-3.5-flash',
+        enabled: true,
+        customHeaders: {},
+        temperature: undefined,
+        createdAt: new Date().toISOString(),
+      }],
+    })
+    await createStory(dataDir, makeStory())
+
+    const resolved = await getModel(dataDir, 'story-test')
+
+    expect((resolved.model as unknown as { provider: string }).provider).toBe('google.generative-ai')
+    expect(resolved.config.baseURL).toBe('https://generativelanguage.googleapis.com/v1beta')
+  })
 })

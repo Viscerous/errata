@@ -46,6 +46,14 @@ const LEGACY_FIELD_MAP: Record<string, { providerId: string; modelId: string }> 
 const providerCache = new Map<string, ReturnType<typeof createOpenAICompatible>>()
 const googleProviderCache = new Map<string, ReturnType<typeof createGoogleGenerativeAI>>()
 
+function isGeminiProvider(provider: { preset?: string; baseURL: string }) {
+  return provider.preset === 'gemini' || provider.baseURL.includes('generativelanguage.googleapis.com')
+}
+
+function normalizeGeminiBaseURL(baseURL: string) {
+  return baseURL.replace(/\/+$/, '').replace(/\/openai$/, '')
+}
+
 function getCachedProvider(id: string, baseURL: string, apiKey: string, name: string, customHeaders?: Record<string, string>) {
   const headerStr = customHeaders ? JSON.stringify(customHeaders) : ''
   const cacheKey = `${id}:${baseURL}:${apiKey}:${headerStr}`
@@ -193,8 +201,10 @@ export async function getModel(dataDir: string, storyId?: string, opts: GetModel
     // — use the fallback provider's default model instead.
     const usingFallback = targetProviderId != null && candidateId !== targetProviderId
     const modelId = (usingFallback ? null : targetModelId) || provider.defaultModel
-    const model = provider.preset === 'gemini'
-      ? getCachedGoogleProvider(provider.id, provider.baseURL, provider.apiKey, provider.customHeaders)(modelId)
+    const nativeGemini = isGeminiProvider(provider)
+    const baseURL = nativeGemini ? normalizeGeminiBaseURL(provider.baseURL) : provider.baseURL
+    const model = nativeGemini
+      ? getCachedGoogleProvider(provider.id, baseURL, provider.apiKey, provider.customHeaders)(modelId)
       : getCachedProvider(provider.id, provider.baseURL, provider.apiKey, provider.name, provider.customHeaders).chatModel(modelId)
     // Story-level temperature takes precedence over provider-level
     const temperature = targetTemperature ?? provider.temperature
@@ -205,7 +215,7 @@ export async function getModel(dataDir: string, storyId?: string, opts: GetModel
       temperature,
       config: {
         providerName: provider.name,
-        baseURL: provider.baseURL,
+        baseURL,
         headers: { ...(provider.customHeaders ?? {}) },
       },
     }

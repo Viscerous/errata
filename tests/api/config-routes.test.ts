@@ -138,8 +138,8 @@ describe('config routes', () => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         name: 'Google Gemini',
-        preset: 'gemini',
-        baseURL: 'https://generativelanguage.googleapis.com/v1beta',
+        preset: 'custom',
+        baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai',
         apiKey: 'gemini-key',
         defaultModel: 'gemini-3.5-flash',
       }),
