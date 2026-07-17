@@ -134,4 +134,29 @@ describe('llm client model resolution', () => {
     expect(resolved.providerId).toBe('openrouter')
     expect(resolved.modelId).toBe('anthropic/claude-sonnet-4.5')
   })
+
+  it('uses the native Google provider for Gemini presets', async () => {
+    await saveGlobalConfig(dataDir, {
+      defaultProviderId: 'gemini',
+      providers: [{
+        id: 'gemini',
+        name: 'Google Gemini',
+        preset: 'gemini',
+        baseURL: 'https://generativelanguage.googleapis.com/v1beta',
+        apiKey: 'test-gemini-key',
+        defaultModel: 'gemini-3.5-flash',
+        enabled: true,
+        customHeaders: {},
+        temperature: undefined,
+        createdAt: new Date().toISOString(),
+      }],
+    })
+    await createStory(dataDir, makeStory())
+
+    const resolved = await getModel(dataDir, 'story-test')
+
+    expect(resolved.providerId).toBe('gemini')
+    expect(resolved.modelId).toBe('gemini-3.5-flash')
+    expect((resolved.model as unknown as { provider: string }).provider).toBe('google.generative-ai')
+  })
 })

@@ -1425,6 +1425,8 @@ return rules.map(r => r.content).join('\\n')`}</div>
             <P>
               Add or edit providers through the Manage Providers panel in Settings. OpenAI-compatible
               endpoints can be used as long as the provider returns compatible chat completions.
+              Choose Google Gemini to use Gemini models through Google&apos;s native Generative Language
+              API, including native model discovery and tool calling.
             </P>
             <P>
               OpenRouter can also be connected through its browser sign-in flow instead of manually

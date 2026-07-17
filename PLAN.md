@@ -425,7 +425,7 @@ Users can customize blocks via the Block Editor (requires Advanced prompt contro
 
 Model resolution chain: story settings → global default → error if none configured.
 
-Provider presets: DeepSeek, OpenAI, Anthropic, OpenRouter, Custom. Any OpenAI-compatible API works via `@ai-sdk/openai-compatible`. Stories can configure separate providers for generation and librarian.
+Provider presets: DeepSeek, OpenAI, Anthropic, Google Gemini, Kimi, OpenRouter, Z.AI, and Custom. Gemini uses the native `@ai-sdk/google` provider; other presets and custom endpoints use `@ai-sdk/openai-compatible`. Stories can configure separate providers for generation and librarian.
 
 ### LLM Tools
 
