@@ -163,7 +163,7 @@ errata/
 │   │   │   ├── LibrarianPanel.tsx     # Librarian activity/chat
 │   │   │   └── ArchivePanel.tsx       # Story archive
 │   │   ├── wizard/
-│   │   │   └── StoryWizard.tsx        # Multi-step creation wizard
+│   │   │   └── StoryWizard.tsx        # Conversational story setup
 │   │   ├── settings/
 │   │   │   └── ProviderManager.tsx    # LLM provider CRUD
 │   │   ├── onboarding/
@@ -604,7 +604,7 @@ Plugin SDK published as `@tealios/errata-plugin-sdk`. See `docs/third-party-plug
 | `/`                | `index.tsx`            | Story list, create/import      |
 | `/story/:storyId`  | `story.$storyId.tsx`   | Main editor view with sidebar  |
 
-The creation wizard (`StoryWizard.tsx`) is an overlay within the story route, not a separate route.
+The story setup (`StoryWizard.tsx`) is an overlay within the story route, not a separate route. It runs an open-ended model conversation, then creates a schema-validated starter set only after explicit user confirmation.
 
 ### Key Patterns
 
@@ -642,6 +642,8 @@ All routes mounted at `/api/*` via Elysia.
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | `/api/stories/:id/generate` | Generate prose (streaming SSE) |
+| POST | `/api/stories/:id/setup/chat` | Continue conversational story setup (streaming NDJSON) |
+| POST | `/api/stories/:id/setup/complete` | Create starter fragments from the setup conversation |
 | GET | `/api/stories/:id/generation-logs` | List generation logs |
 | GET | `/api/stories/:id/generation-logs/:logId` | Get full log |
 
