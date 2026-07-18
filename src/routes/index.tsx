@@ -41,6 +41,8 @@ import { DesktopUpdatesControls } from '@/components/settings/DesktopUpdatesPane
 import { SectionHeading } from '@/components/settings/primitives'
 import { useConfirm } from '@/components/ui/confirm-dialog'
 import { getStoryDisplayName } from '@/lib/story-display'
+import type { FileDropDetails } from '@/lib/file-drop'
+import { createStoryArchiveFromFolderDrop } from '@/lib/story-folder-import'
 
 const THEME_OPTIONS = [
   { value: 'light' as const, label: 'Light', Icon: Sun },
@@ -238,10 +240,34 @@ function StoryListPage() {
   // next drop and auto-dismissed after a few seconds.
   const [dropError, setDropError] = useState<string | null>(null)
 
-  // Global drag-and-drop for story archives (ZIP) and character card files (JSON + PNG)
+  // Global drag-and-drop for story archives (ZIP or unpacked folders) and character cards.
   const handleFileDrop = useCallback(
-    async (files: File[]) => {
+    async (files: File[], dropDetails: FileDropDetails) => {
       setDropError(null)
+
+      // An unpacked Errata story has the same layout as a story ZIP. Package it
+      // in memory and reuse the existing atomic importer without adding another
+      // visible import mode to the library UI.
+      if (dropDetails.directoryNames.length > 0) {
+        try {
+          const folderResult = await createStoryArchiveFromFolderDrop(dropDetails)
+          if (folderResult.kind === 'archive') {
+            const newStory = await api.stories.importFromZip(folderResult.file)
+            await queryClient.invalidateQueries({ queryKey: ['stories'] })
+            navigate({ to: '/story/$storyId', params: { storyId: newStory.id } })
+          } else if (folderResult.kind === 'ambiguous') {
+            setDropError('Drop one unpacked Errata story folder at a time.')
+          } else if (folderResult.kind === 'invalid') {
+            setDropError(`Couldn't import "${folderResult.directoryName}": missing ${folderResult.missing}`)
+          }
+        } catch (err) {
+          setDropError(
+            `Couldn't import story folder: ${err instanceof Error ? err.message : 'invalid story archive'}`,
+          )
+        }
+        return
+      }
+
       // Try PNG character cards first
       for (let i = 0; i < files.length; i++) {
         const file = files[i]

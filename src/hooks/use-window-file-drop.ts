@@ -1,4 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
+import {
+  collectDroppedFileDetails,
+  type FileDropDetails,
+} from '@/lib/file-drop'
 
 /**
  * Window-wide file drag-and-drop. Returns whether a file drag is currently over
@@ -17,7 +21,7 @@ import { useEffect, useRef, useState } from 'react'
  * safety net for the cancel-in-place path.
  */
 export function useWindowFileDrop(
-  onDrop: (files: File[]) => void | Promise<void>,
+  onDrop: (files: File[], details: FileDropDetails) => void | Promise<void>,
 ): boolean {
   const [isDragging, setIsDragging] = useState(false)
   // Keep the latest handler without re-subscribing the listeners every render.
@@ -56,8 +60,21 @@ export function useWindowFileDrop(
       e.preventDefault()
       clearHideTimer()
       setIsDragging(false)
-      const files = e.dataTransfer?.files
-      if (files && files.length > 0) void onDropRef.current(Array.from(files))
+      const transfer = e.dataTransfer
+      if (!transfer) return
+
+      // Capture entry handles synchronously. Chromium releases access to the
+      // DataTransfer after this event returns, but the handles remain readable.
+      const rootEntries = Array.from(transfer.items)
+        .filter((item) => item.kind === 'file')
+        .map((item) => item.webkitGetAsEntry?.() ?? null)
+        .filter((entry): entry is FileSystemEntry => entry !== null)
+      const files = Array.from(transfer.files)
+
+      if (rootEntries.length === 0 && files.length === 0) return
+      void collectDroppedFileDetails(rootEntries, files)
+        .catch(() => collectDroppedFileDetails([], files))
+        .then((details) => onDropRef.current(files, details))
     }
 
     document.addEventListener('dragover', handleDragOver)
