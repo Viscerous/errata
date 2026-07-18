@@ -32,6 +32,63 @@ function isOpenRouterProvider(provider: { preset?: string; baseURL: string }) {
   return provider.preset === 'openrouter' || provider.baseURL.includes('openrouter.ai')
 }
 
+function isGeminiProvider(provider: { preset?: string; baseURL: string }) {
+  return provider.preset === 'gemini' || provider.baseURL.includes('generativelanguage.googleapis.com')
+}
+
+function normalizeGeminiBaseURL(baseURL: string) {
+  return baseURL.replace(/\/+$/, '').replace(/\/openai$/, '')
+}
+
+async function fetchProviderModels(provider: {
+  preset?: string
+  baseURL: string
+  apiKey: string
+  customHeaders?: Record<string, string>
+}) {
+  if (isGeminiProvider(provider)) {
+    const base = normalizeGeminiBaseURL(provider.baseURL)
+    const res = await fetch(`${base}/models`, {
+      headers: {
+        'x-goog-api-key': provider.apiKey,
+        ...(provider.customHeaders ?? {}),
+      },
+    })
+    if (!res.ok) {
+      const text = await res.text().catch(() => res.statusText)
+      return { models: [], error: `Failed to fetch models: ${res.status} ${text}` }
+    }
+    const json = await res.json() as {
+      models?: Array<{ name?: string; supportedGenerationMethods?: string[] }>
+    }
+    const models = (json.models ?? [])
+      .filter(model => model.name && model.supportedGenerationMethods?.includes('generateContent'))
+      .map(model => ({
+        id: model.name!.replace(/^models\//, ''),
+        owned_by: 'google',
+        isFree: false,
+      }))
+      .sort((a, b) => a.id.localeCompare(b.id))
+    return { models }
+  }
+
+  const base = provider.baseURL.replace(/\/+$/, '')
+
+  const url = /\/v\d+$/.test(base) ? `${base}/models` : `${base}/v1/models`
+  const res = await fetch(url, {
+    headers: {
+      'Authorization': `Bearer ${provider.apiKey}`,
+      ...(provider.customHeaders ?? {}),
+    },
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => res.statusText)
+    return { models: [], error: `Failed to fetch models: ${res.status} ${text}` }
+  }
+  const json = await res.json() as { data?: Array<{ id: string; owned_by?: string; pricing?: { prompt?: string; completion?: string } }> }
+  return { models: normalizeModels(json.data ?? [], provider) }
+}
+
 function isFreeModel(model: { id: string; pricing?: { prompt?: string; completion?: string } }) {
   return model.id === OPENROUTER_FREE_MODEL_ID
     || model.id.endsWith(':free')
@@ -156,21 +213,7 @@ export function configRoutes(dataDir: string) {
         return { models: [], error: 'Provider not found' }
       }
       try {
-        const base = provider.baseURL.replace(/\/+$/, '')
-        const url = /\/v\d+$/.test(base) ? `${base}/models` : `${base}/v1/models`
-        const res = await fetch(url, {
-          headers: {
-            'Authorization': `Bearer ${provider.apiKey}`,
-            ...(provider.customHeaders ?? {}),
-          },
-        })
-        if (!res.ok) {
-          const text = await res.text().catch(() => res.statusText)
-          return { models: [], error: `Failed to fetch models: ${res.status} ${text}` }
-        }
-        const json = await res.json() as { data?: Array<{ id: string; owned_by?: string; pricing?: { prompt?: string; completion?: string } }> }
-        const models = normalizeModels(json.data ?? [], provider)
-        return { models }
+        return await fetchProviderModels(provider)
       } catch (err) {
         return { models: [], error: err instanceof Error ? err.message : 'Unknown error fetching models' }
       }
@@ -181,21 +224,7 @@ export function configRoutes(dataDir: string) {
     // Fetch models with arbitrary credentials (for unsaved providers, avoids CORS)
     .post('/config/test-models', async ({ body }) => {
       try {
-        const base = body.baseURL.replace(/\/+$/, '')
-        const url = /\/v\d+$/.test(base) ? `${base}/models` : `${base}/v1/models`
-        const res = await fetch(url, {
-          headers: {
-            'Authorization': `Bearer ${body.apiKey}`,
-            ...(body.customHeaders ?? {}),
-          },
-        })
-        if (!res.ok) {
-          const text = await res.text().catch(() => res.statusText)
-          return { models: [], error: `Failed to fetch models: ${res.status} ${text}` }
-        }
-        const json = await res.json() as { data?: Array<{ id: string; owned_by?: string; pricing?: { prompt?: string; completion?: string } }> }
-        const models = normalizeModels(json.data ?? [], { preset: undefined, baseURL: body.baseURL })
-        return { models }
+        return await fetchProviderModels(body)
       } catch (err) {
         return { models: [], error: err instanceof Error ? err.message : 'Unknown error fetching models' }
       }
@@ -204,6 +233,7 @@ export function configRoutes(dataDir: string) {
       body: t.Object({
         baseURL: t.String(),
         apiKey: t.String(),
+        preset: t.Optional(t.String()),
         customHeaders: t.Optional(t.Record(t.String(), t.String())),
       }),
     })
@@ -214,6 +244,7 @@ export function configRoutes(dataDir: string) {
       let baseURL = body.baseURL
       let apiKey = body.apiKey
       let customHeaders = body.customHeaders ?? {}
+      let preset = body.preset
 
       // If providerId is given, use stored credentials as fallback
       if (body.providerId) {
@@ -222,6 +253,7 @@ export function configRoutes(dataDir: string) {
           if (!baseURL) baseURL = stored.baseURL
           if (!apiKey) apiKey = stored.apiKey
           if (Object.keys(customHeaders).length === 0) customHeaders = stored.customHeaders ?? {}
+          if (!preset) preset = stored.preset
         }
       }
 
@@ -230,7 +262,36 @@ export function configRoutes(dataDir: string) {
       }
 
       try {
+        if (isGeminiProvider({ preset, baseURL })) {
+          const base = normalizeGeminiBaseURL(baseURL)
+          const model = body.model.replace(/^models\//, '')
+          const res = await fetch(`${base}/models/${encodeURIComponent(model)}:generateContent`, {
+            method: 'POST',
+            headers: {
+              'x-goog-api-key': apiKey,
+              'Content-Type': 'application/json',
+              ...customHeaders,
+            },
+            body: JSON.stringify({
+              contents: [{ role: 'user', parts: [{ text: 'Hello! (keep your response short)' }] }],
+              generationConfig: { maxOutputTokens: 64 },
+            }),
+          })
+          if (!res.ok) {
+            const text = await res.text().catch(() => res.statusText)
+            return { ok: false, error: `${res.status} ${text}` }
+          }
+          const json = await res.json() as {
+            candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>
+          }
+          const reply = json.candidates?.[0]?.content?.parts
+            ?.map(part => part.text ?? '')
+            .join('') ?? ''
+          return { ok: true, reply }
+        }
+
         const base = baseURL.replace(/\/+$/, '')
+
         const url = /\/v\d+$/.test(base) ? `${base}/chat/completions` : `${base}/v1/chat/completions`
         const res = await fetch(url, {
           method: 'POST',
@@ -262,6 +323,7 @@ export function configRoutes(dataDir: string) {
         baseURL: t.Optional(t.String()),
         apiKey: t.Optional(t.String()),
         model: t.String(),
+        preset: t.Optional(t.String()),
         customHeaders: t.Optional(t.Record(t.String(), t.String())),
       }),
     })

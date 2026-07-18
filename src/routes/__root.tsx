@@ -29,6 +29,7 @@ export const Route = createRootRoute({
     meta: [
       { charSet: 'utf-8' },
       { name: 'viewport', content: 'width=device-width, initial-scale=1, viewport-fit=cover' },
+      { name: 'description', content: 'Errata is a model-assisted writing workspace for developing stories, characters, knowledge, and prose.' },
       { title: 'Errata' },
     ],
     links: [

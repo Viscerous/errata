@@ -1,6 +1,6 @@
 {
   "name": "errata",
-  "version": "1.10.0-vis.1",
+  "version": "1.11.0-vis.1",
   "private": true,
   "license": "GPL-2.0",
   "type": "module",
@@ -28,6 +28,7 @@
     "test:watch": "bun install --frozen-lockfile && vitest --config vitest.config.ts"
   },
   "dependencies": {
+    "@ai-sdk/google": "^3.0.94",
     "@ai-sdk/openai-compatible": "^2.0.30",
     "@ai-sdk/react": "^3.0.88",
     "@codemirror/autocomplete": "^6.20.1",

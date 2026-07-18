@@ -1,4 +1,5 @@
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
+import { createGoogleGenerativeAI } from '@ai-sdk/google'
 import { getGlobalConfig } from '../config/storage'
 import { getStory } from '../fragments/storage'
 import { modelRoleRegistry } from '../agents/model-role-registry'
@@ -44,6 +45,15 @@ const LEGACY_FIELD_MAP: Record<string, { providerId: string; modelId: string }> 
 
 // Provider cache: keyed by `id:baseURL:apiKey`
 const providerCache = new Map<string, ReturnType<typeof createOpenAICompatible>>()
+const googleProviderCache = new Map<string, ReturnType<typeof createGoogleGenerativeAI>>()
+
+function isGeminiProvider(provider: { preset?: string; baseURL: string }) {
+  return provider.preset === 'gemini' || provider.baseURL.includes('generativelanguage.googleapis.com')
+}
+
+function normalizeGeminiBaseURL(baseURL: string) {
+  return baseURL.replace(/\/+$/, '').replace(/\/openai$/, '')
+}
 
 function getCachedProvider(id: string, baseURL: string, apiKey: string, name: string, customHeaders?: Record<string, string>) {
   const headerStr = customHeaders ? JSON.stringify(customHeaders) : ''
@@ -58,6 +68,26 @@ function getCachedProvider(id: string, baseURL: string, apiKey: string, name: st
       headers: customHeaders && Object.keys(customHeaders).length > 0 ? customHeaders : undefined,
     })
     providerCache.set(cacheKey, provider)
+  }
+  return provider
+}
+
+function getCachedGoogleProvider(
+  id: string,
+  baseURL: string,
+  apiKey: string,
+  customHeaders?: Record<string, string>,
+) {
+  const headerStr = customHeaders ? JSON.stringify(customHeaders) : ''
+  const cacheKey = `${id}:${baseURL}:${apiKey}:${headerStr}`
+  let provider = googleProviderCache.get(cacheKey)
+  if (!provider) {
+    provider = createGoogleGenerativeAI({
+      apiKey,
+      baseURL,
+      headers: customHeaders && Object.keys(customHeaders).length > 0 ? customHeaders : undefined,
+    })
+    googleProviderCache.set(cacheKey, provider)
   }
   return provider
 }
@@ -198,18 +228,22 @@ export async function getModel(dataDir: string, storyId?: string, opts: GetModel
     // fell through to the default, its stored modelId belongs to the old provider
     // — use the fallback provider's default model instead.
     const usingFallback = targetProviderId != null && candidateId !== targetProviderId
-    const oai = getCachedProvider(provider.id, provider.baseURL, provider.apiKey, provider.name, provider.customHeaders)
     const modelId = (usingFallback ? null : targetModelId) || provider.defaultModel
+    const nativeGemini = isGeminiProvider(provider)
+    const baseURL = nativeGemini ? normalizeGeminiBaseURL(provider.baseURL) : provider.baseURL
+    const model = nativeGemini
+      ? getCachedGoogleProvider(provider.id, baseURL, provider.apiKey, provider.customHeaders)(modelId)
+      : getCachedProvider(provider.id, provider.baseURL, provider.apiKey, provider.name, provider.customHeaders).chatModel(modelId)
     // Story-level temperature takes precedence over provider-level
     const temperature = targetTemperature ?? provider.temperature
     const toReturn = {
-      model: oai.chatModel(modelId),
+      model,
       providerId: provider.id,
       modelId,
       temperature,
       config: {
         providerName: provider.name,
-        baseURL: provider.baseURL,
+        baseURL,
         headers: { ...(provider.customHeaders ?? {}) },
       },
     }

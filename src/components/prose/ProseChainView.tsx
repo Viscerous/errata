@@ -83,12 +83,12 @@ const InsertChapterDivider = memo(function InsertChapterDivider({
       onClick={() => createMutation.mutate()}
       disabled={createMutation.isPending}
       aria-label="Insert chapter marker here"
-      className="group/insert w-full flex items-center gap-3 py-1.5 my-0.5 transition-opacity focus-visible:outline-none focus-visible:opacity-100"
+      className="group/insert min-h-6 w-full flex items-center gap-3 py-1.5 my-0.5 transition-opacity focus-visible:outline-none focus-visible:opacity-100"
     >
       <span aria-hidden className="flex-1 h-px bg-border/30 group-hover/insert:bg-primary/40 transition-colors" />
-      <span className="text-[0.6875rem] font-display italic text-muted-foreground/35 group-hover/insert:text-foreground/75 transition-colors whitespace-nowrap flex items-center gap-1.5">
-        <Bookmark className="size-2.5 text-muted-foreground/25 group-hover/insert:text-primary/70 transition-colors" aria-hidden />
-        <span>—&nbsp;chapter&nbsp;—</span>
+      <span className="text-[0.6875rem] font-display italic text-muted-foreground group-hover/insert:text-foreground transition-colors whitespace-nowrap flex items-center gap-1.5">
+        <Bookmark className="size-2.5 text-muted-foreground group-hover/insert:text-primary transition-colors" aria-hidden />
+        <span>chapter</span>
       </span>
       <span aria-hidden className="flex-1 h-px bg-border/30 group-hover/insert:bg-primary/40 transition-colors" />
     </button>

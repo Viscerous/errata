@@ -121,6 +121,15 @@ const PROVIDER_CARDS = {
     accent: 'amber',
     customHeaders: {},
   },
+  gemini: {
+    name: 'Google Gemini',
+    baseURL: 'https://generativelanguage.googleapis.com/v1beta',
+    defaultModel: 'gemini-3.5-flash',
+    models: ['gemini-3.5-flash', 'gemini-3.1-pro-preview', 'gemini-2.5-flash'],
+    description: 'Native Gemini models with tool use and long-context reasoning.',
+    accent: 'indigo',
+    customHeaders: {},
+  },
   kimi: {
     name: 'Kimi',
     baseURL: 'https://api.moonshot.ai/v1',
@@ -164,6 +173,7 @@ const ACCENT_COLORS: Record<string, { border: string; bg: string; text: string }
   cyan: { border: 'border-cyan-500/30', bg: 'bg-cyan-500/10', text: 'text-cyan-400' },
   rose: { border: 'border-rose-500/30', bg: 'bg-rose-500/10', text: 'text-rose-400' },
   purple: { border: 'border-purple-500/30', bg: 'bg-purple-500/10', text: 'text-purple-400' },
+  indigo: { border: 'border-indigo-500/30', bg: 'bg-indigo-500/10', text: 'text-indigo-400' },
   neutral: { border: 'border-border/50', bg: 'bg-muted/30', text: 'text-muted-foreground' },
 }
 
@@ -672,7 +682,7 @@ function ProviderSetupStep({
     setFetchingModels(true)
     setFetchError(null)
     try {
-      const result = await api.config.testModels({ baseURL, apiKey, customHeaders: cardHeaders })
+      const result = await api.config.testModels({ baseURL, apiKey, preset, customHeaders: cardHeaders })
       if (result.error) {
         setFetchError(result.error)
       } else {
@@ -706,6 +716,7 @@ function ProviderSetupStep({
         baseURL,
         apiKey,
         model: defaultModel,
+        preset,
         customHeaders: cardHeaders,
       })
       setTestResult(result)

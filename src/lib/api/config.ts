@@ -19,9 +19,9 @@ export const config = {
     }),
   listModels: (providerId: string) =>
     apiFetch<{ models: Array<{ id: string; owned_by?: string; isFree?: boolean }>; error?: string }>(`/config/providers/${providerId}/models`),
-  testModels: (data: { baseURL: string; apiKey: string; customHeaders?: Record<string, string> }) =>
+  testModels: (data: { baseURL: string; apiKey: string; preset?: string; customHeaders?: Record<string, string> }) =>
     apiFetch<{ models: Array<{ id: string; owned_by?: string; isFree?: boolean }>; error?: string }>('/config/test-models', { method: 'POST', body: JSON.stringify(data) }),
-  testConnection: (data: { providerId?: string; baseURL?: string; apiKey?: string; model: string; customHeaders?: Record<string, string> }) =>
+  testConnection: (data: { providerId?: string; baseURL?: string; apiKey?: string; model: string; preset?: string; customHeaders?: Record<string, string> }) =>
     apiFetch<{ ok: boolean; reply?: string; error?: string }>('/config/test-connection', { method: 'POST', body: JSON.stringify(data) }),
   startOpenRouterOAuth: () =>
     apiFetch<{ authUrl: string; error?: string }>('/config/openrouter/oauth/start', { method: 'POST' }),
