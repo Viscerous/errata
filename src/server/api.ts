@@ -20,6 +20,7 @@ import { folderRoutes } from './routes/folders'
 import { sharingRoutes } from './routes/sharing'
 import { erratanetRoutes } from './routes/erratanet'
 import { erratanetAgentConfigRoutes } from './routes/erratanet-agent-config'
+import { storySetupRoutes } from './routes/story-setup'
 
 const DATA_DIR = process.env.DATA_DIR ?? './data'
 
@@ -60,6 +61,7 @@ export function createApp(dataDir: string = DATA_DIR) {
           { name: 'Generation', description: 'LLM prose generation (streaming)' },
           { name: 'Librarian', description: 'Background analysis, chat, and fragment refinement' },
           { name: 'Character Chat', description: 'In-character conversations' },
+          { name: 'Story Setup', description: 'Conversational planning for new stories' },
           { name: 'Config', description: 'Global provider management and model discovery' },
           { name: 'Agent Blocks', description: 'Per-agent context block configuration' },
           { name: 'Token Usage', description: 'Session and project token tracking' },
@@ -136,6 +138,7 @@ export function createApp(dataDir: string = DATA_DIR) {
     .use(sharingRoutes(dataDir))
     .use(erratanetRoutes(dataDir))
     .use(erratanetAgentConfigRoutes(dataDir))
+    .use(storySetupRoutes(dataDir))
 
   // Mount plugin routes
   for (const plugin of pluginRegistry.listAll()) {

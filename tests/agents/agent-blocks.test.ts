@@ -64,7 +64,7 @@ beforeEach(() => {
 })
 
 describe('Agent Block Registry', () => {
-  it('registers all 5 agents', () => {
+  it('registers all 6 agents', () => {
     const agents = agentBlockRegistry.list()
     const names = agents.map(a => a.agentName)
     expect(names).toContain('librarian.analyze')
@@ -72,6 +72,7 @@ describe('Agent Block Registry', () => {
     expect(names).toContain('librarian.refine')
     expect(names).toContain('librarian.prose-transform')
     expect(names).toContain('character-chat.chat')
+    expect(names).toContain('story-setup.chat')
   })
 
   it('returns agent definitions by name', () => {
@@ -120,10 +121,10 @@ describe('Model Role Registry — fallback chain derivation', () => {
     expect(chain).toEqual(['a.b.c', 'a.b', 'a', 'generation'])
   })
 
-  it('registers namespace-level roles only (4 total)', () => {
+  it('registers namespace-level roles only (5 total)', () => {
     const roles = modelRoleRegistry.list()
     const keys = roles.map(r => r.key).sort()
-    expect(keys).toEqual(['character-chat', 'directions', 'generation', 'librarian'])
+    expect(keys).toEqual(['character-chat', 'directions', 'generation', 'librarian', 'story-setup'])
   })
 })
 

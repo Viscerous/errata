@@ -588,7 +588,8 @@ export function InlineGenerationInput({
                     type="button"
                     disabled={isGenerating}
                     onClick={handleFetchSuggestions}
-                    className="size-5 flex items-center justify-center rounded text-muted-foreground hover:text-foreground/60 transition-colors disabled:opacity-30"
+                    aria-label="Refresh directions"
+                    className="size-7 flex items-center justify-center rounded text-muted-foreground hover:text-foreground transition-colors disabled:opacity-30"
                   >
                     <RefreshCw className="size-3" />
                   </button>
@@ -658,6 +659,7 @@ export function InlineGenerationInput({
                                   handleModeChange('freeform')
                                   requestAnimationFrame(() => textareaRef.current?.focus())
                                 }}
+                                aria-label={`Edit ${s.title} before sending`}
                                 className="shrink-0 flex items-center justify-center w-8 border-l border-border/20 text-muted-foreground/40 hover:text-foreground/60 hover:bg-muted/30 transition-colors rounded-r-md"
                               >
                                 <PenSquare className="size-3.5" />
@@ -723,6 +725,8 @@ export function InlineGenerationInput({
               <div className="relative group/model">
                 <select
                   data-component-id="inline-generation-provider-select"
+                  name="generation-provider"
+                  aria-label="Generation model"
                   value={generationProviderId ?? ''}
                   onChange={(e) => {
                     const providerId = e.target.value || null

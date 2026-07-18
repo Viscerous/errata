@@ -3,6 +3,27 @@
 All notable changes to Errata are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are git tags.
 
+## [1.11.0] — 2026-07-18
+
+### Added
+- **Conversational story setup.** Writers can develop a premise, characters,
+  scenes, and tone in an open-ended conversation while Errata tracks a live
+  setup checklist and creates editable fragments as ideas take shape.
+- **Native Google Gemini support** for generation, model discovery, and
+  connection testing, including normalization of legacy Gemini endpoints.
+
+### Changed
+- Story setup now preserves its transcript, checklist, and fragment drafts
+  across closes and reloads, and remains available from story settings.
+- Polished the story library and writing controls with responsive layouts,
+  better touch targets, clearer focus states, stronger contrast, reduced-motion
+  support, and accessible control names.
+
+### Fixed
+- Story setup persists fragment progress throughout the conversation instead of
+  waiting for a final step.
+- Standalone release archives include the release version in their filenames.
+
 ## [1.10.0] — 2026-06-26
 
 ### Added

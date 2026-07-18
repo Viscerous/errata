@@ -17,6 +17,11 @@ export const PROVIDER_PRESETS = {
     baseURL: 'https://api.anthropic.com/v1',
     defaultModel: 'claude-sonnet-4-5-20250929',
   },
+  gemini: {
+    name: 'Google Gemini',
+    baseURL: 'https://generativelanguage.googleapis.com/v1beta',
+    defaultModel: 'gemini-3.5-flash',
+  },
   openrouter: {
     name: 'OpenRouter',
     baseURL: 'https://openrouter.ai/api/v1',

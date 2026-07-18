@@ -336,8 +336,8 @@ export function StoryInfoPanel({ storyId, story, onLaunchWizard, onExport, onDow
         {onLaunchWizard && (
           <ActionTile
             icon={Wand2}
-            label="Wizard"
-            description="Guided story setup"
+            label="Story setup"
+            description="Refine premise and fragments"
             onClick={onLaunchWizard}
             dataComponentId="story-info-wizard"
           />

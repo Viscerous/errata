@@ -131,4 +131,58 @@ describe('config routes', () => {
     expect(body.models.find((m) => m.id === 'free/model:free')?.isFree).toBe(true)
     expect(body.models.find((m) => m.id === 'paid/model')?.isFree).toBe(false)
   })
+
+  it('discovers and tests Gemini models through the native Google API', async () => {
+    await app.fetch(new Request('http://localhost/api/config/providers', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Google Gemini',
+        preset: 'custom',
+        baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai',
+        apiKey: 'gemini-key',
+        defaultModel: 'gemini-3.5-flash',
+      }),
+    }))
+    const config = await (await app.fetch(new Request('http://localhost/api/config/providers'))).json() as {
+      providers: Array<{ id: string }>
+    }
+
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        models: [
+          { name: 'models/gemini-3.5-flash', supportedGenerationMethods: ['generateContent'] },
+          { name: 'models/gemini-embedding-001', supportedGenerationMethods: ['embedContent'] },
+        ],
+      }), { status: 200, headers: { 'content-type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        candidates: [{ content: { parts: [{ text: 'Hello from Gemini' }] } }],
+      }), { status: 200, headers: { 'content-type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const modelsRes = await app.fetch(new Request(
+      `http://localhost/api/config/providers/${config.providers[0].id}/models`,
+    ))
+    const modelsBody = await modelsRes.json() as { models: Array<{ id: string }> }
+    expect(modelsBody.models).toEqual([{ id: 'gemini-3.5-flash', owned_by: 'google', isFree: false }])
+
+    const testRes = await app.fetch(new Request('http://localhost/api/config/test-connection', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ providerId: config.providers[0].id, model: 'gemini-3.5-flash' }),
+    }))
+    expect(await testRes.json()).toEqual({ ok: true, reply: 'Hello from Gemini' })
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1,
+      'https://generativelanguage.googleapis.com/v1beta/models',
+      expect.objectContaining({ headers: expect.objectContaining({ 'x-goog-api-key': 'gemini-key' }) }),
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(2,
+      'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({ 'x-goog-api-key': 'gemini-key' }),
+      }),
+    )
+  })
 })

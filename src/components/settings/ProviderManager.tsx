@@ -10,6 +10,7 @@ const PRESETS = {
   deepseek: { name: 'DeepSeek', baseURL: 'https://api.deepseek.com', defaultModel: 'deepseek-v4-flash', models: ['deepseek-v4-flash', 'deepseek-v4-pro'] },
   openai: { name: 'OpenAI', baseURL: 'https://api.openai.com/v1', defaultModel: 'gpt-5.2' },
   anthropic: { name: 'Anthropic', baseURL: 'https://api.anthropic.com/v1', defaultModel: 'claude-opus-4-6' },
+  gemini: { name: 'Google Gemini', baseURL: 'https://generativelanguage.googleapis.com/v1beta', defaultModel: 'gemini-3.5-flash', models: ['gemini-3.5-flash', 'gemini-3.1-pro-preview', 'gemini-2.5-flash'] },
   kimi: { name: 'Kimi', baseURL: 'https://api.moonshot.ai/v1', defaultModel: 'kimi-k2.5' },
   'kimi-code': { name: 'Kimi Code', baseURL: 'https://api.kimi.com/coding/v1', defaultModel: 'kimi-for-coding' },
   openrouter: { name: 'OpenRouter', baseURL: 'https://openrouter.ai/api/v1', defaultModel: 'deepseek/deepseek-chat-v3-0324' },
@@ -202,7 +203,7 @@ export function ProviderPanel({ onClose }: { onClose: () => void }) {
       // For saved providers, use stored credentials; for new ones, use form values
       const result = editingId
         ? await api.config.listModels(editingId)
-        : await api.config.testModels({ baseURL: form.baseURL, apiKey: form.apiKey, customHeaders: getFormHeaders() })
+        : await api.config.testModels({ baseURL: form.baseURL, apiKey: form.apiKey, preset: form.preset, customHeaders: getFormHeaders() })
       if (result.error) {
         setFetchError(result.error)
       } else {
@@ -237,6 +238,7 @@ export function ProviderPanel({ onClose }: { onClose: () => void }) {
         baseURL: form.baseURL || undefined,
         apiKey: form.apiKey || undefined,
         model: form.defaultModel,
+        preset: form.preset,
         customHeaders: getFormHeaders(),
       })
       setTestResult(result)
@@ -346,6 +348,7 @@ export function ProviderPanel({ onClose }: { onClose: () => void }) {
                   <option value="deepseek">DeepSeek</option>
                   <option value="openai">OpenAI</option>
                   <option value="anthropic">Anthropic</option>
+                  <option value="gemini">Google Gemini</option>
                   <option value="kimi">Kimi</option>
                   <option value="kimi-code">Kimi Code</option>
                   <option value="openrouter">OpenRouter</option>
