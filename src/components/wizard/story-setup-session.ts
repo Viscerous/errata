@@ -11,6 +11,7 @@ interface StorageLike {
 }
 
 const StorySetupSessionSchema = z.object({
+  contentRevision: z.string().optional(),
   messages: z.array(z.object({
     role: z.enum(['user', 'assistant']),
     content: z.string(),
@@ -31,18 +32,27 @@ const StorySetupSessionSchema = z.object({
 })
 
 export interface StorySetupSession {
+  contentRevision?: string
   messages: StorySetupMessage[]
   checklist: StorySetupChecklistItem[]
   draftFragments: StorySetupDraftFragment[]
 }
 
-function sessionKey(storyId: string) {
-  return `errata:story-setup:${storyId}`
+function sessionKey(storyId: string, scope: string) {
+  return `errata:story-setup:${storyId}:${encodeURIComponent(scope)}`
 }
 
-export function readStorySetupSession(storage: StorageLike, storyId: string): StorySetupSession | null {
+export function storySetupSessionNeedsRefresh(
+  session: StorySetupSession,
+  contentRevision: string,
+): boolean {
+  return session.contentRevision !== contentRevision
+}
+
+export function readStorySetupSession(storage: StorageLike, storyId: string, scope: string): StorySetupSession | null {
   try {
-    const raw = storage.getItem(sessionKey(storyId))
+    const raw = storage.getItem(sessionKey(storyId, scope))
+      ?? (scope === 'main' ? storage.getItem(`errata:story-setup:${storyId}`) : null)
     if (!raw) return null
     const parsed = StorySetupSessionSchema.safeParse(JSON.parse(raw))
     return parsed.success ? parsed.data : null
@@ -51,9 +61,14 @@ export function readStorySetupSession(storage: StorageLike, storyId: string): St
   }
 }
 
-export function writeStorySetupSession(storage: StorageLike, storyId: string, session: StorySetupSession): void {
+export function writeStorySetupSession(
+  storage: StorageLike,
+  storyId: string,
+  scope: string,
+  session: StorySetupSession,
+): void {
   try {
-    storage.setItem(sessionKey(storyId), JSON.stringify(session))
+    storage.setItem(sessionKey(storyId, scope), JSON.stringify(session))
   } catch {
     // Setup remains usable if browser storage is unavailable or full.
   }

@@ -12,6 +12,7 @@ const StorySetupChatInputSchema = z.object({
     role: z.union([z.literal('user'), z.literal('assistant')]),
     content: z.string(),
   })),
+  mode: z.enum(['assess', 'continue']).optional(),
 })
 
 declare module '../agents/agent-instance' {

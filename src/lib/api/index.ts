@@ -26,6 +26,7 @@ export { storySetup } from './story-setup'
 export type {
   StorySetupChecklistItem,
   StorySetupChecklistKey,
+  StorySetupChatMode,
   StorySetupDraftFragment,
   StorySetupMessage,
   StorySetupPlan,

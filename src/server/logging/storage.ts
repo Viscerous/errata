@@ -1,7 +1,8 @@
-import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
+import { appendFile, mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { existsSync } from 'node:fs'
 import type { LogEntry, LogSummary } from './types'
+import { withKeyLock } from '../async-lock'
 
 const MAX_LOGS_PER_FILE = 1000
 const MAX_LOG_FILES = 5
@@ -19,46 +20,44 @@ function logFilePath(dataDir: string, index: number): string {
  * Uses rotating log files to prevent unbounded growth.
  */
 export async function saveLogEntry(dataDir: string, entry: LogEntry): Promise<void> {
-  const dir = logsDir(dataDir)
-  await mkdir(dir, { recursive: true })
+  return withKeyLock(`application-logs:${dataDir}`, async () => {
+    const dir = logsDir(dataDir)
+    await mkdir(dir, { recursive: true })
 
-  // Find the current log file
-  let currentIndex = 0
-  for (let i = 0; i < MAX_LOG_FILES; i++) {
-    const path = logFilePath(dataDir, i)
-    if (!existsSync(path)) {
-      currentIndex = i
-      break
-    }
-    const stats = await readFile(path, 'utf-8')
-    const lines = stats.split('\n').filter(line => line.trim())
-    if (lines.length < MAX_LOGS_PER_FILE) {
-      currentIndex = i
-      break
-    }
-    currentIndex = i + 1
-  }
-
-  // Rotate if needed
-  if (currentIndex >= MAX_LOG_FILES) {
-    // Remove oldest file and shift others
-    for (let i = 0; i < MAX_LOG_FILES - 1; i++) {
-      const oldPath = logFilePath(dataDir, i + 1)
-      const newPath = logFilePath(dataDir, i)
-      if (existsSync(oldPath)) {
-        const content = await readFile(oldPath, 'utf-8')
-        await writeFile(newPath, content, 'utf-8')
+    // Find the current log file
+    let currentIndex = 0
+    for (let i = 0; i < MAX_LOG_FILES; i++) {
+      const path = logFilePath(dataDir, i)
+      if (!existsSync(path)) {
+        currentIndex = i
+        break
       }
+      const stats = await readFile(path, 'utf-8')
+      const lines = stats.split('\n').filter(line => line.trim())
+      if (lines.length < MAX_LOGS_PER_FILE) {
+        currentIndex = i
+        break
+      }
+      currentIndex = i + 1
     }
-    currentIndex = MAX_LOG_FILES - 1
-  }
 
-  const path = logFilePath(dataDir, currentIndex)
-  const line = JSON.stringify(entry) + '\n'
-  
-  // Append to file
-  const existing = existsSync(path) ? await readFile(path, 'utf-8') : ''
-  await writeFile(path, existing + line, 'utf-8')
+    // Rotate if needed
+    if (currentIndex >= MAX_LOG_FILES) {
+      // Remove oldest file and shift others
+      for (let i = 0; i < MAX_LOG_FILES - 1; i++) {
+        const oldPath = logFilePath(dataDir, i + 1)
+        const newPath = logFilePath(dataDir, i)
+        if (existsSync(oldPath)) {
+          const content = await readFile(oldPath, 'utf-8')
+          await writeFile(newPath, content, 'utf-8')
+        }
+      }
+      currentIndex = MAX_LOG_FILES - 1
+    }
+
+    const path = logFilePath(dataDir, currentIndex)
+    await appendFile(path, `${JSON.stringify(entry)}\n`, 'utf-8')
+  })
 }
 
 /**

@@ -2,6 +2,7 @@ import { generateFragmentId } from '@/lib/fragment-ids'
 import { withKeyLock } from '../async-lock'
 import {
   createFragment,
+  archiveFragment,
   getStory,
   listFragments,
   updateFragmentVersioned,
@@ -35,8 +36,8 @@ function makeSetupFragment(draft: StorySetupDraftFragment, order: number): Fragm
   return {
     id: generateFragmentId(draft.type),
     type: draft.type,
-    name: draft.name,
-    description: draft.description,
+    name: draft.name.trim(),
+    description: draft.description.trim(),
     content: draft.content.trim(),
     tags: [],
     refs: [],
@@ -62,15 +63,6 @@ export async function syncStorySetupSnapshot(
     const story = await getStory(dataDir, storyId)
     if (!story) throw new Error(`Story ${storyId} not found`)
 
-    if (input.story) {
-      await updateStory(dataDir, {
-        ...story,
-        name: input.story.name.trim(),
-        description: input.story.description.trim(),
-        updatedAt: new Date().toISOString(),
-      })
-    }
-
     const existing = await listFragments(dataDir, storyId)
     const setupByKey = new Map(
       existing
@@ -79,30 +71,71 @@ export async function syncStorySetupSnapshot(
     )
     let order = existing.reduce((max, fragment) => Math.max(max, fragment.order), -1) + 1
     const persisted: PersistedStorySetupFragment[] = []
+    const incomingKeys = new Set(input.fragments.map(fragment => fragment.key))
+
+    for (const draft of input.fragments) {
+      const current = setupByKey.get(draft.key)
+      if (current && current.type !== draft.type) {
+        throw new Error(`Story setup fragment ${draft.key} cannot change type from ${current.type} to ${draft.type}`)
+      }
+    }
+
+    if (input.story && (
+      story.name !== input.story.name.trim()
+      || story.description !== input.story.description.trim()
+    )) {
+      await updateStory(dataDir, {
+        ...story,
+        name: input.story.name.trim(),
+        description: input.story.description.trim(),
+        updatedAt: new Date().toISOString(),
+      })
+    }
+
+    for (const [key, fragment] of setupByKey) {
+      if (!incomingKeys.has(key)) {
+        await archiveFragment(dataDir, storyId, fragment.id)
+      }
+    }
 
     for (const draft of input.fragments) {
       const current = setupByKey.get(draft.key)
       if (current) {
-        if (current.type !== draft.type) {
-          throw new Error(`Story setup fragment ${draft.key} cannot change type`)
-        }
-        const updated = await updateFragmentVersioned(dataDir, storyId, current.id, {
-          name: draft.name,
-          description: draft.description,
+        const normalized = {
+          ...draft,
+          name: draft.name.trim(),
+          description: draft.description.trim(),
           content: draft.content.trim(),
-        }, { reason: 'story-setup' })
+        }
+        const trimmedContent = draft.content.trim()
+        const changed = current.name !== normalized.name
+          || current.description !== normalized.description
+          || current.content !== trimmedContent
+        const updated = changed
+          ? await updateFragmentVersioned(dataDir, storyId, current.id, {
+              name: normalized.name,
+              description: normalized.description,
+              content: trimmedContent,
+            }, { reason: 'story-setup' })
+          : current
         if (!updated) throw new Error(`Story setup fragment ${current.id} disappeared during update`)
-        persisted.push({ id: updated.id, ...draft })
+        persisted.push({ id: updated.id, ...normalized })
         continue
       }
 
-      const created = makeSetupFragment(draft, order++)
+      const normalized = {
+        ...draft,
+        name: draft.name.trim(),
+        description: draft.description.trim(),
+        content: draft.content.trim(),
+      }
+      const created = makeSetupFragment(normalized, order++)
       await createFragment(dataDir, storyId, created)
       if (created.type === 'prose') {
         await addProseSection(dataDir, storyId, created.id)
       }
       setupByKey.set(draft.key, created)
-      persisted.push({ id: created.id, ...draft })
+      persisted.push({ id: created.id, ...normalized })
     }
 
     return { story: input.story, fragments: persisted }

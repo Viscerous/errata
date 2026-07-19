@@ -17,6 +17,7 @@ import {
   ChevronDown,
   ChevronRight,
   Check,
+  CircleAlert,
   Wrench,
   Radio,
   GitBranch,
@@ -387,6 +388,7 @@ type CollapsedTraceItem =
   | { kind: 'text'; text: string }
   | { kind: 'tool-call'; toolName: string; args: Record<string, unknown> }
   | { kind: 'tool-result'; toolName: string; result: unknown }
+  | { kind: 'tool-error'; toolName: string; error: string }
 
 // The live reasoning/tool trace for a running agent, streamed from its activity
 // buffer and pinned beneath the status strip while the agent runs.
@@ -456,6 +458,8 @@ function ActivityTrace({ storyId, agentName }: { storyId: string; agentName: str
           collapsed.push({ kind: 'tool-call', toolName: ev.toolName, args: ev.args })
         } else if (ev.type === 'tool-result') {
           collapsed.push({ kind: 'tool-result', toolName: ev.toolName, result: ev.result })
+        } else if (ev.type === 'tool-error') {
+          collapsed.push({ kind: 'tool-error', toolName: ev.toolName, error: ev.error })
         }
       }
     }
@@ -515,6 +519,14 @@ function LiveTraceItem({ item }: { item: CollapsedTraceItem }) {
       <div className="flex items-center gap-1 px-1">
         <Check className="size-2 text-emerald-500/40" />
         <span className="text-[0.5rem] text-muted-foreground">{item.toolName}</span>
+      </div>
+    )
+  }
+  if (item.kind === 'tool-error') {
+    return (
+      <div className="flex items-start gap-1 px-1 text-red-500/70" title={item.error}>
+        <CircleAlert className="mt-0.5 size-2.5 shrink-0" />
+        <span className="min-w-0 truncate text-[0.5rem]">{item.toolName}: {item.error}</span>
       </div>
     )
   }

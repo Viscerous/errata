@@ -4,6 +4,7 @@ export interface DrainedAgentStream {
   fullText: string
   fullReasoning: string
   toolCalls: Array<{ toolName: string; args: Record<string, unknown>; result: unknown }>
+  toolErrors: Array<{ toolName: string; error: string }>
   stepCount: number
   finishReason: string
 }
@@ -28,6 +29,17 @@ function idleTimeoutError(timeoutMs: number): Error {
   const error = new Error(`Agent stream idle timeout after ${timeoutMs}ms`)
   error.name = 'TimeoutError'
   return error
+}
+
+function readableStreamError(value: unknown, fallback = 'Agent stream failed'): string {
+  let message = fallback
+  if (value instanceof Error) message = value.message
+  else if (typeof value === 'string') message = value
+  else if (value && typeof value === 'object' && typeof (value as { message?: unknown }).message === 'string') {
+    message = (value as { message: string }).message
+  }
+  const compact = message.replace(/\s+/g, ' ').trim()
+  return compact.length > 500 ? `${compact.slice(0, 497)}...` : compact
 }
 
 function guardedNext(
@@ -100,6 +112,7 @@ export async function drainAgentStream(
   let fullText = ''
   let fullReasoning = ''
   const toolCalls: DrainedAgentStream['toolCalls'] = []
+  const toolErrors: DrainedAgentStream['toolErrors'] = []
   // Correlate a tool-result back to the args from its tool-call event.
   const toolCallArgsById = new Map<string, Record<string, unknown>>()
   let stepCount = 0
@@ -144,6 +157,16 @@ export async function drainAgentStream(
           event = { type: 'tool-result', id: toolCallId, toolName, result: p.output }
           break
         }
+        case 'tool-error': {
+          const toolCallId = (p.toolCallId as string) ?? ''
+          const toolName = (p.toolName as string) ?? ''
+          const error = readableStreamError(p.error, 'Tool execution failed')
+          toolErrors.push({ toolName, error })
+          event = { type: 'tool-error', id: toolCallId, toolName, error }
+          break
+        }
+        case 'error':
+          throw new Error(readableStreamError(p.error))
         // `finish-step` fires once per LLM step; `finish` fires once for the
         // whole generation. Count steps, capture the final reason.
         case 'finish-step':
@@ -163,5 +186,5 @@ export async function drainAgentStream(
     }
   }
 
-  return { fullText, fullReasoning, toolCalls, stepCount, finishReason }
+  return { fullText, fullReasoning, toolCalls, toolErrors, stepCount, finishReason }
 }
