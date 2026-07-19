@@ -89,7 +89,7 @@ function makeFragment(overrides: Partial<Fragment>): Fragment {
 // character-chat) get NO active-marker/trace registration of their own — that's
 // deliberate, not a gap: their only production caller is createAgentInstance
 // (routes/librarian.ts, routes/character-chat.ts), which already wraps the whole
-// call in beginAgentRun and tees the event stream into the run's activity trace.
+// call in beginAgentRun and taps the caller stream into the run's activity trace.
 // This proves that real, un-mocked mechanism actually works end-to-end — nothing
 // exercised it before (refine.test.ts stubs createAgentInstance out entirely).
 describe('createAgentInstance observability (wrapping a createStreamingRunner agent)', () => {
@@ -140,9 +140,46 @@ describe('createAgentInstance observability (wrapping a createStreamingRunner ag
     const refineRun = runs.find(r => r.agentName === 'librarian.refine')
     expect(refineRun).toBeDefined()
     expect(refineRun!.status).toBe('success')
-    // The instance tees the stream into the run's own trace (not just history's
-    // single summarized entry) — confirms drainToTrace actually received events.
+    // The instance taps the stream into the run's own trace (not just history's
+    // single summarized entry) without creating a cancellation-blocking branch.
     expect(refineRun!.trace.length).toBeGreaterThan(0)
+  })
+
+  it('propagates caller cancellation to the underlying model run', async () => {
+    const story = makeStory()
+    await createStory(dataDir, story)
+    await createFragment(dataDir, story.id, makeFragment({}))
+
+    let modelSignal: AbortSignal | undefined
+    let releaseProvider: (() => void) | undefined
+    mockAgentStream.mockImplementation(({ abortSignal }: { abortSignal: AbortSignal }) => {
+      modelSignal = abortSignal
+      return Promise.resolve({
+        fullStream: (async function* () {
+          yield { type: 'text-delta', text: 'Partial response' }
+          await new Promise<void>(resolve => { releaseProvider = resolve })
+          if (abortSignal.aborted) {
+            const error = new Error('aborted')
+            error.name = 'AbortError'
+            throw error
+          }
+        })(),
+        totalUsage: Promise.resolve(undefined),
+      })
+    })
+
+    const instance = createAgentInstance('librarian.refine', { dataDir, storyId: story.id })
+    const result = await instance.execute({ fragmentId: 'ch-0001' })
+    const reader = result.eventStream.getReader()
+    await reader.read()
+
+    const cancel = reader.cancel()
+    await vi.waitFor(() => expect(modelSignal?.aborted).toBe(true))
+    releaseProvider?.()
+    await cancel
+    await result.completion.catch(() => {})
+
+    expect(listActiveAgents(story.id).map(a => a.agentName)).not.toContain('librarian.refine')
   })
 
   it('records the run as an error when the stream rejects', async () => {

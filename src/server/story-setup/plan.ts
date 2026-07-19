@@ -1,7 +1,7 @@
 import { generateText, tool } from 'ai'
 import { z } from 'zod/v4'
 import { generateFragmentId } from '@/lib/fragment-ids'
-import { getModel, buildProviderOptions } from '../llm/client'
+import { resolveAgentRuntime } from '../llm/client'
 import { createFragment, getStory, listFragments, updateStory } from '../fragments/storage'
 import { addProseSection } from '../fragments/prose-chain'
 import type { Fragment } from '../fragments/schema'
@@ -9,7 +9,7 @@ import type { StorySetupDraftFragment } from './schema'
 
 const StarterFragmentSchema = z.object({
   name: z.string().min(1).max(100),
-  description: z.string().min(1).max(50),
+  description: z.string().min(1).max(250),
   content: z.string().min(1),
 })
 
@@ -52,10 +52,12 @@ export async function generateStorySetupPlan(
   if (!story) throw new Error(`Story ${storyId} not found`)
 
   const existingFragments = await listFragments(dataDir, storyId)
-  const { model, temperature } = await getModel(dataDir, storyId, { role: 'story-setup.plan' })
-  const providerOptions = buildProviderOptions(story.settings.disableThinking ?? false) as
-    | Record<string, Record<string, string>>
-    | undefined
+  const { model, temperature, providerOptions, guards } = await resolveAgentRuntime(
+    dataDir,
+    storyId,
+    'story-setup.plan',
+    story,
+  )
 
   const submitStorySetupPlan = tool({
     description: 'Submit the validated story setup plan for Errata to save.',
@@ -66,9 +68,10 @@ export async function generateStorySetupPlan(
     model,
     temperature,
     providerOptions,
+    maxOutputTokens: guards.maxOutputTokens,
     system: `Turn a story setup conversation into a small, useful starter set for Errata.
 
-Stay grounded in the writer's answers. Resolve minor gaps conservatively, but do not invent major characters, world rules, or plot commitments the writer did not imply. Prefer fewer, richer fragments over exhaustive lists. Descriptions must be 50 characters or fewer.
+Stay grounded in the writer's answers. Resolve minor gaps conservatively, but do not invent major characters, world rules, or plot commitments the writer did not imply. Prefer fewer, richer fragments over exhaustive lists. Keep descriptions concise (250 characters or fewer).
 
 The guideline should capture prose voice, viewpoint, tense, pacing, and relevant craft constraints. Use null only when the conversation gives no meaningful writing direction. Knowledge is for setting, rules, history, objects, or premise facts. Characters are for people or other story actors. Use an opening only if the conversation establishes a beginning or asks Errata to draft one; otherwise return null.
 
@@ -113,8 +116,8 @@ function makeFragment(
   return {
     id: generateFragmentId(type),
     type,
-    name: name.slice(0, 100),
-    description: description.slice(0, 50),
+    name: name.trim().slice(0, 100),
+    description: description.trim().slice(0, 250),
     content: content.trim(),
     tags: [],
     refs: [],

@@ -19,7 +19,13 @@ export function storySetupRoutes(dataDir: string) {
       let agent: ReturnType<typeof createAgentInstance> | undefined
       try {
         agent = createAgentInstance('story-setup.chat', { dataDir, storyId: params.storyId })
-        const { eventStream } = await agent.execute({ messages: body.messages })
+        const { eventStream, completion } = await agent.execute({ messages: body.messages, mode: body.mode })
+        void completion.catch((error) => {
+          logger.error('Story setup stream completed without a valid snapshot', {
+            storyId: params.storyId,
+            error: error instanceof Error ? error.message : String(error),
+          })
+        })
         return new Response(encodeStream(eventStream), {
           headers: { 'Content-Type': 'application/x-ndjson; charset=utf-8' },
         })
@@ -38,6 +44,7 @@ export function storySetupRoutes(dataDir: string) {
           role: t.Union([t.Literal('user'), t.Literal('assistant')]),
           content: t.String(),
         })),
+        mode: t.Optional(t.Union([t.Literal('assess'), t.Literal('continue')])),
       }),
       detail: { summary: 'Continue the conversational story setup' },
     })
@@ -85,7 +92,7 @@ export function storySetupRoutes(dataDir: string) {
             t.Literal('prose'),
           ]),
           name: t.String({ minLength: 1, maxLength: 100 }),
-          description: t.String({ minLength: 1, maxLength: 50 }),
+          description: t.String({ minLength: 1, maxLength: 250 }),
           content: t.String({ minLength: 1 }),
         }))),
       }),

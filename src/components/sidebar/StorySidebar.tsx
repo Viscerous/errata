@@ -64,6 +64,7 @@ interface StorySidebarProps {
   storyId: string
   story: StoryMeta | undefined
   activeSection: SidebarSection
+  storySetupActive?: boolean
   onSectionChange: (section: SidebarSection) => void
   onLaunchWizard?: () => void
   enabledPanelPlugins: Array<{
@@ -108,6 +109,7 @@ export function StorySidebar({
   storyId,
   story,
   activeSection,
+  storySetupActive = false,
   onSectionChange,
   onLaunchWizard,
   enabledPanelPlugins,
@@ -166,7 +168,7 @@ export function StorySidebar({
             <SidebarMenu>
               <SidebarMenuItem>
                 <SidebarMenuButton
-                  isActive={activeSection === null}
+                  isActive={activeSection === null && !storySetupActive}
                   onClick={() => { onSectionChange(null); dismissMobileSheet() }}
                   tooltip="Story"
                   data-component-id="sidebar-story-link"
@@ -178,6 +180,7 @@ export function StorySidebar({
               {onLaunchWizard && (
                 <SidebarMenuItem>
                   <SidebarMenuButton
+                    isActive={storySetupActive}
                     onClick={() => { onLaunchWizard(); dismissMobileSheet() }}
                     tooltip="Story setup"
                     data-component-id="sidebar-story-setup"

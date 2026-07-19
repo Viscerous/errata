@@ -3,6 +3,23 @@ import { renderToString } from 'react-dom/server'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { describe, expect, it } from 'vitest'
 import { StoryWizard } from '@/components/wizard/StoryWizard'
+import type { StorySetupController } from '@/components/wizard/use-story-setup-controller'
+
+const controller: StorySetupController = {
+  messages: [],
+  input: '',
+  setInput: () => undefined,
+  streamingText: '',
+  isStreaming: false,
+  error: null,
+  checklist: [],
+  draftFragments: [],
+  sessionLoaded: true,
+  contextReady: true,
+  send: () => undefined,
+  stop: () => undefined,
+  retry: () => undefined,
+}
 
 describe('StoryWizard', () => {
   it('opens as an unstructured story conversation rather than a step form', () => {
@@ -14,10 +31,7 @@ describe('StoryWizard', () => {
       React.createElement(
         QueryClientProvider,
         { client: queryClient },
-        React.createElement(StoryWizard, {
-          storyId: 'story-test',
-          onComplete: () => undefined,
-        }),
+        React.createElement(StoryWizard, { controller, onComplete: () => undefined }),
       ),
     )
 
@@ -26,6 +40,8 @@ describe('StoryWizard', () => {
     expect(html).toContain('Fragments are saved as the conversation develops')
     expect(html).toContain('Open story')
     expect(html).toContain('Story checklist')
+    expect(html).toContain('explored')
+    expect(html).toContain('existing story material')
     expect(html).toContain('Starting point')
     expect(html).toContain('What it is about')
     expect(html).toContain('Characters')

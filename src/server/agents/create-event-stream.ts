@@ -40,6 +40,7 @@ export function createEventStream(
           text: drained.fullText,
           reasoning: drained.fullReasoning,
           toolCalls: drained.toolCalls,
+          toolErrors: drained.toolErrors,
           stepCount: drained.stepCount,
           finishReason: drained.finishReason,
         })

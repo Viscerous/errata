@@ -14,8 +14,6 @@ import { componentId } from '@/lib/dom-ids'
 import {
   deactivateAllClientPluginRuntimes,
   syncClientPluginRuntimes,
-  notifyPluginPanelOpen,
-  notifyPluginPanelClose,
 } from '@/lib/plugin-panels'
 import {
   parseErrataExport,
@@ -45,6 +43,9 @@ import { AgentActivityIndicator } from '@/components/AgentActivityIndicator'
 import { useTimelineBar } from '@/lib/theme'
 import { initClientPluginPanels } from '@/lib/plugin-panel-init'
 import { AgentBlockConfigSchema, type AgentBlockConfig } from '@/contracts/block-config'
+import { q } from '@/lib/query-keys'
+import { useWorkspaceSurface } from '@/hooks/use-workspace-surface'
+import { useStorySetupController } from '@/components/wizard/use-story-setup-controller'
 
 const DebugPanel = lazy(() => import('@/components/generation/DebugPanel').then((module) => ({ default: module.DebugPanel })))
 const ProviderPanel = lazy(() => import('@/components/settings/ProviderManager').then((module) => ({ default: module.ProviderPanel })))
@@ -55,6 +56,19 @@ const TavernCardImportDialog = lazy(() => import('@/components/fragments/TavernC
 const CharacterCardImportDialog = lazy(() => import('@/components/fragments/CharacterCardImportDialog').then((module) => ({ default: module.CharacterCardImportDialog })))
 const CharacterChatView = lazy(() => import('@/components/character-chat/CharacterChatView').then((module) => ({ default: module.CharacterChatView })))
 const ErratanetIntroPrompt = lazy(() => import('@/components/erratanet/ErratanetIntroPrompt').then((module) => ({ default: module.ErratanetIntroPrompt })))
+
+function fingerprintFragments(fragments: Fragment[]): string {
+  const source = fragments
+    .map(fragment => `${fragment.id}:${fragment.version}:${fragment.updatedAt}`)
+    .sort()
+    .join('|')
+  let hash = 2166136261
+  for (let index = 0; index < source.length; index += 1) {
+    hash ^= source.charCodeAt(index)
+    hash = Math.imul(hash, 16777619)
+  }
+  return `${fragments.length}-${(hash >>> 0).toString(36)}`
+}
 
 export const Route = createFileRoute('/story/$storyId')({
   component: StoryEditorPage,
@@ -67,11 +81,13 @@ function StoryEditorPage() {
   const pluginSidebarPrefsKey = `errata:plugin-sidebar:${storyId}`
   const [mainView, setMainView] = useState<'prose' | 'character-chat'>('prose')
   const [activeSection, setActiveSection] = useState<SidebarSection>(null)
-  const [selectedFragment, setSelectedFragment] = useState<Fragment | null>(null)
-  const [editorMode, setEditorMode] = useState<'view' | 'edit'>('view')
-  const [showWizard, setShowWizard] = useState<boolean | null>(null)
-  const [debugLogId, setDebugLogId] = useState<string | null>(null)
-  const [showProviders, setShowProviders] = useState(false)
+  const {
+    surface: workspaceSurface,
+    transition: transitionWorkspaceSurface,
+    updateFragment: updateWorkspaceFragment,
+    updateProseFragment: updateWorkspaceProseFragment,
+  } = useWorkspaceSurface(storyId)
+  const [wizardCheckedBranchId, setWizardCheckedBranchId] = useState<string | null>(null)
   const [showImportDialog, setShowImportDialog] = useState(false)
   const [importInitialData, setImportInitialData] = useState<ErrataExportData | null>(null)
   const [showTavernImport, setShowTavernImport] = useState(false)
@@ -79,11 +95,8 @@ function StoryEditorPage() {
   const [showCardImport, setShowCardImport] = useState(false)
   const [cardImportData, setCardImportData] = useState<ParsedCharacterCard | null>(null)
   const [cardImportImageUrl, setCardImportImageUrl] = useState<string | null>(null)
-  const [showExportPanel, setShowExportPanel] = useState(false)
   const [pluginSidebarVisibility, setPluginSidebarVisibility] = useState<Record<string, boolean>>({})
   const [pluginCloseReturnSection, setPluginCloseReturnSection] = useState<SidebarSection>(null)
-  const [editingProseId, setEditingProseId] = useState<string | null>(null)
-  const [editSelectionText, setEditSelectionText] = useState<string | null>(null)
   const [askLibrarianFragmentId, setAskLibrarianFragmentId] = useState<string | null>(null)
   const [askLibrarianPrefill, setAskLibrarianPrefill] = useState<string | null>(null)
   const [pendingAgentConfigImport, setPendingAgentConfigImport] = useState<{ agentName: string; displayName?: string; config: AgentBlockConfig } | null>(null)
@@ -106,25 +119,13 @@ function StoryEditorPage() {
     if (typeof window === 'undefined') return
     const params = new URLSearchParams(window.location.search)
     if (params.get('openrouter_oauth') === '1') {
-      setShowProviders(true)
-      notifyPluginPanelOpen({ panel: 'providers' }, { storyId })
+      transitionWorkspaceSurface({ kind: 'providers' })
     }
-  }, [storyId])
+  }, [storyId, transitionWorkspaceSurface])
 
   const { data: story, isLoading } = useQuery({
     queryKey: ['story', storyId],
     queryFn: () => api.stories.get(storyId),
-  })
-
-  // Only used to check if story has any fragments (for wizard auto-show).
-  // Uses a distinct query key to avoid being caught in fragment invalidation storms.
-  const { data: fragmentCount } = useQuery({
-    queryKey: ['fragment-count', storyId],
-    queryFn: async () => {
-      const list = await api.fragments.list(storyId)
-      return list.length
-    },
-    staleTime: 30_000,
   })
 
   const { data: plugins } = useQuery({
@@ -135,6 +136,23 @@ function StoryEditorPage() {
   const { data: branchesIndex } = useQuery({
     queryKey: ['branches', storyId],
     queryFn: () => api.branches.list(storyId),
+  })
+
+  // Share the normal branch-addressed fragment cache. Its invalidations also
+  // advance the Story setup session revision after ordinary editor changes.
+  const activeBranchId = branchesIndex?.activeBranchId
+  const { data: fragmentSnapshot } = useQuery({
+    ...q.fragments(storyId, activeBranchId ?? 'main'),
+    enabled: activeBranchId !== undefined,
+  })
+  const storySetupRevision = story && fragmentSnapshot
+    ? `${story.updatedAt}:${fingerprintFragments(fragmentSnapshot)}`
+    : undefined
+  const storySetupController = useStorySetupController({
+    storyId,
+    sessionScope: activeBranchId ?? 'main',
+    contentRevision: storySetupRevision,
+    active: workspaceSurface?.kind === 'story-setup',
   })
 
   useEffect(() => {
@@ -239,20 +257,27 @@ function StoryEditorPage() {
     return () => window.removeEventListener('errata:plugin:invalidate', handler)
   }, [queryClient])
 
-  // Auto-show wizard when story has no fragments
-  if (showWizard === null && fragmentCount !== undefined) {
-    if (fragmentCount === 0) {
-      setShowWizard(true)
-    } else {
-      setShowWizard(false)
+  // Auto-show wizard when the active timeline has no fragments. This is an
+  // effect rather than a render-time state update so React can commit the
+  // query result before navigation state changes.
+  useEffect(() => {
+    if (!activeBranchId || fragmentSnapshot === undefined) return
+    if (wizardCheckedBranchId === activeBranchId) return
+    setWizardCheckedBranchId(activeBranchId)
+    if (fragmentSnapshot.length === 0 && workspaceSurface === null) {
+      transitionWorkspaceSurface({ kind: 'story-setup' })
     }
-  }
+  }, [
+    activeBranchId,
+    fragmentSnapshot,
+    transitionWorkspaceSurface,
+    wizardCheckedBranchId,
+    workspaceSurface,
+  ])
 
   const handleSelectFragment = (fragment: Fragment) => {
-    setSelectedFragment(fragment)
-    setEditorMode('edit')
     if (isMobile) setActiveSection(null) // Close detail panel on mobile so editor is visible
-    notifyPluginPanelOpen({ panel: 'fragment-editor', fragment, mode: 'edit' }, { storyId })
+    transitionWorkspaceSurface({ kind: 'fragment-editor', fragment, mode: 'edit' })
   }
 
   const handleCreateFragment = async (type: string, prefill?: FragmentPrefill) => {
@@ -274,47 +299,25 @@ function StoryEditorPage() {
         return typeSlot === undefined || typeSlot === type
       },
     })
-    setSelectedFragment(created)
-    setEditorMode('edit')
     if (isMobile) setActiveSection(null)
-    notifyPluginPanelOpen({ panel: 'fragment-editor', fragment: created, mode: 'edit' }, { storyId })
-  }
-
-  const handleEditorClose = () => {
-    setSelectedFragment(null)
-    setEditorMode('view')
-    notifyPluginPanelClose({ panel: 'fragment-editor' }, { storyId })
+    transitionWorkspaceSurface({ kind: 'fragment-editor', fragment: created, mode: 'edit' })
   }
 
   const handleDebugLog = (logId: string) => {
-    setDebugLogId(logId || '__browse__')
-    setSelectedFragment(null)
-    setEditorMode('view')
-    notifyPluginPanelOpen({ panel: 'debug' }, { storyId })
+    transitionWorkspaceSurface({ kind: 'debug', logId: logId || '__browse__' })
   }
 
-  const handleLaunchWizard = useCallback(() => {
-    setShowWizard(true)
-    notifyPluginPanelOpen({ panel: 'wizard' }, { storyId })
-  }, [storyId])
-
   const handleSectionChange = useCallback((section: SidebarSection) => {
+    transitionWorkspaceSurface(null)
     setPluginCloseReturnSection(null)
     setActiveSection(section)
-    if (section === null) {
-      setSelectedFragment((prev) => {
-        if (prev || editorMode !== 'view') {
-          notifyPluginPanelClose({ panel: 'fragment-editor' }, { storyId })
-        }
-        return null
-      })
-      setEditorMode('view')
-      setDebugLogId((prev) => {
-        if (prev) notifyPluginPanelClose({ panel: 'debug' }, { storyId })
-        return null
-      })
-    }
-  }, [editorMode, storyId])
+  }, [transitionWorkspaceSurface])
+
+  const handleLaunchWizard = useCallback(() => {
+    setPluginCloseReturnSection(null)
+    setActiveSection(null)
+    transitionWorkspaceSurface({ kind: 'story-setup' })
+  }, [transitionWorkspaceSurface])
 
   const handleOpenPluginPanelFromSettings = useCallback((pluginName: string) => {
     setPluginCloseReturnSection('settings')
@@ -498,14 +501,13 @@ function StoryEditorPage() {
     )
   }
 
-  const isEditingFragment = editorMode !== 'view' || selectedFragment
-
   return (
     <SidebarProvider className="!min-h-dvh !max-h-dvh overflow-hidden" data-component-id="story-editor-root">
       <StorySidebar
         storyId={storyId}
         story={story}
         activeSection={activeSection}
+        storySetupActive={workspaceSurface?.kind === 'story-setup'}
         onSectionChange={handleSectionChange}
         onLaunchWizard={handleLaunchWizard}
         enabledPanelPlugins={sidebarPanelPlugins}
@@ -519,13 +521,12 @@ function StoryEditorPage() {
         onClose={handleDetailPanelClose}
         onSelectFragment={handleSelectFragment}
         onCreateFragment={handleCreateFragment}
-        selectedFragmentId={selectedFragment?.id}
+        selectedFragmentId={workspaceSurface?.kind === 'fragment-editor' ? workspaceSurface.fragment.id : undefined}
         onManageProviders={() => {
           // Close the settings overlay so the providers panel isn't stuck behind
           // its blurred backdrop.
           setActiveSection(null)
-          setShowProviders(true)
-          notifyPluginPanelOpen({ panel: 'providers' }, { storyId })
+          transitionWorkspaceSurface({ kind: 'providers' })
         }}
         onOpenPluginPanel={handleOpenPluginPanelFromSettings}
         onTogglePluginSidebar={setPluginSidebarVisible}
@@ -534,8 +535,7 @@ function StoryEditorPage() {
         onImportFragment={handleOpenImport}
         onImportCard={handleOpenTavernImport}
         onExport={() => {
-          setShowExportPanel(true)
-          notifyPluginPanelOpen({ panel: 'export' }, { storyId })
+          transitionWorkspaceSurface({ kind: 'export' })
         }}
         onDownloadStory={() => api.stories.exportAsZip(storyId)}
         onExportProse={handleExportProse}
@@ -675,8 +675,11 @@ function StoryEditorPage() {
             outlineOpen={outlineOpen}
             onSelectFragment={handleSelectFragment}
             onEditProse={(fragmentId, selectedText) => {
-              setEditingProseId(fragmentId)
-              setEditSelectionText(selectedText ?? null)
+              transitionWorkspaceSurface({
+                kind: 'prose-editor',
+                fragmentId,
+                selectionText: selectedText ?? null,
+              })
             }}
             onDebugLog={handleDebugLog}
             onLaunchWizard={handleLaunchWizard}
@@ -696,74 +699,69 @@ function StoryEditorPage() {
         )}
 
         {/* Overlay panels render on top */}
-        {showWizard && (
+        {workspaceSurface?.kind === 'story-setup' && (
           <div className="absolute inset-0 z-30 bg-background" data-component-id="overlay-story-wizard">
             <Suspense fallback={null}>
-              <StoryWizard storyId={storyId} onComplete={() => {
-                setShowWizard(false)
-                notifyPluginPanelClose({ panel: 'wizard' }, { storyId })
-              }} />
-            </Suspense>
-          </div>
-        )}
-        {debugLogId && (
-          <div className="absolute inset-0 z-30 bg-background" data-component-id="overlay-debug-panel">
-            <Suspense fallback={null}>
-              <DebugPanel
-                storyId={storyId}
-                fragmentId={debugLogId === '__browse__' ? undefined : debugLogId}
-                onClose={() => {
-                  setDebugLogId(null)
-                  notifyPluginPanelClose({ panel: 'debug' }, { storyId })
-                }}
+              <StoryWizard
+                key={`${storyId}:${activeBranchId ?? 'main'}`}
+                controller={storySetupController}
+                onComplete={() => transitionWorkspaceSurface(null)}
               />
             </Suspense>
           </div>
         )}
-        {showProviders && (
-          <div className="absolute inset-0 z-30 bg-background" data-component-id="overlay-provider-panel">
+        {workspaceSurface?.kind === 'debug' && (
+          <div className="absolute inset-0 z-30 bg-background" data-component-id="overlay-debug-panel">
             <Suspense fallback={null}>
-              <ProviderPanel onClose={() => {
-                setShowProviders(false)
-                notifyPluginPanelClose({ panel: 'providers' }, { storyId })
-              }} />
+              <DebugPanel
+                storyId={storyId}
+                fragmentId={workspaceSurface.logId === '__browse__' ? undefined : workspaceSurface.logId}
+                onClose={() => transitionWorkspaceSurface(null)}
+              />
             </Suspense>
           </div>
         )}
-        {showExportPanel && (
+        {workspaceSurface?.kind === 'providers' && (
+          <div className="absolute inset-0 z-30 bg-background" data-component-id="overlay-provider-panel">
+            <Suspense fallback={null}>
+              <ProviderPanel onClose={() => transitionWorkspaceSurface(null)} />
+            </Suspense>
+          </div>
+        )}
+        {workspaceSurface?.kind === 'export' && (
           <div className="absolute inset-0 z-30 bg-background" data-component-id="overlay-export-panel">
             <Suspense fallback={null}>
               <FragmentExportPanel
                 storyId={storyId}
                 storyName={story.name}
-                onClose={() => {
-                  setShowExportPanel(false)
-                  notifyPluginPanelClose({ panel: 'export' }, { storyId })
-                }}
+                onClose={() => transitionWorkspaceSurface(null)}
               />
             </Suspense>
           </div>
         )}
-        {editingProseId && (
+        {workspaceSurface?.kind === 'prose-editor' && (
           <div className="absolute inset-0 z-30 bg-background" data-component-id="overlay-prose-writing-panel">
             <ProseWritingPanel
               storyId={storyId}
-              fragmentId={editingProseId}
-              initialSelection={editSelectionText}
-              onClose={() => { setEditingProseId(null); setEditSelectionText(null) }}
-              onFragmentChange={setEditingProseId}
+              fragmentId={workspaceSurface.fragmentId}
+              initialSelection={workspaceSurface.selectionText}
+              onClose={() => transitionWorkspaceSurface(null)}
+              onFragmentChange={updateWorkspaceProseFragment}
             />
           </div>
         )}
-        {isEditingFragment && (
-          <div className="absolute inset-0 z-30 bg-background" data-component-id={componentId('overlay-fragment-editor', editorMode)}>
+        {workspaceSurface?.kind === 'fragment-editor' && (
+          <div className="absolute inset-0 z-30 bg-background" data-component-id={componentId('overlay-fragment-editor', workspaceSurface.mode)}>
             <FragmentEditor
               storyId={storyId}
-              fragment={selectedFragment}
-              mode={editorMode}
-              onClose={handleEditorClose}
+              fragment={workspaceSurface.fragment}
+              mode={workspaceSurface.mode}
+              onClose={() => transitionWorkspaceSurface(null)}
               onSaved={() => {}}
-              onFragmentChange={setSelectedFragment}
+              onFragmentChange={(fragment) => {
+                if (!fragment) return
+                updateWorkspaceFragment(fragment)
+              }}
             />
           </div>
         )}

@@ -1,21 +1,20 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
+import { useEffect, useRef } from 'react'
 import { ArrowUp, Check, Circle, FileText, Minus, Square, X } from 'lucide-react'
 import {
-  api,
   type StorySetupChecklistItem,
-  type StorySetupChecklistKey,
   type StorySetupDraftFragment,
-  type StorySetupMessage,
 } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { StreamMarkdown } from '@/components/ui/stream-markdown'
 import { ErrataMark } from '@/components/ErrataLogo'
-import { readStorySetupSession, writeStorySetupSession } from './story-setup-session'
+import {
+  STORY_SETUP_CHECKLIST,
+  type StorySetupController,
+} from './use-story-setup-controller'
 
 interface StoryWizardProps {
-  storyId: string
+  controller: StorySetupController
   onComplete: () => void
 }
 
@@ -25,22 +24,6 @@ const STARTING_POINTS = [
   { label: 'A scene', message: 'I have a scene I can picture.' },
   { label: 'Only a mood', message: 'I only have a mood or feeling so far.' },
 ] as const
-
-const CHECKLIST: Array<{ key: StorySetupChecklistKey; label: string }> = [
-  { key: 'starting-point', label: 'Starting point' },
-  { key: 'premise', label: 'What it is about' },
-  { key: 'characters', label: 'Characters' },
-  { key: 'goal', label: 'Goal and stakes' },
-  { key: 'setting', label: 'Setting' },
-  { key: 'voice', label: 'Voice and tone' },
-  { key: 'opening', label: 'Opening direction' },
-]
-
-const INITIAL_CHECKLIST: StorySetupChecklistItem[] = CHECKLIST.map(item => ({
-  key: item.key,
-  status: 'missing',
-  note: '',
-}))
 
 function AssistantTurn({ content, streaming = false }: { content: string; streaming?: boolean }) {
   return (
@@ -103,6 +86,7 @@ function StorySetupRail({
   updating: boolean
 }) {
   const covered = checklist.filter(item => item.status === 'covered').length
+  const explored = checklist.filter(item => item.status !== 'missing').length
   const checklistByKey = new Map(checklist.map(item => [item.key, item]))
 
   return (
@@ -110,11 +94,13 @@ function StorySetupRail({
       <section aria-labelledby="story-checklist-heading">
         <div className="flex items-baseline justify-between gap-3">
           <h2 id="story-checklist-heading" className="text-sm font-semibold text-foreground">Story checklist</h2>
-          <span className="text-xs tabular-nums text-muted-foreground">{covered} of {CHECKLIST.length}</span>
+          <span className="text-xs tabular-nums text-muted-foreground">{explored} of {STORY_SETUP_CHECKLIST.length} explored</span>
         </div>
-        <p className="mt-1 text-xs leading-5 text-muted-foreground">A guide for the conversation, not a requirement.</p>
+        <p className="mt-1 text-xs leading-5 text-muted-foreground">
+          {covered} complete. Based on this conversation and existing story material; not a requirement.
+        </p>
         <ul className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 lg:grid-cols-1">
-          {CHECKLIST.map(definition => {
+          {STORY_SETUP_CHECKLIST.map(definition => {
             const item = checklistByKey.get(definition.key) ?? {
               key: definition.key,
               status: 'missing' as const,
@@ -171,110 +157,25 @@ function StorySetupRail({
   )
 }
 
-export function StoryWizard({ storyId, onComplete }: StoryWizardProps) {
-  const queryClient = useQueryClient()
-  const [messages, setMessages] = useState<StorySetupMessage[]>([])
-  const [input, setInput] = useState('')
-  const [streamingText, setStreamingText] = useState('')
-  const [isStreaming, setIsStreaming] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [checklist, setChecklist] = useState<StorySetupChecklistItem[]>(INITIAL_CHECKLIST)
-  const [draftFragments, setDraftFragments] = useState<StorySetupDraftFragment[]>([])
-  const [sessionLoaded, setSessionLoaded] = useState(false)
-  const abortRef = useRef<AbortController | null>(null)
-  const initialRequestRef = useRef(false)
+export function StoryWizard({ controller, onComplete }: StoryWizardProps) {
+  const {
+    messages,
+    input,
+    setInput,
+    streamingText,
+    isStreaming,
+    error,
+    checklist,
+    draftFragments,
+    contextReady,
+    send,
+    stop,
+    retry,
+  } = controller
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const endRef = useRef<HTMLDivElement | null>(null)
 
   const userTurnCount = messages.filter(message => message.role === 'user').length
-
-  const requestAssistant = useCallback(async (history: StorySetupMessage[]) => {
-    const controller = new AbortController()
-    abortRef.current = controller
-    setIsStreaming(true)
-    setStreamingText('')
-    setError(null)
-    let accumulated = ''
-
-    try {
-      const stream = await api.storySetup.chat(storyId, history, controller.signal)
-      const reader = stream.getReader()
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        if (value.type === 'text') {
-          accumulated += value.text
-          setStreamingText(accumulated)
-        } else if (value.type === 'tool-call' && value.toolName === 'updateStorySetup') {
-          const snapshot = value.args as {
-            checklist?: StorySetupChecklistItem[]
-            fragments?: StorySetupDraftFragment[]
-          }
-          if (Array.isArray(snapshot.checklist)) {
-            const incoming = new Map(snapshot.checklist.map(item => [item.key, item]))
-            setChecklist(CHECKLIST.map(definition => incoming.get(definition.key) ?? {
-              key: definition.key,
-              status: 'missing',
-              note: '',
-            }))
-          }
-          if (Array.isArray(snapshot.fragments)) {
-            setDraftFragments(snapshot.fragments)
-          }
-        } else if (value.type === 'tool-result' && value.toolName === 'updateStorySetup') {
-          const saved = value.result as { fragments?: StorySetupDraftFragment[] }
-          if (Array.isArray(saved.fragments)) {
-            setDraftFragments(saved.fragments)
-          }
-          await Promise.all([
-            queryClient.invalidateQueries({ queryKey: ['story', storyId] }),
-            queryClient.invalidateQueries({ queryKey: ['fragments', storyId] }),
-            queryClient.invalidateQueries({ queryKey: ['wizard-fragments', storyId] }),
-            queryClient.invalidateQueries({ queryKey: ['fragment-count', storyId] }),
-            queryClient.invalidateQueries({ queryKey: ['proseChain', storyId] }),
-          ])
-        }
-      }
-    } catch (caught) {
-      if ((caught as Error).name !== 'AbortError') {
-        setError(caught instanceof Error ? caught.message : 'Errata could not continue the conversation.')
-      }
-    } finally {
-      if (accumulated.trim()) {
-        setMessages([...history, { role: 'assistant', content: accumulated.trim() }])
-      }
-      setStreamingText('')
-      setIsStreaming(false)
-      abortRef.current = null
-      requestAnimationFrame(() => textareaRef.current?.focus())
-    }
-  }, [queryClient, storyId])
-
-  useEffect(() => {
-    const saved = readStorySetupSession(window.localStorage, storyId)
-    if (saved) {
-      const savedByKey = new Map(saved.checklist.map(item => [item.key, item]))
-      setMessages(saved.messages)
-      setChecklist(CHECKLIST.map(item => savedByKey.get(item.key) ?? { ...item, status: 'missing', note: '' }))
-      setDraftFragments(saved.draftFragments)
-    }
-    setSessionLoaded(true)
-  }, [storyId])
-
-  useEffect(() => {
-    if (!sessionLoaded) return
-    if (initialRequestRef.current) return
-    initialRequestRef.current = true
-    if (messages.length === 0 || messages.at(-1)?.role === 'user') {
-      requestAssistant(messages)
-    }
-    return () => abortRef.current?.abort()
-  }, [messages, requestAssistant, sessionLoaded])
-
-  useEffect(() => {
-    if (!sessionLoaded) return
-    writeStorySetupSession(window.localStorage, storyId, { messages, checklist, draftFragments })
-  }, [checklist, draftFragments, messages, sessionLoaded, storyId])
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: isStreaming ? 'auto' : 'smooth', block: 'end' })
@@ -287,14 +188,9 @@ export function StoryWizard({ storyId, onComplete }: StoryWizardProps) {
     textarea.style.height = `${Math.min(textarea.scrollHeight, 176)}px`
   }, [input])
 
-  const send = useCallback((content: string) => {
-    const trimmed = content.trim()
-    if (!trimmed || isStreaming) return
-    const history: StorySetupMessage[] = [...messages, { role: 'user', content: trimmed }]
-    setMessages(history)
-    setInput('')
-    requestAssistant(history)
-  }, [isStreaming, messages, requestAssistant])
+  useEffect(() => {
+    if (!isStreaming) textareaRef.current?.focus()
+  }, [isStreaming])
 
   const handleSubmit = (event: React.FormEvent) => {
     event.preventDefault()
@@ -306,11 +202,6 @@ export function StoryWizard({ storyId, onComplete }: StoryWizardProps) {
       event.preventDefault()
       send(input)
     }
-  }
-
-  const handleClose = () => {
-    abortRef.current?.abort()
-    onComplete()
   }
 
   return (
@@ -326,8 +217,8 @@ export function StoryWizard({ storyId, onComplete }: StoryWizardProps) {
           </div>
 
           <div className="flex shrink-0 items-center gap-2">
-            <Button size="sm" onClick={handleClose}>Open story</Button>
-            <Button variant="ghost" size="icon-sm" onClick={handleClose} aria-label="Close story setup">
+            <Button size="sm" onClick={onComplete}>Open story</Button>
+            <Button variant="ghost" size="icon-sm" onClick={onComplete} aria-label="Close story setup">
               <X className="size-4" aria-hidden />
             </Button>
           </div>
@@ -368,7 +259,7 @@ export function StoryWizard({ storyId, onComplete }: StoryWizardProps) {
                     <p>{error}</p>
                     <button
                       type="button"
-                      onClick={() => requestAssistant(messages)}
+                      onClick={retry}
                       className="mt-2 font-medium underline underline-offset-4 hover:no-underline"
                     >
                       Try the conversation again
@@ -397,7 +288,7 @@ export function StoryWizard({ storyId, onComplete }: StoryWizardProps) {
                   value={input}
                   onChange={event => setInput(event.target.value)}
                   onKeyDown={handleKeyDown}
-                  disabled={isStreaming}
+                  disabled={isStreaming || !contextReady}
                   rows={1}
                   autoFocus
                   aria-label="Your story idea"
@@ -409,13 +300,13 @@ export function StoryWizard({ storyId, onComplete }: StoryWizardProps) {
                     type="button"
                     size="icon-sm"
                     variant="ghost"
-                    onClick={() => abortRef.current?.abort()}
+                    onClick={stop}
                     aria-label="Stop Errata"
                   >
                     <Square className="size-3 fill-current" aria-hidden />
                   </Button>
                 ) : (
-                  <Button type="submit" size="icon-sm" disabled={!input.trim()} aria-label="Send message">
+                  <Button type="submit" size="icon-sm" disabled={!contextReady || !input.trim()} aria-label="Send message">
                     <ArrowUp className="size-4" aria-hidden />
                   </Button>
                 )}

@@ -60,6 +60,7 @@ export function createAgentInstance<K extends string>(
           text: completion.text,
           reasoning: completion.reasoning,
           toolCalls: completion.toolCalls,
+          toolErrors: completion.toolErrors,
           stepCount: completion.stepCount,
           finishReason: completion.finishReason,
         }),
@@ -95,10 +96,11 @@ export function createAgentInstance<K extends string>(
       const rawOutput = await definition.run(invocationContext, parsedInput)
       const { eventStream, completion } = rawOutput as AgentStreamResult
 
-      // Mirror the agent's events onto its live activity trace while the caller
-      // consumes the original branch untouched. Each chunk is one NDJSON event.
-      const [forCaller, forTrace] = eventStream.tee()
-      void drainToTrace(forTrace, handle)
+      // Observe events in the caller's stream instead of teeing it. A tee keeps
+      // its source alive until both branches are cancelled, which meant the
+      // activity-trace branch could accidentally keep an LLM run alive after
+      // the HTTP client disconnected.
+      const forCaller = tapActivityTrace(eventStream, handle)
 
       const wrappedCompletion = completion.then(
         (result) => {
@@ -120,15 +122,20 @@ export function createAgentInstance<K extends string>(
   }
 }
 
-/** Read an agent's NDJSON event stream and replay each event onto its run handle's
- *  activity trace. Best-effort: a malformed or aborted stream is swallowed since
- *  the trace is purely for live display. */
-async function drainToTrace(stream: ReadableStream<string>, handle: AgentRunHandle): Promise<void> {
+/** Tap an agent's NDJSON stream into its activity trace without becoming a
+ * second stream consumer. Cancelling the returned stream cancels the source,
+ * allowing disconnects to reach the underlying model AbortController. */
+function tapActivityTrace(stream: ReadableStream<string>, handle: AgentRunHandle): ReadableStream<string> {
   const reader = stream.getReader()
-  try {
-    for (;;) {
-      const { done, value } = await reader.read()
-      if (done) break
+  let released = false
+
+  const release = () => {
+    if (released) return
+    released = true
+    reader.releaseLock()
+  }
+
+  const traceChunk = (value: string) => {
       for (const line of value.split('\n')) {
         const trimmed = line.trim()
         if (!trimmed) continue
@@ -138,10 +145,30 @@ async function drainToTrace(stream: ReadableStream<string>, handle: AgentRunHand
           // Ignore malformed lines.
         }
       }
-    }
-  } catch {
-    // Stream errored/cancelled — finish() records the outcome separately.
-  } finally {
-    reader.releaseLock()
   }
+
+  return new ReadableStream<string>({
+    async pull(controller) {
+      try {
+        const { done, value } = await reader.read()
+        if (done) {
+          release()
+          controller.close()
+          return
+        }
+        traceChunk(value)
+        controller.enqueue(value)
+      } catch (error) {
+        release()
+        controller.error(error)
+      }
+    },
+    async cancel(reason) {
+      try {
+        await reader.cancel(reason)
+      } finally {
+        release()
+      }
+    },
+  })
 }

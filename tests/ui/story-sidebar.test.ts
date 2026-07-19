@@ -44,4 +44,34 @@ describe('StorySidebar', () => {
     expect(html).toContain('Story setup')
     expect(html).toContain('data-component-id="sidebar-story-setup"')
   })
+
+  it('marks Story setup active without also marking Story active', () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const html = renderToString(
+      React.createElement(
+        QueryClientProvider,
+        { client: queryClient },
+        React.createElement(
+          HelpProvider,
+          null,
+          React.createElement(
+            SidebarProvider,
+            null,
+            React.createElement(StorySidebar, {
+              storyId: 'story-test',
+              story: undefined,
+              activeSection: null,
+              storySetupActive: true,
+              onSectionChange: () => undefined,
+              onLaunchWizard: () => undefined,
+              enabledPanelPlugins: [],
+            }),
+          ),
+        ),
+      ),
+    )
+
+    expect(html).toMatch(/data-active="true"[^>]*data-component-id="sidebar-story-setup"/)
+    expect(html).toMatch(/data-active="false"[^>]*data-component-id="sidebar-story-link"/)
+  })
 })

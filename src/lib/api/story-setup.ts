@@ -5,6 +5,8 @@ export interface StorySetupMessage {
   content: string
 }
 
+export type StorySetupChatMode = 'assess' | 'continue'
+
 export type StorySetupChecklistKey =
   | 'starting-point'
   | 'premise'
@@ -44,8 +46,12 @@ export interface StorySetupResult {
 }
 
 export const storySetup = {
-  chat: (storyId: string, messages: StorySetupMessage[], signal?: AbortSignal) =>
-    fetchEventStream(`/stories/${storyId}/setup/chat`, { messages }, signal),
+  chat: (
+    storyId: string,
+    messages: StorySetupMessage[],
+    mode: StorySetupChatMode,
+    signal?: AbortSignal,
+  ) => fetchEventStream(`/stories/${storyId}/setup/chat`, { messages, mode }, signal),
 
   complete: (
     storyId: string,

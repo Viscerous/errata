@@ -85,4 +85,65 @@ describe('story setup fragment sync', () => {
     const chain = await getProseChain(dataDir, 'story-setup-sync')
     expect(chain?.entries[0].proseFragments[0]).toBe(result.fragments[0].id)
   })
+
+  it('reconciles the complete snapshot and archives omitted setup fragments', async () => {
+    const first = await syncStorySetupSnapshot(dataDir, 'story-setup-sync', {
+      story: null,
+      fragments: [
+        {
+          key: 'mara',
+          type: 'character',
+          name: 'Mara',
+          description: 'Courier with a stolen memory',
+          content: 'Mara carries the memory.',
+        },
+        {
+          key: 'memory-trade',
+          type: 'knowledge',
+          name: 'Memory trade',
+          description: 'Rules of bought memories',
+          content: 'Memories can be copied and sold.',
+        },
+      ],
+    })
+
+    await syncStorySetupSnapshot(dataDir, 'story-setup-sync', {
+      story: null,
+      fragments: [{
+        key: 'mara',
+        type: 'character',
+        name: 'Mara',
+        description: 'Courier with a stolen memory',
+        content: 'Mara carries the memory.',
+      }],
+    })
+
+    expect((await listFragments(dataDir, 'story-setup-sync')).map(fragment => fragment.id)).toEqual([first.fragments[0].id])
+    const withArchived = await listFragments(dataDir, 'story-setup-sync', undefined, { includeArchived: true })
+    expect(withArchived.find(fragment => fragment.id === first.fragments[1].id)?.archived).toBe(true)
+  })
+
+  it('does not create fragment versions or story revisions for an unchanged snapshot', async () => {
+    const snapshot = {
+      story: { name: 'The Memory Courier', description: 'A courier carries a stolen memory.' },
+      fragments: [{
+        key: 'mara',
+        type: 'character' as const,
+        name: 'Mara',
+        description: 'Courier with a stolen memory',
+        content: 'Mara carries the memory.',
+      }],
+    }
+    await syncStorySetupSnapshot(dataDir, 'story-setup-sync', snapshot)
+    const storyAfterFirst = await getStory(dataDir, 'story-setup-sync')
+    const fragmentAfterFirst = (await listFragments(dataDir, 'story-setup-sync'))[0]
+
+    await syncStorySetupSnapshot(dataDir, 'story-setup-sync', snapshot)
+    const storyAfterSecond = await getStory(dataDir, 'story-setup-sync')
+    const fragmentAfterSecond = (await listFragments(dataDir, 'story-setup-sync'))[0]
+
+    expect(storyAfterSecond?.updatedAt).toBe(storyAfterFirst?.updatedAt)
+    expect(fragmentAfterSecond.version).toBe(fragmentAfterFirst.version)
+    expect(fragmentAfterSecond.versions).toEqual(fragmentAfterFirst.versions)
+  })
 })

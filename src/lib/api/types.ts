@@ -552,6 +552,7 @@ export type ChatEvent =
   | { type: 'prewriter-reset' }
   | { type: 'tool-call'; id: string; toolName: string; args: Record<string, unknown> }
   | { type: 'tool-result'; id: string; toolName: string; result: unknown }
+  | { type: 'tool-error'; id: string; toolName: string; error: string }
   | { type: 'phase'; phase: string }
   | { type: 'finish'; finishReason: string; stepCount: number }
   | { type: 'prewriter-directions'; directions: SuggestionDirection[] }

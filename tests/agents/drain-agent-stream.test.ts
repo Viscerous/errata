@@ -24,6 +24,7 @@ describe('drainAgentStream', () => {
       fullText: 'Once upon a time.',
       fullReasoning: 'thinking... ',
       toolCalls: [{ toolName: 'readFragments', args: { id: 'ch-0001' }, result: { name: 'Alice' } }],
+      toolErrors: [],
       stepCount: 2,
       finishReason: 'stop',
     })
@@ -37,6 +38,24 @@ describe('drainAgentStream', () => {
       { type: 'tool-call', id: 't1', toolName: 'readFragments', args: { id: 'ch-0001' } },
       { type: 'tool-result', id: 't1', toolName: 'readFragments', result: { name: 'Alice' } },
     ])
+  })
+
+  it('surfaces recoverable tool errors without preventing a later successful retry', async () => {
+    const events: AgentStreamEvent[] = []
+    const result = await drainAgentStream(fullStreamOf([
+      { type: 'tool-error', toolCallId: 'bad-1', toolName: 'updateStorySetup', error: new Error('Invalid tool input') },
+      { type: 'tool-call', toolCallId: 'good-1', toolName: 'updateStorySetup', input: { checklist: [] } },
+      { type: 'tool-result', toolCallId: 'good-1', toolName: 'updateStorySetup', output: { saved: false } },
+    ]), event => events.push(event))
+
+    expect(result.toolErrors).toEqual([{ toolName: 'updateStorySetup', error: 'Invalid tool input' }])
+    expect(result.toolCalls).toHaveLength(1)
+    expect(events).toContainEqual({
+      type: 'tool-error',
+      id: 'bad-1',
+      toolName: 'updateStorySetup',
+      error: 'Invalid tool input',
+    })
   })
 
   it('correlates a tool-result to its own tool-call args when interleaved', async () => {
@@ -81,5 +100,12 @@ describe('drainAgentStream', () => {
     controller.abort()
 
     await expect(drained).rejects.toThrow('Agent stream aborted')
+  })
+
+  it('rejects fatal SDK error parts instead of silently completing', async () => {
+    await expect(drainAgentStream(fullStreamOf([
+      { type: 'text-delta', text: 'partial' },
+      { type: 'error', error: new Error('Provider connection failed') },
+    ]))).rejects.toThrow('Provider connection failed')
   })
 })

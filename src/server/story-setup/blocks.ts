@@ -2,7 +2,42 @@ import type { ContextBlock } from '../llm/context-builder'
 import type { AgentBlockContext } from '../agents/agent-block-context'
 import { buildBasePreviewContext } from '../agents/block-helpers'
 import { instructionRegistry } from '../instructions'
+import {
+  buildFragmentContextLanes,
+  fragmentCatalogBlock,
+  fragmentFullContextBlocksBySource,
+  proseWindowBlock,
+} from '../llm/fragment-context-blocks'
+import { selectAttentionContext } from '../llm/context-selection'
 import { listStorySetupFragments } from './sync'
+
+const isWriterOwned = (fragment: { meta: Record<string, unknown> }) =>
+  typeof fragment.meta.storySetupKey !== 'string'
+
+function writerOwnedContext(ctx: AgentBlockContext): AgentBlockContext {
+  const filterGroups = (groups: AgentBlockContext['customFragmentCatalogs']) => groups
+    ?.map(group => ({ ...group, fragments: group.fragments.filter(isWriterOwned) }))
+    .filter(group => group.fragments.length > 0)
+
+  return {
+    ...ctx,
+    proseFragments: ctx.proseFragments.filter(isWriterOwned),
+    stickyGuidelines: ctx.stickyGuidelines.filter(isWriterOwned),
+    stickyKnowledge: ctx.stickyKnowledge.filter(isWriterOwned),
+    stickyCharacters: ctx.stickyCharacters.filter(isWriterOwned),
+    stickyCustomFragments: ctx.stickyCustomFragments?.filter(isWriterOwned),
+    guidelineCatalog: ctx.guidelineCatalog.filter(isWriterOwned),
+    knowledgeCatalog: ctx.knowledgeCatalog.filter(isWriterOwned),
+    characterCatalog: ctx.characterCatalog.filter(isWriterOwned),
+    recentKnowledge: ctx.recentKnowledge?.filter(isWriterOwned),
+    recentCharacters: ctx.recentCharacters?.filter(isWriterOwned),
+    recentCustomFragments: filterGroups(ctx.recentCustomFragments),
+    customFragmentCatalogs: filterGroups(ctx.customFragmentCatalogs),
+    allKnowledge: ctx.allKnowledge?.filter(isWriterOwned),
+    allCharacters: ctx.allCharacters?.filter(isWriterOwned),
+    allCustomFragments: filterGroups(ctx.allCustomFragments),
+  }
+}
 
 export const STORY_SETUP_SYSTEM_PROMPT = `You are Errata's story setup collaborator. Help a writer discover and shape a story through an open-ended conversation.
 
@@ -19,9 +54,7 @@ Use this checklist to guide the conversation:
 - Voice and tone: viewpoint, tense, style, mood, and pacing when relevant.
 - Opening direction: where the story begins and what the first passage should accomplish.
 
-Before every conversational response, call updateStorySetup exactly once. Include all seven checklist entries in the listed order. Mark an entry partial when there is a useful clue but an important decision remains. Set story to null until there is enough information for a useful working title and description; after that, include the latest title and description on every call.
-
-The fragments array must be the complete current set of story fragments, not only changes from the previous turn. Create or revise guideline, knowledge, character, and prose fragments as soon as the conversation supports them. Give every fragment a short lowercase key made of letters, numbers, and hyphens. Keep that key unchanged when revising or renaming the fragment. Keep uncertainty visible in fragment content instead of inventing a major decision. After the tool saves the snapshot, ask about the most useful missing or partial entry. Do not mention the tool call.
+Mark a checklist entry partial when there is a useful clue but an important decision remains. After updating the checklist, ask about the most useful missing or partial entry. Do not mention the tool call.
 
 Keep each response concise, usually two to four sentences. Do not expose fragment mechanics. The writer can open the story at any point, so help them notice important ambiguity without delaying them for completeness.`
 
@@ -41,13 +74,50 @@ export function createStorySetupBlocks(ctx: AgentBlockContext): ContextBlock[] {
     ].join('\n')).join('\n\n')}`
     : ''
 
-  return [{
+  const toolPolicy = ctx.storySetupReadOnly
+    ? '\n\nThis is a read-only assessment turn. Before responding, call updateStorySetup exactly once with only the seven checklist entries in the listed order. The server supplies existing setup fragments; do not send story or fragments. Do not propose or save story or fragment changes. Only continue after updateStorySetup succeeds.'
+    : '\n\nBefore every conversational response, call updateStorySetup exactly once with all seven checklist entries in the listed order. Omit story until there is enough information for a useful working title and description; after that, include the latest name and description on every call. The fragments array must be the complete current set of setup fragments, not only changes from the previous turn. Create or revise guideline, knowledge, character, and prose fragments as soon as the conversation supports them. Give every fragment a short lowercase key made of letters, numbers, and hyphens, and keep it unchanged when revising or renaming the fragment. Keep uncertainty visible instead of inventing a major decision. Only continue after updateStorySetup succeeds.'
+  const materialPolicy = '\n\nThe existing writer-owned context blocks and fragment catalog are read-only reference material. Use them to assess checklist coverage and avoid questions the story has already answered. Do not copy them into the fragments array or assign them storySetupKey values.'
+  const blocks: ContextBlock[] = [{
     id: 'story-setup-instructions',
     role: 'system',
-    content: `${instructionRegistry.resolve('story-setup.system', ctx.modelId)}${existingStory}${existingFragments}`,
+    content: `${instructionRegistry.resolve('story-setup.system', ctx.modelId)}${existingStory}${materialPolicy}${existingFragments}${toolPolicy}`,
     order: 100,
     source: 'builtin',
   }]
+
+  const writerContext = writerOwnedContext(ctx)
+  const selection = selectAttentionContext(buildFragmentContextLanes(writerContext), {
+    runner: 'story-setup.chat',
+    catalogScope: 'available',
+  })
+  blocks.push(...fragmentFullContextBlocksBySource({
+    selection,
+    partitions: [{
+      id: 'story-setup-existing-full',
+      heading: 'Existing Writer-Owned Story Material',
+      scope: 'all',
+      order: 200,
+      intro: 'Use this material to assess what the story has already established. It is read-only.',
+      matches: () => true,
+    }],
+  }))
+
+  const catalog = fragmentCatalogBlock({
+    id: 'story-setup-existing-catalog',
+    sections: selection.lanes.map(lane => ({
+      type: lane.type,
+      label: lane.label,
+      fragments: lane.catalog,
+    })),
+    order: 220,
+  })
+  if (catalog) blocks.push(catalog)
+
+  const prose = proseWindowBlock(writerContext.proseFragments, { order: 240 })
+  if (prose) blocks.push(prose)
+
+  return blocks
 }
 
 export async function buildStorySetupPreviewContext(dataDir: string, storyId: string): Promise<AgentBlockContext> {
@@ -55,5 +125,9 @@ export async function buildStorySetupPreviewContext(dataDir: string, storyId: st
     buildBasePreviewContext(dataDir, storyId),
     listStorySetupFragments(dataDir, storyId),
   ])
-  return { ...context, storySetupFragments }
+  return {
+    ...context,
+    storySetupFragments,
+    storySetupReadOnly: true,
+  }
 }
