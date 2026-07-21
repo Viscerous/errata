@@ -7,10 +7,10 @@ import {
 } from '../../src/lib/interaction-sounds'
 
 describe('interaction sound preference', () => {
-  it('starts enabled when no preference has been saved', () => {
+  it('starts disabled when no preference has been saved', () => {
     const storage = { getItem: () => null }
 
-    expect(readInteractionSoundsPreference(storage)).toBe(true)
+    expect(readInteractionSoundsPreference(storage)).toBe(false)
   })
 
   it('honors an explicit disabled preference', () => {
@@ -21,14 +21,22 @@ describe('interaction sound preference', () => {
     expect(readInteractionSoundsPreference(storage)).toBe(false)
   })
 
-  it('falls back to enabled when storage is unavailable', () => {
+  it('honors an explicit enabled preference', () => {
+    const storage = {
+      getItem: (key: string) => key === INTERACTION_SOUNDS_STORAGE_KEY ? 'true' : null,
+    }
+
+    expect(readInteractionSoundsPreference(storage)).toBe(true)
+  })
+
+  it('falls back to disabled when storage is unavailable', () => {
     const storage = {
       getItem: () => {
         throw new Error('storage blocked')
       },
     }
 
-    expect(readInteractionSoundsPreference(storage)).toBe(true)
+    expect(readInteractionSoundsPreference(storage)).toBe(false)
   })
 })
 

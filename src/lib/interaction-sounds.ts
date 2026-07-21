@@ -40,11 +40,11 @@ function getBrowserStorage(): StorageReader | null {
 export function readInteractionSoundsPreference(
   storage: StorageReader | null = getBrowserStorage(),
 ): boolean {
-  if (!storage) return true
+  if (!storage) return false
   try {
-    return storage.getItem(INTERACTION_SOUNDS_STORAGE_KEY) !== 'false'
+    return storage.getItem(INTERACTION_SOUNDS_STORAGE_KEY) === 'true'
   } catch {
-    return true
+    return false
   }
 }
 
