@@ -55,6 +55,8 @@ function Button({
       data-slot="button"
       data-variant={variant}
       data-size={size}
+      data-cuelume-press=""
+      data-cuelume-release=""
       className={cn(buttonVariants({ variant, size, className }))}
       {...props}
     />

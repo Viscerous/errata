@@ -830,6 +830,7 @@ function AgentBlockEditor({ storyId, agentName, agents, onBack }: AgentBlockEdit
                           role="button"
                           tabIndex={0}
                           aria-expanded={isExpanded}
+                          data-cuelume-disclosure=""
                           draggable
                           onDragStart={() => handleDragStart(index)}
                           onDragEnter={() => handleDragEnter(index)}

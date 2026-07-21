@@ -315,6 +315,7 @@ function ExpandedScriptView({
       role="dialog"
       aria-modal="true"
       aria-label="Expanded script editor"
+      data-cuelume-surface="bloom"
       className="fixed inset-0 z-50 flex flex-col bg-background animate-onboarding-fade-in"
     >
       {/* Header — block identity on the left, controls on the right.

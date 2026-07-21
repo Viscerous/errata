@@ -331,6 +331,8 @@ export function DetailPanel({
         ref={containerRef}
         className={`fixed inset-0 z-40 flex flex-col bg-background transition-opacity duration-200 ${visible ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
         onTransitionEnd={handleTransitionEnd}
+        data-cuelume-surface="bloom"
+        data-cuelume-close="none"
         data-component-id="detail-panel-root"
       >
         <div className="flex items-center justify-between px-4 py-3 border-b border-border/50" data-component-id="detail-panel-header">
@@ -353,6 +355,8 @@ export function DetailPanel({
       onTransitionEnd={handleTransitionEnd}
       className="border-r border-border/50 flex flex-col bg-background shrink-0 overflow-hidden transition-[width,opacity] duration-200 ease-out"
       style={{ width: visible ? effectiveWidth : 0, opacity: visible ? 1 : 0 }}
+      data-cuelume-surface="bloom"
+      data-cuelume-close="none"
       data-component-id="detail-panel-root"
     >
       <div className="flex flex-col h-full" style={{ width: effectiveWidth, minWidth: effectiveWidth }} data-component-id={componentId('detail-panel-section', activeSection)}>

@@ -196,6 +196,7 @@ export function FragmentTypesPanel({ storyId, story }: FragmentTypesPanelProps) 
                     className="flex min-w-0 flex-1 items-center gap-2 text-left"
                     onClick={() => setExpandedIndex(isExpanded ? null : index)}
                     aria-expanded={isExpanded}
+                    data-cuelume-disclosure=""
                   >
                     <ChevronDown className={`size-3.5 shrink-0 text-muted-foreground transition-transform ${isExpanded ? '' : '-rotate-90'}`} />
                     <div className="flex size-8 shrink-0 items-center justify-center rounded-md border border-border/40 bg-background">

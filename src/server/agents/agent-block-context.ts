@@ -18,6 +18,7 @@ export interface AgentBlockContext extends ContextBuildState {
   // Story setup
   storySetupFragments?: Fragment[]
   storySetupReadOnly?: boolean
+  storySetupReferenceFragments?: Fragment[]
 
   // Librarian analyze
   allCharacters?: Fragment[]

@@ -44,7 +44,7 @@ export function DebugPanel({ storyId, logId, fragmentId, onClose }: DebugPanelPr
   })
 
   return (
-    <div className="flex flex-col h-full" data-component-id="debug-panel-root">
+    <div className="flex flex-col h-full" data-cuelume-surface="bloom" data-component-id="debug-panel-root">
       {/* Header */}
       <div className="flex items-center justify-between px-6 py-4 border-b border-border/50" data-component-id="debug-panel-header">
         <div className="flex items-center gap-2">

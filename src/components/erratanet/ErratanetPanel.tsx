@@ -237,6 +237,7 @@ export function ErratanetPanel({ storyId, story, onExport }: ErratanetPanelProps
         createPortal(
           <div
             className="fixed inset-0 z-[60] bg-background"
+            data-cuelume-surface="bloom"
             data-component-id="erratanet-browser-overlay"
           >
             <ErratanetBrowserPanel storyId={storyId} onClose={() => setBrowseOpen(false)} />

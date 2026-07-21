@@ -175,6 +175,7 @@ export function Toggle({
       disabled={disabled}
       aria-label={label}
       aria-pressed={checked}
+      data-cuelume-toggle=""
       className={cn(
         'relative h-[18px] w-[32px] shrink-0 rounded-full transition-colors disabled:opacity-40',
         checked ? 'bg-foreground' : 'bg-muted-foreground/20',
@@ -219,6 +220,7 @@ export function SegmentedControl<T extends string>({
           type="button"
           onClick={() => onChange(opt.value)}
           disabled={disabled}
+          data-cuelume-toggle=""
           className={cn(
             'px-2.5 text-[0.6875rem] font-medium transition-colors',
             value === opt.value

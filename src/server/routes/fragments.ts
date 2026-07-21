@@ -210,7 +210,7 @@ export function fragmentRoutes(dataDir: string) {
         }
       }
 
-      reanalyzeAfterProseChange(dataDir, params.storyId, existing, updated)
+      await reanalyzeAfterProseChange(dataDir, params.storyId, existing, updated)
 
       return { ...updated, idChanged }
     }, {
@@ -251,7 +251,7 @@ export function fragmentRoutes(dataDir: string) {
         return { error: 'Fragment not found' }
       }
 
-      reanalyzeAfterProseChange(dataDir, params.storyId, existing, updated)
+      await reanalyzeAfterProseChange(dataDir, params.storyId, existing, updated)
 
       return updated
     }, {

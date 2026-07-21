@@ -156,6 +156,7 @@ export function TtsPlayerBar() {
               type="button"
               onClick={toggleMute}
               aria-label={volume === 0 ? 'Unmute' : 'Mute'}
+              data-cuelume-toggle="toggle"
               className="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
             >
               <VolumeIcon className="size-3.5" />
@@ -177,6 +178,7 @@ export function TtsPlayerBar() {
                 <div
                   role="dialog"
                   aria-label="Playback settings"
+                  data-cuelume-surface="whisper"
                   className="absolute bottom-full right-0 mb-2 w-52 space-y-3 rounded-lg border border-border/50 bg-card/95 p-3 shadow-[0_8px_24px_-12px_rgba(0,0,0,0.3)] backdrop-blur-md"
                 >
                   <PopSlider label="Speed" value={settings.rate} min={0.5} max={2} step={0.05} onChange={setSpeed} format={(v) => `${v.toFixed(2)}×`} />

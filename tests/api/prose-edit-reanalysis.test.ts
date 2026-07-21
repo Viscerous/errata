@@ -91,6 +91,38 @@ describe('prose edit reanalysis trigger', () => {
     expect(mockedInvokeAgent).not.toHaveBeenCalled()
   })
 
+  it('does not trigger librarian on prose PUT when automatic analysis is disabled', async () => {
+    const { storyId, fragmentId } = await createStoryAndProse()
+    await apiJson(`/stories/${storyId}/settings`, {
+      disableLibrarianAutoAnalysis: true,
+    }, 'PATCH')
+
+    const res = await apiJson(`/stories/${storyId}/fragments/${fragmentId}`, {
+      name: 'Opening',
+      description: 'Initial',
+      content: 'New content',
+    }, 'PUT')
+
+    expect(res.status).toBe(200)
+    expect(mockedInvokeAgent).not.toHaveBeenCalled()
+  })
+
+  it('does not trigger librarian on prose PUT when agent auto analysis is disabled', async () => {
+    const { storyId, fragmentId } = await createStoryAndProse()
+    await apiJson(`/stories/${storyId}/agent-blocks/librarian.analyze/config`, {
+      disableAutoAnalysis: true,
+    }, 'PATCH')
+
+    const res = await apiJson(`/stories/${storyId}/fragments/${fragmentId}`, {
+      name: 'Opening',
+      description: 'Initial',
+      content: 'New content',
+    }, 'PUT')
+
+    expect(res.status).toBe(200)
+    expect(mockedInvokeAgent).not.toHaveBeenCalled()
+  })
+
   it('triggers librarian on prose PATCH when text replacement changes content', async () => {
     const { storyId, fragmentId } = await createStoryAndProse()
 
@@ -114,6 +146,21 @@ describe('prose edit reanalysis trigger', () => {
 
     const res = await apiJson(`/stories/${storyId}/fragments/${fragmentId}`, {
       oldText: 'missing-text',
+      newText: 'Updated',
+    }, 'PATCH')
+
+    expect(res.status).toBe(200)
+    expect(mockedInvokeAgent).not.toHaveBeenCalled()
+  })
+
+  it('does not trigger librarian on prose PATCH when automatic analysis is disabled', async () => {
+    const { storyId, fragmentId } = await createStoryAndProse()
+    await apiJson(`/stories/${storyId}/settings`, {
+      disableLibrarianAutoAnalysis: true,
+    }, 'PATCH')
+
+    const res = await apiJson(`/stories/${storyId}/fragments/${fragmentId}`, {
+      oldText: 'Old',
       newText: 'Updated',
     }, 'PATCH')
 

@@ -1577,6 +1577,7 @@ function FullscreenSummaryEditor({
       role="dialog"
       aria-modal="true"
       aria-label={`Summary editor: ${fragment.name}`}
+      data-cuelume-surface="bloom"
       className="fixed inset-0 z-50 flex flex-col bg-background animate-onboarding-fade-in"
     >
       {/* Header — serif identity, meta row, actions on the right */}

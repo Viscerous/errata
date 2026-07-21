@@ -292,7 +292,7 @@ export function ProviderPanel({ onClose }: { onClose: () => void }) {
   const labelClass = "text-xs font-medium text-muted-foreground mb-1.5 block"
 
   return (
-    <div className="flex flex-col h-full" data-component-id="provider-panel-root">
+    <div className="flex flex-col h-full" data-cuelume-surface="bloom" data-component-id="provider-panel-root">
       {/* Header */}
       <div className="flex items-center justify-between px-6 py-4 border-b border-border/50">
         <div className="flex items-center gap-2">

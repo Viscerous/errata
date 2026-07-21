@@ -95,6 +95,8 @@ export function HelpPanel() {
                 visible ? 'translate-x-0' : '-translate-x-full'
               }`
         }`}
+        data-cuelume-surface="bloom"
+        data-cuelume-close="none"
         data-component-id="help-panel-root"
       >
         {/* Header */}
@@ -103,6 +105,7 @@ export function HelpPanel() {
             {activeSection && (
               <button
                 onClick={() => openHelp()}
+                data-cuelume-toggle="page"
                 className="shrink-0 p-1 -ml-1 rounded-md text-muted-foreground hover:text-foreground/70 transition-colors"
                 title="Back to topics"
                 data-component-id="help-back"
@@ -162,6 +165,7 @@ function TopicIndex({ onSelect }: { onSelect: (sectionId: string) => void }) {
         <button
           key={section.id}
           onClick={() => onSelect(section.id)}
+          data-cuelume-toggle="page"
           className="w-full text-left rounded-lg border border-border/25 hover:border-border/50 bg-accent/10 hover:bg-accent/25 px-4 py-3.5 transition-all duration-150 group"
           style={{ animationDelay: `${idx * 40}ms` }}
           data-component-id={componentId('help-topic', section.id)}
@@ -212,6 +216,7 @@ function SectionView({ section, scrollAreaRef }: { section: HelpSection; scrollA
               onClick={() => {
                 if (scrollAreaRef.current) scrollToHelpAnchor(scrollAreaRef.current, sub.id)
               }}
+              data-cuelume-toggle="page"
               className="block text-left text-[0.71875rem] text-foreground/50 hover:text-foreground/80 transition-colors py-0.5"
               data-component-id={componentId('help-nav', sub.id)}
             >

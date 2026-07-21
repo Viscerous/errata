@@ -1,7 +1,7 @@
 import { createStreamingRunner } from '../agents/create-streaming-runner'
 import { tool } from 'ai'
 import { StorySetupAssessmentSchema, StorySetupSnapshotSchema } from './schema'
-import { listStorySetupFragments, syncStorySetupSnapshot } from './sync'
+import { listStorySetupFragmentContext, syncStorySetupSnapshot } from './sync'
 
 export interface StorySetupChatOptions {
   messages: Array<{ role: 'user' | 'assistant'; content: string }>
@@ -16,10 +16,14 @@ const runStorySetupChat = createStreamingRunner<StorySetupChatOptions>({
   name: 'story-setup.chat',
   role: 'story-setup.chat',
   readOnly: true,
-  extraContext: async ({ dataDir, storyId, opts }) => ({
-    storySetupFragments: await listStorySetupFragments(dataDir, storyId),
-    storySetupReadOnly: resolveStorySetupMode(opts) === 'assess',
-  }),
+  extraContext: async ({ dataDir, storyId, opts }) => {
+    const { setupFragments, referenceFragments } = await listStorySetupFragmentContext(dataDir, storyId)
+    return {
+      storySetupFragments: setupFragments,
+      storySetupReferenceFragments: referenceFragments,
+      storySetupReadOnly: resolveStorySetupMode(opts) === 'assess',
+    }
+  },
   tools: ({ dataDir, storyId, opts }) => {
     const mode = resolveStorySetupMode(opts)
     if (mode === 'assess') {
@@ -29,13 +33,13 @@ const runStorySetupChat = createStreamingRunner<StorySetupChatOptions>({
           inputSchema: StorySetupAssessmentSchema,
           execute: async ({ checklist }) => {
             try {
-              const existing = await listStorySetupFragments(dataDir, storyId)
+              const { setupFragments } = await listStorySetupFragmentContext(dataDir, storyId)
               return {
                 saved: false,
                 checklist,
                 covered: checklist.filter(item => item.status === 'covered').length,
                 story: null,
-                fragments: existing.map(fragment => ({
+                fragments: setupFragments.map(fragment => ({
                   id: fragment.id,
                   key: fragment.meta.storySetupKey as string,
                   type: fragment.type,

@@ -14,6 +14,7 @@ import { TtsPlayerBar } from '@/components/tts/TtsPlayerBar'
 import { DesktopUpdateBanner } from '@/components/desktop/DesktopUpdateBanner'
 import { CustomCssStyles } from '@/components/settings/CustomCssPanel'
 import { useCustomCss } from '@/lib/theme'
+import { InteractionSoundsController } from '@/lib/interaction-sounds'
 import appCss from '../styles.css?url'
 
 const queryClient = new QueryClient({
@@ -110,6 +111,7 @@ function CustomCssProvider() {
 function RootComponent() {
   return (
     <ThemeProvider>
+      <InteractionSoundsController />
       <CustomCssProvider />
       <QueryClientProvider client={queryClient}>
         <TooltipProvider>

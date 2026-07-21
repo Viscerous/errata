@@ -1194,6 +1194,7 @@ export function ProseChainView({
           {mobileTocOpen && (
             <div
               className="md:hidden fixed inset-0 z-40 bg-background animate-in fade-in duration-150"
+              data-cuelume-surface="bloom"
               data-component-id="prose-mobile-toc-overlay"
             >
               <ProseOutlinePanel

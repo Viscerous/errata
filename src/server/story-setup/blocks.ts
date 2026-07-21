@@ -9,7 +9,7 @@ import {
   proseWindowBlock,
 } from '../llm/fragment-context-blocks'
 import { selectAttentionContext } from '../llm/context-selection'
-import { listStorySetupFragments } from './sync'
+import { listStorySetupFragmentContext } from './sync'
 
 const isWriterOwned = (fragment: { meta: Record<string, unknown> }) =>
   typeof fragment.meta.storySetupKey !== 'string'
@@ -121,13 +121,14 @@ export function createStorySetupBlocks(ctx: AgentBlockContext): ContextBlock[] {
 }
 
 export async function buildStorySetupPreviewContext(dataDir: string, storyId: string): Promise<AgentBlockContext> {
-  const [context, storySetupFragments] = await Promise.all([
+  const [context, fragmentContext] = await Promise.all([
     buildBasePreviewContext(dataDir, storyId),
-    listStorySetupFragments(dataDir, storyId),
+    listStorySetupFragmentContext(dataDir, storyId),
   ])
   return {
     ...context,
-    storySetupFragments,
+    storySetupFragments: fragmentContext.setupFragments,
     storySetupReadOnly: true,
+    storySetupReferenceFragments: fragmentContext.referenceFragments,
   }
 }

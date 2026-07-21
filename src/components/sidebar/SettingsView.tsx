@@ -113,7 +113,13 @@ export function SettingsView({
   if (typeof document === 'undefined') return null
 
   return createPortal(
-    <div role="dialog" aria-modal="true" aria-label="Settings">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Settings"
+      data-cuelume-surface="bloom"
+      data-cuelume-close="none"
+    >
       {/* Backdrop */}
       <button
         type="button"
@@ -168,6 +174,7 @@ export function SettingsView({
                   type="button"
                   onClick={() => jump(item.id)}
                   aria-current={activeId === item.id ? 'true' : undefined}
+                  data-cuelume-toggle="page"
                   className={cn(
                     'block w-full rounded-md px-2.5 py-1.5 text-left text-[0.8125rem] transition-colors',
                     activeId === item.id

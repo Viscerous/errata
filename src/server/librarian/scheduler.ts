@@ -1,6 +1,8 @@
 import type { Fragment } from '../fragments/schema'
 import { createLogger } from '../logging'
 import { getActiveBranchId, withBranch } from '../fragments/branches'
+import { getStory } from '../fragments/storage'
+import { getAgentBlockConfig } from '../agents/agent-block-storage'
 import { clearAnalysisIndexEntry } from './storage'
 
 interface QueuedRun {
@@ -197,20 +199,30 @@ function hasMaterialProseChange(before: Fragment, after: Fragment): boolean {
     || before.content !== after.content
 }
 
+async function isAutoAnalysisDisabled(dataDir: string, storyId: string): Promise<boolean> {
+  const [story, librarianConfig] = await Promise.all([
+    getStory(dataDir, storyId),
+    getAgentBlockConfig(dataDir, storyId, 'librarian.analyze'),
+  ])
+  return story?.settings.disableLibrarianAutoAnalysis === true
+    || librarianConfig.disableAutoAnalysis === true
+}
+
 /**
  * Schedule librarian re-analysis after a prose fragment changes, from any code path
  * (HTTP route or librarian tool). No-ops for non-prose or immaterial changes; marks the
  * analysis stale for the UI indicator and schedules the run.
  */
-export function reanalyzeAfterProseChange(
+export async function reanalyzeAfterProseChange(
   dataDir: string,
   storyId: string,
   before: Fragment,
   after: Fragment,
-): void {
+): Promise<void> {
   if (after.type !== 'prose' || !hasMaterialProseChange(before, after)) return
-  clearAnalysisIndexEntry(dataDir, storyId, after.id).catch(() => {})
-  Promise.resolve(triggerLibrarian(dataDir, storyId, after)).catch((err) => {
+  await clearAnalysisIndexEntry(dataDir, storyId, after.id).catch(() => {})
+  if (await isAutoAnalysisDisabled(dataDir, storyId)) return
+  await triggerLibrarian(dataDir, storyId, after).catch((err) => {
     logger.child({ storyId }).error('triggerLibrarian failed after prose change', {
       fragmentId: after.id,
       error: err instanceof Error ? err.message : String(err),
