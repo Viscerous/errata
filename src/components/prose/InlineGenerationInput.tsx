@@ -238,6 +238,7 @@ export function InlineGenerationInput({
       const reader = stream.getReader()
       let accumulatedText = ''
       let accumulatedReasoning = ''
+      let rejectionReason: string | null = null
       const thoughtSteps: ThoughtStep[] = []
       let thoughtsDirty = false
       let rafScheduled = false
@@ -285,6 +286,8 @@ export function InlineGenerationInput({
           prewriterDirectionsRef.current = value.directions
         } else if (value.type === 'clarify-questions') {
           askedQuestions = value.questions
+        } else if (value.type === 'generation-rejected') {
+          rejectionReason = value.reason
         } else if (value.type === 'phase') {
           accumulatedReasoning = ''
           thoughtSteps.push({ type: 'phase', phase: value.phase })
@@ -313,6 +316,12 @@ export function InlineGenerationInput({
       if (askedQuestions) {
         setPendingQuestions(askedQuestions)
         onGenerationComplete()
+        return
+      }
+
+      if (rejectionReason) {
+        setError(rejectionReason)
+        onGenerationError()
         return
       }
 

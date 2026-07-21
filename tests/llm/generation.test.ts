@@ -90,7 +90,7 @@ function extractMessageText(messages: Array<{ role: string; content: string | Ar
     .join('\n\n')
 }
 
-function createMockStreamResult(text: string) {
+function createMockStreamResult(text: string, finishReason = 'stop') {
   // Create a minimal mock that mimics the streamText result
   const encoder = new TextEncoder()
   const stream = new ReadableStream({
@@ -111,7 +111,7 @@ function createMockStreamResult(text: string) {
   // fullStream: async iterable of AI SDK v6 TextStreamPart events
   async function* generateFullStream() {
     yield { type: 'text-delta' as const, text }
-    yield { type: 'finish' as const, finishReason: 'stop' }
+    yield { type: 'finish' as const, finishReason }
   }
   const fullStream = generateFullStream()
 
@@ -121,7 +121,7 @@ function createMockStreamResult(text: string) {
     text: Promise.resolve(text),
     usage: Promise.resolve({ promptTokens: 10, completionTokens: 20, totalTokens: 30 }),
     totalUsage: Promise.resolve({ inputTokens: 10, outputTokens: 20 }),
-    finishReason: Promise.resolve('stop' as const),
+    finishReason: Promise.resolve(finishReason),
     steps: Promise.resolve([]),
     toTextStreamResponse: () => new Response(stream, {
       headers: { 'Content-Type': 'text/plain; charset=utf-8' },
@@ -243,6 +243,64 @@ describe('generation endpoint', () => {
     const after = await listFragments(dataDir, storyId, 'prose')
     expect(after.length).toBe(before.length) // no phantom fragment persisted
     expect(getPendingCount()).toBe(0) // librarian not triggered for a failed run
+  })
+
+  it('quarantines output that ends at the token limit instead of saving or analyzing it', async () => {
+    mockAgentStream.mockResolvedValue(
+      createMockStreamResult('An unfinished passage that reached the cap.', 'length') as any,
+    )
+
+    const res = await api(`/stories/${storyId}/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ input: 'Continue', saveResult: true }),
+    })
+
+    expect(res.status).toBe(200)
+    const streamed = await res.text()
+    expect(streamed).toContain('"type":"generation-rejected"')
+    expect(streamed).toContain('"code":"incomplete_finish"')
+
+    expect(await listFragments(dataDir, storyId, 'prose')).toHaveLength(0)
+    expect(getPendingCount()).toBe(0)
+
+    const { listGenerationLogs, getGenerationLog } = await import('@/server/llm/generation-logs')
+    const logs = await listGenerationLogs(dataDir, storyId)
+    expect(logs).toHaveLength(1)
+    const log = await getGenerationLog(dataDir, storyId, logs[0].id)
+    expect(log).toMatchObject({
+      fragmentId: null,
+      finishReason: 'length',
+      commitStatus: 'rejected',
+      rejectionCode: 'incomplete_finish',
+    })
+  })
+
+  it('quarantines leaked reasoning sentinels even when the provider reports stop', async () => {
+    mockAgentStream.mockResolvedValue(
+      createMockStreamResult('.thought\nReady. Proceed. Final check. Ready.') as any,
+    )
+
+    const res = await api(`/stories/${storyId}/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ input: 'Continue', saveResult: true }),
+    })
+
+    const streamed = await res.text()
+    expect(streamed).toContain('"code":"reasoning_leak"')
+    expect(await listFragments(dataDir, storyId, 'prose')).toHaveLength(0)
+    expect(getPendingCount()).toBe(0)
+
+    const { listGenerationLogs, getGenerationLog } = await import('@/server/llm/generation-logs')
+    const logs = await listGenerationLogs(dataDir, storyId)
+    const log = await getGenerationLog(dataDir, storyId, logs[0].id)
+    expect(log).toMatchObject({
+      fragmentId: null,
+      finishReason: 'stop',
+      commitStatus: 'rejected',
+      rejectionCode: 'reasoning_leak',
+    })
   })
 
   it('POST /stories/:storyId/generate applies writer instruction replacement from agent config', async () => {

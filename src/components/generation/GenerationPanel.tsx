@@ -67,6 +67,7 @@ export function GenerationPanel({ storyId, onBack }: GenerationPanelProps) {
     runIdRef.current = runId
 
     let asked: ClarifyQuestion[] | null = null
+    let rejectionReason: string | null = null
     try {
       const opts = clarifications.length || round > 0
         ? { clarifications, clarifyRound: round, runId }
@@ -86,6 +87,8 @@ export function GenerationPanel({ storyId, onBack }: GenerationPanelProps) {
           accumulated += value.text
         } else if (value.type === 'clarify-questions') {
           asked = value.questions
+        } else if (value.type === 'generation-rejected') {
+          rejectionReason = value.reason
         }
 
         if (!rafScheduled && accumulated) {
@@ -104,6 +107,11 @@ export function GenerationPanel({ storyId, onBack }: GenerationPanelProps) {
       if (asked) {
         setPendingQuestions(asked)
         return // wait for the author's answers before finalizing
+      }
+
+      if (rejectionReason) {
+        setError(rejectionReason)
+        return
       }
 
       setStreamedText(accumulated)

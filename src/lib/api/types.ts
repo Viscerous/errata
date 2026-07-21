@@ -421,6 +421,9 @@ export interface GenerationLog {
   stepCount: number
   finishReason: string
   stepsExceeded: boolean
+  commitStatus?: 'committed' | 'rejected'
+  rejectionCode?: 'empty_output' | 'incomplete_finish' | 'reasoning_leak'
+  rejectionReason?: string
   totalUsage?: { inputTokens: number; outputTokens: number }
   reasoning?: string
   prewriterBrief?: string
@@ -556,6 +559,7 @@ export type ChatEvent =
   | { type: 'tool-error'; id: string; toolName: string; error: string }
   | { type: 'phase'; phase: string }
   | { type: 'finish'; finishReason: string; stepCount: number }
+  | { type: 'generation-rejected'; reason: string; code: 'empty_output' | 'incomplete_finish' | 'reasoning_leak'; finishReason: string }
   | { type: 'prewriter-directions'; directions: SuggestionDirection[] }
   | { type: 'clarify-questions'; questions: ClarifyQuestion[]; round: number }
 

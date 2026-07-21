@@ -40,6 +40,7 @@ import { drainAgentStream } from '../agents/drain-agent-stream'
 import { createLogger } from '../logging'
 import type { Fragment } from '../fragments/schema'
 import { getBranchesIndex, isBranchDeleting, withBranch } from '../fragments/branches'
+import { assessGenerationForCommit } from './output-validation'
 
 const logger = createLogger('generation')
 
@@ -441,9 +442,72 @@ export async function runGeneration(
         }
       }
 
+      const commitAssessment = assessGenerationForCommit(fullText, lastFinishReason)
+
+      // Keep rejected attempts inspectable, but never turn them into prose or
+      // launch downstream analysis. This is intentionally before plugin hooks:
+      // plugins must not be asked to repair objectively incomplete output.
+      if (body.saveResult && !runError && !abortController.signal.aborted && !commitAssessment.accepted) {
+        emit({
+          type: 'generation-rejected',
+          reason: commitAssessment.message,
+          code: commitAssessment.code,
+          finishReason: lastFinishReason,
+        })
+        try {
+          const now = new Date().toISOString()
+          const durationMs = Date.now() - startTime
+          const configuredMaxStepsForLog = story.settings.maxSteps ?? 10
+          const stepsExceeded = stepCount >= configuredMaxStepsForLog && lastFinishReason !== 'stop'
+          const totalUsage = await resolveAndReportUsage(
+            dataDir, storyId, 'generation.writer',
+            totalUsagePromise ?? Promise.resolve(undefined), resolvedModelId,
+          )
+          const logId = `gen-${Date.now().toString(36)}`
+          const log: GenerationLog = {
+            id: logId,
+            createdAt: now,
+            input: body.input,
+            messages: logMessages.map((m) => ({
+              role: String(m.role),
+              content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
+            })),
+            toolCalls,
+            generatedText: fullText,
+            fragmentId: null,
+            model: resolvedModelId,
+            durationMs,
+            stepCount,
+            finishReason: lastFinishReason,
+            stepsExceeded,
+            commitStatus: 'rejected',
+            rejectionCode: commitAssessment.code,
+            rejectionReason: commitAssessment.message,
+            ...(totalUsage ? { totalUsage } : {}),
+            ...(fullReasoning ? { reasoning: fullReasoning } : {}),
+            ...(prewriterBrief ? { prewriterBrief } : {}),
+            ...(prewriterReasoning ? { prewriterReasoning } : {}),
+            ...(prewriterLogMessages ? { prewriterMessages: prewriterLogMessages } : {}),
+            ...(prewriterDurationMs ? { prewriterDurationMs } : {}),
+            ...(prewriterModel ? { prewriterModel } : {}),
+            ...(prewriterUsage ? { prewriterUsage } : {}),
+            ...(prewriterToolCalls.length ? { prewriterToolCalls } : {}),
+            ...(prewriterDirections?.length ? { prewriterDirections } : {}),
+          }
+          await saveGenerationLog(dataDir, storyId, log)
+          requestLogger.warn('Generation rejected before commit', {
+            logId,
+            finishReason: lastFinishReason,
+            rejectionCode: commitAssessment.code,
+          })
+        } catch (err) {
+          requestLogger.error('Error saving rejected generation log', { error: err instanceof Error ? err.message : String(err) })
+        }
+      }
+
       // Stop means discard the unfinished passage. Never run save hooks or
-      // launch downstream analysis for an aborted generation.
-      if (body.saveResult && !runError && !abortController.signal.aborted && fullText.trim()) {
+      // launch downstream analysis for an aborted or rejected generation.
+      if (body.saveResult && !runError && !abortController.signal.aborted && commitAssessment.accepted) {
         try {
           const durationMs = Date.now() - startTime
           requestLogger.info('LLM generation completed', { durationMs, textLength: fullText.length })
@@ -583,6 +647,7 @@ export async function runGeneration(
             stepCount,
             finishReason: String(finishReason),
             stepsExceeded,
+            commitStatus: 'committed',
             ...(totalUsage ? { totalUsage } : {}),
             ...(fullReasoning ? { reasoning: fullReasoning } : {}),
             ...(prewriterBrief ? { prewriterBrief } : {}),
@@ -605,7 +670,18 @@ export async function runGeneration(
       // so timeline deletion cannot race the post-stream commit phase.
       writerRun.finish(
         wasAborted ? 'aborted' : runError ? 'error' : 'success',
-        runError ? { error: runError } : { output: { finishReason: lastFinishReason, stepCount } },
+        runError
+          ? { error: runError }
+          : {
+              output: {
+                finishReason: lastFinishReason,
+                stepCount,
+                commitStatus: body.saveResult
+                  ? commitAssessment.accepted ? 'committed' : 'rejected'
+                  : 'not-requested',
+                ...(!commitAssessment.accepted ? { rejectionCode: commitAssessment.code } : {}),
+              },
+            },
       )
 
       // Close the stream controller after saving completes (or abort concludes)

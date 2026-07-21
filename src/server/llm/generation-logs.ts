@@ -28,6 +28,9 @@ export interface GenerationLog {
   stepCount: number
   finishReason: string
   stepsExceeded: boolean
+  commitStatus?: 'committed' | 'rejected'
+  rejectionCode?: 'empty_output' | 'incomplete_finish' | 'reasoning_leak'
+  rejectionReason?: string
   totalUsage?: TokenUsage
   reasoning?: string
   prewriterBrief?: string

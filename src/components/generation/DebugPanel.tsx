@@ -134,12 +134,20 @@ export function DebugPanel({ storyId, logId, fragmentId, onClose }: DebugPanelPr
                   {selectedLog.stepsExceeded && (
                     <Badge variant="destructive" className="text-[0.5625rem] h-3.5">EXCEEDED</Badge>
                   )}
+                  {selectedLog.commitStatus === 'rejected' && (
+                    <Badge variant="destructive" className="text-[0.5625rem] h-3.5">REJECTED</Badge>
+                  )}
                 </div>
               </div>
 
               {selectedLog.stepsExceeded && (
                 <div className="px-6 py-2 text-xs text-destructive bg-destructive/5 border-b border-border/50">
                   Generation hit the 10-step limit. Output may be incomplete.
+                </div>
+              )}
+              {selectedLog.commitStatus === 'rejected' && selectedLog.rejectionReason && (
+                <div className="px-6 py-2 text-xs text-destructive bg-destructive/5 border-b border-border/50">
+                  {selectedLog.rejectionReason}
                 </div>
               )}
 
