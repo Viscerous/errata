@@ -199,6 +199,28 @@ describe('branches', () => {
       expect(index.branches).toHaveLength(1)
       expect(index.branches[0].id).toBe('main')
       expect(index.activeBranchId).toBe('main')
+      expect(index.rootBranchId).toBe('main')
+    })
+
+    it('repairs imported master indexes with an invalid main selection', async () => {
+      const storyDir = join(dataDir, 'stories', TEST_STORY_ID)
+      await mkdir(join(storyDir, 'branches', 'master', 'fragments'), { recursive: true })
+      await writeFile(join(storyDir, 'meta.json'), JSON.stringify(makeStory()))
+      await writeFile(join(storyDir, 'branches.json'), JSON.stringify({
+        branches: [
+          { id: 'master', name: 'Master', order: 0, createdAt: new Date().toISOString() },
+          { id: 'br-alt', name: 'Alt', order: 1, parentBranchId: 'master', createdAt: new Date().toISOString() },
+        ],
+        activeBranchId: 'main',
+      }))
+
+      const index = await getBranchesIndex(dataDir, TEST_STORY_ID)
+      expect(index.rootBranchId).toBe('master')
+      expect(index.activeBranchId).toBe('master')
+
+      const persisted = JSON.parse(await readFile(join(storyDir, 'branches.json'), 'utf-8'))
+      expect(persisted.rootBranchId).toBe('master')
+      expect(persisted.activeBranchId).toBe('master')
     })
 
     it('creates a branch by copying parent content', async () => {
@@ -308,7 +330,30 @@ describe('branches', () => {
       await createStory(dataDir, makeStory())
 
       await expect(deleteBranch(dataDir, TEST_STORY_ID, 'main'))
-        .rejects.toThrow("Cannot delete the 'main' branch")
+        .rejects.toThrow("Cannot delete the root branch 'main'")
+    })
+
+    it('protects a legacy master root and falls back to a deleted branch parent', async () => {
+      const storyDir = join(dataDir, 'stories', TEST_STORY_ID)
+      await mkdir(join(storyDir, 'branches', 'master', 'fragments'), { recursive: true })
+      await mkdir(join(storyDir, 'branches', 'br-parent', 'fragments'), { recursive: true })
+      await mkdir(join(storyDir, 'branches', 'br-child', 'fragments'), { recursive: true })
+      await writeFile(join(storyDir, 'meta.json'), JSON.stringify(makeStory()))
+      await writeFile(join(storyDir, 'branches.json'), JSON.stringify({
+        branches: [
+          { id: 'master', name: 'Master', order: 0, createdAt: new Date().toISOString() },
+          { id: 'br-parent', name: 'Parent', order: 1, parentBranchId: 'master', createdAt: new Date().toISOString() },
+          { id: 'br-child', name: 'Child', order: 2, parentBranchId: 'br-parent', createdAt: new Date().toISOString() },
+        ],
+        activeBranchId: 'br-child',
+      }))
+
+      await expect(deleteBranch(dataDir, TEST_STORY_ID, 'master'))
+        .rejects.toThrow("Cannot delete the root branch 'master'")
+
+      const index = await deleteBranch(dataDir, TEST_STORY_ID, 'br-child')
+      expect(index.rootBranchId).toBe('master')
+      expect(index.activeBranchId).toBe('br-parent')
     })
 
     it('switches to main when deleting active branch', async () => {

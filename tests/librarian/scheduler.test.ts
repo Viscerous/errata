@@ -11,10 +11,16 @@ vi.mock('../../src/server/agents', () => ({
 // Mock the branches module — scheduler resolves the active branch before running
 vi.mock('@/server/fragments/branches', () => ({
   getActiveBranchId: vi.fn().mockResolvedValue('main'),
+  getScopedBranchId: vi.fn().mockReturnValue(undefined),
+  isBranchDeleting: vi.fn().mockReturnValue(false),
+  getContentRoot: vi.fn().mockResolvedValue('/data/stories/story-1/branches/main'),
   withBranch: vi.fn((_dataDir: string, _storyId: string, fn: () => Promise<unknown>, _branchId?: string) => fn()),
 }))
 vi.mock('../../src/server/fragments/branches', () => ({
   getActiveBranchId: vi.fn().mockResolvedValue('main'),
+  getScopedBranchId: vi.fn().mockReturnValue(undefined),
+  isBranchDeleting: vi.fn().mockReturnValue(false),
+  getContentRoot: vi.fn().mockResolvedValue('/data/stories/story-1/branches/main'),
   withBranch: vi.fn((_dataDir: string, _storyId: string, fn: () => Promise<unknown>, _branchId?: string) => fn()),
 }))
 
@@ -24,6 +30,13 @@ vi.mock('@/server/librarian/storage', () => ({
 }))
 vi.mock('../../src/server/librarian/storage', () => ({
   clearAnalysisIndexEntry: vi.fn(() => Promise.resolve()),
+}))
+
+vi.mock('@/server/agents/agent-block-storage', () => ({
+  getAgentBlockConfig: async () => ({ disableAutoAnalysis: false }),
+}))
+vi.mock('../../src/server/agents/agent-block-storage', () => ({
+  getAgentBlockConfig: async () => ({ disableAutoAnalysis: false }),
 }))
 
 // Import mocked modules AFTER vi.mock (vitest hoists mocks to top)

@@ -2,9 +2,12 @@ import { apiFetch, fetchGetEventStream } from './client'
 
 export interface ActiveAgent {
   id: string
+  runId?: string
   storyId: string
+  branchId?: string
   agentName: string
   startedAt: string
+  status: 'running' | 'cancelling'
 }
 
 export const agents = {

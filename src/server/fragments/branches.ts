@@ -14,6 +14,29 @@ interface BranchScopeContext {
 }
 
 const branchScope = new AsyncLocalStorage<BranchScopeContext>()
+const deletingBranches = new Set<string>()
+
+function branchLifecycleKey(storyId: string, branchId: string): string {
+  return `${storyId}:${branchId}`
+}
+
+export function isBranchDeleting(storyId: string, branchId: string): boolean {
+  return deletingBranches.has(branchLifecycleKey(storyId, branchId))
+}
+
+/** Block new work from entering a branch while its existing work settles. */
+export function markBranchDeleting(storyId: string, branchId: string): () => void {
+  const key = branchLifecycleKey(storyId, branchId)
+  if (deletingBranches.has(key)) throw new Error(`Timeline '${branchId}' is already being deleted`)
+  deletingBranches.add(key)
+  return () => deletingBranches.delete(key)
+}
+
+/** Current branch pinned by withBranch(), if any. */
+export function getScopedBranchId(storyId: string): string | undefined {
+  const scope = branchScope.getStore()
+  return scope?.storyId === storyId ? scope.branchId : undefined
+}
 
 // --- Path helpers ---
 
@@ -56,7 +79,32 @@ function createDefaultBranchesIndex(): BranchesIndex {
       createdAt: new Date().toISOString(),
     }],
     activeBranchId: 'main',
+    rootBranchId: 'main',
   }
+}
+
+/**
+ * Repair indexes written by older releases and preserve their real root ID
+ * (`master` in some imported stories). The root is the earliest branch whose
+ * parent is absent from the index; all current branch creation paths produce
+ * exactly one such branch.
+ */
+export function normalizeBranchesIndex(index: Omit<BranchesIndex, 'rootBranchId'> & { rootBranchId?: string }): BranchesIndex {
+  if (index.branches.length === 0) return createDefaultBranchesIndex()
+
+  const ids = new Set(index.branches.map(branch => branch.id))
+  const inferredRoot = [...index.branches]
+    .sort((a, b) => a.order - b.order)
+    .find(branch => !branch.parentBranchId || !ids.has(branch.parentBranchId))
+    ?? index.branches[0]
+  const rootBranchId = index.rootBranchId && ids.has(index.rootBranchId)
+    ? index.rootBranchId
+    : inferredRoot.id
+  const activeBranchId = ids.has(index.activeBranchId)
+    ? index.activeBranchId
+    : rootBranchId
+
+  return { ...index, rootBranchId, activeBranchId }
 }
 
 // --- Migration ---
@@ -125,7 +173,11 @@ export async function getBranchesIndex(dataDir: string, storyId: string): Promis
     await writeJson(branchesIndexPath(dir), defaultIndex)
     return defaultIndex
   }
-  return index
+  const normalized = normalizeBranchesIndex(index)
+  if (normalized.rootBranchId !== index.rootBranchId || normalized.activeBranchId !== index.activeBranchId) {
+    await writeJson(branchesIndexPath(dir), normalized)
+  }
+  return normalized
 }
 
 export async function saveBranchesIndex(dataDir: string, storyId: string, index: BranchesIndex): Promise<void> {
@@ -254,19 +306,35 @@ export async function createBranch(
   })
 }
 
-export async function deleteBranch(dataDir: string, storyId: string, branchId: string): Promise<void> {
-  if (branchId === 'main') {
-    throw new Error("Cannot delete the 'main' branch")
-  }
-
-  await mutateBranchesIndex(dataDir, storyId, async (index, dir) => {
+export async function deleteBranch(dataDir: string, storyId: string, branchId: string): Promise<BranchesIndex> {
+  const deletedDir = await mutateBranchesIndex(dataDir, storyId, (index, dir) => {
     const branchIdx = index.branches.findIndex(b => b.id === branchId)
     if (branchIdx === -1) throw new Error(`Branch '${branchId}' not found`)
-    const bDir = branchDir(dir, branchId)
-    if (existsSync(bDir)) await rm(bDir, { recursive: true, force: true })
+    if (branchId === index.rootBranchId) {
+      throw new Error(`Cannot delete the root branch '${branchId}'`)
+    }
+
+    const branch = index.branches[branchIdx]
+    const remaining = index.branches.filter(candidate => candidate.id !== branchId)
+    const fallback = remaining.find(candidate => candidate.id === branch.parentBranchId)
+      ?? remaining.find(candidate => candidate.id === index.rootBranchId)
+      ?? [...remaining].sort((a, b) => a.order - b.order)[0]
+    if (!fallback) throw new Error('Cannot delete the only branch')
+
+    // Keep descendants connected to a valid branch if their parent is removed.
+    for (const child of remaining) {
+      if (child.parentBranchId === branchId) child.parentBranchId = fallback?.id
+    }
     index.branches.splice(branchIdx, 1)
-    if (index.activeBranchId === branchId) index.activeBranchId = 'main'
+    if (index.activeBranchId === branchId) index.activeBranchId = fallback.id
+    return branchDir(dir, branchId)
   })
+
+  // Publish the valid replacement selection before removing content. A failed
+  // filesystem cleanup can leave an unreachable backup directory, but never an
+  // index that points at a deleted timeline.
+  if (existsSync(deletedDir)) await rm(deletedDir, { recursive: true, force: true })
+  return getBranchesIndex(dataDir, storyId)
 }
 
 export async function renameBranch(dataDir: string, storyId: string, branchId: string, name: string): Promise<BranchMeta> {

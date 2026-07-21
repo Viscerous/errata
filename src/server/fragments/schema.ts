@@ -239,6 +239,7 @@ export type BranchMeta = z.infer<typeof BranchMetaSchema>
 export const BranchesIndexSchema = z.object({
   branches: z.array(BranchMetaSchema),
   activeBranchId: z.string(),
+  rootBranchId: z.string(),
 })
 
 export type BranchesIndex = z.infer<typeof BranchesIndexSchema>

@@ -7,6 +7,11 @@ export interface ClarifyOpts {
   clarifyRound?: number
 }
 
+export interface GenerationRequestOpts extends ClarifyOpts {
+  runId?: string
+  branchId?: string
+}
+
 export function clarifyBody(opts?: ClarifyOpts): Record<string, unknown> {
   const clarifications = opts?.clarifications ?? []
   const round = opts?.clarifyRound ?? 0
@@ -17,19 +22,30 @@ export function clarifyBody(opts?: ClarifyOpts): Record<string, unknown> {
   return { clarifications, clarifyRound: round }
 }
 
+function generationRequestBody(opts?: GenerationRequestOpts): Record<string, unknown> {
+  return {
+    ...clarifyBody(opts),
+    ...(opts?.runId ? { runId: opts.runId } : {}),
+    ...(opts?.branchId ? { branchId: opts.branchId } : {}),
+  }
+}
+
 export const generation = {
   /** Stream prose generation (returns ReadableStream of ChatEvent) */
-  stream: (storyId: string, input: string, signal?: AbortSignal, opts?: ClarifyOpts) =>
-    fetchEventStream(`/stories/${storyId}/generate`, { input, saveResult: false, ...clarifyBody(opts) }, signal),
+  stream: (storyId: string, input: string, signal?: AbortSignal, opts?: GenerationRequestOpts) =>
+    fetchEventStream(`/stories/${storyId}/generate`, { input, saveResult: false, ...generationRequestBody(opts) }, signal),
   /** Generate and save as a new prose fragment */
-  generateAndSave: (storyId: string, input: string, signal?: AbortSignal, opts?: ClarifyOpts) =>
-    fetchEventStream(`/stories/${storyId}/generate`, { input, saveResult: true, ...clarifyBody(opts) }, signal),
+  generateAndSave: (storyId: string, input: string, signal?: AbortSignal, opts?: GenerationRequestOpts) =>
+    fetchEventStream(`/stories/${storyId}/generate`, { input, saveResult: true, ...generationRequestBody(opts) }, signal),
   /** Regenerate an existing fragment with a new prompt */
-  regenerate: (storyId: string, fragmentId: string, input: string, signal?: AbortSignal, opts?: ClarifyOpts) =>
-    fetchEventStream(`/stories/${storyId}/generate`, { input, saveResult: true, mode: 'regenerate', fragmentId, ...clarifyBody(opts) }, signal),
+  regenerate: (storyId: string, fragmentId: string, input: string, signal?: AbortSignal, opts?: GenerationRequestOpts) =>
+    fetchEventStream(`/stories/${storyId}/generate`, { input, saveResult: true, mode: 'regenerate', fragmentId, ...generationRequestBody(opts) }, signal),
   /** Refine an existing fragment with instructions */
-  refine: (storyId: string, fragmentId: string, input: string, signal?: AbortSignal, opts?: ClarifyOpts) =>
-    fetchEventStream(`/stories/${storyId}/generate`, { input, saveResult: true, mode: 'refine', fragmentId, ...clarifyBody(opts) }, signal),
+  refine: (storyId: string, fragmentId: string, input: string, signal?: AbortSignal, opts?: GenerationRequestOpts) =>
+    fetchEventStream(`/stories/${storyId}/generate`, { input, saveResult: true, mode: 'refine', fragmentId, ...generationRequestBody(opts) }, signal),
+  /** Explicit server-side cancellation; transport abort remains a fallback. */
+  cancel: (storyId: string, runId: string) =>
+    apiFetch<{ ok: boolean; active: boolean }>(`/stories/${storyId}/generations/${runId}/cancel`, { method: 'POST' }),
   /** Get AI-generated story direction proposals */
   proposeDirections: (storyId: string, count?: number) =>
     apiFetch<{ suggestions: SuggestionDirection[] }>(

@@ -1,7 +1,8 @@
 import { recordAgentRun, makeAgentRunId } from './traces'
-import { registerActiveAgent, unregisterActiveAgent } from './active-registry'
-import { getActivityBuffer, pushActivityEvent, type ActivityStreamEvent } from './activity-stream'
-import type { AgentTraceEntry } from './types'
+import { getActiveAgentBuffer, registerActiveAgent, unregisterActiveAgent } from './active-registry'
+import { pushActivityEvent, type ActivityStreamEvent } from './activity-stream'
+import type { AgentRunStatus, AgentTraceEntry } from './types'
+import { getScopedBranchId } from '../fragments/branches'
 
 export interface AgentRunDetail {
   error?: string
@@ -17,7 +18,13 @@ export interface AgentRunHandle {
    * Record the run's outcome and clear its active-agent marker. Idempotent —
    * safe to call from a finally and an explicit branch; only the first wins.
    */
-  finish(status: 'success' | 'error', detail?: AgentRunDetail): void
+  finish(status: AgentRunStatus, detail?: AgentRunDetail): void
+}
+
+export interface BeginAgentRunOptions {
+  runId?: string
+  branchId?: string
+  abortController?: AbortController
 }
 
 /**
@@ -26,13 +33,22 @@ export interface AgentRunHandle {
  * active marker. Used by every agent execution path (streaming instances, the
  * writer/prewriter route) so they all surface in the same activity/history.
  */
-export function beginAgentRun(storyId: string, agentName: string, input?: Record<string, unknown>): AgentRunHandle {
-  const runId = makeAgentRunId()
+export function beginAgentRun(
+  storyId: string,
+  agentName: string,
+  input?: Record<string, unknown>,
+  options: BeginAgentRunOptions = {},
+): AgentRunHandle {
+  const runId = options.runId ?? makeAgentRunId()
   const startedAt = new Date().toISOString()
   const startMs = Date.now()
-  const activityId = registerActiveAgent(storyId, agentName)
+  const activityId = registerActiveAgent(storyId, agentName, {
+    runId,
+    branchId: options.branchId ?? getScopedBranchId(storyId),
+    cancel: options.abortController ? () => options.abortController!.abort() : undefined,
+  })
   // Buffer is owned by the active registry (created above); we just hold the ref to push into.
-  const buffer = getActivityBuffer(storyId, agentName)
+  const buffer = getActiveAgentBuffer(activityId)
   let settled = false
 
   return {

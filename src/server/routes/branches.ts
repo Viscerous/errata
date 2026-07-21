@@ -6,7 +6,10 @@ import {
   createBranch,
   deleteBranch,
   renameBranch,
+  markBranchDeleting,
 } from '../fragments/branches'
+import { cancelActiveAgentsForBranch } from '../agents/active-registry'
+import { cancelPendingLibrarianForBranch } from '../librarian/scheduler'
 
 export function branchRoutes(dataDir: string) {
   return new Elysia({ detail: { tags: ['Branches'] } })
@@ -70,12 +73,27 @@ export function branchRoutes(dataDir: string) {
     })
 
     .delete('/stories/:storyId/branches/:branchId', withStory(dataDir, async (_story, { params, set }) => {
+      let releaseDeletion: (() => void) | undefined
       try {
-        await deleteBranch(dataDir, params.storyId, params.branchId)
-        return { ok: true }
+        const current = await getBranchesIndex(dataDir, params.storyId)
+        if (!current.branches.some(branch => branch.id === params.branchId)) {
+          throw new Error(`Branch '${params.branchId}' not found`)
+        }
+        if (current.rootBranchId === params.branchId) {
+          throw new Error(`Cannot delete the root branch '${params.branchId}'`)
+        }
+        releaseDeletion = markBranchDeleting(params.storyId, params.branchId)
+        cancelPendingLibrarianForBranch(params.storyId, params.branchId)
+        await cancelActiveAgentsForBranch(params.storyId, params.branchId)
+        // A running agent can schedule analysis while it is settling.
+        cancelPendingLibrarianForBranch(params.storyId, params.branchId)
+        const index = await deleteBranch(dataDir, params.storyId, params.branchId)
+        return { ok: true, activeBranchId: index.activeBranchId }
       } catch (err) {
         set.status = 400
         return { error: err instanceof Error ? err.message : 'Failed to delete branch' }
+      } finally {
+        releaseDeletion?.()
       }
     }), {
       detail: { summary: 'Delete a branch' },

@@ -167,7 +167,11 @@ function ActivityContent({ storyId }: { storyId: string }) {
               {agentRuns.slice(0, 12).map((run) => {
                 const expanded = expandedRunId === run.rootRunId
                 const runTime = new Date(run.startedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                const isError = run.status === 'error'
+                const statusColor = run.status === 'error'
+                  ? 'text-red-500/70'
+                  : run.status === 'aborted'
+                    ? 'text-amber-500/70'
+                    : 'text-emerald-500/50'
                 return (
                   <div key={run.rootRunId} className="rounded-md border border-border/25 overflow-hidden">
                     <button
@@ -181,7 +185,7 @@ function ActivityContent({ storyId }: { storyId: string }) {
                       <span className="font-mono text-foreground/65 truncate">{run.agentName}</span>
                       <span className="text-muted-foreground shrink-0">{runTime}</span>
                       <span className="text-muted-foreground shrink-0">{formatDuration(run.durationMs)}</span>
-                      <span className={`ml-auto text-[0.5625rem] font-mono shrink-0 ${isError ? 'text-red-500/70' : 'text-emerald-500/50'}`}>
+                      <span className={`ml-auto text-[0.5625rem] font-mono shrink-0 ${statusColor}`}>
                         {run.status}
                       </span>
                     </button>
@@ -247,7 +251,7 @@ function TraceTree({ run }: { run: AgentRunTraceRecord }) {
           <span className="text-muted-foreground mt-px">{depth === 0 ? '\u25CF' : '\u2514'}</span>
           <span className="font-mono text-foreground/70">{node.agentName}</span>
           <span className="text-muted-foreground">{formatDuration(node.durationMs)}</span>
-          <span className={node.status === 'error' ? 'text-red-500/70' : 'text-emerald-500/50'}>
+          <span className={node.status === 'error' ? 'text-red-500/70' : node.status === 'aborted' ? 'text-amber-500/70' : 'text-emerald-500/50'}>
             {node.status}
           </span>
         </div>

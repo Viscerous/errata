@@ -35,6 +35,7 @@ export function GenerationPanel({ storyId, onBack }: GenerationPanelProps) {
   const [showDebug, setShowDebug] = useState(false)
   const [pendingQuestions, setPendingQuestions] = useState<ClarifyQuestion[] | null>(null)
   const abortRef = useRef<AbortController | null>(null)
+  const runIdRef = useRef<string | null>(null)
   const outputRef = useRef<HTMLDivElement>(null)
   // In-flight generation context, preserved across the clarify round trip.
   const genCtxRef = useRef<{ input: string; saveResult: boolean; clarifications: Clarification[]; round: number }>({
@@ -62,12 +63,14 @@ export function GenerationPanel({ storyId, onBack }: GenerationPanelProps) {
 
     const ac = new AbortController()
     abortRef.current = ac
+    const runId = `gen-${Date.now().toString(36)}-${crypto.randomUUID()}`
+    runIdRef.current = runId
 
     let asked: ClarifyQuestion[] | null = null
     try {
       const opts = clarifications.length || round > 0
-        ? { clarifications, clarifyRound: round }
-        : undefined
+        ? { clarifications, clarifyRound: round, runId }
+        : { runId }
       const stream = saveResult
         ? await api.generation.generateAndSave(storyId, genInput, ac.signal, opts)
         : await api.generation.stream(storyId, genInput, ac.signal, opts)
@@ -115,6 +118,7 @@ export function GenerationPanel({ storyId, onBack }: GenerationPanelProps) {
     } finally {
       setIsGenerating(false)
       abortRef.current = null
+      if (runIdRef.current === runId) runIdRef.current = null
     }
   }, [storyId, queryClient])
 
@@ -134,13 +138,18 @@ export function GenerationPanel({ storyId, onBack }: GenerationPanelProps) {
   }, [runGeneration])
 
   const handleStop = useCallback(() => {
-    if (abortRef.current) {
-      abortRef.current.abort()
-      abortRef.current = null
+    const controller = abortRef.current
+    const runId = runIdRef.current
+    if (controller) {
+      if (runId) {
+        void api.generation.cancel(storyId, runId).finally(() => controller.abort())
+      } else {
+        controller.abort()
+      }
     }
     setIsGenerating(false)
     setPendingQuestions(null)
-  }, [])
+  }, [storyId])
 
   return (
     <Panel data-component-id="generation-panel-root">

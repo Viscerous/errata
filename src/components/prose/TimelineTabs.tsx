@@ -16,10 +16,11 @@ interface TimelineTabsProps {
   storyId: string
   branches: BranchMeta[]
   activeBranchId: string
+  rootBranchId: string
   onHide: () => void
 }
 
-export function TimelineTabs({ storyId, branches, activeBranchId, onHide }: TimelineTabsProps) {
+export function TimelineTabs({ storyId, branches, activeBranchId, rootBranchId, onHide }: TimelineTabsProps) {
   const queryClient = useQueryClient()
   const confirm = useConfirm()
   const [renamingId, setRenamingId] = useState<string | null>(null)
@@ -58,7 +59,7 @@ export function TimelineTabs({ storyId, branches, activeBranchId, onHide }: Time
 
   const deleteMutation = useMutation({
     mutationFn: (branchId: string) => api.branches.delete(storyId, branchId),
-    // deleting the active branch auto-switches to 'main' on the server
+    // deleting the active branch auto-switches to its parent/root on the server
     onSuccess: branchChanged,
   })
 
@@ -77,7 +78,7 @@ export function TimelineTabs({ storyId, branches, activeBranchId, onHide }: Time
     <div className="flex items-center gap-1 px-4 py-1.5 border-b border-border/30 bg-muted/20 overflow-x-auto" data-component-id="timeline-tabs">
       {branches.map((branch) => {
         const isActive = branch.id === activeBranchId
-        const isMain = branch.id === 'main'
+        const isRoot = branch.id === rootBranchId
 
         if (renamingId === branch.id) {
           return (
@@ -111,7 +112,7 @@ export function TimelineTabs({ storyId, branches, activeBranchId, onHide }: Time
               }}
               data-component-id={`timeline-tab-${branch.id}`}
             >
-              {!isMain && <GitBranch className="size-3 opacity-50" />}
+              {!isRoot && <GitBranch className="size-3 opacity-50" />}
               {branch.name}
             </button>
 
@@ -127,7 +128,7 @@ export function TimelineTabs({ storyId, branches, activeBranchId, onHide }: Time
                     <Pencil className="size-3 mr-2" />
                     Rename
                   </DropdownMenuItem>
-                  {!isMain && (
+                  {!isRoot && (
                     <DropdownMenuItem
                       className="text-destructive focus:text-destructive"
                       onClick={async () => {

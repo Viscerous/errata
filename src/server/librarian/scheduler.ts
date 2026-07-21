@@ -1,6 +1,6 @@
 import type { Fragment } from '../fragments/schema'
 import { createLogger } from '../logging'
-import { getActiveBranchId, withBranch } from '../fragments/branches'
+import { getActiveBranchId, getScopedBranchId, isBranchDeleting, withBranch } from '../fragments/branches'
 import { getStory } from '../fragments/storage'
 import { getAgentBlockConfig } from '../agents/agent-block-storage'
 import { clearAnalysisIndexEntry } from './storage'
@@ -93,7 +93,11 @@ export async function triggerLibrarian(
   const requestLogger = logger.child({ storyId })
 
   // Capture the active branch at trigger time, before any in-flight run can switch it.
-  const branchId = await getActiveBranchId(dataDir, storyId)
+  const branchId = getScopedBranchId(storyId) ?? await getActiveBranchId(dataDir, storyId)
+  if (isBranchDeleting(storyId, branchId)) {
+    requestLogger.debug('Ignoring analysis for a timeline being deleted', { fragmentId: fragment.id, branchId })
+    return
+  }
 
   const state = scheduler.get(storyId) ?? { running: false, queued: null }
   scheduler.set(storyId, state)
@@ -248,6 +252,17 @@ export function clearPending(): void {
     run.resolve()
   }
   activeRuns.clear()
+}
+
+/** Remove deferred work for a timeline before its active agents are cancelled. */
+export function cancelPendingLibrarianForBranch(storyId: string, branchId: string): void {
+  const state = scheduler.get(storyId)
+  if (!state?.queued || state.queued.branchId !== branchId) return
+  state.queued = null
+  setRuntimeStatus(storyId, {
+    pendingFragmentId: null,
+    runStatus: state.running ? 'running' : 'idle',
+  })
 }
 
 /** Number of stories with a running or queued analysis (useful for tests). */

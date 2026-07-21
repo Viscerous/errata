@@ -1,7 +1,7 @@
 import { z, type ZodTypeAny } from 'zod/v4'
 import type { Logger } from '../logging'
 
-export type AgentRunStatus = 'success' | 'error'
+export type AgentRunStatus = 'success' | 'error' | 'aborted'
 
 export interface AgentTraceEntry {
   runId: string

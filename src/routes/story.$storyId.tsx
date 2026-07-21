@@ -580,6 +580,7 @@ function StoryEditorPage() {
             storyId={storyId}
             branches={branchesIndex.branches}
             activeBranchId={branchesIndex.activeBranchId}
+            rootBranchId={branchesIndex.rootBranchId}
             onHide={() => setTimelineBarVisible(false)}
           />
         )}

@@ -2,7 +2,7 @@ import { createLogger } from '../logging'
 import { agentRegistry } from './registry'
 import { ensureCoreAgentsRegistered } from './register-core'
 import { beginAgentRun, type AgentRunHandle } from './agent-run'
-import type { AgentInvocationContext } from './types'
+import type { AgentInvocationContext, AgentRunStatus } from './types'
 import type { AgentStreamResult, AgentStreamCompletion } from './stream-types'
 
 /**
@@ -49,7 +49,7 @@ export function createAgentInstance<K extends string>(
   // Translate the agent's completion/error into the shared run handle. The handle
   // owns the active marker and the activity-history record; this just serializes
   // the agent-specific output.
-  function finish(status: 'success' | 'error', resultOrError: unknown): void {
+  function finish(status: AgentRunStatus, resultOrError: unknown): void {
     if (settled || !handle) return
     settled = true
 
@@ -66,7 +66,7 @@ export function createAgentInstance<K extends string>(
         }),
       })
     } else {
-      handle.finish('error', {
+      handle.finish(status, {
         error: resultOrError instanceof Error ? resultOrError.message : String(resultOrError),
       })
     }
@@ -108,7 +108,7 @@ export function createAgentInstance<K extends string>(
           return result
         },
         (err) => {
-          finish('error', err)
+          finish(err instanceof Error && err.name === 'AbortError' ? 'aborted' : 'error', err)
           throw err
         },
       )
@@ -117,7 +117,7 @@ export function createAgentInstance<K extends string>(
     },
 
     fail(error: unknown): void {
-      finish('error', error)
+      finish(error instanceof Error && error.name === 'AbortError' ? 'aborted' : 'error', error)
     },
   }
 }

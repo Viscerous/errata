@@ -67,6 +67,7 @@ export function InlineGenerationInput({
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const composeTextareaRef = useRef<HTMLTextAreaElement>(null)
   const abortRef = useRef<AbortController | null>(null)
+  const runIdRef = useRef<string | null>(null)
   // In-flight generation context, preserved across the clarify round trip.
   const genCtxRef = useRef<{ input: string; clarifications: Clarification[]; round: number }>({ input: '', clarifications: [], round: 0 })
 
@@ -222,10 +223,16 @@ export function InlineGenerationInput({
 
     const ac = new AbortController()
     abortRef.current = ac
+    const runId = `gen-${Date.now().toString(36)}-${crypto.randomUUID()}`
+    runIdRef.current = runId
     let askedQuestions: ClarifyQuestion[] | null = null
 
     try {
-      const opts = clarifications.length || round > 0 ? { clarifications, clarifyRound: round } : undefined
+      const opts = {
+        ...(clarifications.length || round > 0 ? { clarifications, clarifyRound: round } : {}),
+        runId,
+        branchId,
+      }
       const stream = await api.generation.generateAndSave(storyId, generationInput, ac.signal, opts)
 
       const reader = stream.getReader()
@@ -335,6 +342,7 @@ export function InlineGenerationInput({
       }
     } finally {
       abortRef.current = null
+      if (runIdRef.current === runId) runIdRef.current = null
     }
   }, [storyId, branchId, latestFragmentId, isGenerating, onGenerationStart, onGenerationStream, onGenerationThoughts, onGenerationComplete, onGenerationError, queryClient])
 
@@ -355,7 +363,14 @@ export function InlineGenerationInput({
   }, [handleGenerateWithInput])
 
   const handleStop = () => {
-    abortRef.current?.abort()
+    const controller = abortRef.current
+    const runId = runIdRef.current
+    if (!controller) return
+    if (!runId) {
+      controller.abort()
+      return
+    }
+    void api.generation.cancel(storyId, runId).finally(() => controller.abort())
   }
 
   const handleCompose = async () => {

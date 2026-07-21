@@ -1,4 +1,4 @@
-import type { AgentTraceEntry } from './types'
+import type { AgentRunStatus, AgentTraceEntry } from './types'
 
 let runIdCounter = 0
 
@@ -17,7 +17,7 @@ export interface AgentRunTraceRecord {
   runId: string
   storyId: string
   agentName: string
-  status: 'success' | 'error'
+  status: AgentRunStatus
   startedAt: string
   finishedAt: string
   durationMs: number

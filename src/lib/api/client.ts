@@ -117,6 +117,9 @@ export async function fetchGetEventStream(path: string): Promise<ReadableStream<
         buffer += decoder.decode(value, { stream: true })
       }
     },
+    async cancel(reason) {
+      await reader.cancel(reason)
+    },
   })
 }
 
@@ -180,6 +183,9 @@ export async function fetchEventStream(
         }
         buffer += decoder.decode(value, { stream: true })
       }
+    },
+    async cancel(reason) {
+      await reader.cancel(reason)
     },
   })
 }

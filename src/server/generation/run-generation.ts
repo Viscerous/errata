@@ -39,11 +39,14 @@ import { resolveAndReportUsage } from '../llm/usage-normalizer'
 import { drainAgentStream } from '../agents/drain-agent-stream'
 import { createLogger } from '../logging'
 import type { Fragment } from '../fragments/schema'
+import { getBranchesIndex, isBranchDeleting, withBranch } from '../fragments/branches'
 
 const logger = createLogger('generation')
 
 export interface GenerationInput {
   input: string
+  runId?: string
+  branchId?: string
   saveResult?: boolean
   mode?: 'generate' | 'regenerate' | 'refine'
   fragmentId?: string
@@ -84,6 +87,26 @@ export async function runGeneration(
     requestLogger.warn('Empty input received')
     return { ok: false, status: 422, error: 'Input is required' }
   }
+
+  const branchesIndex = await getBranchesIndex(dataDir, storyId)
+  const branchId = body.branchId ?? branchesIndex.activeBranchId
+  if (!branchesIndex.branches.some(branch => branch.id === branchId)) {
+    return { ok: false, status: 404, error: `Timeline '${branchId}' not found` }
+  }
+  if (isBranchDeleting(storyId, branchId)) {
+    return { ok: false, status: 409, error: `Timeline '${branchId}' is being deleted` }
+  }
+
+  return withBranch(dataDir, storyId, async () => {
+  const abortController = new AbortController()
+  const writerRun = beginAgentRun(storyId, 'generation.writer', undefined, {
+    runId: body.runId,
+    branchId,
+    abortController,
+  })
+
+  try {
+  abortController.signal.throwIfAborted()
 
   const mode = body.mode ?? 'generate'
   const librarianConfig = await getAgentBlockConfig(dataDir, storyId, 'librarian.analyze')
@@ -134,6 +157,7 @@ export async function runGeneration(
       }
     : {}
   let ctxState = await buildContextState(dataDir, storyId, effectiveInput, buildContextOpts)
+  abortController.signal.throwIfAborted()
   const contextFragments = {
     proseCount: ctxState.proseFragments.length,
     stickyGuidelines: ctxState.stickyGuidelines.length,
@@ -153,6 +177,7 @@ export async function runGeneration(
 
   // Resolve model early so modelId is available for instruction resolution
   const { model, modelId: resolvedModelId, temperature, providerOptions, guards } = await resolveAgentRuntime(dataDir, storyId, 'generation.writer', story)
+  abortController.signal.throwIfAborted()
   requestLogger.info('Resolved model', { resolvedModelId })
   ctxState.modelId = resolvedModelId
 
@@ -225,7 +250,7 @@ export async function runGeneration(
   const modelMessages = addCacheBreakpoints(messages)
 
   requestLogger.info('Starting LLM stream...')
-  const abortController = new AbortController()
+  abortController.signal.throwIfAborted()
 
   let fullText = ''
   let fullReasoning = ''
@@ -235,8 +260,7 @@ export async function runGeneration(
   // Set with the error message when the stream throws for a reason other than
   // client abort, so the save path skips persisting a failed generation.
   let runError: string | null = null
-
-  const writerRun = beginAgentRun(storyId, 'generation.writer')
+  let wasAborted = false
 
   const eventStream = new ReadableStream<Uint8Array>({
     async start(controller) {
@@ -252,7 +276,10 @@ export async function runGeneration(
         if (isPrewriterMode) {
           emit({ type: 'phase', phase: 'prewriting' })
 
-          const prewriterRun = beginAgentRun(storyId, 'generation.prewriter')
+          const prewriterRun = beginAgentRun(storyId, 'generation.prewriter', undefined, {
+            branchId,
+            abortController,
+          })
           let prewriterOk = false
           try {
             const configuredMax = story.settings.maxSteps ?? 10
@@ -309,6 +336,7 @@ export async function runGeneration(
               // skips the writer and the save block entirely.
               emit({ type: 'clarify-questions', questions: prewriterResult.questions, round: clarifyRound })
               emit({ type: 'finish', finishReason: 'clarify', stepCount: prewriterResult.stepCount, stopped: true })
+              writerRun.finish('success', { output: { finishReason: 'clarify', stepCount: prewriterResult.stepCount } })
               controller.close()
               return
             }
@@ -347,7 +375,10 @@ export async function runGeneration(
               requestLogger.warn('Prewriter produced an empty brief; falling back to full context for the writer')
             }
           } finally {
-            prewriterRun.finish(prewriterOk ? 'success' : 'error', prewriterOk ? { output: { stepCount: prewriterStepCount } } : undefined)
+            prewriterRun.finish(
+              abortController.signal.aborted ? 'aborted' : prewriterOk ? 'success' : 'error',
+              prewriterOk ? { output: { stepCount: prewriterStepCount } } : undefined,
+            )
           }
 
           emit({ type: 'phase', phase: 'writing' })
@@ -375,7 +406,7 @@ export async function runGeneration(
         const drained = await drainAgentStream(result.fullStream, (event) => {
           emit(event)
           writerRun.pushEvent(event as ActivityStreamEvent)
-        })
+        }, { abortSignal: abortController.signal })
         fullText = drained.fullText
         fullReasoning = drained.fullReasoning
         toolCalls.push(...drained.toolCalls)
@@ -387,7 +418,7 @@ export async function runGeneration(
         emit(finishEvent)
         writerRun.pushEvent(finishEvent)
       } catch (err) {
-        const wasAborted = abortController.signal.aborted
+        wasAborted = abortController.signal.aborted
         if (wasAborted) {
           requestLogger.info('Generation aborted by client', { textLength: fullText.length })
           lastFinishReason = 'stop'
@@ -408,16 +439,11 @@ export async function runGeneration(
           requestLogger.error('Generation stream failed', { error: runError, textLength: fullText.length })
           controller.error(err)
         }
-      } finally {
-        writerRun.finish(
-          runError ? 'error' : 'success',
-          runError ? { error: runError } : { output: { finishReason: lastFinishReason, stepCount } },
-        )
       }
 
-      // Save only when the generation actually produced text and didn't fail.
-      // (Aborted-with-partial-text still saves what was generated.)
-      if (body.saveResult && !runError && fullText.trim()) {
+      // Stop means discard the unfinished passage. Never run save hooks or
+      // launch downstream analysis for an aborted generation.
+      if (body.saveResult && !runError && !abortController.signal.aborted && fullText.trim()) {
         try {
           const durationMs = Date.now() - startTime
           requestLogger.info('LLM generation completed', { durationMs, textLength: fullText.length })
@@ -430,6 +456,7 @@ export async function runGeneration(
             fragmentId: (mode === 'regenerate' || mode === 'refine') ? body.fragmentId! : null,
             toolCalls,
           })
+          abortController.signal.throwIfAborted()
           requestLogger.info('AfterGeneration hooks completed')
 
           const now = new Date().toISOString()
@@ -574,6 +601,13 @@ export async function runGeneration(
         }
       }
 
+      // The run remains active through persistence and downstream scheduling,
+      // so timeline deletion cannot race the post-stream commit phase.
+      writerRun.finish(
+        wasAborted ? 'aborted' : runError ? 'error' : 'success',
+        runError ? { error: runError } : { output: { finishReason: lastFinishReason, stepCount } },
+      )
+
       // Close the stream controller after saving completes (or abort concludes)
       if (!runError) {
         try {
@@ -589,4 +623,12 @@ export async function runGeneration(
   })
 
   return { ok: true, eventStream }
+  } catch (error) {
+    writerRun.finish(
+      abortController.signal.aborted ? 'aborted' : 'error',
+      { error: error instanceof Error ? error.message : String(error) },
+    )
+    throw error
+  }
+  }, branchId)
 }

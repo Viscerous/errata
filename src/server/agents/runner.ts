@@ -3,6 +3,7 @@ import { agentRegistry } from './registry'
 import { ensureCoreAgentsRegistered } from './register-core'
 import { recordAgentRun, makeAgentRunId } from './traces'
 import { registerActiveAgent, unregisterActiveAgent } from './active-registry'
+import { getScopedBranchId } from '../fragments/branches'
 import type {
   AgentCallOptions,
   AgentInvocationContext,
@@ -166,7 +167,7 @@ async function invokeInternal<TOutput>(args: {
       startedAt,
       finishedAt,
       durationMs,
-      status: 'error',
+      status: args.runtime.abortController.signal.aborted ? 'aborted' : 'error',
       error: errorMessage,
     })
     logger.error('Agent run failed', {
@@ -205,7 +206,11 @@ export async function invokeAgent<TOutput = unknown>(args: {
     abortController: new AbortController(),
   }
 
-  const activityId = registerActiveAgent(args.storyId, args.agentName)
+  const activityId = registerActiveAgent(args.storyId, args.agentName, {
+    runId: runtime.rootRunId,
+    branchId: getScopedBranchId(args.storyId),
+    cancel: () => runtime.abortController.abort(),
+  })
 
   try {
     const result = await invokeInternal<TOutput>({
@@ -248,7 +253,7 @@ export async function invokeAgent<TOutput = unknown>(args: {
       runId: first?.runId ?? runtime.rootRunId,
       storyId: args.storyId,
       agentName: args.agentName,
-      status: 'error',
+      status: runtime.abortController.signal.aborted ? 'aborted' : 'error',
       startedAt: first?.startedAt ?? new Date().toISOString(),
       finishedAt: last?.finishedAt ?? new Date().toISOString(),
       durationMs: computeTraceDurationMs(first?.startedAt, last?.finishedAt),

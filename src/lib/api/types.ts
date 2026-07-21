@@ -324,7 +324,7 @@ export interface AgentTraceEntry {
   startedAt: string
   finishedAt: string
   durationMs: number
-  status: 'success' | 'error'
+  status: 'success' | 'error' | 'aborted'
   error?: string
   output?: Record<string, unknown>
 }
@@ -334,7 +334,7 @@ export interface AgentRunTraceRecord {
   runId: string
   storyId: string
   agentName: string
-  status: 'success' | 'error'
+  status: 'success' | 'error' | 'aborted'
   startedAt: string
   finishedAt: string
   durationMs: number
@@ -514,6 +514,7 @@ export interface BranchMeta {
 export interface BranchesIndex {
   branches: BranchMeta[]
   activeBranchId: string
+  rootBranchId: string
 }
 
 export interface SuggestionDirection {
