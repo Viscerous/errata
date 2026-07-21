@@ -164,8 +164,6 @@ export function ProseChainView({
   const activeIndexRef = useRef(0)
   const [mobileTocOpen, setMobileTocOpen] = useState(false)
   const scrollAreaRef = useRef<HTMLDivElement>(null)
-  const composerOverlayRef = useRef<HTMLDivElement>(null)
-  const [composerHeight, setComposerHeight] = useState(0)
   const [isGenerating, setIsGenerating] = useState(false)
   const [pendingGeneration, setPendingGeneration] = useState<PendingGenerationMeta | null>(null)
   const generationStreamStoreRef = useRef<GenerationStreamStore | null>(null)
@@ -456,29 +454,6 @@ export function ProseChainView({
     }
   }, [])
   const getViewport = useCallback(() => viewportRef.current, [])
-
-  useEffect(() => {
-    const node = composerOverlayRef.current
-    if (!node) return
-
-    const measure = () => {
-      const next = Math.ceil(node.getBoundingClientRect().height)
-      setComposerHeight((current) => current === next ? current : next)
-    }
-
-    measure()
-    window.addEventListener('resize', measure)
-    if (!window.ResizeObserver) {
-      return () => window.removeEventListener('resize', measure)
-    }
-
-    const observer = new ResizeObserver(measure)
-    observer.observe(node)
-    return () => {
-      observer.disconnect()
-      window.removeEventListener('resize', measure)
-    }
-  }, [])
 
   // Measure offset from viewport top to the list container (accounts for cover image + padding)
   const proseContentRef = useRef<HTMLDivElement>(null)
@@ -1027,7 +1002,6 @@ export function ProseChainView({
             className="mx-auto w-full py-6 px-4 sm:py-12 sm:px-8"
             style={{
               maxWidth: PROSE_WIDTH_VALUES[proseWidth],
-              paddingBottom: composerHeight ? composerHeight + 24 : undefined,
             }}
           >
             {orderedRows.length > 0 ? (
@@ -1123,9 +1097,8 @@ export function ProseChainView({
           </MentionProvider>
         </ScrollArea>
 
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 px-3 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:px-6">
+        <div className="pointer-events-none relative z-20 shrink-0 px-3 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:px-6">
           <div
-            ref={composerOverlayRef}
             className="pointer-events-auto mx-auto w-full"
             style={{ maxWidth: PROSE_WIDTH_VALUES[proseWidth] }}
           >
