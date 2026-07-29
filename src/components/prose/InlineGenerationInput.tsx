@@ -12,7 +12,7 @@ import { QuestionCard } from '@/components/generation/QuestionCard'
 import { generateRunId } from '@/lib/client-ids'
 import { mergeDirectionSuggestions } from './direction-suggestions'
 
-// A round high enough that the server withholds the ask tool and must write â€”
+// A round high enough that the server withholds the ask tool and must write —
 // used by "Skip & write" to proceed without answering.
 const FORCE_PROCEED_ROUND = 99
 
@@ -31,7 +31,7 @@ interface InlineGenerationInputProps {
   /**
    * The active head passage of the current timeline (last section's active
    * fragment). Directions are anchored to the passage they were generated
-   * against and only stay relevant while that passage is still the head â€” once
+   * against and only stay relevant while that passage is still the head — once
    * the timeline advances, they're hidden.
    */
   latestFragmentId?: string
@@ -94,6 +94,16 @@ export function InlineGenerationInput({
   const [isFetchingSuggestions, setIsFetchingSuggestions] = useState(false)
   const [suggestionError, setSuggestionError] = useState<string | null>(null)
   const [activeSuggestionIndex, setActiveSuggestionIndex] = useState<number | null>(null)
+  /**
+   * Whether the pressed card was already expanded when the press started.
+   *
+   * Live state can't answer that: pressing a button focuses it, focus expands the
+   * card, so by click time it always reads "open" and the first tap would commit
+   * unseen. Snapshotted on pointerdown, which precedes the focus. Null means no
+   * pointer was involved, where current state is honest — Tab focused the card in
+   * its own interaction.
+   */
+  const pressStartedExpandedRef = useRef<boolean | null>(null)
 
   // Poll librarian status to detect when analysis completes
   const { data: librarianStatus } = useQuery({
@@ -107,7 +117,7 @@ export function InlineGenerationInput({
     const prev = prevRunStatusRef.current
     const curr = librarianStatus?.runStatus
     prevRunStatusRef.current = curr
-    // When analysis transitions from running â†’ idle/error, refresh analyses and prose fragments
+    // When analysis transitions from running → idle/error, refresh analyses and prose fragments
     // (librarian writes annotations to fragment.meta, so prose fragments must be re-fetched)
     if (prev === 'running' && (curr === 'idle' || curr === 'error')) {
       queryClient.invalidateQueries({ queryKey: ['librarian-analyses', storyId] })
@@ -124,7 +134,7 @@ export function InlineGenerationInput({
   // Only surface the newest analysis's directions while the passage it was
   // generated against is still the timeline's head. Once a new passage is
   // written (or the tail is deleted / a variation switched), the analysis no
-  // longer describes "what comes next" and its directions drop out â€” until the
+  // longer describes "what comes next" and its directions drop out — until the
   // librarian re-analyses the new head.
   const latestSummary = analysesList?.[0]
   const latestAnalysisId =
@@ -276,7 +286,7 @@ export function InlineGenerationInput({
           }
           thoughtsDirty = true
         } else if (value.type === 'prewriter-reset') {
-          // Prewriter re-wrote the brief in a new step â€” clear the live block so
+          // Prewriter re-wrote the brief in a new step — clear the live block so
           // it refills with the final version instead of showing it twice.
           const last = thoughtSteps[thoughtSteps.length - 1]
           if (last && last.type === 'prewriter-text') {
@@ -312,7 +322,7 @@ export function InlineGenerationInput({
       onGenerationStream(accumulatedText)
       if (thoughtSteps.length > 0) onGenerationThoughts?.([...thoughtSteps])
 
-      // The prewriter asked clarifying questions instead of writing â€” surface
+      // The prewriter asked clarifying questions instead of writing — surface
       // them and wait for answers (no prose was produced this round).
       if (askedQuestions) {
         setPendingQuestions(askedQuestions)
@@ -329,7 +339,7 @@ export function InlineGenerationInput({
       await invalidateStoryContent(queryClient, storyId)
 
       if (prewriterDirectionsRef.current?.length) {
-        // Anchor to the passage that was just written (now the head) â€” read it
+        // Anchor to the passage that was just written (now the head) — read it
         // from the chain refreshed by invalidateStoryContent above, since the
         // latestFragmentId prop may not have propagated yet in this callback.
         const chain = queryClient.getQueryData<{ entries: Array<{ active: string }> }>(
@@ -342,7 +352,7 @@ export function InlineGenerationInput({
       setInput('')
       onGenerationComplete()
     } catch (err) {
-      // User-initiated abort â€” not an error
+      // User-initiated abort — not an error
       if (ac.signal.aborted) {
         await invalidateStoryContent(queryClient, storyId)
         onGenerationComplete()
@@ -417,7 +427,7 @@ export function InlineGenerationInput({
     try {
       const result = await api.generation.proposeDirections(storyId)
       // proposeDirections is computed from the current story state, i.e. the
-      // current head â€” anchor to it so these retire when the timeline advances.
+      // current head — anchor to it so these retire when the timeline advances.
       setManualAnchor(latestFragmentId)
       setManualSuggestions(result.suggestions)
     } catch (err) {
@@ -512,7 +522,7 @@ export function InlineGenerationInput({
           </button>
         </div>
 
-        {/* Freeform mode â€” original textarea */}
+        {/* Freeform mode — original textarea */}
         {mode === 'freeform' && (
           <textarea
             ref={textareaRef}
@@ -621,7 +631,12 @@ export function InlineGenerationInput({
                 </div>
                 <div
                   className="flex flex-col gap-1"
-                  onPointerLeave={() => updateActiveSuggestion(null)}
+                  // Only a mouse previews on hover. A pointer that arrives by
+                  // touching fires enter at contact and leave on release, both
+                  // before the click — one press would expand, collapse, commit.
+                  onPointerLeave={(event) => {
+                    if (event.pointerType === 'mouse') updateActiveSuggestion(null)
+                  }}
                   onBlur={(event) => {
                     if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
                       updateActiveSuggestion(null)
@@ -636,10 +651,28 @@ export function InlineGenerationInput({
                       handleGenerateWithInput(s.instruction)
                     }
 
+                    /**
+                     * One rule for every pointer, hence no device branch: a card
+                     * commits only if it was already showing what it will do.
+                     * Hover satisfies that ahead of a click; a touch expands
+                     * first and commits on the second tap. A finger that misses
+                     * the edit control then merely opens a collapsed card.
+                     */
+                    const activateSuggestion = () => {
+                      const wasExpanded = pressStartedExpandedRef.current ?? isExpanded
+                      pressStartedExpandedRef.current = null
+                      if (wasExpanded) chooseSuggestion()
+                      else updateActiveSuggestion(i)
+                    }
+                    // Ahead of the focus this same press will trigger.
+                    const recordPressStart = () => { pressStartedExpandedRef.current = isExpanded }
+
                     return (
                       <div
                         key={i}
-                        onPointerEnter={() => updateActiveSuggestion(i)}
+                        onPointerEnter={(event) => {
+                          if (event.pointerType === 'mouse') updateActiveSuggestion(i)
+                        }}
                         onFocus={() => updateActiveSuggestion(i)}
                         className={cn(
                           'group/card w-full overflow-hidden rounded-md border bg-card/90',
@@ -651,11 +684,13 @@ export function InlineGenerationInput({
                         )}
                       >
                         {/* Top bar (one-line layout) */}
-                        <div className="flex min-h-8 w-full items-stretch">
+                        <div className="flex w-full items-stretch min-h-8 pointer-coarse:min-h-11">
                           <button
                             type="button"
                             disabled={isGenerating}
-                            onClick={chooseSuggestion}
+                            onPointerDown={recordPressStart}
+                            onClick={activateSuggestion}
+                            aria-expanded={isExpanded}
                             className="flex-1 text-left px-2.5 py-1.5 min-w-0"
                           >
                             <div className="flex min-w-0 items-baseline gap-2">
@@ -685,7 +720,8 @@ export function InlineGenerationInput({
                                   requestAnimationFrame(() => textareaRef.current?.focus())
                                 }}
                                 aria-label={`Edit ${s.title} before sending`}
-                                className="shrink-0 flex items-center justify-center w-8 border-l border-border/20 text-muted-foreground/40 hover:text-foreground/60 hover:bg-muted/30 transition-colors rounded-r-md"
+                                // 32px suits a cursor; 44px is the WCAG 2.5.5 floor.
+                                className="shrink-0 flex items-center justify-center w-8 pointer-coarse:w-11 border-l border-border/20 text-muted-foreground/40 hover:text-foreground/60 hover:bg-muted/30 transition-colors rounded-r-md"
                               >
                                 <PenSquare className="size-3.5" />
                               </button>
@@ -704,7 +740,8 @@ export function InlineGenerationInput({
                             <button
                               type="button"
                               disabled={isGenerating}
-                              onClick={chooseSuggestion}
+                              onPointerDown={recordPressStart}
+                              onClick={activateSuggestion}
                               className="block w-full px-2.5 pb-2 text-left text-[0.6875rem] text-muted-foreground leading-normal whitespace-normal break-words disabled:cursor-default"
                             >
                               {s.description}
