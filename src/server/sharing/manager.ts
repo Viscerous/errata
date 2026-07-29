@@ -12,10 +12,9 @@ import { createLogger } from '../logging'
 const logger = createLogger('sharing')
 
 /**
- * Preferred port for the LAN/auth proxy; falls back upward if taken. The
- * override exists so a second instance — or a test run alongside a live app —
- * can be pointed somewhere else instead of silently landing on the neighbour's
- * fallback port and authenticating against the wrong config.
+ * Preferred port for the LAN/auth proxy; falls back upward if taken. The override
+ * keeps a second instance (or a test beside a live app) off the neighbour's
+ * fallback port, where it would authenticate against the wrong config.
  */
 function sharePort(): number {
   return Number(process.env.ERRATA_SHARE_PORT) || 7740
@@ -60,17 +59,28 @@ function requestIsAuthorized(req: IncomingMessage): boolean {
   return authReady(s) && checkBasicAuth(req.headers.authorization, s!.username, s!.passwordHash)
 }
 
-/**
- * Rewrite Host to the local app so the upstream never sees the external
- * hostname — required because Vite dev rejects unknown Hosts (allowedHosts),
- * and it's harmless in production.
- */
+/** Vite dev rejects unknown Hosts (allowedHosts); harmless in production. */
 function upstreamHeaders(req: IncomingMessage, port: number) {
   return { ...req.headers, host: `localhost:${port}` }
 }
 
+/**
+ * Rejections are logged: a remote client that silently gets 401s looks exactly
+ * like one whose requests never arrive, and only this side can tell them apart.
+ */
+function logRejected(req: IncomingMessage, kind: 'request' | 'upgrade'): void {
+  logger.warn('Proxy rejected an unauthenticated request', {
+    kind,
+    method: req.method,
+    url: req.url,
+    hasAuthorization: !!req.headers.authorization,
+    configured: authReady(state.current),
+  })
+}
+
 function handleProxyRequest(req: IncomingMessage, res: ServerResponse) {
   if (!requestIsAuthorized(req)) {
+    logRejected(req, 'request')
     res.writeHead(401, {
       'WWW-Authenticate': 'Basic realm="Errata", charset="UTF-8"',
       'Content-Type': 'text/plain',
@@ -84,10 +94,18 @@ function handleProxyRequest(req: IncomingMessage, res: ServerResponse) {
     { hostname: state.upstreamHost, port, path: req.url, method: req.method, headers },
     (proxyRes) => {
       res.writeHead(proxyRes.statusCode || 502, proxyRes.headers)
+      // writeHead only stores the head; a stream slow to its first token would
+      // otherwise leave the client's fetch() unresolved and looking broken.
+      res.flushHeaders()
       proxyRes.pipe(res)
     },
   )
-  proxyReq.on('error', () => {
+  proxyReq.on('error', (err) => {
+    // Logged for the same reason as a rejection: a remote client only sees a
+    // failed request, and the upstream hop is visible from nowhere else.
+    logger.error('Proxy could not reach the app', {
+      method: req.method, url: req.url, host: state.upstreamHost, port, error: String(err),
+    })
     if (!res.headersSent) res.writeHead(502, { 'Content-Type': 'text/plain' })
     res.end('Bad gateway: the app is not reachable.')
   })
@@ -95,21 +113,13 @@ function handleProxyRequest(req: IncomingMessage, res: ServerResponse) {
 }
 
 /**
- * Forward protocol upgrades — WebSockets — through the same door as everything
- * else.
- *
- * Without this the proxy answered an upgrade as though it were an ordinary
- * request and the socket died. Production never noticed, because a built app
- * opens none; the dev server's HMR socket is one, so remote access appeared
- * broken only in dev. A proxy that silently drops a whole protocol is incomplete
- * rather than dev-hostile, and anything later that wants a socket — live
- * collaboration, a second device watching a session — would have hit the same
- * wall.
+ * Forward protocol upgrades through the same door as everything else. Answered as
+ * an ordinary request, an upgrade dies; a built app opens no sockets, so only dev
+ * (HMR) noticed.
  */
 function handleProxyUpgrade(req: IncomingMessage, clientSocket: Duplex, head: Buffer) {
   if (!requestIsAuthorized(req)) {
-    // A 401 on an upgrade still has to be spoken as raw HTTP: there is no
-    // ServerResponse here, only the socket.
+    // No ServerResponse on this path, so the 401 is spoken as raw HTTP.
     clientSocket.end(
       'HTTP/1.1 401 Unauthorized\r\n'
       + 'WWW-Authenticate: Basic realm="Errata", charset="UTF-8"\r\n'
@@ -153,21 +163,32 @@ function handleProxyUpgrade(req: IncomingMessage, clientSocket: Duplex, head: Bu
   proxyReq.end()
 }
 
+/**
+ * Bind the first free port at or above `port`, resolving with the port actually
+ * bound — read off the socket, so the advertised port cannot disagree with it.
+ *
+ * Both listeners must be removed symmetrically: `server.listen(port, cb)` makes
+ * `cb` a one-shot 'listening' listener, so dropping only the 'error' one left it
+ * to fire on the retry and resolve with the port that had just failed.
+ */
 function listen(server: Server, port: number, maxPort = port + 20): Promise<number> {
   return new Promise((resolve, reject) => {
-    const onError = (err: NodeJS.ErrnoException) => {
+    const onListening = () => {
       server.removeListener('error', onError)
+      const address = server.address()
+      resolve(typeof address === 'object' && address !== null ? address.port : port)
+    }
+    const onError = (err: NodeJS.ErrnoException) => {
+      server.removeListener('listening', onListening)
       if (err.code === 'EADDRINUSE' && port < maxPort) {
         listen(server, port + 1, maxPort).then(resolve, reject)
       } else {
         reject(err)
       }
     }
-    server.on('error', onError)
-    server.listen(port, '0.0.0.0', () => {
-      server.removeListener('error', onError)
-      resolve(port)
-    })
+    server.once('listening', onListening)
+    server.once('error', onError)
+    server.listen(port, '0.0.0.0')
   })
 }
 
