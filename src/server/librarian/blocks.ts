@@ -11,10 +11,11 @@ import {
   fragmentFullContextBlocksBySource,
   isBuiltinContextFragmentType,
   markdownSection,
-  renderFullFragmentSheet,
+  fragmentSummaryLine,
   storySummaryBlock,
 } from '../llm/fragment-context-blocks'
 import { contextSignalMap, selectAttentionContext } from '../llm/context-selection'
+import { renderSegments, segmentText } from '../llm/segments'
 import { baseBlockContext, type AgentBlockContext } from '../agents/agent-block-context'
 import type { Fragment, StoryMeta } from '../fragments/schema'
 import { getStory, listFragments, getFragment } from '../fragments/storage'
@@ -44,6 +45,17 @@ import {
   mergeFragmentCandidates,
   writerProvenanceFragmentCandidates,
 } from './candidates'
+import { renderContinuityMemoryForAnalysis } from './continuity-view'
+
+/**
+ * A full sheet whose body is sentence-numbered, so `proposeRecordCorrections`
+ * can name the assertion it is replacing. Timeline 9's corrections all failed
+ * to stay local because the model was asked to reproduce the target text; here
+ * the target is addressable, and the server resolves the exact span.
+ */
+function renderNumberedFragmentSheet(fragment: Fragment): string {
+  return markdownSection(3, fragmentSummaryLine(fragment), renderSegments(segmentText(fragment.content)))
+}
 
 // ─── Librarian Analyze ───
 
@@ -65,26 +77,41 @@ export function buildAnalyzeSystemPrompt(opts?: {
     ? enabledTools.has(toolName)
     : !disabledTools.has(toolName)
   const canReport = hasTool('reportAnalysis')
-  const canSuggest = opts?.disableSuggestions !== true && hasTool('proposeFragmentChanges')
-  const canReadFragments = canSuggest && hasTool('readFragments')
+  const canCorrectRecords = opts?.disableSuggestions !== true && hasTool('proposeRecordCorrections')
+  const canCreateRecords = opts?.disableSuggestions !== true && hasTool('proposeNewRecords')
+  const canSuggest = canCorrectRecords || canCreateRecords
   const canSuggestDirections = opts?.disableDirections !== true && hasTool('proposeDirections')
   const canFinish = hasTool('finishAnalysis')
   const actions: string[] = []
 
+  // Its own step, deliberately. Buried mid-paragraph in the reportAnalysis step
+  // this instruction changed nothing for Qwen3.6 — it named only the record the
+  // passage already mentioned. It also comes *before* reporting rather than
+  // after, so the one batched call carries the ripple IDs instead of needing a
+  // second round trip to add them.
+  if (canReport) {
+    actions.push('work out which existing records this passage has made inaccurate, before you report anything. Your context lists every record as `id | name | desc`. A death, departure, or reversal invalidates records the prose never names: when someone dies, the record of the person who worked under them still says they report to them, and the record of the thing they looked after still says they look after it. Read the descriptions for those ties and collect the IDs — you will pass them as candidateFragmentIds in the next step and their full text comes back numbered for correction.')
+  }
+
   actions.push(canReport
-    ? 'scan the new prose against the provided context and call **reportAnalysis** once with the prose summary, exact fragment mentions, durable-memory candidateFragmentIds, and continuity signals. Mentions must use the fragment\'s exact ID plus exact prose text: a direct name, nickname, title, role, or distinctive key term; never a bare pronoun ("I", "she", "they"). If a surface term is ambiguous, include enough surrounding words to identify the intended fragment.'
+    ? 'scan the new prose against the provided context and call **reportAnalysis** once with the prose summary, exact fragment mentions, candidateFragmentIds, temporal frame, keyed state operations, thread lifecycle and focus, explicit character knowledge changes, and other continuity signals. State memory is for conditions worth retaining after this passage leaves the recent-prose window; clear superseded keys and omit momentary pose, sensation, emotion, or completed action. A thread key names one unresolved question: resolve it when answered, never repurpose it, and let it remain dormant indefinitely when merely absent. Record character knowledge only for a fact that the prose explicitly establishes the character learned, corrected, or forgot and could later act upon; reader-visible information and a character\'s feelings are not knowledge. Reuse matching stateKey, threadKey, and knowledgeKey values from continuity memory. Every state, thread, or knowledge operation cites the sentence numbers in the new prose that show it — cite, never retype. A contradiction is a high-confidence conflict with a reusable non-prose record: cite the sentence numbers on both sides: in the new prose, and in the numbering of that record. A later choice, changed condition, or other chronological supersession is not a contradiction. Mentions are distinctive prose terms that identify listed fragments: direct names, nicknames, titles, roles, or key terms. Copy the exact surface text and fragment ID; first-person or third-person pronouns alone do not identify a fragment. If a surface term is ambiguous, include enough surrounding words to identify the intended fragment. This call returns the full records for anything you reported that was not already in your context, under resolvedFragments, with their sentences numbered; use them for the steps below rather than reading them again. Once is enough when the report was right: if a later step proves it wrong or incomplete, call it again with the complete corrected set rather than leaving it standing.'
     : 'scan the new prose against the provided context. The reportAnalysis tool is disabled, so do not invent a replacement reporting tool.')
 
   if (canSuggest) {
     const customTypes = opts?.customFragmentTypes ?? []
     const typeNamesList = ['characters', 'knowledge', ...customTypes.map(t => t.name.toLowerCase())].join(', ')
-    const readGuidance = canReadFragments
-      ? 'read any fragment that is not already shown in full before proposing edits, or when validation asks for current content/baseHash.'
-      : 'use only fragments already shown in full when proposing edits; readFragments is disabled.'
-    actions.push(`${readGuidance} Use **proposeFragmentChanges** to update existing fragments when the prose changes a lasting fact (such as changes to state, location, relationships, allegiances, or titles) — keep edits minimal — and to create genuinely new ${typeNamesList}.`)
+    const proposalActions: string[] = []
+    if (canCorrectRecords) {
+      proposalActions.push('Use **proposeRecordCorrections** only when accepted prose makes a specific current assertion in an existing reusable fragment inaccurate, including through ordinary story progression. Records are shown with numbered sentences: name the sentence to replace and give its corrected wording. Replace that one assertion — never restate the scene. Only a listed record can be corrected: a continuity memory key is not one, and changes to it belong in the reportAnalysis state, thread, or knowledge operations.')
+    }
+    if (canCreateRecords) {
+      proposalActions.push(`Use **proposeNewRecords** only for genuinely new reusable named records in the allowed fragment types (${typeNamesList}). Cite the sentence numbers that establish it. A temporary scene label, unnamed scenery, episode recap, current condition, feeling, or interpretation is not a reusable record.`)
+    }
+    proposalActions.push('Each tool is optional and may be called at most once successfully. Simply do not call a tool you do not need — leave ongoing events and conditions in reportAnalysis. Only a call that failed must be retried or reported as skipped in finishAnalysis.')
+    actions.push(proposalActions.join(' '))
   }
   if (canSuggestDirections) {
-    actions.push('call **proposeDirections** with next directions for the story.')
+    actions.push('call **proposeDirections** with next directions for the story. Offer scene intents rather than conclusions: do not turn interpretation, temporary emotion, or an implied protagonist decision into settled psychology or canon.')
   }
   if (canFinish) {
     actions.push('call **finishAnalysis** upon completion of all steps.')
@@ -123,6 +150,10 @@ export async function buildAnalyzeContext(
 ): Promise<AgentBlockContext> {
   const ctxState = await buildContextState(dataDir, storyId, '', {
     excludeFragmentId: input.proseFragment?.id,
+    ...(input.proseFragment ? {
+      proseBeforeFragmentId: input.proseFragment.id,
+      summaryBeforeFragmentId: input.proseFragment.id,
+    } : {}),
   })
   const effectiveStory = ctxState.story
   const allCharacters = await listFragments(dataDir, storyId, 'character')
@@ -145,7 +176,7 @@ export async function buildAnalyzeContext(
     allCustomFragments,
     newProse: input.newProse,
     // Author-pinned characters are always-relevant, so analyze loads them in full
-    // independent of what the prose forwarded (writerContextIds).
+    // independent of what the prose context receipt recorded.
     stickyCharacters: allCharacters.filter((c) => c.sticky),
     stickyKnowledge: allKnowledge.filter((k) => k.sticky),
     recentCharacters: ctxState.recentCharacters ?? [],
@@ -183,6 +214,21 @@ export function createLibrarianAnalyzeBlocks(ctx: AgentBlockContext): ContextBlo
     placeholder: STORY_SUMMARY_PLACEHOLDER,
   }))
 
+  if (ctx.continuityView) {
+    blocks.push({
+      id: 'continuity-memory',
+      role: 'user',
+      content: renderContinuityMemoryForAnalysis(ctx.continuityView, {
+        characterIds: [
+          ...(ctx.attentionCandidateIds ?? []),
+          ...(ctx.recentCharacters ?? []).map((fragment) => fragment.id),
+        ],
+      }),
+      order: 150,
+      source: 'builtin',
+    })
+  }
+
   const lanes = buildFragmentContextLanes(ctx)
   const selection = selectAttentionContext(lanes, {
     runner: 'librarian.analyze',
@@ -204,7 +250,9 @@ export function createLibrarianAnalyzeBlocks(ctx: AgentBlockContext): ContextBlo
 
   blocks.push(...fragmentFullContextBlocksBySource({
     selection: orderedSelection,
-    renderFragment: renderFullFragmentSheet,
+    // Analyze-only: numbering the body lets a correction address a sentence
+    // instead of retyping one. Other agents keep the plain sheet.
+    renderFragment: renderNumberedFragmentSheet,
     partitions: [
       {
         id: 'fragment-pinned',
@@ -252,12 +300,14 @@ export function createLibrarianAnalyzeBlocks(ctx: AgentBlockContext): ContextBlo
   }))
 
   if (ctx.newProse) {
+    // Numbered so evidence can be a citation instead of a retyped quote.
     blocks.push({
       id: 'prose-new',
       role: 'user',
       content: markdownSection(2, 'New Prose Fragment', [
         `Fragment ID: ${ctx.newProse.id}`,
-        ctx.newProse.content,
+        'Sentences are numbered. Cite them by number as evidence.',
+        renderSegments(segmentText(ctx.newProse.content)),
       ]),
       order: 400,
       source: 'builtin',

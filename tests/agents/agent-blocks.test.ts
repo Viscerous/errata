@@ -150,6 +150,39 @@ describe('Librarian Analyze Blocks', () => {
     expect(catalog!.content).toContain('Hero')
   })
 
+  it('gives analyze the keyed continuity registry including dormant threads', () => {
+    const def = agentBlockRegistry.get('librarian.analyze')!
+    const blocks = def.createDefaultBlocks(makeBaseContext({
+      continuityView: {
+        currentState: [{
+          sourceFragmentId: 'pr-0001',
+          analysisId: 'la-1',
+          narrativePosition: 1,
+          stateKey: 'alice.location',
+          subject: 'Alice location',
+          value: 'north gate',
+        }],
+        liveThreads: [{
+          sourceFragmentId: 'pr-0001',
+          analysisId: 'la-1',
+          narrativePosition: 1,
+          threadKey: 'missing-key',
+          label: 'The missing key',
+          relatedFragmentIds: [],
+          visibility: 'dormant',
+        }],
+        characterKnowledge: [],
+        temporalFrame: { relation: 'forward' },
+        staleProjectionCount: 0,
+      },
+    }))
+
+    const memory = blocks.find((block) => block.id === 'continuity-memory')
+    expect(memory?.content).toContain('alice.location | Alice location | north gate')
+    expect(memory?.content).toContain('missing-key | dormant | The missing key')
+    expect(memory?.content).toContain('Thread omission means dormancy, never resolution')
+  })
+
   it('renders recent-context characters in full and drops them from the catalog', () => {
     const def = agentBlockRegistry.get('librarian.analyze')!
     const hero = makeFragment({ id: 'ch-hero01', name: 'Hero', description: 'A brave hero', content: 'Hero full sheet body.\n\n' })
@@ -295,8 +328,9 @@ describe('Librarian Analyze Blocks', () => {
     }))
     const proseBlock = blocks.find(b => b.id === 'prose-new')
     expect(proseBlock).toBeDefined()
-    expect(proseBlock!.content).toContain('## New Prose Fragment\n\nFragment ID: pr-test01\n\nThe hero drew their sword.')
-    expect(proseBlock!.content).toContain('The hero drew their sword.')
+    expect(proseBlock!.content).toContain('## New Prose Fragment\n\nFragment ID: pr-test01')
+    // Numbered so evidence can cite a sentence instead of retyping it.
+    expect(proseBlock!.content).toContain('[1] The hero drew their sword.')
     expect(proseBlock!.content).not.toMatch(/\n{3,}/)
   })
 
@@ -410,6 +444,7 @@ describe('Librarian Chat Blocks', () => {
       mode: 'summary-index',
       scope: 'catalog',
       fragmentType: 'mixed',
+      fragmentIds: ['gl-stick1', 'gl-other1', 'kn-stick1', 'kn-recent1', 'kn-other1', 'loc-stick1', 'loc-other1'],
     })
   })
 })
@@ -478,18 +513,61 @@ describe('Librarian Refine Blocks', () => {
       mode: 'summary-index',
       scope: 'pinned',
       fragmentType: 'mixed',
+      fragmentIds: ['gl-pin01', 'kn-pin01', 'ch-pin01'],
     })
   })
 })
+// The fold runs inside buildContextState for nearly every agent, so an agent
+// that decides what a passage does must render it rather than silently drop it.
+describe('Continuity reaches the agents that decide what happens next', () => {
+  const viewFixture = {
+    currentState: [{
+      sourceFragmentId: 'pr-0001',
+      analysisId: 'la-1',
+      narrativePosition: 1,
+      stateKey: 'alice_location',
+      subject: 'Alice location',
+      value: 'north gate',
+    }],
+    liveThreads: [],
+    characterKnowledge: [],
+    temporalFrame: { relation: 'forward' as const },
+    staleProjectionCount: 0,
+  }
+
+  it('renders a continuity block for the writer, the planner, and directions', () => {
+    for (const agentName of ['generation.writer', 'generation.prewriter', 'directions.suggest']) {
+      const def = agentBlockRegistry.get(agentName)!
+      const blocks = def.createDefaultBlocks(makeBaseContext({ continuityView: viewFixture }))
+      const block = blocks.find((b) => b.id === 'continuity-observations')
+      expect(block, `${agentName} should render continuity`).toBeDefined()
+      expect(block!.content).toContain('Alice location: north gate')
+    }
+  })
+
+  it('omits the block entirely when there is nothing folded yet', () => {
+    for (const agentName of ['generation.writer', 'generation.prewriter', 'directions.suggest']) {
+      const def = agentBlockRegistry.get(agentName)!
+      const blocks = def.createDefaultBlocks(makeBaseContext())
+      expect(blocks.some((b) => b.id === 'continuity-observations'), agentName).toBe(false)
+    }
+  })
+})
+
 describe('Librarian Analyze Prompt', () => {
   it('reports named character references', () => {
     const prompt = buildAnalyzeSystemPrompt()
-    expect(prompt).toContain('direct name, nickname, title, role')
-    expect(prompt).toContain('1. Scan the new prose against the provided context')
-    expect(prompt).toContain('2. Read any fragment')
-    expect(prompt).toContain('3. Call **proposeDirections**')
-    expect(prompt).toContain('4. Finally, call **finishAnalysis**')
-    expect(prompt).toContain('durable-memory candidateFragmentIds')
+    expect(prompt).toContain('direct names, nicknames, titles, roles')
+    expect(prompt).toContain('let it remain dormant indefinitely')
+    expect(prompt).toContain('cite, never retype')
+    expect(prompt).toContain('2. Scan the new prose against the provided context')
+    expect(prompt).toContain('resolvedFragments')
+    expect(prompt).toContain('4. Call **proposeDirections**')
+    expect(prompt).toContain('5. Finally, call **finishAnalysis**')
+    expect(prompt).toContain('candidateFragmentIds')
+    // The two questions are named against each other, because asking only what
+    // the passage mentions left records it invalidated without ever naming.
+    expect(prompt).toContain('which existing records this passage has made inaccurate')
     expect(prompt).toContain('If a surface term is ambiguous')
     expect(prompt).not.toContain('final assistant text')
     expect(prompt).not.toContain('Analysis complete')
@@ -497,27 +575,29 @@ describe('Librarian Analyze Prompt', () => {
 
   it('makes the last enabled analyze action explicit without naming disabled tools', () => {
     const noDirections = buildAnalyzeSystemPrompt({ disableDirections: true })
-    expect(noDirections).toContain('2. Read any fragment')
-    expect(noDirections).toContain('3. Finally, call **finishAnalysis**')
+    expect(noDirections).toContain('3. Use **proposeRecordCorrections**')
+    expect(noDirections).toContain('4. Finally, call **finishAnalysis**')
     expect(noDirections).not.toContain('proposeDirections')
 
     const noSuggestions = buildAnalyzeSystemPrompt({ disableSuggestions: true })
-    expect(noSuggestions).toContain('2. Call **proposeDirections**')
-    expect(noSuggestions).toContain('3. Finally, call **finishAnalysis**')
-    expect(noSuggestions).not.toContain('proposeFragmentChanges')
+    expect(noSuggestions).toContain('3. Call **proposeDirections**')
+    expect(noSuggestions).toContain('4. Finally, call **finishAnalysis**')
+    expect(noSuggestions).not.toContain('proposeRecordCorrections')
+    expect(noSuggestions).not.toContain('proposeNewRecords')
 
     const noOptionalTools = buildAnalyzeSystemPrompt({
-      disabledTools: ['proposeDirections', 'proposeFragmentChanges'],
+      disabledTools: ['proposeDirections', 'proposeRecordCorrections', 'proposeNewRecords'],
     })
-    expect(noOptionalTools).toContain('1. Scan the new prose')
-    expect(noOptionalTools).toContain('2. Finally, call **finishAnalysis**')
+    expect(noOptionalTools).toContain('2. Scan the new prose')
+    expect(noOptionalTools).toContain('3. Finally, call **finishAnalysis**')
     expect(noOptionalTools).not.toContain('proposeDirections')
-    expect(noOptionalTools).not.toContain('proposeFragmentChanges')
+    expect(noOptionalTools).not.toContain('proposeRecordCorrections')
+    expect(noOptionalTools).not.toContain('proposeNewRecords')
 
     const noFinishTool = buildAnalyzeSystemPrompt({
-      disabledTools: ['proposeDirections', 'proposeFragmentChanges', 'finishAnalysis'],
+      disabledTools: ['proposeDirections', 'proposeRecordCorrections', 'proposeNewRecords', 'finishAnalysis'],
     })
-    expect(noFinishTool).toContain('1. Finally, scan the new prose')
+    expect(noFinishTool).toContain('2. Finally, scan the new prose')
     expect(noFinishTool).not.toContain('finishAnalysis')
   })
 
@@ -696,6 +776,14 @@ describe('Directions Blocks', () => {
 })
 
 describe('Writer Blocks', () => {
+  it('separates omniscient reference context from character knowledge', () => {
+    const def = agentBlockRegistry.get('generation.writer')!
+    const blocks = def.createDefaultBlocks(makeBaseContext())
+    const instructions = blocks.find((block) => block.id === 'instructions')
+    expect(instructions?.content).toContain('not knowledge automatically possessed by characters')
+    expect(instructions?.content).toContain('Character awareness boundaries')
+  })
+
   it('includes recent full blocks and one catalog for built-in and custom fragments when provided', () => {
     const def = agentBlockRegistry.get('generation.writer')!
     const recentKnowledge = makeFragment({ id: 'kn-sword', type: 'knowledge', name: 'Sword', content: 'Recent lore', sticky: false })
@@ -729,6 +817,7 @@ describe('Writer Blocks', () => {
       mode: 'full',
       scope: 'recent',
       fragmentType: 'mixed',
+      fragmentIds: ['kn-sword', 'loc-market'],
     })
 
     expect(catalog!.content).toContain('### Locations')
@@ -739,6 +828,7 @@ describe('Writer Blocks', () => {
       mode: 'summary-index',
       scope: 'catalog',
       fragmentType: 'mixed',
+      fragmentIds: ['kn-shield', 'loc-bridge'],
     })
   })
 })

@@ -39,6 +39,7 @@ interface RunCompiledPassArgs {
   temperature: ToolLoopPassArgs['temperature']
   providerOptions: ToolLoopPassArgs['providerOptions']
   maxOutputTokens: number
+  maxSteps?: number
   emit: (event: ActivityStreamEvent) => void
   terminalToolName?: string
   terminalRequiresToolName?: string
@@ -90,6 +91,7 @@ async function runCompiledToolPass(args: RunCompiledPassArgs): Promise<{
     temperature: args.temperature,
     providerOptions: args.providerOptions,
     maxOutputTokens: args.maxOutputTokens,
+    maxSteps: args.maxSteps,
     emit: args.emit,
     terminalToolName: args.terminalToolName,
     terminalRequiresToolName: args.terminalRequiresToolName,
@@ -183,12 +185,33 @@ async function runOnlineAnalyzePass(
     context.attentionCandidateIds = fragmentCandidateIds(initialCandidates)
     context.attentionCandidateSignals = candidateSignals(initialCandidates)
 
+    const presentedFullFragmentIds = [...new Set([
+      ...context.attentionCandidateIds,
+      ...(context.stickyCharacters ?? []).map((fragment) => fragment.id),
+      ...(context.stickyKnowledge ?? []).map((fragment) => fragment.id),
+      ...(context.recentCharacters ?? []).map((fragment) => fragment.id),
+      ...(context.recentKnowledge ?? []).map((fragment) => fragment.id),
+      ...(context.recentCustomFragments ?? []).flatMap((group) => group.fragments.map((fragment) => fragment.id)),
+    ])]
+
+    // The live registry becomes a closed choice in the operation schemas, so
+    // reusing an established identity is the structural default rather than an
+    // instruction the model has to remember and retype.
+    const continuityKeys = {
+      state: (context.continuityView?.currentState ?? []).map((entry) => entry.stateKey),
+      thread: (context.continuityView?.liveThreads ?? []).map((entry) => entry.threadKey),
+      knowledge: (context.continuityView?.characterKnowledge ?? [])
+        .map((entry) => entry.knowledgeKey),
+    }
+
     const tools = createLibrarianOnlineTools(collector, {
       dataDir,
       storyId,
       proseFragmentId: fragment.id,
       disableDirections,
       disableSuggestions,
+      presentedFullFragmentIds,
+      continuityKeys,
       customFragmentTypes: story.settings.customFragmentTypes,
     })
     const compiled = await compileAgentContext(dataDir, storyId, 'librarian.analyze', context, tools)
@@ -203,6 +226,7 @@ async function runOnlineAnalyzePass(
       temperature,
       providerOptions,
       maxOutputTokens: guards.maxOutputTokens,
+      maxSteps: 8,
       emit,
       terminalToolName: compiled.tools.finishAnalysis ? 'finishAnalysis' : undefined,
       terminalRequiresToolName: compiled.tools.finishAnalysis && compiled.tools.reportAnalysis ? 'reportAnalysis' : undefined,
@@ -221,11 +245,12 @@ async function runOnlineAnalyzePass(
     })
 
     const toolCallNames = result.toolCalls.map((call) => call.toolName)
-    const proposalToolCalls = toolCallNames.filter((name) => name === 'proposeFragmentChanges')
+    const proposalToolNames = new Set(['proposeRecordCorrections', 'proposeNewRecords'])
+    const proposalToolCalls = toolCallNames.filter((name) => proposalToolNames.has(name))
     const directionToolCalls = toolCallNames.filter((name) => name === 'proposeDirections')
     const finishToolCalls = toolCallNames.filter((name) => name === 'finishAnalysis')
     const proposalToolResults = result.toolCalls
-      .filter((call) => call.toolName === 'proposeFragmentChanges')
+      .filter((call) => proposalToolNames.has(call.toolName))
       .map((call) => call.result)
     return {
       fullText: result.fullText,

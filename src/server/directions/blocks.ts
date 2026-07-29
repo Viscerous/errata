@@ -7,6 +7,7 @@ import {
   storySummaryBlock,
 } from '../llm/fragment-context-blocks'
 import { selectAttentionContext } from '../llm/context-selection'
+import { renderContinuityView } from '../librarian/continuity-view'
 import type { AgentBlockContext } from '../agents/agent-block-context'
 import { getFragment } from '../fragments/storage'
 import { getFragmentsByTag } from '../fragments/associations'
@@ -68,6 +69,24 @@ export function createDirectionsSuggestBlocks(ctx: AgentBlockContext): ContextBl
       },
     ],
   }))
+
+  // Directions set macro trajectory, so they must not be proposed against a
+  // less-informed picture than the Writer's. Timeline 8 recorded exactly that
+  // failure: a direction generated without a record the following Writer had.
+  if (ctx.continuityView) {
+    blocks.push({
+      id: 'continuity-observations',
+      role: 'user',
+      content: renderContinuityView(ctx.continuityView, {
+        characterIds: [
+          ...ctx.stickyCharacters.map((fragment) => fragment.id),
+          ...(ctx.recentCharacters ?? []).map((fragment) => fragment.id),
+        ],
+      }),
+      order: 200,
+      source: 'builtin',
+    })
+  }
 
   {
     const prose = proseWindowBlock(ctx.proseFragments.slice(-3), { order: 300 })

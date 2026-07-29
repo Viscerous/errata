@@ -14,7 +14,6 @@ import { saveAgentBlockConfig } from '@/server/agents/agent-block-storage'
 import { initProseChain, addProseSection } from '@/server/fragments/prose-chain'
 import { addTag } from '@/server/fragments/associations'
 import type { StoryMeta, Fragment } from '@/server/fragments/schema'
-import { fragmentBaseHash } from '@/server/fragments/change-operations'
 
 const { mockAgentStream } = vi.hoisted(() => ({
   mockAgentStream: vi.fn(),
@@ -123,6 +122,23 @@ function mockStreamWithToolCalls(toolCalls: Array<{ toolName: string; args: Reco
   })
 }
 
+function correctionProposalArgs(
+  evidenceSegments: number[],
+  operations: Array<Record<string, unknown>>,
+  rationale = 'The existing reusable fragment would state a fact that the accepted prose has explicitly replaced.',
+) {
+  return { evidenceSegments, rationale, corrections: operations }
+}
+
+function newFragmentProposalArgs(
+  evidenceSegments: number[],
+  operation: Record<string, unknown>,
+  rationale = 'The prose establishes a newly named reusable setting record that future scenes can reference.',
+) {
+  const { action: _action, ...newFragment } = operation
+  return { evidenceSegments, rationale, newFragments: [newFragment] }
+}
+
 // Concatenate all summary fragments for a story in the same order the
 // context builder reads them (era summaries first, then chapter summaries
 // by createdAt). Replaces assertions on the removed story.summary field.
@@ -205,9 +221,9 @@ describe('librarian agent', () => {
     ) => {
       expect(opts?.instructions).toContain('CUSTOM PREPEND')
       expect(opts?.instructions).toContain('Never drop custom system fragments.')
-      if (tools.proposeFragmentChanges) {
-        expect(opts?.instructions).toContain('keep edits minimal')
-        expect(opts?.instructions).toContain('genuinely new characters, knowledge, locations')
+      if (tools.proposeRecordCorrections) {
+        expect(opts?.instructions).toContain('**proposeRecordCorrections**')
+        expect(opts?.instructions).toContain('allowed fragment types (characters, knowledge, locations)')
       }
 
       return {
@@ -320,7 +336,12 @@ describe('librarian agent', () => {
     await createFragment(dataDir, storyId, makeFragment({
       id: 'pr-0001',
       content: 'Alice fought bravely.',
-      meta: { writerContextIds: ['ch-0001'] },
+      meta: {
+        contextReceipt: {
+          version: 1,
+          entries: [{ fragmentId: 'ch-0001', access: 'full', actor: 'writer', reason: 'recent-context' }],
+        },
+      },
     }))
     await setupProseChain(dataDir, storyId, ['pr-0001'])
 
@@ -631,7 +652,7 @@ describe('librarian agent', () => {
       type: 'character',
       name: 'Alice',
       description: 'Captain of the guard',
-      content: 'Alice is captain of the guard.',
+      content: 'Alice is captain of the guard. She keeps the north gate.',
     }))
     await createFragment(dataDir, storyId, makeFragment({
       id: 'pr-0001',
@@ -647,16 +668,17 @@ describe('librarian agent', () => {
         },
       },
       {
-        toolName: 'proposeFragmentChanges',
-        args: {
-          operations: [{
-            action: 'append_paragraph',
+        toolName: 'proposeRecordCorrections',
+        args: correctionProposalArgs(
+          [1],
+          [{
             fragmentId: 'ch-0001',
             field: 'content',
-            text: 'Status: Alice resigned from the guard.',
+            segment: 1,
+            newText: 'Alice is the former captain of the guard.',
             reason: 'The prose changes Alice role.',
           }],
-        },
+        ),
       },
     ])
 
@@ -707,7 +729,7 @@ describe('librarian agent', () => {
       type: 'character',
       name: 'Alice',
       description: 'Captain of the guard',
-      content: 'Alice is captain of the guard.',
+      content: 'Alice is captain of the guard. She keeps the north gate.',
     }))
     await createFragment(dataDir, storyId, makeFragment({
       id: 'pr-0001',
@@ -724,16 +746,16 @@ describe('librarian agent', () => {
         },
       },
       {
-        toolName: 'proposeFragmentChanges',
-        args: {
-          operations: [{
-            action: 'replace_text',
+        toolName: 'proposeRecordCorrections',
+        args: correctionProposalArgs(
+          [1],
+          [{
             fragmentId: 'ch-0001',
             field: 'content',
-            oldText: 'captain of the moon',
-            newText: 'former captain of the guard',
+            segment: 9,
+            newText: 'Alice is the former captain of the guard.',
           }],
-        },
+        ),
       },
     ])
 
@@ -755,7 +777,7 @@ describe('librarian agent', () => {
       type: 'character',
       name: 'Alice',
       description: 'Captain of the guard',
-      content: 'Alice is captain of the guard.',
+      content: 'Alice is captain of the guard. She keeps the north gate.',
     }))
     await createFragment(dataDir, storyId, makeFragment({
       id: 'kn-0001',
@@ -767,7 +789,12 @@ describe('librarian agent', () => {
     await createFragment(dataDir, storyId, makeFragment({
       id: 'pr-0001',
       content: 'The captain resigned from the guard.',
-      meta: { writerContextIds: ['kn-0001'] },
+      meta: {
+        contextReceipt: {
+          version: 1,
+          entries: [{ fragmentId: 'kn-0001', access: 'full', actor: 'writer', reason: 'recent-context' }],
+        },
+      },
     }))
     await setupProseChain(dataDir, storyId, ['pr-0001'])
 
@@ -810,7 +837,12 @@ describe('librarian agent', () => {
     await createFragment(dataDir, storyId, makeFragment({
       id: 'pr-0001',
       content: 'The room went quiet after the oath.',
-      meta: { writerContextIds: ['kn-0001'] },
+      meta: {
+        contextReceipt: {
+          version: 1,
+          entries: [{ fragmentId: 'kn-0001', access: 'full', actor: 'writer', reason: 'recent-context' }],
+        },
+      },
     }))
     await setupProseChain(dataDir, storyId, ['pr-0001'])
 
@@ -824,7 +856,8 @@ describe('librarian agent', () => {
     expect(analysis.candidateFragmentIds).toEqual(['kn-0001'])
     expect(analyzePass?.diagnostics?.attentionCandidateIds).toEqual(['kn-0001'])
     expect(analyzePass?.diagnostics?.toolNames).toContain('reportAnalysis')
-    expect(analyzePass?.diagnostics?.toolNames).not.toContain('proposeFragmentChanges')
+    expect(analyzePass?.diagnostics?.toolNames).not.toContain('proposeRecordCorrections')
+    expect(analyzePass?.diagnostics?.toolNames).not.toContain('proposeNewRecords')
     expect(analyzePass?.diagnostics?.toolNames).not.toContain('readFragments')
   })
 
@@ -835,7 +868,7 @@ describe('librarian agent', () => {
       type: 'character',
       name: 'Alice',
       description: 'Captain of the guard',
-      content: 'Alice is captain of the guard.',
+      content: 'Alice is captain of the guard. She keeps the north gate.',
     }))
     await createFragment(dataDir, storyId, makeFragment({
       id: 'pr-0001',
@@ -951,6 +984,13 @@ describe('librarian agent', () => {
   it('flags contradictions', async () => {
     await createStory(dataDir, makeStory({ summary: 'Alice has blue eyes.' }))
     await createFragment(dataDir, storyId, makeFragment({
+      id: 'ch-0001',
+      type: 'character',
+      name: 'Alice',
+      description: 'A woman with blue eyes.',
+      content: 'Alice has blue eyes.',
+    }))
+    await createFragment(dataDir, storyId, makeFragment({
       id: 'pr-0001',
       content: 'Alice looked at him with her green eyes.',
     }))
@@ -964,6 +1004,8 @@ describe('librarian agent', () => {
           contradictions: [{
             description: 'Alice was described as having blue eyes, but new prose says green eyes.',
             fragmentIds: ['pr-0001'],
+            sourceSegments: [1],
+            conflictingEvidence: [{ fragmentId: 'ch-0001', segments: [1] }],
           }],
         },
       },
@@ -990,16 +1032,17 @@ describe('librarian agent', () => {
         },
       },
       {
-        toolName: 'proposeFragmentChanges',
-        args: {
-          operations: [{
+        toolName: 'proposeNewRecords',
+        args: newFragmentProposalArgs(
+          [1],
+          {
             action: 'create_fragment',
             type: 'knowledge',
             name: 'Valdris',
             description: 'Ancient mountain city',
             content: 'Valdris is an ancient city located atop a mountain.',
-          }],
-        },
+          },
+        ),
       },
     ])
 
@@ -1037,16 +1080,17 @@ describe('librarian agent', () => {
         },
       },
       {
-        toolName: 'proposeFragmentChanges',
-        args: {
-          operations: [{
+        toolName: 'proposeNewRecords',
+        args: newFragmentProposalArgs(
+          [1],
+          {
             action: 'create_fragment',
             type: 'knowledge',
             name: 'Valdris',
             description: 'Ancient city',
-            content: 'Valdris is an ancient mountain city.',
-          }],
-        },
+            content: 'Valdris is an ancient mountain city. Its walls predate the Reckoning.',
+          },
+        ),
       },
     ])
 
@@ -1067,18 +1111,16 @@ describe('librarian agent', () => {
         },
       },
       {
-        toolName: 'proposeFragmentChanges',
-        args: {
-          operations: [{
-            action: 'set_fields',
+        toolName: 'proposeRecordCorrections',
+        args: correctionProposalArgs(
+          [1],
+          [{
             fragmentId: createdId,
-            baseHash: fragmentBaseHash(created!),
-            fields: {
-              description: 'Ancient defended city',
-              content: 'Valdris is an ancient mountain city guarded by stone sentinels.',
-            },
+            field: 'content',
+            segment: 1,
+            newText: 'Valdris is an ancient mountain city guarded by stone sentinels.',
           }],
-        },
+        ),
       },
     ])
 
@@ -1106,7 +1148,7 @@ describe('librarian agent', () => {
       type: 'knowledge',
       name: 'Valdris',
       description: 'Ancient city',
-      content: 'Valdris is an ancient city.',
+      content: 'Valdris is an ancient city. Its walls predate the Reckoning.',
     }))
     await createFragment(dataDir, storyId, makeFragment({
       id: 'pr-0001',
@@ -1115,7 +1157,6 @@ describe('librarian agent', () => {
     await setupProseChain(dataDir, storyId, ['pr-0001'])
     const existingKnowledge = await getFragment(dataDir, storyId, 'kn-0001')
     expect(existingKnowledge).toBeTruthy()
-    const baseHash = fragmentBaseHash(existingKnowledge!)
 
     mockStreamWithToolCalls([
       {
@@ -1126,18 +1167,16 @@ describe('librarian agent', () => {
         },
       },
       {
-        toolName: 'proposeFragmentChanges',
-        args: {
-          operations: [{
-            action: 'set_fields',
+        toolName: 'proposeRecordCorrections',
+        args: correctionProposalArgs(
+          [1],
+          [{
             fragmentId: 'kn-0001',
-            baseHash,
-            fields: {
-              description: 'Ancient defended city',
-              content: 'Valdris is an ancient city defended by stone sentinels.',
-            },
+            field: 'content',
+            segment: 1,
+            newText: 'Valdris is an ancient city defended by stone sentinels.',
           }],
-        },
+        ),
       },
     ])
 
@@ -1152,7 +1191,7 @@ describe('librarian agent', () => {
     expect(updated?.refs).toContain('pr-0001')
   })
 
-  it('auto-applies exact edit proposals to existing fragments', async () => {
+  it('auto-applies edits whose ordered evidence spans remain grounded', async () => {
     await createStory(dataDir, makeStory({
       settings: {
         autoApplyLibrarianSuggestions: true,
@@ -1164,7 +1203,7 @@ describe('librarian agent', () => {
       type: 'character',
       name: 'Alice',
       description: 'Captain of the guard',
-      content: 'Alice is captain of the guard and lives in Valdris.',
+      content: 'Alice is captain of the guard and lives in Valdris. She trained under Bren.',
     }))
     await createFragment(dataDir, storyId, makeFragment({
       id: 'pr-0001',
@@ -1181,17 +1220,17 @@ describe('librarian agent', () => {
         },
       },
       {
-        toolName: 'proposeFragmentChanges',
-        args: {
-          operations: [{
-            action: 'replace_text',
+        toolName: 'proposeRecordCorrections',
+        args: correctionProposalArgs(
+          [1],
+          [{
             fragmentId: 'ch-0001',
             field: 'content',
-            oldText: 'captain of the guard',
-            newText: 'former captain of the guard',
+            segment: 1,
+            newText: 'Alice is the former captain of the guard.',
             reason: 'The prose says Alice resigned.',
           }],
-        },
+        ),
       },
     ])
 
@@ -1202,6 +1241,147 @@ describe('librarian agent', () => {
     const updated = await getFragment(dataDir, storyId, 'ch-0001')
     expect(updated?.content).toContain('former captain of the guard')
     expect(updated?.refs).toContain('pr-0001')
+  })
+
+  /**
+   * A description is capped at 250 characters and is usually one sentence, so
+   * every correction to one replaces the whole field. Refusing that when the
+   * proposal was made destroyed it outright — a kill test in which the
+   * groundskeeper died produced exactly the right description edit and the
+   * engine dropped it, telling the model to "leave this to author review" while
+   * ensuring no author would ever see it. The rewrite is held back from the
+   * *unattended* write instead, where the record can be judged as it stands.
+   */
+  it('proposes a whole-field description fix but leaves the write to the author', async () => {
+    await createStory(dataDir, makeStory({
+      settings: {
+        autoApplyLibrarianSuggestions: true,
+        summarizationThreshold: 0,
+      },
+    }))
+    await createFragment(dataDir, storyId, makeFragment({
+      id: 'ch-0001',
+      type: 'character',
+      name: 'Alice',
+      description: 'Captain of the guard at Valdris.',
+      content: 'Alice is captain of the guard and lives in Valdris. She trained under Bren.',
+    }))
+    await createFragment(dataDir, storyId, makeFragment({
+      id: 'pr-0001',
+      content: 'Alice resigned and became former captain of the guard.',
+    }))
+    await setupProseChain(dataDir, storyId, ['pr-0001'])
+
+    mockStreamWithToolCalls([
+      {
+        toolName: 'reportAnalysis',
+        args: {
+          summary: 'Alice resigned from the guard.',
+          candidateFragmentIds: ['ch-0001'],
+        },
+      },
+      {
+        toolName: 'proposeRecordCorrections',
+        args: correctionProposalArgs(
+          [1],
+          [{
+            fragmentId: 'ch-0001',
+            field: 'description',
+            segment: 1,
+            newText: 'Former captain of the guard at Valdris.',
+            reason: 'The prose says Alice resigned.',
+          }],
+        ),
+      },
+    ])
+
+    const analysis = await runLibrarian(dataDir, storyId, 'pr-0001')
+
+    // The correction survives as work the author can accept, carried by the
+    // operation that can express a whole-field change safely.
+    expect(analysis.fragmentChangeProposals).toHaveLength(1)
+    const operation = analysis.fragmentChangeProposals[0].operations[0]
+    expect(operation).toMatchObject({
+      action: 'set_fields',
+      fragmentId: 'ch-0001',
+      fields: { description: 'Former captain of the guard at Valdris.' },
+    })
+    // The hash pins the record it was written against, so a concurrent edit
+    // makes the proposal stale rather than silently overwriting the author.
+    expect(operation).toHaveProperty('baseHash', expect.any(String))
+    // ...but a whole-field rewrite is never written unattended, and it stays
+    // pending rather than being dismissed as stale on the author's behalf.
+    expect(analysis.fragmentChangeProposals[0].autoApplied).not.toBe(true)
+    expect(analysis.fragmentChangeProposals[0].stale).toBeUndefined()
+    expect(analysis.fragmentChangeProposals[0].dismissed).not.toBe(true)
+    expect((await getFragment(dataDir, storyId, 'ch-0001'))?.description)
+      .toBe('Captain of the guard at Valdris.')
+  })
+
+  /**
+   * One event is one proposal, and a death makes both a body sentence and the
+   * description above it wrong at once. `set_fields` cannot share a fragment
+   * with localized edits, so the record's edits compose into a single write
+   * rather than being split across proposals or refused — the 31B produced
+   * exactly this shape and lost four operations to the conflict.
+   */
+  it('composes a record whose edits span a sentence and its whole description', async () => {
+    await createStory(dataDir, makeStory({
+      settings: { autoApplyLibrarianSuggestions: true, summarizationThreshold: 0 },
+    }))
+    await createFragment(dataDir, storyId, makeFragment({
+      id: 'ch-0001',
+      type: 'character',
+      name: 'Alice',
+      description: 'Captain of the guard at Valdris.',
+      content: 'Alice is captain of the guard. She trained under Bren. She keeps the east gate.',
+    }))
+    await createFragment(dataDir, storyId, makeFragment({
+      id: 'pr-0001',
+      content: 'Alice resigned and became former captain of the guard.',
+    }))
+    await setupProseChain(dataDir, storyId, ['pr-0001'])
+
+    mockStreamWithToolCalls([
+      {
+        toolName: 'reportAnalysis',
+        args: { summary: 'Alice resigned.', candidateFragmentIds: ['ch-0001'] },
+      },
+      {
+        toolName: 'proposeRecordCorrections',
+        args: correctionProposalArgs([1], [
+          {
+            fragmentId: 'ch-0001',
+            field: 'content',
+            segment: 1,
+            newText: 'Alice is the former captain of the guard.',
+            reason: 'She resigned.',
+          },
+          {
+            fragmentId: 'ch-0001',
+            field: 'description',
+            segment: 1,
+            newText: 'Former captain of the guard at Valdris.',
+            reason: 'She resigned.',
+          },
+        ]),
+      },
+    ])
+
+    const analysis = await runLibrarian(dataDir, storyId, 'pr-0001')
+
+    expect(analysis.fragmentChangeProposals).toHaveLength(1)
+    const operations = analysis.fragmentChangeProposals[0].operations
+    expect(operations).toHaveLength(1)
+    expect(operations[0]).toMatchObject({
+      action: 'set_fields',
+      fragmentId: 'ch-0001',
+      fields: {
+        description: 'Former captain of the guard at Valdris.',
+        // The untouched sentences survive the compose; only the cited span moved.
+        content: 'Alice is the former captain of the guard. She trained under Bren. She keeps the east gate.',
+      },
+    })
   })
 
   it('marks a proposal stale instead of leaving it pending when auto-apply validation fails', async () => {
@@ -1216,7 +1396,7 @@ describe('librarian agent', () => {
       type: 'character',
       name: 'Alice',
       description: 'Captain of the guard',
-      content: 'Alice is captain of the guard and lives in Valdris.',
+      content: 'Alice is captain of the guard and lives in Valdris. She trained under Bren.',
     }))
     await createFragment(dataDir, storyId, makeFragment({
       id: 'pr-0001',
@@ -1236,28 +1416,28 @@ describe('librarian agent', () => {
         },
       },
       {
-        toolName: 'proposeFragmentChanges',
-        args: {
-          operations: [{
-            action: 'replace_text',
+        toolName: 'proposeRecordCorrections',
+        args: correctionProposalArgs(
+          [1],
+          [{
             fragmentId: 'ch-0001',
             field: 'content',
-            oldText: 'captain of the guard',
-            newText: 'no longer with the guard',
+            segment: 1,
+            newText: 'Alice is no longer with the guard.',
           }],
-        },
+        ),
       },
       {
-        toolName: 'proposeFragmentChanges',
-        args: {
-          operations: [{
-            action: 'replace_text',
+        toolName: 'proposeRecordCorrections',
+        args: correctionProposalArgs(
+          [1],
+          [{
             fragmentId: 'ch-0001',
             field: 'content',
-            oldText: 'captain of the guard',
-            newText: 'a free blade',
+            segment: 1,
+            newText: 'Alice is a free blade.',
           }],
-        },
+        ),
       },
     ])
 
@@ -1275,7 +1455,7 @@ describe('librarian agent', () => {
     expect(updated?.content).toContain('no longer with the guard')
   })
 
-  it('auto-applies batched edit proposals to existing fragments', async () => {
+  it('does not turn episodic state updates into unattended character-sheet appends', async () => {
     await createStory(dataDir, makeStory({
       settings: {
         autoApplyLibrarianSuggestions: true,
@@ -1303,40 +1483,16 @@ describe('librarian agent', () => {
           candidateFragmentIds: ['ch-0001'],
         },
       },
-      {
-        toolName: 'proposeFragmentChanges',
-        args: {
-          operations: [
-            {
-              action: 'append_paragraph',
-              fragmentId: 'ch-0001',
-              field: 'content',
-              text: 'Status: Alice left the gate.',
-              reason: 'The prose changes Alice location.',
-            },
-            {
-              action: 'append_paragraph',
-              fragmentId: 'ch-0001',
-              field: 'content',
-              text: 'Role: Alice accepted command of the watch.',
-              reason: 'The prose changes Alice role.',
-            },
-          ],
-        },
-      },
     ])
 
     const analysis = await runLibrarian(dataDir, storyId, 'pr-0001')
-    expect(analysis.fragmentChangeProposals).toHaveLength(1)
-    expect(analysis.fragmentChangeProposals[0]).toMatchObject({
-      accepted: true,
-      autoApplied: true,
-    })
-    expect(analysis.fragmentChangeProposals[0].operations).toHaveLength(2)
+    expect(analysis.fragmentChangeProposals).toEqual([])
+    expect(analysis.passes?.find((pass) => pass.name === 'analyze')?.diagnostics)
+      .toMatchObject({ proposalToolCallCount: 0, proposalQueuedOperationCount: 0 })
 
     const updated = await getFragment(dataDir, storyId, 'ch-0001')
-    expect(updated?.content).toBe('Alice waits at the gate.\n\nStatus: Alice left the gate.\n\nRole: Alice accepted command of the watch.')
-    expect(updated?.refs).toContain('pr-0001')
+    expect(updated?.content).toBe('Alice waits at the gate.')
+    expect(updated?.refs).not.toContain('pr-0001')
   })
 
   it('tracks timeline events', async () => {
@@ -1469,6 +1625,11 @@ describe('librarian agent', () => {
       events: ['Alice entered the vault'],
       stateChanges: ['Alice now has the key'],
       openThreads: ['Who locked the vault?'],
+    })
+    expect(analysis.sourceRevision?.contentHash).toMatch(/^[a-f0-9]{64}$/)
+    expect(analysis.continuityProjection).toMatchObject({
+      version: 1,
+      temporalFrame: { relation: 'uncertain' },
     })
   })
 

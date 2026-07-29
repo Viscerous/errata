@@ -17,6 +17,13 @@ import {
   type RevertResult,
 } from '../fragments/change-apply'
 import type { LibrarianAnalysis } from './storage'
+import { evidenceAppearsInText } from './evidence'
+import {
+  correctionShapeError,
+  MAX_CORRECTION_SPAN_CHARS,
+  MAX_NEW_FRAGMENT_CONTENT_CHARS,
+  MIN_CORRECTION_ANCHOR_CHARS,
+} from './correction-limits'
 
 export interface ApplyFragmentChangeProposalResult {
   appliedResults: OperationValidation[]
@@ -63,6 +70,23 @@ export class ProposalValidationError extends Error {
   }
 }
 
+/**
+ * Thrown when a proposal is sound but may not be written *unattended* — a
+ * whole-field rewrite, say. Manual accept does not consult the unattended gate
+ * at all, so this accept would succeed and the proposal must stay pending.
+ *
+ * It is a distinct type because the two refusals read identically at the throw
+ * site and mean opposite things to the author: "this can never apply" versus
+ * "this is yours to approve". Marking the second stale dismissed a correct
+ * correction the moment it was made.
+ */
+export class ProposalNeedsAuthorError extends ProposalValidationError {
+  constructor(message: string, results: OperationValidation[]) {
+    super(message, results)
+    this.name = 'ProposalNeedsAuthorError'
+  }
+}
+
 /** Fragment IDs recorded in an applied-change snapshot for a given change kind. */
 function changedIdsOfKind(changes: AppliedChange[], kind: AppliedChange['kind']): string[] {
   return unique(changes.filter((change) => change.kind === kind).map((change) => change.fragmentId))
@@ -73,6 +97,44 @@ function sourceFragmentIdForProposal(
   proposal: LibrarianAnalysis['fragmentChangeProposals'][number],
 ): string | null {
   return proposal.sourceFragmentId ?? analysis.fragmentId ?? null
+}
+
+async function unattendedProposalError(
+  dataDir: string,
+  storyId: string,
+  analysis: LibrarianAnalysis,
+  proposal: LibrarianAnalysis['fragmentChangeProposals'][number],
+): Promise<string | null> {
+  if (proposal.autoApplySafe !== true || !proposal.proposalKind || !proposal.evidenceText) {
+    return 'The proposal did not pass the online Librarian record-maintenance contract.'
+  }
+
+  const sourceFragmentId = sourceFragmentIdForProposal(analysis, proposal)
+  const source = sourceFragmentId ? await getFragment(dataDir, storyId, sourceFragmentId) : null
+  if (!source || source.type !== 'prose' || !evidenceAppearsInText(source.content, proposal.evidenceText)) {
+    return 'The proposal evidence is no longer grounded by verbatim spans in its accepted prose source.'
+  }
+
+  for (const operation of proposal.operations) {
+    if (operation.action === 'create_fragment') {
+      if (operation.content.length > MAX_NEW_FRAGMENT_CONTENT_CHARS) {
+        return 'A new fragment proposed for unattended application exceeded the minimal content limit.'
+      }
+      continue
+    }
+    if (operation.action !== 'replace_text' || operation.replaceAll) {
+      return 'Unattended record maintenance may only create reusable fragments or replace exact existing assertions.'
+    }
+    if (
+      operation.oldText.trim().length < MIN_CORRECTION_ANCHOR_CHARS
+      || operation.oldText.length > MAX_CORRECTION_SPAN_CHARS
+      || operation.newText.length > MAX_CORRECTION_SPAN_CHARS
+      || correctionShapeError(operation.oldText, operation.newText) !== null
+    ) {
+      return 'An unattended correction exceeded the minimal localized-edit limits.'
+    }
+  }
+  return null
 }
 
 function invalidValidationMessage(results: OperationValidation[]): string {
@@ -111,6 +173,15 @@ export async function applyFragmentChangeProposal(args: {
   const proposal = analysis.fragmentChangeProposals[proposalIndex]
   if (!proposal) {
     throw new Error('Invalid fragment change proposal index')
+  }
+  const autoApplyError = reason === 'auto-apply'
+    ? await unattendedProposalError(dataDir, storyId, analysis, proposal)
+    : null
+  if (autoApplyError) {
+    throw new ProposalNeedsAuthorError(
+      `Cannot auto-apply proposal: ${autoApplyError}`,
+      proposal.validation,
+    )
   }
 
   const validation = await validateOperations(dataDir, storyId, proposal.operations)

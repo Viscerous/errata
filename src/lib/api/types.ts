@@ -162,6 +162,8 @@ export interface LibrarianAnalysisSummary {
   timelineEventCount: number
   directionsCount: number
   hasTrace?: boolean
+  /** Source prose changed after this analysis, so its continuity is not folded. */
+  continuityStale?: boolean
 }
 
 export type FragmentChangeAction =
@@ -241,6 +243,11 @@ export type FragmentChangeOperation = {
 export interface LibrarianFragmentChangeProposal {
   title?: string
   rationale?: string
+  proposalKind?: 'correction' | 'new-fragment'
+  evidenceSegments?: number[]
+  evidenceText?: string
+  eligibilityReason?: string
+  autoApplySafe?: boolean
   operations: FragmentChangeOperation[]
   validation: FragmentOperationValidation[]
   sourceFragmentId?: string
@@ -261,11 +268,51 @@ export interface LibrarianAnalysis {
   id: string
   createdAt: string
   fragmentId: string
+  sourceRevision?: {
+    contentHash: string
+    fragmentVersion?: number
+    updatedAt: string
+  }
   summaryUpdate: string
   structuredSummary?: {
     events: string[]
     stateChanges: string[]
     openThreads: string[]
+  }
+  continuityProjection?: {
+    version: 1
+    temporalFrame: {
+      relation: 'forward' | 'flashback' | 'flash-forward' | 'concurrent' | 'uncertain'
+      anchor?: string
+      evidenceText?: string
+    }
+    stateOperations: Array<{
+      stateKey: string
+      action: 'set' | 'clear'
+      subject: string
+      value?: string
+      evidenceText: string
+    }>
+    threadOperations: Array<{
+      threadKey: string
+      action: 'open' | 'advance' | 'resolve' | 'abandon'
+      label?: string
+      note?: string
+      relatedFragmentIds: string[]
+      evidenceText: string
+    }>
+    threadFocus: Array<{
+      threadKey: string
+      visibility: 'foreground' | 'background'
+    }>
+    knowledgeOperations: Array<{
+      characterId: string
+      knowledgeKey: string
+      action: 'learn' | 'correct' | 'forget'
+      fact?: string
+      acquisition: 'witnessed' | 'told' | 'inferred' | 'other'
+      evidenceText: string
+    }>
   }
   mentions: LibrarianMention[]
   candidateFragmentIds?: string[]
@@ -278,6 +325,10 @@ export interface LibrarianAnalysis {
   contradictions: Array<{
     description: string
     fragmentIds: string[]
+    dismissed?: boolean
+    dismissedAt?: string
+    sourceEvidenceText?: string
+    conflictingEvidence?: Array<{ fragmentId: string; segments?: number[]; evidenceText: string }>
   }>
   fragmentChangeProposals: LibrarianFragmentChangeProposal[]
   timelineEvents: Array<{

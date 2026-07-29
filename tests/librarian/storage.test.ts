@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { createTempDir, makeTestSettings } from '../setup'
-import { createStory } from '@/server/fragments/storage'
+import { createFragment, createStory, getFragment, updateFragment } from '@/server/fragments/storage'
+import { analysisSourceRevision } from '@/server/librarian/continuity-source'
 import {
   saveAnalysis,
   getAnalysis,
@@ -87,6 +88,7 @@ describe('librarian storage', () => {
         id: 'analysis-counts',
         contradictions: [
           { description: 'Eye color changed', fragmentIds: ['pr-0001', 'pr-0002'] },
+          { description: 'Dismissed old finding', fragmentIds: ['pr-0001'], dismissed: true },
         ],
         fragmentChangeProposals: [
           {
@@ -114,6 +116,74 @@ describe('librarian storage', () => {
     it('returns empty list when no analyses exist', async () => {
       const summaries = await listAnalyses(dataDir, storyId)
       expect(summaries).toEqual([])
+    })
+
+    /**
+     * Summaries are memoized per file so a five-second poll stops re-parsing
+     * every trace. Rewriting an analysis — dismissing a contradiction, accepting
+     * a proposal — must invalidate that, or the panel keeps showing counts the
+     * user has already acted on.
+     */
+    it('reflects a rewritten analysis rather than a memoized summary', async () => {
+      await saveAnalysis(dataDir, storyId, makeAnalysis({
+        id: 'analysis-rewritten',
+        contradictions: [
+          { description: 'First', fragmentIds: ['ch-0001'] },
+          { description: 'Second', fragmentIds: ['ch-0001'] },
+        ],
+      }))
+      expect((await listAnalyses(dataDir, storyId))[0].contradictionCount).toBe(2)
+
+      await saveAnalysis(dataDir, storyId, makeAnalysis({
+        id: 'analysis-rewritten',
+        contradictions: [
+          { description: 'First', fragmentIds: ['ch-0001'], dismissed: true },
+          { description: 'Second', fragmentIds: ['ch-0001'] },
+        ],
+      }))
+      expect((await listAnalyses(dataDir, storyId))[0].contradictionCount).toBe(1)
+    })
+
+    // The fold rejects a projection whose source prose changed. Without a flag
+    // here that rejection is invisible: the passage's state and knowledge just
+    // stop reaching the Writer with nothing prompting a re-analysis.
+    it('flags an analysis whose source prose changed after it ran', async () => {
+      await createFragment(dataDir, storyId, {
+        id: 'pr-stale',
+        type: 'prose',
+        name: 'Passage',
+        description: '',
+        content: 'The original passage.',
+        tags: [],
+        refs: [],
+        sticky: false,
+        placement: 'user',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        order: 1,
+        meta: {},
+      })
+      const prose = (await getFragment(dataDir, storyId, 'pr-stale'))!
+      const projection = {
+        version: 1 as const,
+        temporalFrame: { relation: 'forward' as const },
+        stateOperations: [],
+        threadOperations: [],
+        threadFocus: [],
+        knowledgeOperations: [],
+      }
+      await saveAnalysis(dataDir, storyId, makeAnalysis({
+        id: 'analysis-fresh',
+        fragmentId: 'pr-stale',
+        sourceRevision: analysisSourceRevision(prose),
+        continuityProjection: projection,
+      }))
+
+      expect((await listAnalyses(dataDir, storyId))[0].continuityStale).toBeUndefined()
+
+      await updateFragment(dataDir, storyId, { ...prose, content: 'The passage was rewritten.' })
+
+      expect((await listAnalyses(dataDir, storyId))[0].continuityStale).toBe(true)
     })
 
     it('updates latest-analysis index on save and reanalysis', async () => {

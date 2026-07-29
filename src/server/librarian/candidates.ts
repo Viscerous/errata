@@ -2,6 +2,7 @@ import type { Fragment, StoryMeta } from '../fragments/schema'
 import { listFragments } from '../fragments/storage'
 import { customContextFragmentTypes } from '../llm/fragment-context-blocks'
 import type { ContextSelectionSource } from '../llm/context-selection'
+import { contextReceiptProvenanceIds } from '../llm/context-receipt'
 
 export type FragmentCandidateSource = Extract<
   ContextSelectionSource,
@@ -43,12 +44,6 @@ export async function listRoutableMemoryFragments(
   return all.filter((fragment) => isRoutableMemoryFragment(story, fragment))
 }
 
-function writerContextIds(fragment: Fragment | null | undefined): string[] {
-  return Array.isArray(fragment?.meta?.writerContextIds)
-    ? (fragment.meta.writerContextIds as unknown[]).filter((id): id is string => typeof id === 'string')
-    : []
-}
-
 export function observationFragmentCandidates(params: {
   mentionedFragmentIds: string[]
   candidateFragmentIds: string[]
@@ -76,7 +71,7 @@ export function writerProvenanceFragmentCandidates(
   proseFragment: Fragment | null | undefined,
   fragments: Fragment[],
 ): FragmentCandidate[] {
-  const ids = new Set(writerContextIds(proseFragment))
+  const ids = new Set(contextReceiptProvenanceIds(proseFragment))
   return fragments
     .filter((fragment) => ids.has(fragment.id) && isRoutableMemoryFragment(story, fragment))
     .map((fragment) => ({

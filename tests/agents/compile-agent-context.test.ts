@@ -144,8 +144,13 @@ describe('compileAgentContext', () => {
         inputSchema: z.object({}),
         execute: async () => ({ ok: true }),
       }),
-      proposeFragmentChanges: tool({
-        description: 'Propose fragment changes',
+      proposeRecordCorrections: tool({
+        description: 'Propose record corrections',
+        inputSchema: z.object({}),
+        execute: async () => ({ ok: true }),
+      }),
+      proposeNewRecords: tool({
+        description: 'Propose new records',
         inputSchema: z.object({}),
         execute: async () => ({ ok: true }),
       }),
@@ -164,18 +169,19 @@ describe('compileAgentContext', () => {
       customBlocks: [],
       overrides: {},
       blockOrder: [],
-      disabledTools: ['proposeDirections', 'proposeFragmentChanges'],
+      disabledTools: ['proposeDirections', 'proposeRecordCorrections', 'proposeNewRecords'],
     })
 
     const result = await compileAgentContext(dataDir, STORY_ID, 'librarian.analyze', makeContext(), tools)
     const instructions = result.blocks.find((block) => block.id === 'instructions')!
 
     expect(Object.keys(result.tools)).toEqual(['reportAnalysis', 'finishAnalysis'])
-    expect(instructions.content).toContain('1. Scan the new prose')
-    expect(instructions.content).toContain('2. Finally, call **finishAnalysis**')
+    expect(instructions.content).toContain('2. Scan the new prose')
+    expect(instructions.content).toContain('3. Finally, call **finishAnalysis**')
     expect(instructions.content).toContain('reportAnalysis')
     expect(instructions.content).not.toContain('proposeDirections')
-    expect(instructions.content).not.toContain('proposeFragmentChanges')
+    expect(instructions.content).not.toContain('proposeRecordCorrections')
+    expect(instructions.content).not.toContain('proposeNewRecords')
   })
 
   it('applies block overrides from config', async () => {
@@ -289,7 +295,12 @@ describe('compileAgentContext', () => {
       createdAt: now,
       updatedAt: now,
       order: 0,
-      meta: { writerContextIds: ['ch-0001'] },
+      meta: {
+        contextReceipt: {
+          version: 1,
+          entries: [{ fragmentId: 'ch-0001', access: 'full', actor: 'writer', reason: 'recent-context' }],
+        },
+      },
       archived: false,
     })
     await initProseChain(dataDir, STORY_ID, 'pr-0001')

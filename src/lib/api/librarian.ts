@@ -37,6 +37,8 @@ export const librarian = {
     apiFetch<LibrarianRevertChangeProposalResponse>(`/stories/${storyId}/librarian/analyses/${analysisId}/change-proposals/${index}/revert`, { method: 'POST' }),
   dismissChangeProposal: (storyId: string, analysisId: string, index: number) =>
     apiFetch<{ analysis: LibrarianAnalysis }>(`/stories/${storyId}/librarian/analyses/${analysisId}/change-proposals/${index}/dismiss`, { method: 'POST' }),
+  dismissContradiction: (storyId: string, analysisId: string, index: number) =>
+    apiFetch<{ analysis: LibrarianAnalysis }>(`/stories/${storyId}/librarian/analyses/${analysisId}/contradictions/${index}/dismiss`, { method: 'POST' }),
   deleteAnalysis: (storyId: string, analysisId: string) =>
     apiFetch<{ ok: boolean }>(`/stories/${storyId}/librarian/analyses/${analysisId}`, { method: 'DELETE' }),
   refine: (storyId: string, fragmentId: string, instructions?: string) =>

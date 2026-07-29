@@ -180,7 +180,7 @@ const fieldUpdatesSchema = z.object({
   { message: 'Provide at least one field to set.' },
 )
 
-const createFragmentOperationSchema = z.object({
+export const createFragmentOperationSchema = z.object({
   operationId: operationIdSchema,
   action: z.literal('create_fragment'),
   type: z.string().min(1).describe('Registered fragment type, such as character, guideline, knowledge, summary, or a story custom type.'),
@@ -190,7 +190,7 @@ const createFragmentOperationSchema = z.object({
   reason: z.string().max(500).optional(),
 })
 
-const replaceTextOperationSchema = z.object({
+export const replaceTextOperationSchema = z.object({
   operationId: operationIdSchema,
   action: z.literal('replace_text'),
   fragmentId: z.string().min(1).describe('Target fragment ID.'),

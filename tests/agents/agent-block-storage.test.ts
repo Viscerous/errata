@@ -145,8 +145,8 @@ describe('Agent Block Config Storage', () => {
   })
 
   it('updates disabled tools', async () => {
-    const config = await updateAgentDisabledTools(dataDir, STORY_ID, AGENT_NAME, ['reportAnalysis', 'proposeFragmentChanges'])
-    expect(config.disabledTools).toEqual(['reportAnalysis', 'proposeFragmentChanges'])
+    const config = await updateAgentDisabledTools(dataDir, STORY_ID, AGENT_NAME, ['reportAnalysis', 'proposeRecordCorrections'])
+    expect(config.disabledTools).toEqual(['reportAnalysis', 'proposeRecordCorrections'])
   })
 
   it('migrates deprecated disabled tool names', async () => {

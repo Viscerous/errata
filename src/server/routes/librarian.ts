@@ -304,6 +304,24 @@ export function librarianRoutes(dataDir: string) {
       return { analysis }
     }, { detail: { summary: 'Dismiss a fragment change proposal' } })
 
+    .post('/stories/:storyId/librarian/analyses/:analysisId/contradictions/:index/dismiss', async ({ params, set }) => {
+      const analysis = await getLibrarianAnalysis(dataDir, params.storyId, params.analysisId)
+      if (!analysis) {
+        set.status = 404
+        return { error: 'Analysis not found' }
+      }
+      const index = parseInt(params.index, 10)
+      if (isNaN(index) || index < 0 || index >= analysis.contradictions.length) {
+        set.status = 422
+        return { error: 'Invalid contradiction index' }
+      }
+
+      analysis.contradictions[index].dismissed = true
+      analysis.contradictions[index].dismissedAt = new Date().toISOString()
+      await saveLibrarianAnalysis(dataDir, params.storyId, analysis)
+      return { analysis }
+    }, { detail: { summary: 'Dismiss a contradiction finding' } })
+
     .delete('/stories/:storyId/librarian/analyses/:analysisId', async ({ params, set }) => {
       const { deleteAnalysis } = await import('../librarian/storage')
       const deleted = await deleteAnalysis(dataDir, params.storyId, params.analysisId)

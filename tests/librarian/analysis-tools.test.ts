@@ -2,13 +2,16 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import {
   createAnalysisTools,
   createEmptyCollector,
+  buildReportAnalysisInputSchema,
   createLibrarianOnlineTools,
+  librarianFinishAnalysisInputSchema,
+  librarianRecordCorrectionsInputSchema,
   listLibrarianAnalyzeToolNames,
   mentionInputSchema,
   reportAnalysisInputSchema,
 } from '@/server/librarian/analysis-tools'
 import { getFragment } from '@/server/fragments/storage'
-import { fragmentBaseHash } from '@/server/fragments/change-operations'
+import type { Fragment } from '@/server/fragments/schema'
 
 vi.mock('@/server/fragments/storage', () => ({
   getFragment: vi.fn().mockResolvedValue(null),
@@ -39,7 +42,7 @@ function mockFragment(overrides: Record<string, unknown> = {}) {
     version: 1,
     versions: [],
     ...overrides,
-  } as never
+  } as Fragment
 }
 
 describe('analysis-tools', () => {
@@ -56,22 +59,43 @@ describe('analysis-tools', () => {
     expect(collector.contradictions).toEqual([])
     expect(collector.fragmentChangeProposals).toEqual([])
     expect(collector.timelineEvents).toEqual([])
+    expect(collector.continuityProjection).toEqual({
+      version: 1,
+      temporalFrame: { relation: 'uncertain' },
+      stateOperations: [],
+      threadOperations: [],
+      threadFocus: [],
+      knowledgeOperations: [],
+    })
     expect(collector.directions).toEqual([])
+  })
+
+  it('does not collect global participant or witness rosters', () => {
+    const parsed = reportAnalysisInputSchema.parse({
+      participantIds: ['ch-0001'],
+      witnessIds: ['ch-0002'],
+    })
+    expect(parsed).not.toHaveProperty('participantIds')
+    expect(parsed).not.toHaveProperty('witnessIds')
   })
 
   it('exposes the online analysis tool names', () => {
     const tools = createAnalysisTools(createEmptyCollector())
     expect(Object.keys(tools)).toEqual([
       'reportAnalysis',
-      'proposeFragmentChanges',
       'proposeDirections',
       'finishAnalysis',
     ])
 
-    const onlineTools = createLibrarianOnlineTools(createEmptyCollector(), { dataDir: '/tmp', storyId: 'story-test' })
+    const onlineTools = createLibrarianOnlineTools(createEmptyCollector(), {
+      dataDir: '/tmp',
+      storyId: 'story-test',
+      proseFragmentId: 'pr-0001',
+    })
     expect(Object.keys(onlineTools)).toContain('reportAnalysis')
     expect(Object.keys(onlineTools)).toContain('readFragments')
-    expect(Object.keys(onlineTools)).toContain('proposeFragmentChanges')
+    expect(Object.keys(onlineTools)).toContain('proposeRecordCorrections')
+    expect(Object.keys(onlineTools)).toContain('proposeNewRecords')
     expect(Object.keys(onlineTools)).toContain('proposeDirections')
     expect(Object.keys(onlineTools)).toContain('finishAnalysis')
 
@@ -89,13 +113,19 @@ describe('analysis-tools', () => {
     expect(Object.keys(tools)).toContain('reportAnalysis')
     expect(Object.keys(tools)).toContain('readFragments')
     expect(Object.keys(tools)).toContain('finishAnalysis')
-    expect(tools).not.toHaveProperty('proposeFragmentChanges')
+    expect(tools).not.toHaveProperty('proposeRecordCorrections')
+    expect(tools).not.toHaveProperty('proposeNewRecords')
     expect(tools).not.toHaveProperty('proposeDirections')
   })
 
   it('finishAnalysis returns a terminal success marker without mutating analysis data', async () => {
     const collector = createEmptyCollector()
     const tools = createAnalysisTools(collector)
+
+    await tools.reportAnalysis.execute!({ summary: 'A quiet passage.' }, {
+      toolCallId: 'report', messages: [], abortSignal: undefined as unknown as AbortSignal,
+    })
+    const beforeFinish = structuredClone(collector)
 
     const result = await tools.finishAnalysis.execute!({
       completed: ['reportAnalysis'],
@@ -107,7 +137,184 @@ describe('analysis-tools', () => {
       completed: ['reportAnalysis'],
       skipped: [{ toolName: 'proposeDirections', reason: 'No useful branches yet.' }],
     })
-    expect(collector).toEqual(createEmptyCollector())
+    expect(collector).toEqual(beforeFinish)
+  })
+
+  it('finishAnalysis rejects a failed proposal falsely claimed as completed', async () => {
+    const prose = mockFragment({ id: 'pr-0001', type: 'prose', content: 'Alice waited.' })
+    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => id === 'pr-0001' ? prose : null)
+    const collector = createEmptyCollector()
+    const tools = createAnalysisTools(collector, {
+      dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001', disableDirections: true,
+    })
+    await tools.reportAnalysis.execute!({ summary: 'Alice waited.' }, {
+      toolCallId: 'report', messages: [], abortSignal: undefined as unknown as AbortSignal,
+    })
+    await tools.proposeRecordCorrections.execute!({
+      evidenceSegments: [1], corrections: [],
+    }, { toolCallId: 'proposal', messages: [], abortSignal: undefined as unknown as AbortSignal })
+
+    const falseFinish = await tools.finishAnalysis.execute!({
+      completed: ['reportAnalysis', 'proposeRecordCorrections'],
+      skipped: [{ toolName: 'proposeNewRecords', reason: 'No new reusable record.' }],
+    }, { toolCallId: 'false-finish', messages: [], abortSignal: undefined as unknown as AbortSignal })
+    const honestFinish = await tools.finishAnalysis.execute!({
+      completed: ['reportAnalysis'],
+      skipped: [
+        { toolName: 'proposeRecordCorrections', reason: 'The attempted correction was invalid.' },
+        { toolName: 'proposeNewRecords', reason: 'No new reusable record.' },
+      ],
+    }, { toolCallId: 'honest-finish', messages: [], abortSignal: undefined as unknown as AbortSignal })
+
+    expect(falseFinish).toMatchObject({ ok: false, falseCompleted: ['proposeRecordCorrections'] })
+    expect(honestFinish).toMatchObject({ ok: true })
+  })
+
+  // Timeline 9 made 24 finishAnalysis calls for 16 analyses. Six were rejected
+  // only because a successful correction was not paired with a skip note for
+  // the discovery lane, which had nothing to propose.
+  it('finishAnalysis accepts a lane that was never needed without a skip note', async () => {
+    const current = 'Alice is captain of the guard. She keeps the north gate.'
+    const prose = mockFragment({ id: 'pr-0001', type: 'prose', content: 'Alice resigned from the guard.' })
+    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => {
+      if (id === 'pr-0001') return prose
+      if (id === 'ch-0001') return mockFragment({ id, content: current })
+      return null
+    })
+    const collector = createEmptyCollector()
+    const tools = createAnalysisTools(collector, {
+      dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001', disableDirections: true,
+    })
+    await tools.reportAnalysis.execute!({ summary: 'Alice resigned.' }, {
+      toolCallId: 'report', messages: [], abortSignal: undefined as unknown as AbortSignal,
+    })
+    const correction = await tools.proposeRecordCorrections.execute!({
+      evidenceSegments: [1],
+      corrections: [{
+        fragmentId: 'ch-0001',
+        segment: 1,
+        newText: 'Alice is the former captain of the guard.',
+      }],
+    }, { toolCallId: 'correction', messages: [], abortSignal: undefined as unknown as AbortSignal })
+
+    const finish = await tools.finishAnalysis.execute!({
+      completed: ['reportAnalysis', 'proposeRecordCorrections'],
+    }, { toolCallId: 'finish', messages: [], abortSignal: undefined as unknown as AbortSignal })
+
+    expect(correction).toMatchObject({ ok: true, queuedOperationCount: 1 })
+    expect(finish).toMatchObject({ ok: true })
+  })
+
+  it('finishAnalysis still refuses to abandon a proposal lane left in a failed state', async () => {
+    const prose = mockFragment({ id: 'pr-0001', type: 'prose', content: 'Alice waited.' })
+    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => id === 'pr-0001' ? prose : null)
+    const collector = createEmptyCollector()
+    const tools = createAnalysisTools(collector, {
+      dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001', disableDirections: true,
+    })
+    await tools.reportAnalysis.execute!({ summary: 'Alice waited.' }, {
+      toolCallId: 'report', messages: [], abortSignal: undefined as unknown as AbortSignal,
+    })
+    await tools.proposeNewRecords.execute!({
+      evidenceSegments: [1], newFragments: [],
+    }, { toolCallId: 'attempt', messages: [], abortSignal: undefined as unknown as AbortSignal })
+
+    const finish = await tools.finishAnalysis.execute!({
+      completed: ['reportAnalysis'],
+    }, { toolCallId: 'finish', messages: [], abortSignal: undefined as unknown as AbortSignal })
+
+    expect(finish).toMatchObject({ ok: false, missingRequired: ['proposeNewRecords'] })
+  })
+
+  // Timeline 10 rejected five of twenty-three finish calls purely because the
+  // lane was named as a bare string. Every one of them was a lane never called,
+  // which the gate does not require to be declared at all.
+  it('finishAnalysis accepts a lane abandoned by name alone', async () => {
+    const collector = createEmptyCollector()
+    const tools = createAnalysisTools(collector, {
+      dataDir: '/tmp', storyId: 'story-test', disableDirections: true,
+    })
+    await tools.reportAnalysis.execute!({ summary: 'Alice waited.' }, {
+      toolCallId: 'report', messages: [], abortSignal: undefined as unknown as AbortSignal,
+    })
+
+    const parsed = librarianFinishAnalysisInputSchema.parse({
+      completed: ['reportAnalysis'],
+      skipped: ['proposeRecordCorrections', 'proposeNewRecords'],
+    })
+    const finish = await tools.finishAnalysis.execute!(parsed, {
+      toolCallId: 'finish', messages: [], abortSignal: undefined as unknown as AbortSignal,
+    })
+
+    expect(finish).toMatchObject({
+      ok: true,
+      skipped: [{ toolName: 'proposeRecordCorrections' }, { toolName: 'proposeNewRecords' }],
+    })
+  })
+
+  it('finishAnalysis still demands a reason for abandoning a lane it left failing', async () => {
+    const prose = mockFragment({ id: 'pr-0001', type: 'prose', content: 'Alice waited.' })
+    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => id === 'pr-0001' ? prose : null)
+    const collector = createEmptyCollector()
+    const tools = createAnalysisTools(collector, {
+      dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001', disableDirections: true,
+    })
+    await tools.reportAnalysis.execute!({ summary: 'Alice waited.' }, {
+      toolCallId: 'report', messages: [], abortSignal: undefined as unknown as AbortSignal,
+    })
+    await tools.proposeNewRecords.execute!({
+      evidenceSegments: [1], newFragments: [],
+    }, { toolCallId: 'attempt', messages: [], abortSignal: undefined as unknown as AbortSignal })
+
+    const bare = await tools.finishAnalysis.execute!(
+      librarianFinishAnalysisInputSchema.parse({
+        completed: ['reportAnalysis'],
+        skipped: ['proposeNewRecords'],
+      }),
+      { toolCallId: 'bare', messages: [], abortSignal: undefined as unknown as AbortSignal },
+    )
+    const explained = await tools.finishAnalysis.execute!(
+      librarianFinishAnalysisInputSchema.parse({
+        completed: ['reportAnalysis'],
+        skipped: [{ toolName: 'proposeNewRecords', reason: 'Nothing reusable was established.' }],
+      }),
+      { toolCallId: 'explained', messages: [], abortSignal: undefined as unknown as AbortSignal },
+    )
+
+    expect(bare).toMatchObject({ ok: false, unexplained: ['proposeNewRecords'] })
+    expect(explained).toMatchObject({ ok: true })
+  })
+
+  // Continuity memory names its keys the way the catalog names records, so
+  // Timeline 10 aimed a correction at a state key and spent an extra report
+  // round trip working the distinction out from a note that only said the
+  // target could not be read.
+  it('names the lane that owns a continuity key aimed at as a correctable record', async () => {
+    const prose = mockFragment({ id: 'pr-0001', type: 'prose', content: 'Her throat bruised.' })
+    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => id === 'pr-0001' ? prose : null)
+    const collector = createEmptyCollector()
+    const tools = createLibrarianOnlineTools(collector, {
+      dataDir: '/tmp',
+      storyId: 'story-test',
+      proseFragmentId: 'pr-0001',
+      disableDirections: true,
+      continuityKeys: { state: ['victoria_physical_state_post_waters'] },
+    })
+
+    const atKey = await tools.proposeRecordCorrections.execute!({
+      evidenceSegments: [1],
+      corrections: [{ fragmentId: 'victoria_physical_state_post_waters', segment: 1, newText: 'Bruised throat.' }],
+    }, { toolCallId: 'at-key', messages: [], abortSignal: undefined as unknown as AbortSignal })
+    const atNothing = await tools.proposeRecordCorrections.execute!({
+      corrections: [{ fragmentId: 'ch-missing', segment: 1, newText: 'Bruised throat.' }],
+    }, { toolCallId: 'at-nothing', messages: [], abortSignal: undefined as unknown as AbortSignal })
+
+    expect(atKey).toMatchObject({ ok: false })
+    expect((atKey as { skipped: Array<{ reason: string }> }).skipped[0].reason)
+      .toBe('victoria_physical_state_post_waters is a state key in continuity memory, not a reusable record. Change it with a reportAnalysis state operation instead.')
+    // A genuinely absent record must not be mislabelled as continuity memory.
+    expect((atNothing as { skipped: Array<{ reason: string }> }).skipped[0].reason)
+      .toBe('There is no reusable record ch-missing. Correct only records whose numbered sentences you were shown.')
   })
 
   it('reportAnalysis sets summary, structured signals, mentions, contradictions, and timeline events', async () => {
@@ -139,6 +346,21 @@ describe('analysis-tools', () => {
     expect(collector.timelineEvents[0]).toEqual({ event: 'Alice arms herself', position: 'during' })
   })
 
+  it('deduplicates contradictions and timeline events when a model repeats reportAnalysis', async () => {
+    const collector = createEmptyCollector()
+    const tools = createAnalysisTools(collector)
+    const report = {
+      contradictions: [{ description: 'Eye color mismatch', fragmentIds: ['ch-0001'] }],
+      timelineEvents: [{ event: 'Alice arms herself', position: 'during' as const }],
+    }
+
+    await tools.reportAnalysis.execute!(report, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
+    await tools.reportAnalysis.execute!(report, { toolCallId: 'b', messages: [], abortSignal: undefined as unknown as AbortSignal })
+
+    expect(collector.contradictions).toHaveLength(1)
+    expect(collector.timelineEvents).toHaveLength(1)
+  })
+
   it('reportAnalysis records validated candidate fragments for proposal context', async () => {
     vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, fragmentId) => (
       fragmentId === 'ch-0001' ? mockFragment({ id: fragmentId }) : null
@@ -159,6 +381,168 @@ describe('analysis-tools', () => {
     expect(collector.mentions).toEqual([])
   })
 
+  it('reportAnalysis records evidence-backed structured continuity and skips unsupported operations', async () => {
+    const prose = mockFragment({
+      id: 'pr-0001',
+      type: 'prose',
+      content: 'Alice entered the north hall. Bob heard Alice say that the seal was broken.',
+    })
+    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, fragmentId) => {
+      if (fragmentId === 'pr-0001') return prose
+      if (fragmentId === 'ch-0001') return mockFragment({ id: fragmentId, type: 'character' })
+      if (fragmentId === 'ch-0002') return mockFragment({ id: fragmentId, type: 'character' })
+      return null
+    })
+    const collector = createEmptyCollector()
+    const tools = createAnalysisTools(collector, {
+      dataDir: '/tmp',
+      storyId: 'story-test',
+      proseFragmentId: 'pr-0001',
+    })
+
+    const result = await tools.reportAnalysis.execute!({
+      summary: 'Alice enters and tells Bob about the seal.',
+      temporalFrame: { relation: 'forward' },
+      stateOperations: [
+        {
+          key: 'alice.location',
+          action: 'set',
+          subject: 'Alice location',
+          value: 'north hall',
+          evidenceSegments: [1],
+        },
+        {
+          // Sentence 7 does not exist in a two-sentence passage.
+          key: 'seal.color',
+          action: 'set',
+          subject: 'Seal color',
+          value: 'red',
+          evidenceSegments: [7],
+        },
+      ],
+      threadOperations: [{
+        key: 'broken-seal',
+        action: 'open',
+        label: 'Why the seal was broken',
+        relatedFragmentIds: ['ch-0001'],
+        evidenceSegments: [2],
+      }],
+      threadFocus: [{ threadKey: 'broken-seal', visibility: 'background' }],
+      knowledgeOperations: [{
+        characterId: 'ch-0002',
+        key: 'seal.broken',
+        action: 'learn',
+        fact: 'The seal is broken.',
+        acquisition: 'told',
+        evidenceSegments: [2],
+      }],
+    }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
+
+    expect(result).toMatchObject({
+      ok: true,
+      stateOperationCount: 1,
+      threadOperationCount: 1,
+      focusedThreadCount: 1,
+      knowledgeOperationCount: 1,
+    })
+    expect(result.skippedContinuity).toEqual([
+      { kind: 'state', key: 'seal_color', reason: 'Cited sentence 7 does not exist in the passage.' },
+    ])
+    // Keys are canonicalized at ingest so near-synonym spellings collapse into
+    // one reusable identity; skippedContinuity still echoes what was submitted.
+    expect(collector.continuityProjection).toMatchObject({
+      temporalFrame: { relation: 'forward' },
+      stateOperations: [{
+        stateKey: 'alice_location',
+        value: 'north hall',
+        evidenceSegments: [1],
+        evidenceText: 'Alice entered the north hall.',
+      }],
+      threadOperations: [{ threadKey: 'broken_seal', action: 'open' }],
+      threadFocus: [{ threadKey: 'broken_seal', visibility: 'background' }],
+      knowledgeOperations: [{ characterId: 'ch-0002', knowledgeKey: 'seal_broken' }],
+    })
+    expect(collector.continuityProjection).not.toHaveProperty('participantIds')
+    expect(collector.continuityProjection).not.toHaveProperty('witnessIds')
+  })
+
+  it('records only contradictions grounded on both the new prose and a reusable fragment', async () => {
+    const prose = mockFragment({
+      id: 'pr-0001',
+      type: 'prose',
+      content: 'Alice looked at him with her green eyes.',
+    })
+    const character = mockFragment({
+      id: 'ch-0001',
+      type: 'character',
+      content: 'Alice has blue eyes.',
+    })
+    const earlierProse = mockFragment({
+      id: 'pr-0002',
+      type: 'prose',
+      content: 'Alice selected a black dress.',
+    })
+    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, fragmentId) => {
+      if (fragmentId === prose.id) return prose
+      if (fragmentId === character.id) return character
+      if (fragmentId === earlierProse.id) return earlierProse
+      return null
+    })
+    const collector = createEmptyCollector()
+    const tools = createAnalysisTools(collector, {
+      dataDir: '/tmp',
+      storyId: 'story-test',
+      proseFragmentId: prose.id,
+    })
+
+    const result = await tools.reportAnalysis.execute!({
+      contradictions: [
+        {
+          description: 'Alice has incompatible eye colors.',
+          sourceSegments: [1],
+          conflictingEvidence: [{ fragmentId: character.id, segments: [1] }],
+        },
+        {
+          description: 'A later clothing choice was mistaken for a contradiction.',
+          sourceSegments: [1],
+          conflictingEvidence: [{ fragmentId: earlierProse.id, segments: [1] }],
+        },
+        {
+          description: 'An ungrounded guess.',
+          fragmentIds: [character.id],
+        },
+      ],
+    }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
+
+    expect(result).toMatchObject({
+      ok: true,
+      contradictionCount: 1,
+      skippedContradictions: [
+        {
+          description: 'A later clothing choice was mistaken for a contradiction.',
+          reason: 'Cite the numbered sentence in pr-0002 that carries the incompatible claim; it must be a reusable non-prose record.',
+        },
+        {
+          description: 'An ungrounded guess.',
+          reason: 'No supporting sentence was cited.',
+        },
+      ],
+    })
+    expect(collector.contradictions).toEqual([{
+      description: 'Alice has incompatible eye colors.',
+      fragmentIds: [character.id],
+      sourceSegments: [1],
+      sourceEvidenceText: 'Alice looked at him with her green eyes.',
+      // The cited sentence is resolved server-side, so the stored finding keeps
+      // reviewable text without the model ever having retyped it.
+      conflictingEvidence: [{
+        fragmentId: character.id,
+        segments: [1],
+        evidenceText: 'Alice has blue eyes.',
+      }],
+    }])
+  })
+
   it('reportAnalysis derives a summary from structured signals when summary text is empty', async () => {
     const collector = createEmptyCollector()
     const tools = createAnalysisTools(collector)
@@ -175,9 +559,9 @@ describe('analysis-tools', () => {
     expect(collector.summaryUpdate).toContain('Open threads: Who sent the letter?.')
   })
 
-  it('reportAnalysis accepts an empty payload with a nudge instead of a schema error', async () => {
-    // A schema-level rejection makes small models loop on resubmitting; an
-    // empty report is acknowledged and nudged instead.
+  it('reportAnalysis nudges an empty payload instead of raising a schema error', async () => {
+    // A schema-level rejection makes small models loop on resubmitting the
+    // whole payload, so an empty report is still a normal tool result.
     await expect(reportAnalysisInputSchema.parseAsync({
       summary: '  ',
       events: [],
@@ -191,9 +575,43 @@ describe('analysis-tools', () => {
       { summary: '  ' },
       { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal },
     )
-    expect(result).toMatchObject({ ok: true })
+    expect(result).toMatchObject({ ok: false })
     expect(result.note).toContain('Empty report')
     expect(collector.summaryUpdate).toBe('')
+  })
+
+  // The empty report used to answer ok:true while withholding the success
+  // marker, so finishAnalysis then told the model it had falsely claimed the
+  // very call that had just reported success. The two surfaces must agree.
+  it('reports an empty analysis consistently to the reporting tool and to finish', async () => {
+    const collector = createEmptyCollector()
+    const tools = createAnalysisTools(collector, {
+      dataDir: '/tmp', storyId: 'story-test', disableDirections: true,
+    })
+
+    const empty = await tools.reportAnalysis.execute!({ summary: '  ' }, {
+      toolCallId: 'empty', messages: [], abortSignal: undefined as unknown as AbortSignal,
+    })
+    const finishAfterEmpty = await tools.finishAnalysis.execute!({
+      completed: ['reportAnalysis'],
+    }, { toolCallId: 'finish-empty', messages: [], abortSignal: undefined as unknown as AbortSignal })
+
+    expect(empty).toMatchObject({ ok: false })
+    // Not "you falsely completed a call that just told you it was fine".
+    expect(finishAfterEmpty).toMatchObject({
+      ok: false,
+      falseCompleted: ['reportAnalysis'],
+      missingRequired: ['reportAnalysis'],
+    })
+
+    await tools.reportAnalysis.execute!({ summary: 'Alice waited by the gate.' }, {
+      toolCallId: 'retry', messages: [], abortSignal: undefined as unknown as AbortSignal,
+    })
+    const finishAfterRetry = await tools.finishAnalysis.execute!({
+      completed: ['reportAnalysis'],
+    }, { toolCallId: 'finish-retry', messages: [], abortSignal: undefined as unknown as AbortSignal })
+
+    expect(finishAfterRetry).toMatchObject({ ok: true })
   })
 
   it('mention schema requires a valid fragment id and non-empty text', async () => {
@@ -222,6 +640,42 @@ describe('analysis-tools', () => {
       summary: 'Something happened.',
       mentions: Array.from({ length: 151 }, () => mention),
     })).rejects.toThrow()
+  })
+
+  // Brevity in citations is a preference, not an invariant: over-citing costs a
+  // longer stored evidence string and nothing else. As a schema `.max(8)` it
+  // rejected the whole payload, and Timeline 10 lost a full reportAnalysis and
+  // proposeDirections round trip because one knowledge operation cited nine.
+  it('keeps a report that over-cites, clipping the citation rather than rejecting the call', async () => {
+    const prose = mockFragment({
+      id: 'pr-0001',
+      type: 'prose',
+      content: Array.from({ length: 12 }, (_, i) => `Sentence ${i + 1} happened.`).join(' '),
+    })
+    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => id === 'pr-0001' ? prose : null)
+    const collector = createEmptyCollector()
+    const tools = createAnalysisTools(collector, {
+      dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001',
+    })
+    const overCited = [1, 2, 3, 4, 5, 6, 7, 8, 9]
+
+    const parsed = await reportAnalysisInputSchema.parseAsync({
+      summary: 'Much happened.',
+      stateOperations: [{
+        key: 'alice_condition',
+        action: 'set',
+        subject: 'Alice',
+        value: 'weary',
+        evidenceSegments: overCited,
+      }],
+    })
+    const result = await tools.reportAnalysis.execute!(parsed, {
+      toolCallId: 'report', messages: [], abortSignal: undefined as unknown as AbortSignal,
+    })
+
+    expect(result).toMatchObject({ ok: true, stateOperationCount: 1 })
+    expect(collector.continuityProjection.stateOperations[0].evidenceSegments)
+      .toEqual([1, 2, 3, 4, 5, 6, 7, 8])
   })
 
   it('reportAnalysis anchors mentions to the prose: salvages quote-wrapping, skips paraphrases', async () => {
@@ -254,7 +708,14 @@ describe('analysis-tools', () => {
     expect(result).toMatchObject({
       ok: true,
       mentionCount: 2,
-      skippedMentions: [{ fragmentId: 'ch-0001', text: 'her quiet menace' }],
+      skippedMentions: [{
+        fragmentId: 'ch-0001',
+        text: 'her quiet menace',
+        // The reason belongs to the entry, not only to the note beside the
+        // list: the trace panel reads entries, and an entry without one is a
+        // loss reported as a blank line.
+        reason: 'Not verbatim in the passage, so it cannot be highlighted.',
+      }],
     })
   })
 
@@ -280,485 +741,388 @@ describe('analysis-tools', () => {
     expect(collector.timelineEvents).toHaveLength(12)
   })
 
-  it('proposeFragmentChanges records create_fragment proposals', async () => {
-    const collector = createEmptyCollector()
-    const tools = createAnalysisTools(collector)
-
-    const result = await tools.proposeFragmentChanges.execute!({
-      operations: [{
-        action: 'create_fragment',
-        type: 'knowledge',
-        name: 'Valdris',
-        description: 'Ancient city',
-        content: 'Valdris is ancient.',
-      }],
-    }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
-
-    expect(result).toMatchObject({ ok: true, proposalCount: 1, queuedOperationCount: 1 })
-    expect(collector.fragmentChangeProposals[0].operations[0]).toMatchObject({
-      action: 'create_fragment',
-      type: 'knowledge',
-      name: 'Valdris',
-      content: 'Valdris is ancient.',
+  it('online analysis marks an exact evidence-backed correction safe for unattended apply', async () => {
+    const prose = mockFragment({
+      id: 'pr-0001',
+      type: 'prose',
+      content: 'Alice resigned and became former captain of the guard.',
     })
-    expect(collector.fragmentChangeProposals[0].validation[0]).toMatchObject({
-      operationId: 'op-1',
-      action: 'create_fragment',
-      status: 'valid',
+    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => {
+      if (id === 'pr-0001') return prose
+      if (id === 'ch-0001') return mockFragment({ id, content: 'Alice is captain of the guard. She keeps the north gate.' })
+      return null
     })
-  })
-
-  it('proposeFragmentChanges skips unavailable create_fragment types', async () => {
     const collector = createEmptyCollector()
-    const tools = createAnalysisTools(collector)
+    const tools = createAnalysisTools(collector, {
+      dataDir: '/tmp',
+      storyId: 'story-test',
+      proseFragmentId: 'pr-0001',
+    })
 
-    const result = await tools.proposeFragmentChanges.execute!({
-      operations: [{
-        action: 'create_fragment',
-        type: 'location',
-        name: 'Ash Market',
-        description: '',
-        content: 'A night market.',
-      }],
-    }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
-
-    expect(collector.fragmentChangeProposals).toHaveLength(0)
-    expect(result.skipped[0].reason).toContain('not available')
-  })
-
-  it('proposeFragmentChanges skips create_fragment names copied from fragment ids', async () => {
-    const collector = createEmptyCollector()
-    const tools = createAnalysisTools(collector)
-
-    const result = await tools.proposeFragmentChanges.execute!({
-      operations: [{
-        action: 'create_fragment',
-        type: 'character',
-        name: 'ch-thorne: Elias Thorne',
-        description: 'Rival patron',
-        content: 'Elias Thorne is a rival patron.',
-      }],
-    }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
-
-    expect(collector.fragmentChangeProposals).toHaveLength(0)
-    expect(result.skipped[0].reason).toContain('human-readable name')
-  })
-
-  it('proposeFragmentChanges records exact replace_text proposals', async () => {
-    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) =>
-      id === 'ch-0001' ? mockFragment({ id }) : null,
-    )
-    const collector = createEmptyCollector()
-    const tools = createAnalysisTools(collector, { dataDir: '/tmp', storyId: 'story-test' })
-
-    const result = await tools.proposeFragmentChanges.execute!({
-      operations: [{
-        action: 'replace_text',
+    const result = await tools.proposeRecordCorrections.execute!({
+      evidenceSegments: [1],
+      rationale: 'The existing role assertion is now false and would mislead future scenes.',
+      corrections: [{
         fragmentId: 'ch-0001',
         field: 'content',
-        oldText: 'twenty years old',
-        newText: 'twenty-one years old',
-        reason: 'The prose says Alice had a birthday.',
+        segment: 1,
+        newText: 'Alice is the former captain of the guard.',
       }],
     }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
 
-    expect(result).toMatchObject({ ok: true, proposalCount: 1, queuedOperationCount: 1 })
-    expect(collector.fragmentChangeProposals[0].operations[0]).toMatchObject({
-      action: 'replace_text',
-      fragmentId: 'ch-0001',
-      field: 'content',
-      oldText: 'twenty years old',
-      newText: 'twenty-one years old',
-      reason: 'The prose says Alice had a birthday.',
-    })
-    expect(collector.fragmentChangeProposals[0].validation[0]).toMatchObject({
-      status: 'valid',
-      target: { fragmentId: 'ch-0001', field: 'content' },
+    expect(result).toMatchObject({ ok: true, evidenceMatched: true, autoApplySafe: true })
+    expect(collector.fragmentChangeProposals[0]).toMatchObject({
+      proposalKind: 'correction',
+      evidenceSegments: [1],
+      autoApplySafe: true,
     })
   })
 
-  it('proposeFragmentChanges records append_paragraph proposals', async () => {
-    const originalContent = 'Alice is a brave warrior with blue eyes. Currently twenty years old.'
-    const target = mockFragment({ id: 'ch-0001', content: originalContent })
-    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) =>
-      id === 'ch-0001' ? target : null,
-    )
+  it('keeps corrections and discoveries in separate semantic proposals', async () => {
+    const prose = mockFragment({
+      id: 'pr-0001',
+      type: 'prose',
+      content: 'Alice resigned as captain and founded the Lantern Archive.',
+    })
+    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => {
+      if (id === 'pr-0001') return prose
+      if (id === 'ch-0001') return mockFragment({ id, content: 'Alice is captain. The role defines her public duties.' })
+      return null
+    })
     const collector = createEmptyCollector()
-    const tools = createAnalysisTools(collector, { dataDir: '/tmp', storyId: 'story-test' })
+    const tools = createAnalysisTools(collector, {
+      dataDir: '/tmp',
+      storyId: 'story-test',
+      proseFragmentId: 'pr-0001',
+    })
 
-    const result = await tools.proposeFragmentChanges.execute!({
-      operations: [{
+    const correctionResult = await tools.proposeRecordCorrections.execute!({
+      evidenceSegments: [1],
+      rationale: 'The old role is false.',
+      corrections: [{
+        fragmentId: 'ch-0001',
+        segment: 1,
+        newText: 'Alice is a former captain.',
+      }],
+    }, { toolCallId: 'correction', messages: [], abortSignal: undefined as unknown as AbortSignal })
+    const discoveryResult = await tools.proposeNewRecords.execute!({
+      evidenceSegments: [1],
+      rationale: 'The newly founded institution is a reusable named record.',
+      newFragments: [{
+        type: 'knowledge',
+        name: 'Lantern Archive',
+        description: 'An archive founded by Alice.',
+        content: 'The Lantern Archive was founded by Alice.',
+      }],
+    }, { toolCallId: 'discovery', messages: [], abortSignal: undefined as unknown as AbortSignal })
+
+    expect(correctionResult).toMatchObject({ ok: true, queuedOperationCount: 1 })
+    expect(discoveryResult).toMatchObject({ ok: true, queuedOperationCount: 1 })
+    expect(collector.fragmentChangeProposals).toHaveLength(2)
+    expect(collector.fragmentChangeProposals.map((proposal) => proposal.proposalKind))
+      .toEqual(['correction', 'new-fragment'])
+  })
+
+  // Paraphrase is no longer a reachable failure: evidence is a citation, so
+  // there is nothing to reword. What remains is citing a sentence that is not
+  // there, which the model can see and fix from the numbered passage.
+  it('rejects a citation the passage does not contain', async () => {
+    const prose = mockFragment({ id: 'pr-0001', type: 'prose', content: 'Alice resigned from the guard.' })
+    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => {
+      if (id === 'pr-0001') return prose
+      if (id === 'ch-0001') return mockFragment({ id, content: 'Alice is captain of the guard. She keeps the north gate.' })
+      return null
+    })
+    const collector = createEmptyCollector()
+    const tools = createAnalysisTools(collector, {
+      dataDir: '/tmp',
+      storyId: 'story-test',
+      proseFragmentId: 'pr-0001',
+    })
+
+    const result = await tools.proposeRecordCorrections.execute!({
+      evidenceSegments: [4],
+      rationale: 'The existing role assertion is now false and would mislead future scenes.',
+      corrections: [{
+        fragmentId: 'ch-0001',
+        segment: 1,
+        newText: 'Alice is the former captain of the guard.',
+      }],
+    }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
+
+    expect(result).toMatchObject({ ok: false, evidenceMatched: false, queuedOperationCount: 0 })
+    expect(String((result as { note: string }).note)).toContain('sentence 4 does not exist')
+    expect(collector.fragmentChangeProposals).toEqual([])
+  })
+
+  it('rejects an empty record-maintenance proposal without mutating analysis', async () => {
+    const prose = mockFragment({ id: 'pr-0001', type: 'prose', content: 'Alice waited.' })
+    vi.mocked(getFragment).mockResolvedValue(prose)
+    const collector = createEmptyCollector()
+    const tools = createAnalysisTools(collector, {
+      dataDir: '/tmp',
+      storyId: 'story-test',
+      proseFragmentId: 'pr-0001',
+    })
+
+    const result = await tools.proposeRecordCorrections.execute!({
+      evidenceSegments: [1],
+      corrections: [],
+    }, { toolCallId: 'empty', messages: [], abortSignal: undefined as unknown as AbortSignal })
+
+    expect(result).toMatchObject({ ok: false, queuedOperationCount: 0 })
+    expect(collector.fragmentChangeProposals).toEqual([])
+  })
+
+  it('retains grounded evidence while the model retries only correction fields', async () => {
+    const prose = mockFragment({ id: 'pr-0001', type: 'prose', content: 'Alice resigned from the guard.' })
+    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => {
+      if (id === 'pr-0001') return prose
+      if (id === 'ch-0001') return mockFragment({ id, content: 'Alice is captain of the guard. She keeps the north gate.' })
+      return null
+    })
+    const collector = createEmptyCollector()
+    const tools = createAnalysisTools(collector, {
+      dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001',
+    })
+
+    const first = await tools.proposeRecordCorrections.execute!({
+      evidenceSegments: [1],
+      corrections: [],
+    }, { toolCallId: 'first', messages: [], abortSignal: undefined as unknown as AbortSignal })
+    const retry = await tools.proposeRecordCorrections.execute!({
+      corrections: [{
+        fragmentId: 'ch-0001',
+        segment: 1,
+        newText: 'Alice is the former captain of the guard.',
+      }],
+    }, { toolCallId: 'retry', messages: [], abortSignal: undefined as unknown as AbortSignal })
+
+    expect(first).toMatchObject({ ok: false, evidenceRetained: true })
+    expect(retry).toMatchObject({ ok: true, evidenceMatched: true, queuedOperationCount: 1 })
+    expect(collector.fragmentChangeProposals[0].evidenceText).toBe('Alice resigned from the guard.')
+  })
+
+  // Timeline 9 applied seven unattended corrections. Every one submitted a
+  // copied paragraph, one failed outright on `oldText was not found`, and two
+  // were episode recaps. None of those shapes is expressible now: a correction
+  // names one numbered sentence and the server resolves the exact span.
+  it('resolves a cited sentence to the exact span it replaces', async () => {
+    const current = 'Sanne is a River Hearth priestess. She has never met Victoria. She keeps the gate.'
+    const prose = mockFragment({ id: 'pr-0001', type: 'prose', content: 'Sanne greets me at the First Hearth.' })
+    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => {
+      if (id === 'pr-0001') return prose
+      if (id === 'ch-0001') return mockFragment({ id, content: current })
+      return null
+    })
+    const collector = createEmptyCollector()
+    const tools = createAnalysisTools(collector, {
+      dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001',
+    })
+
+    const result = await tools.proposeRecordCorrections.execute!({
+      evidenceSegments: [1],
+      corrections: [{
+        fragmentId: 'ch-0001',
+        segment: 2,
+        newText: 'She has met Victoria once, at the First Hearth.',
+      }],
+    }, { toolCallId: 'cited', messages: [], abortSignal: undefined as unknown as AbortSignal })
+
+    expect(result).toMatchObject({ ok: true, queuedOperationCount: 1 })
+    const operation = collector.fragmentChangeProposals[0].operations[0]
+    if (operation.action !== 'replace_text') throw new Error('Expected replace_text')
+    // The model never stated the old text, so it cannot have got it wrong.
+    expect(operation.oldText).toBe('She has never met Victoria.')
+    expect(current.replace(operation.oldText, operation.newText)).toBe(
+      'Sanne is a River Hearth priestess. She has met Victoria once, at the First Hearth. She keeps the gate.',
+    )
+  })
+
+  it('still refuses a single sentence inflated into an episode recap', async () => {
+    const current = 'Sanne has never met Victoria. No hostility exists at baseline.'
+    const prose = mockFragment({ id: 'pr-0001', type: 'prose', content: 'She is overwritten by the abundance of ninety-six men.' })
+    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => {
+      if (id === 'pr-0001') return prose
+      if (id === 'ch-0001') return mockFragment({ id, content: current })
+      return null
+    })
+    const collector = createEmptyCollector()
+    const tools = createAnalysisTools(collector, {
+      dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001',
+    })
+
+    const result = await tools.proposeRecordCorrections.execute!({
+      evidenceSegments: [1],
+      corrections: [{
+        fragmentId: 'ch-0001',
+        segment: 1,
+        newText: 'Sanne has met Victoria, and has since completed the first stage of the Trial, '
+          + 'embracing a state of total physical and psychological erasure as she is overwritten '
+          + 'by the abundance of ninety-six men before transferring to the River Hearth.',
+      }],
+    }, { toolCallId: 'recap', messages: [], abortSignal: undefined as unknown as AbortSignal })
+
+    expect(result).toMatchObject({ ok: false, queuedOperationCount: 0, evidenceRetained: true })
+    expect(JSON.stringify(result)).toContain('do not restate the scene')
+    expect(collector.fragmentChangeProposals).toEqual([])
+  })
+
+  // Timeline 12 aimed a correction at `He is waiting.` (14 characters) to record
+  // that the character had been killed. The old floor granted a flat 80 extra
+  // characters, so the allowance was 94 and the correction was refused — the
+  // stale-status case record correction exists for was unreachable by
+  // construction on any terse assertion.
+  it('lets a terse assertion be corrected into a specific one', async () => {
+    const current = 'Konstantin Severi is a Cypriot oligarch. He is waiting. His houses are in Monaco.'
+    const prose = mockFragment({ id: 'pr-0001', type: 'prose', content: 'Victoria killed Severi in the study.' })
+    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => {
+      if (id === 'pr-0001') return prose
+      if (id === 'ch-0001') return mockFragment({ id, content: current })
+      return null
+    })
+    const collector = createEmptyCollector()
+    const tools = createAnalysisTools(collector, {
+      dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001',
+    })
+
+    const result = await tools.proposeRecordCorrections.execute!({
+      evidenceSegments: [1],
+      corrections: [{
+        fragmentId: 'ch-0001',
+        segment: 2,
+        newText: 'He is deceased, having been murdered by Victoria in a calculated act of personal defense and internal reclamation.',
+      }],
+    }, { toolCallId: 'terse', messages: [], abortSignal: undefined as unknown as AbortSignal })
+
+    expect(result).toMatchObject({ ok: true, queuedOperationCount: 1 })
+    const operation = collector.fragmentChangeProposals[0].operations[0]
+    if (operation.action !== 'replace_text') throw new Error('Expected replace_text')
+    expect(operation.oldText).toBe('He is waiting.')
+  })
+
+  // The record is presented sentence-numbered, so the model writes the marker
+  // back with its replacement. Timeline 12 sent `[16] He is deceased...`; left
+  // in, the marker inflates the length check and is written into the record.
+  it('strips the presentation marker the numbering taught the model to echo', async () => {
+    const current = 'Alice is captain of the guard. She keeps the north gate.'
+    const prose = mockFragment({ id: 'pr-0001', type: 'prose', content: 'Alice resigned from the guard.' })
+    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => {
+      if (id === 'pr-0001') return prose
+      if (id === 'ch-0001') return mockFragment({ id, content: current })
+      return null
+    })
+    const collector = createEmptyCollector()
+    const tools = createAnalysisTools(collector, {
+      dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001',
+    })
+
+    const result = await tools.proposeRecordCorrections.execute!({
+      evidenceSegments: [1],
+      corrections: [{
+        fragmentId: 'ch-0001',
+        segment: 1,
+        newText: '[1] Alice is the former captain of the guard.',
+      }],
+    }, { toolCallId: 'marker', messages: [], abortSignal: undefined as unknown as AbortSignal })
+
+    expect(result).toMatchObject({ ok: true, queuedOperationCount: 1 })
+    const operation = collector.fragmentChangeProposals[0].operations[0]
+    if (operation.action !== 'replace_text') throw new Error('Expected replace_text')
+    expect(operation.newText).toBe('Alice is the former captain of the guard.')
+    expect(current.replace(operation.oldText, operation.newText)).toBe(
+      'Alice is the former captain of the guard. She keeps the north gate.',
+    )
+  })
+
+  // Timeline 9's worst case was two sentences around a paragraph break. Size
+  // caught it only incidentally; a correction targets one numbered sentence, so
+  // more than one sentence back is refused on shape whatever its length.
+  it('refuses a replacement that is more than one sentence, however short', async () => {
+    const current = 'Sanne has never met Victoria. No hostility exists at baseline.'
+    const prose = mockFragment({ id: 'pr-0001', type: 'prose', content: 'Sanne greets Victoria warmly.' })
+    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => {
+      if (id === 'pr-0001') return prose
+      if (id === 'ch-0001') return mockFragment({ id, content: current })
+      return null
+    })
+    const collector = createEmptyCollector()
+    const tools = createAnalysisTools(collector, {
+      dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001',
+    })
+
+    const result = await tools.proposeRecordCorrections.execute!({
+      evidenceSegments: [1],
+      corrections: [{
+        fragmentId: 'ch-0001',
+        segment: 1,
+        // Well inside any length allowance, but it rewrites the record's shape.
+        newText: 'Sanne has met Victoria. She greeted her warmly.',
+      }],
+    }, { toolCallId: 'two', messages: [], abortSignal: undefined as unknown as AbortSignal })
+
+    expect(result).toMatchObject({ ok: false, queuedOperationCount: 0 })
+    expect(JSON.stringify(result)).toContain('replaces one numbered sentence with one sentence')
+    expect(collector.fragmentChangeProposals).toEqual([])
+  })
+
+  it('reports the real numbering of the record when a citation is out of range', async () => {
+    const current = 'Alice is captain of the guard. She keeps the north gate.'
+    const prose = mockFragment({ id: 'pr-0001', type: 'prose', content: 'Alice resigned from the guard.' })
+    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => {
+      if (id === 'pr-0001') return prose
+      if (id === 'ch-0001') return mockFragment({ id, content: current })
+      return null
+    })
+    const collector = createEmptyCollector()
+    const tools = createAnalysisTools(collector, {
+      dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001',
+    })
+
+    const result = await tools.proposeRecordCorrections.execute!({
+      evidenceSegments: [1],
+      corrections: [{ fragmentId: 'ch-0001', segment: 5, newText: 'Alice is the former captain.' }],
+    }, { toolCallId: 'range', messages: [], abortSignal: undefined as unknown as AbortSignal })
+
+    expect(result).toMatchObject({ ok: false, queuedOperationCount: 0, evidenceRetained: true })
+    expect(JSON.stringify(result)).toContain('has 2 numbered sentences; 5 is not one of them')
+    expect(collector.fragmentChangeProposals).toEqual([])
+  })
+
+  it('disambiguates a sentence that repeats verbatim in the same record', async () => {
+    const current = 'The gate is shut. Alice waits. The gate is shut.'
+    const prose = mockFragment({ id: 'pr-0001', type: 'prose', content: 'Alice opened the gate.' })
+    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => {
+      if (id === 'pr-0001') return prose
+      if (id === 'ch-0001') return mockFragment({ id, content: current })
+      return null
+    })
+    const collector = createEmptyCollector()
+    const tools = createAnalysisTools(collector, {
+      dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001',
+    })
+
+    await tools.proposeRecordCorrections.execute!({
+      evidenceSegments: [1],
+      corrections: [{ fragmentId: 'ch-0001', segment: 3, newText: 'The gate now stands open.' }],
+    }, { toolCallId: 'dup', messages: [], abortSignal: undefined as unknown as AbortSignal })
+
+    const operation = collector.fragmentChangeProposals[0].operations[0]
+    if (operation.action !== 'replace_text') throw new Error('Expected replace_text')
+    expect(operation).toMatchObject({ oldText: 'The gate is shut.', occurrence: 2 })
+  })
+
+  it('does not expose append, archive, or whole-field rewrite operations to online analysis', () => {
+    const parsed = librarianRecordCorrectionsInputSchema.safeParse({
+      evidenceSegments: [1],
+      corrections: [{
         action: 'append_paragraph',
         fragmentId: 'ch-0001',
-        field: 'content',
-        text: 'Status: Alice has entered the western gate.',
-        reason: 'The prose establishes her current location.',
+        text: 'Alice waited.',
       }],
-    }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
-
-    expect(result).toMatchObject({ ok: true, proposalCount: 1, queuedOperationCount: 1 })
-    expect(collector.fragmentChangeProposals[0].operations[0]).toMatchObject({
-      action: 'append_paragraph',
-      fragmentId: 'ch-0001',
-      field: 'content',
-      text: 'Status: Alice has entered the western gate.',
-      reason: 'The prose establishes her current location.',
-    })
-    expect(collector.fragmentChangeProposals[0].validation[0].diffs?.[0]).toMatchObject({
-      field: 'content',
-      before: '',
-      after: 'Status: Alice has entered the western gate.',
-    })
-  })
-
-  it('proposeFragmentChanges records archive_fragment proposals', async () => {
-    const target = mockFragment({ id: 'ch-0001' })
-    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) =>
-      id === 'ch-0001' ? target : null,
-    )
-    const collector = createEmptyCollector()
-    const tools = createAnalysisTools(collector, { dataDir: '/tmp', storyId: 'story-test' })
-
-    const result = await tools.proposeFragmentChanges.execute!({
-      operations: [{
-        action: 'archive_fragment',
-        fragmentId: 'ch-0001',
-        reason: 'The prose retires this fragment.',
-      }],
-    }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
-
-    expect(result).toMatchObject({ ok: true, proposalCount: 1, queuedOperationCount: 1 })
-    expect(collector.fragmentChangeProposals[0].operations[0]).toMatchObject({
-      action: 'archive_fragment',
-      fragmentId: 'ch-0001',
-    })
-    expect(collector.fragmentChangeProposals[0].validation[0]).toMatchObject({
-      action: 'archive_fragment',
-      status: 'valid',
-      target: { fragmentId: 'ch-0001' },
-    })
-  })
-
-  it('proposeFragmentChanges keeps multiple localized edits in one proposal', async () => {
-    const originalContent = 'Alice is a brave warrior with blue eyes. Currently twenty years old.'
-    const target = mockFragment({ id: 'ch-0001', content: originalContent })
-    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) =>
-      id === 'ch-0001' ? target : null,
-    )
-    const collector = createEmptyCollector()
-    const tools = createAnalysisTools(collector, { dataDir: '/tmp', storyId: 'story-test' })
-
-    const result = await tools.proposeFragmentChanges.execute!({
-      operations: [
-        {
-          action: 'replace_text',
-          fragmentId: 'ch-0001',
-          field: 'content',
-          oldText: 'blue eyes',
-          newText: 'hazel eyes',
-          reason: 'The prose changes Alice eye color.',
-        },
-        {
-          action: 'append_paragraph',
-          fragmentId: 'ch-0001',
-          field: 'content',
-          text: 'Status: Alice has entered the western gate.',
-          reason: 'The prose establishes her current location.',
-        },
-      ],
-    }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
-
-    expect(result).toMatchObject({ ok: true, proposalCount: 1, queuedOperationCount: 2 })
-    expect(collector.fragmentChangeProposals).toHaveLength(1)
-    expect(collector.fragmentChangeProposals[0].operations).toHaveLength(2)
-    expect(collector.fragmentChangeProposals[0].operations.map((operation) => operation.action)).toEqual([
-      'replace_text',
-      'append_paragraph',
-    ])
-    expect(collector.fragmentChangeProposals[0].validation).toHaveLength(2)
-    expect(collector.fragmentChangeProposals[0].validation.every((result) => result.status === 'valid')).toBe(true)
-  })
-
-  it('proposeFragmentChanges skips exact edits when oldText is absent, target is prose, or target is locked', async () => {
-    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => {
-      if (id === 'ch-0001') return mockFragment({ id })
-      if (id === 'pr-0001') return mockFragment({ id, type: 'prose', content: 'Once.' })
-      if (id === 'ch-locked') return mockFragment({ id, meta: { locked: true } })
-      return null
     })
 
-    const collector = createEmptyCollector()
-    const tools = createAnalysisTools(collector, { dataDir: '/tmp', storyId: 'story-test' })
-
-    const result = await tools.proposeFragmentChanges.execute!({
-      operations: [
-        { action: 'replace_text', fragmentId: 'ch-0001', field: 'content', oldText: 'green eyes', newText: 'hazel eyes' },
-        { action: 'replace_text', fragmentId: 'pr-0001', field: 'content', oldText: 'Once', newText: 'Twice' },
-        { action: 'replace_text', fragmentId: 'ch-locked', field: 'content', oldText: 'Alice', newText: 'Alicia' },
-      ],
-    }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
-
-    expect(collector.fragmentChangeProposals).toHaveLength(0)
-    expect(result.readFragmentIds).toEqual(['ch-0001'])
-    expect(result.operations[0].errors[0].nextAction).toBe('readFragments')
-    expect(result.skipped.map((s: { reason: string }) => s.reason).join('\n')).toContain('oldText was not found')
-    expect(result.skipped.map((s: { reason: string }) => s.reason).join('\n')).toContain('Use editProse')
-    expect(result.skipped.map((s: { reason: string }) => s.reason).join('\n')).toContain('locked')
-  })
-
-  it('proposeFragmentChanges does not queue replace_text operations with empty oldText', async () => {
-    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) =>
-      id === 'ch-0001' ? mockFragment({ id }) : null,
-    )
-    const collector = createEmptyCollector()
-    const tools = createAnalysisTools(collector, { dataDir: '/tmp', storyId: 'story-test' })
-
-    const result = await tools.proposeFragmentChanges.execute!({
-      operations: [{
-        action: 'replace_text',
-        fragmentId: 'ch-0001',
-        field: 'content',
-        oldText: '',
-        newText: 'Inserted text.',
-      }],
-    }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
-
-    expect(result).toMatchObject({ ok: false, proposalCount: 0, queuedOperationCount: 0, invalid: 1 })
-    expect(collector.fragmentChangeProposals).toHaveLength(0)
-    expect(result.operations[0].errors[0].code).toBe('old_text_missing')
-    expect(result.skipped[0].reason).toContain('replace_text requires oldText')
-  })
-
-  it('proposeFragmentChanges does not queue whole-field replace_text operations', async () => {
-    const content = 'Alice is a brave warrior with blue eyes. Currently twenty years old.'
-    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) =>
-      id === 'ch-0001' ? mockFragment({ id, content }) : null,
-    )
-    const collector = createEmptyCollector()
-    const tools = createAnalysisTools(collector, { dataDir: '/tmp', storyId: 'story-test' })
-
-    const result = await tools.proposeFragmentChanges.execute!({
-      operations: [{
-        action: 'replace_text',
-        fragmentId: 'ch-0001',
-        field: 'content',
-        oldText: content,
-        newText: 'Alice is a brave warrior with hazel eyes. Currently twenty-one years old.',
-      }],
-    }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
-
-    expect(result).toMatchObject({ ok: false, proposalCount: 0, queuedOperationCount: 0, invalid: 1 })
-    expect(collector.fragmentChangeProposals).toHaveLength(0)
-    expect(result.operations[0].errors[0].code).toBe('whole_field_replace_text')
-    expect(result.skipped[0].reason).toContain('whole-field rewrite')
-    expect(result.skipped[0].reason).toContain('set_fields with baseHash')
-  })
-
-  it('proposeFragmentChanges records set_fields as a whole-field proposal', async () => {
-    const target = mockFragment({ id: 'ch-0001' })
-    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) =>
-      id === 'ch-0001' ? target : null,
-    )
-    const collector = createEmptyCollector()
-    const tools = createAnalysisTools(collector, { dataDir: '/tmp', storyId: 'story-test' })
-    const baseHash = fragmentBaseHash(target)
-
-    const result = await tools.proposeFragmentChanges.execute!({
-      operations: [{
-        action: 'set_fields',
-        fragmentId: 'ch-0001',
-        baseHash,
-        fields: {
-          description: 'Updated',
-          content: 'Alice is a brave warrior with hazel eyes. Currently twenty-one years old.',
-        },
-      }],
-    }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
-
-    expect(result.proposalCount).toBe(1)
-    expect(collector.fragmentChangeProposals[0].operations[0]).toMatchObject({
-      action: 'set_fields',
-      fragmentId: 'ch-0001',
-      baseHash,
-      fields: {
-        description: 'Updated',
-        content: 'Alice is a brave warrior with hazel eyes. Currently twenty-one years old.',
-      },
-    })
-    expect(collector.fragmentChangeProposals[0].validation[0]).toMatchObject({
-      status: 'valid',
-      target: { fragmentId: 'ch-0001' },
-    })
-  })
-
-  it('proposeFragmentChanges rejects mixed exact edits and set_fields for the same target', async () => {
-    const target = mockFragment({ id: 'ch-0001' })
-    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) =>
-      id === 'ch-0001' ? target : null,
-    )
-    const collector = createEmptyCollector()
-    const tools = createAnalysisTools(collector, { dataDir: '/tmp', storyId: 'story-test' })
-    const baseHash = fragmentBaseHash(target)
-
-    const result = await tools.proposeFragmentChanges.execute!({
-      operations: [
-        {
-          action: 'replace_text',
-          fragmentId: 'ch-0001',
-          field: 'content',
-          oldText: 'twenty years old',
-          newText: 'twenty-one years old',
-        },
-        {
-          action: 'set_fields',
-          fragmentId: 'ch-0001',
-          baseHash,
-          fields: {
-            content: 'Alice is a brave warrior with blue eyes. Currently twenty-one years old.',
-          },
-        },
-      ],
-    }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
-
-    expect(result).toMatchObject({ ok: false, proposalCount: 0, queuedOperationCount: 0 })
-    expect(collector.fragmentChangeProposals).toHaveLength(0)
-    expect(result.skipped.map((s: { reason: string }) => s.reason).join('\n')).toContain('Submit set_fields and localized edits')
-  })
-
-  it('treats a resubmitted identical proposal as a success, not an error', async () => {
-    const target = mockFragment({ id: 'ch-0001' })
-    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) =>
-      id === 'ch-0001' ? target : null,
-    )
-    const collector = createEmptyCollector()
-    const tools = createAnalysisTools(collector, { dataDir: '/tmp', storyId: 'story-test' })
-
-    const operations = [{
-      action: 'replace_text' as const,
-      fragmentId: 'ch-0001',
-      field: 'content' as const,
-      oldText: 'twenty years old',
-      newText: 'twenty-one years old',
-    }]
-
-    const first = await tools.proposeFragmentChanges.execute!({ operations }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
-    expect(first).toMatchObject({ ok: true, proposalCount: 1 })
-
-    const second = await tools.proposeFragmentChanges.execute!({ operations }, { toolCallId: 'b', messages: [], abortSignal: undefined as unknown as AbortSignal })
-    // A duplicate does not queue a second proposal, but it is not an error and
-    // does not count against `ok`/`invalid` — it just acknowledges the dedupe.
-    expect(second).toMatchObject({ ok: true, proposalCount: 1, invalid: 0, duplicate: true })
-    expect(collector.fragmentChangeProposals).toHaveLength(1)
-  })
-
-  it('a retried batch queues only the operations not already queued', async () => {
-    const target = mockFragment({ id: 'ch-0001' })
-    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) =>
-      id === 'ch-0001' ? target : null,
-    )
-    const collector = createEmptyCollector()
-    const tools = createAnalysisTools(collector, { dataDir: '/tmp', storyId: 'story-test' })
-
-    const createOperation = {
-      action: 'create_fragment' as const,
-      type: 'knowledge',
-      name: 'Valdris',
-      description: 'Ancient city',
-      content: 'Valdris is an ancient mountain city.',
-    }
-
-    // First batch: the create is valid and queues; the edit has a bad anchor.
-    const first = await tools.proposeFragmentChanges.execute!({
-      operations: [
-        createOperation,
-        {
-          action: 'replace_text' as const,
-          fragmentId: 'ch-0001',
-          field: 'content' as const,
-          oldText: 'text that does not exist',
-          newText: 'former captain',
-        },
-      ],
-    }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
-    expect(first).toMatchObject({ ok: false, proposalCount: 1, queuedOperationCount: 1, invalid: 1 })
-
-    // Retry resubmits the whole batch with the edit fixed. The create must not
-    // queue a second time — otherwise accepting both proposals creates the
-    // fragment twice.
-    const second = await tools.proposeFragmentChanges.execute!({
-      operations: [
-        createOperation,
-        {
-          action: 'replace_text' as const,
-          fragmentId: 'ch-0001',
-          field: 'content' as const,
-          oldText: 'twenty years old',
-          newText: 'twenty-one years old',
-        },
-      ],
-    }, { toolCallId: 'b', messages: [], abortSignal: undefined as unknown as AbortSignal })
-
-    expect(second).toMatchObject({ ok: true, proposalCount: 2, queuedOperationCount: 1, invalid: 0 })
-    expect(second.alreadyQueuedOperationIds).toHaveLength(1)
-    expect(collector.fragmentChangeProposals).toHaveLength(2)
-    expect(collector.fragmentChangeProposals[0].operations.map((op: { action: string }) => op.action)).toEqual(['create_fragment'])
-    expect(collector.fragmentChangeProposals[1].operations.map((op: { action: string }) => op.action)).toEqual(['replace_text'])
-  })
-
-  it('a lightly reworded resubmission of a queued append is treated as a duplicate', async () => {
-    const target = mockFragment({ id: 'kn-0001', type: 'knowledge' })
-    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) =>
-      id === 'kn-0001' ? target : null,
-    )
-    const collector = createEmptyCollector()
-    const tools = createAnalysisTools(collector, { dataDir: '/tmp', storyId: 'story-test' })
-
-    const paragraph = 'The Maritime Heritage Initiative branding is now serving as a cover for the smuggling operation across the harbor district.'
-    const first = await tools.proposeFragmentChanges.execute!({
-      operations: [{ action: 'append_paragraph' as const, fragmentId: 'kn-0001', field: 'content' as const, text: paragraph }],
-    }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
-    expect(first).toMatchObject({ ok: true, proposalCount: 1 })
-
-    // Same fact, different whitespace and casing — must not queue a second
-    // proposal that can only fail on apply with a repeated-paragraph error.
-    const second = await tools.proposeFragmentChanges.execute!({
-      operations: [{
-        action: 'append_paragraph' as const,
-        fragmentId: 'kn-0001',
-        field: 'content' as const,
-        text: 'the maritime heritage initiative  branding is now serving as a cover for the smuggling operation across   the harbor district.',
-      }],
-    }, { toolCallId: 'b', messages: [], abortSignal: undefined as unknown as AbortSignal })
-
-    expect(second).toMatchObject({ ok: true, proposalCount: 1, duplicate: true, queuedOperationCount: 0 })
-    expect(collector.fragmentChangeProposals).toHaveLength(1)
-  })
-
-  it('proposeFragmentChanges skips set_fields without baseHash and frozen-section violations', async () => {
-    const frozen = mockFragment({
-      id: 'kn-frozen',
-      type: 'knowledge',
-      content: 'The ancient city of Valdris stands eternal.',
-      meta: { frozenSections: [{ id: 'fs-1', text: 'The ancient city of Valdris stands eternal.' }] },
-    })
-    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => {
-      if (id === 'ch-0001') return mockFragment({ id })
-      if (id === 'kn-frozen') return frozen
-      return null
-    })
-    const collector = createEmptyCollector()
-    const tools = createAnalysisTools(collector, { dataDir: '/tmp', storyId: 'story-test' })
-
-    const result = await tools.proposeFragmentChanges.execute!({
-      operations: [
-        { action: 'set_fields', fragmentId: 'ch-0001', fields: { description: 'Updated' } },
-        { action: 'set_fields', fragmentId: 'kn-frozen', baseHash: fragmentBaseHash(frozen), fields: { content: 'Valdris was destroyed.' } },
-      ],
-    }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
-
-    expect(collector.fragmentChangeProposals).toHaveLength(0)
-    expect(result.skipped.map((s: { reason: string }) => s.reason).join('\n')).toContain('requires baseHash')
-    expect(result.skipped.map((s: { reason: string }) => s.reason).join('\n')).toContain('Frozen section')
+    expect(parsed.success).toBe(false)
   })
 
   it('proposeDirections records directions', async () => {
@@ -775,5 +1139,174 @@ describe('analysis-tools', () => {
 
     expect(collector.directions).toHaveLength(3)
     expect(collector.directions[0].title).toBe('Into the forest')
+  })
+
+  // reportAnalysis loads every referenced fragment to validate its ID, so the
+  // records are already in hand. Handing them back removes the refusal loop
+  // that used to make directions wait on a readFragments round trip.
+  it('returns newly resolved records rather than demanding they be read', async () => {
+    const prose = mockFragment({ id: 'pr-0001', type: 'prose', content: 'Alice entered the forest.' })
+    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => {
+      if (id === 'pr-0001') return prose
+      if (id === 'ch-0001') return mockFragment({ id, content: 'Alice avoids the northern road. She fears it.' })
+      return null
+    })
+    const collector = createEmptyCollector()
+    const tools = createAnalysisTools(collector, {
+      dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001',
+    })
+
+    const report = await tools.reportAnalysis.execute!({
+      summary: 'Alice entered the forest.',
+      mentions: [{ fragmentId: 'ch-0001', text: 'Alice' }],
+    }, { toolCallId: 'report', messages: [], abortSignal: undefined as unknown as AbortSignal })
+    const directions = await tools.proposeDirections.execute!({
+      directions: [
+        { title: 'Into the forest', description: 'Alice enters the forest.', instruction: 'Continue into the forest.' },
+        { title: 'Wait at dusk', description: 'Alice waits until dusk.', instruction: 'Hold the scene until dusk.' },
+        { title: 'Take the river', description: 'Alice follows the river.', instruction: 'Continue along the river.' },
+      ],
+    }, { toolCallId: 'directions', messages: [], abortSignal: undefined as unknown as AbortSignal })
+
+    expect(report).toMatchObject({
+      resolvedFragments: [{
+        id: 'ch-0001',
+        name: 'Alice',
+        // Sentences are numbered so a later correction can address one.
+        content: '[1] Alice avoids the northern road.\n[2] She fears it.',
+      }],
+    })
+    // No read, no refusal: the first attempt records.
+    expect(directions).toMatchObject({ ok: true })
+    expect(collector.directions).toHaveLength(3)
+  })
+
+  it('does not re-deliver a record already presented in full', async () => {
+    const prose = mockFragment({ id: 'pr-0001', type: 'prose', content: 'Alice entered the forest.' })
+    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => {
+      if (id === 'pr-0001') return prose
+      if (id === 'ch-0001') return mockFragment({ id, content: 'Alice avoids the northern road.' })
+      return null
+    })
+    const collector = createEmptyCollector()
+    const tools = createAnalysisTools(collector, {
+      dataDir: '/tmp',
+      storyId: 'story-test',
+      proseFragmentId: 'pr-0001',
+      presentedFullFragmentIds: ['ch-0001'],
+    })
+
+    const report = await tools.reportAnalysis.execute!({
+      summary: 'Alice entered the forest.',
+      mentions: [{ fragmentId: 'ch-0001', text: 'Alice' }],
+    }, { toolCallId: 'report', messages: [], abortSignal: undefined as unknown as AbortSignal })
+
+    expect(report).not.toHaveProperty('resolvedFragments')
+  })
+})
+
+/**
+ * The registry steers reuse through the field description and through
+ * canonicalization on ingest, not through a closed enum. Enforcing the choice
+ * with an enum plus a sibling newKey field cost 11 of Timeline 11's 14
+ * reportAnalysis rejections, because a 12B could not reliably pick between two
+ * optional fields and the penalty was the whole batched report.
+ */
+describe('continuity keys steered by the live registry', () => {
+  // stateOperations is array(...).max().default(), so: default -> array -> element.
+  /* eslint-disable @typescript-eslint/no-explicit-any */
+  const elementShape = (field: any) => field.def.innerType.def.element.shape
+  const keyFields = (registry: Parameters<typeof buildReportAnalysisInputSchema>[0]) => {
+    const shape = buildReportAnalysisInputSchema(registry).shape as any
+    return {
+      state: Object.keys(elementShape(shape.stateOperations)),
+      knowledge: Object.keys(elementShape(shape.knowledgeOperations)),
+    }
+  }
+  const stateKeyDescription = (registry: Parameters<typeof buildReportAnalysisInputSchema>[0]) =>
+    (elementShape((buildReportAnalysisInputSchema(registry).shape as any).stateOperations).key.description ?? '') as string
+  /* eslint-enable @typescript-eslint/no-explicit-any */
+
+  it('exposes one key field whether or not the registry has entries', () => {
+    for (const registry of [{}, { state: ['captivity_status'] }]) {
+      expect(keyFields(registry).state).toContain('key')
+      expect(keyFields(registry).state).not.toContain('existingKey')
+      expect(keyFields(registry).state).not.toContain('newKey')
+    }
+  })
+
+  it('names the live keys at the point of use without making them the only legal values', () => {
+    const schema = buildReportAnalysisInputSchema({ state: ['captivity_status', 'location'] })
+    const stateOperation = (key: unknown) => ({
+      stateOperations: [{ key, action: 'set', subject: 'Victoria', value: 'held', evidenceSegments: [1] }],
+    })
+
+    expect(stateKeyDescription({ state: ['captivity_status', 'location'] }))
+      .toContain('captivity_status, location')
+    expect(stateKeyDescription({})).not.toContain('Reuse one of these')
+
+    expect(schema.safeParse(stateOperation('captivity_status')).success).toBe(true)
+    // A key outside the registry is a new identity, not a rejected report.
+    expect(schema.safeParse(stateOperation('captivity_state')).success).toBe(true)
+    // The field the model is not using arrives as an explicit null often enough
+    // that treating it as a rejection cost Timeline 11 three whole reports.
+    expect(schema.safeParse(stateOperation(null)).success).toBe(true)
+  })
+
+  it('lands a legacy spelling on the live key by canonicalizing rather than by refusing it', async () => {
+    const collector = createEmptyCollector()
+    const prose = mockFragment({ id: 'pr-0001', type: 'prose', content: 'She is the queen. She says so.' })
+    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => {
+      if (id === 'pr-0001') return prose
+      if (id === 'ch-0001') return mockFragment({ id, type: 'character' })
+      return null
+    })
+    const tools = createAnalysisTools(collector, {
+      dataDir: '/tmp',
+      storyId: 'story-test',
+      proseFragmentId: 'pr-0001',
+      continuityKeys: { knowledge: ['queen_identity'] },
+    })
+
+    await tools.reportAnalysis.execute!(await buildReportAnalysisInputSchema({ knowledge: ['queen_identity'] }).parseAsync({
+      summary: 'She is the queen.',
+      knowledgeOperations: [{
+        characterId: 'ch-0001',
+        // The prefixed, hyphenated spelling the model reached for on Timeline 9.
+        key: 'ch-zinozi|Queen-Identity',
+        action: 'learn',
+        fact: 'She is the queen.',
+        acquisition: 'witnessed',
+        evidenceSegments: [1],
+      }],
+    }), { toolCallId: 'report', messages: [], abortSignal: undefined as unknown as AbortSignal })
+
+    expect(collector.continuityProjection.knowledgeOperations[0].knowledgeKey).toBe('queen_identity')
+  })
+
+  // Timeline 11 admitted a literal `_` as a thread key because the 12B put the
+  // real key in `label`. It must be skipped with a reason, not registered.
+  it('skips an operation whose key carries no identity instead of registering it', async () => {
+    const collector = createEmptyCollector()
+    const prose = mockFragment({ id: 'pr-0001', type: 'prose', content: 'He claims her line. She accepts.' })
+    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => id === 'pr-0001' ? prose : null)
+    const tools = createAnalysisTools(collector, {
+      dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001',
+    })
+
+    const result = await tools.reportAnalysis.execute!(await reportAnalysisInputSchema.parseAsync({
+      summary: 'He claims her line.',
+      threadOperations: [{
+        key: '_',
+        action: 'advance',
+        label: 'mpamba_dynastic_intent',
+        relatedFragmentIds: [],
+        evidenceSegments: [1],
+      }],
+    }), { toolCallId: 'report', messages: [], abortSignal: undefined as unknown as AbortSignal })
+
+    expect(collector.continuityProjection.threadOperations).toEqual([])
+    expect((result as { skippedContinuity: Array<{ reason: string }> }).skippedContinuity[0].reason)
+      .toContain('needs a key naming the unresolved question')
   })
 })

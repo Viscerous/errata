@@ -98,7 +98,12 @@ export async function applyBlockConfig(
         return block
     }
 
-    return { ...block, content }
+    // A full override no longer represents the structured fragment surface the
+    // default block described. Drop its metadata so context receipts do not
+    // claim that removed fragments were delivered.
+    return override.contentMode === 'override'
+      ? { ...block, content, fragmentContext: undefined }
+      : { ...block, content }
   })
 
   // 3. Apply blockOrder ordering (position-based)

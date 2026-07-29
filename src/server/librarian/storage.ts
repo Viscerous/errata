@@ -1,13 +1,16 @@
-import { mkdir, readdir, readFile, unlink } from 'node:fs/promises'
+import { mkdir, readdir, readFile, stat, unlink } from 'node:fs/promises'
 import { join } from 'node:path'
 import { existsSync } from 'node:fs'
 import { getContentRoot } from '../fragments/branches'
+import { getFragment } from '../fragments/storage'
+import { proseContentHash } from './continuity-source'
 import { generateConversationId } from '@/lib/fragment-ids'
 import { writeJsonAtomic } from '../fs-utils'
 import { withKeyLock } from '../async-lock'
 import type { FragmentChangeOperation, OperationValidation } from '../fragments/change-operations'
 import type { AppliedChange, AppliedFieldChange, RevertResult } from '../fragments/change-apply'
 import type { MergedFragmentCandidate } from './candidates'
+import type { AnalysisSourceRevision, ContinuityProjection } from './continuity-types'
 
 /**
  * The librarian analysis proposals reuse the shared apply/revert snapshot types.
@@ -28,6 +31,19 @@ function withIndexLock<T>(storyId: string, fn: () => Promise<T>): Promise<T> {
 export interface LibrarianFragmentChangeProposal {
   title?: string
   rationale?: string
+  /** Which online maintenance lane queued this proposal. */
+  proposalKind?: 'correction' | 'new-fragment'
+  /** Sentence numbers the analyst cited in the accepted prose. */
+  evidenceSegments?: number[]
+  /** Those sentences resolved to exact text, for review and unattended re-checking. */
+  evidenceText?: string
+  /** Positive eligibility argument supplied by the analyst. */
+  eligibilityReason?: string
+  /**
+   * Set only after the online-analysis contract passes its structural safety
+   * gates. Required for unattended application.
+   */
+  autoApplySafe?: boolean
   operations: FragmentChangeOperation[]
   validation: OperationValidation[]
   sourceFragmentId?: string
@@ -48,6 +64,8 @@ export interface LibrarianAnalysis {
   id: string
   createdAt: string
   fragmentId: string
+  /** Material source fingerprint used to reject stale derived continuity. */
+  sourceRevision?: AnalysisSourceRevision
   /** The summary text the librarian intended to record (intent). */
   summaryUpdate: string
   /**
@@ -62,12 +80,19 @@ export interface LibrarianAnalysis {
     stateChanges: string[]
     openThreads: string[]
   }
+  continuityProjection?: ContinuityProjection
   mentions: LibrarianMention[]
   candidateFragmentIds?: string[]
   candidateFragments?: MergedFragmentCandidate[]
   contradictions: Array<{
     description: string
     fragmentIds: string[]
+    /** User-reviewed findings remain in the historical analysis but no longer count as active. */
+    dismissed?: boolean
+    dismissedAt?: string
+    /** Exact source-linked evidence used by newer, high-precision analyses. */
+    sourceEvidenceText?: string
+    conflictingEvidence?: Array<{ fragmentId: string; segments?: number[]; evidenceText: string }>
   }>
   fragmentChangeProposals: LibrarianFragmentChangeProposal[]
   timelineEvents: Array<{
@@ -160,6 +185,12 @@ export interface LibrarianAnalysisSummary {
   timelineEventCount: number
   directionsCount: number
   hasTrace?: boolean
+  /**
+   * The source prose changed after this analysis ran, so its continuity
+   * projection is rejected by the derived fold. Without surfacing this, an edit
+   * silently drops that passage's state and knowledge from Writer context.
+   */
+  continuityStale?: boolean
 }
 
 export interface LibrarianState {
@@ -411,6 +442,62 @@ export async function deleteAnalysis(
   return true
 }
 
+/**
+ * The panel polls this list every five seconds, and the counts it needs are a
+ * few integers off each analysis — but the analysis file also carries the whole
+ * agent trace, which is most of its bulk. Re-reading and re-parsing all of it on
+ * every poll cost 28ms across 5.3MB on a 36-analysis branch, growing linearly
+ * with the story, for rows that had not changed.
+ *
+ * Files are written atomically and never mutated in place, so size and mtime
+ * settle the question of whether a parse can be skipped. `continuityStale` is
+ * deliberately not cached: it compares the analysis against the *live* prose,
+ * which moves without the analysis file changing at all.
+ */
+interface CachedAnalysisSummary {
+  signature: string
+  summary: LibrarianAnalysisSummary
+  /** Present only when the analysis carries a projection worth staleness-checking. */
+  projectionContentHash: string | null
+}
+
+const MAX_SUMMARY_CACHE_ENTRIES = 512
+const summaryCache = new Map<string, CachedAnalysisSummary>()
+
+async function readAnalysisSummary(path: string): Promise<CachedAnalysisSummary> {
+  const stats = await stat(path)
+  const signature = `${stats.mtimeMs}:${stats.size}`
+  const cached = summaryCache.get(path)
+  if (cached?.signature === signature) return cached
+
+  const analysis = normalizeAnalysis(JSON.parse(await readFile(path, 'utf-8')))
+  const entry: CachedAnalysisSummary = {
+    signature,
+    summary: {
+      id: analysis.id,
+      createdAt: analysis.createdAt,
+      fragmentId: analysis.fragmentId,
+      contradictionCount: analysis.contradictions.filter((contradiction) => !contradiction.dismissed).length,
+      suggestionCount: analysis.fragmentChangeProposals.length,
+      pendingSuggestionCount: analysis.fragmentChangeProposals.filter((s) => !s.accepted && !s.dismissed).length,
+      timelineEventCount: analysis.timelineEvents.length,
+      directionsCount: analysis.directions?.length ?? 0,
+      hasTrace: !!analysis.trace?.length,
+    },
+    projectionContentHash: analysis.sourceRevision && analysis.continuityProjection
+      ? analysis.sourceRevision.contentHash
+      : null,
+  }
+
+  summaryCache.set(path, entry)
+  while (summaryCache.size > MAX_SUMMARY_CACHE_ENTRIES) {
+    const oldest = summaryCache.keys().next().value
+    if (typeof oldest !== 'string') break
+    summaryCache.delete(oldest)
+  }
+  return entry
+}
+
 export async function listAnalyses(
   dataDir: string,
   storyId: string,
@@ -420,25 +507,23 @@ export async function listAnalyses(
 
   const entries = await readdir(dir)
   const summaries: LibrarianAnalysisSummary[] = []
+  const sourceHashes = new Map<string, string | null>()
 
   for (const entry of entries) {
     if (!entry.endsWith('.json')) continue
-    const raw = await readFile(join(dir, entry), 'utf-8')
-    const analysis = normalizeAnalysis(JSON.parse(raw))
-    const suggestionCount = analysis.fragmentChangeProposals.length
-    const pendingSuggestionCount = analysis.fragmentChangeProposals.filter((s) => !s.accepted && !s.dismissed).length
+    const { summary, projectionContentHash } = await readAnalysisSummary(join(dir, entry))
 
-    summaries.push({
-      id: analysis.id,
-      createdAt: analysis.createdAt,
-      fragmentId: analysis.fragmentId,
-      contradictionCount: analysis.contradictions.length,
-      suggestionCount,
-      pendingSuggestionCount,
-      timelineEventCount: analysis.timelineEvents.length,
-      directionsCount: analysis.directions?.length ?? 0,
-      hasTrace: !!analysis.trace?.length,
-    })
+    let continuityStale = false
+    if (projectionContentHash) {
+      if (!sourceHashes.has(summary.fragmentId)) {
+        const source = await getFragment(dataDir, storyId, summary.fragmentId)
+        sourceHashes.set(summary.fragmentId, source ? proseContentHash(source) : null)
+      }
+      const hash = sourceHashes.get(summary.fragmentId)
+      continuityStale = hash != null && hash !== projectionContentHash
+    }
+
+    summaries.push(continuityStale ? { ...summary, continuityStale } : summary)
   }
 
   // Sort newest first

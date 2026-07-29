@@ -21,11 +21,13 @@ import {
   saveState,
   type LibrarianAnalysis,
 } from './storage'
+import { analysisSourceRevision } from './continuity-source'
 import {
   applyFragmentChangeProposal,
   markFragmentChangeProposalApplied,
   markFragmentChangeProposalStale,
   ProposalApplyError,
+  ProposalNeedsAuthorError,
   ProposalValidationError,
 } from './suggestions'
 import { createLogger } from '../logging'
@@ -150,8 +152,10 @@ async function runLibrarianInner(
     id: analysisId,
     createdAt: new Date().toISOString(),
     fragmentId,
+    sourceRevision: analysisSourceRevision(fragment),
     summaryUpdate: collector.summaryUpdate,
     structuredSummary: collector.structuredSummary,
+    continuityProjection: collector.continuityProjection,
     mentions: collector.mentions,
     candidateFragmentIds,
     candidateFragments,
@@ -172,6 +176,14 @@ async function runLibrarianInner(
       proposalCount: analysis.fragmentChangeProposals.length,
     })
     for (let index = 0; index < analysis.fragmentChangeProposals.length; index += 1) {
+      const proposal = analysis.fragmentChangeProposals[index]
+      if (proposal.autoApplySafe !== true) {
+        requestLogger.warn('Leaving proposal pending because it did not pass the unattended-apply contract', {
+          proposalIndex: index,
+          proposalKind: proposal.proposalKind ?? 'legacy',
+        })
+        continue
+      }
       try {
         const result = await applyFragmentChangeProposal({
           dataDir,
@@ -194,6 +206,14 @@ async function runLibrarianInner(
             proposalIndex: index,
             result: error.partial,
             autoApplied: true,
+          })
+        } else if (error instanceof ProposalNeedsAuthorError) {
+          // Sound, but not something to write unattended. Manual accept skips
+          // the unattended gate, so leave it pending for the author instead of
+          // dismissing the correction on their behalf.
+          requestLogger.info('Proposal left pending for author review', {
+            proposalIndex: index,
+            reason: error.message,
           })
         } else if (error instanceof ProposalValidationError) {
           // Nothing was written; an earlier proposal in this run typically

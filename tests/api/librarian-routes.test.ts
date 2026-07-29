@@ -201,6 +201,44 @@ describe('librarian API routes', () => {
     })
   })
 
+  describe('POST /stories/:storyId/librarian/analyses/:analysisId/contradictions/:index/dismiss', () => {
+    it('dismisses a contradiction without deleting it from analysis history', async () => {
+      await saveAnalysis(dataDir, storyId, makeAnalysis({
+        id: 'analysis-dismiss-contradiction',
+        contradictions: [
+          { description: 'Eye color mismatch', fragmentIds: ['ch-0001'] },
+        ],
+      }))
+
+      const res = await app.fetch(new Request(
+        `http://localhost/api/stories/${storyId}/librarian/analyses/analysis-dismiss-contradiction/contradictions/0/dismiss`,
+        { method: 'POST' },
+      ))
+
+      expect(res.status).toBe(200)
+      const data = await res.json()
+      expect(data.analysis.contradictions[0]).toMatchObject({ dismissed: true })
+      expect(typeof data.analysis.contradictions[0].dismissedAt).toBe('string')
+
+      const listRes = await app.fetch(
+        new Request(`http://localhost/api/stories/${storyId}/librarian/analyses`),
+      )
+      const summaries = await listRes.json()
+      expect(summaries[0].contradictionCount).toBe(0)
+    })
+
+    it('rejects an invalid contradiction index', async () => {
+      await saveAnalysis(dataDir, storyId, makeAnalysis({ id: 'analysis-no-contradiction' }))
+
+      const res = await app.fetch(new Request(
+        `http://localhost/api/stories/${storyId}/librarian/analyses/analysis-no-contradiction/contradictions/0/dismiss`,
+        { method: 'POST' },
+      ))
+
+      expect(res.status).toBe(422)
+    })
+  })
+
   describe('PATCH /stories/:storyId/librarian/analyses/:analysisId', () => {
     it('updates the saved summary and its canonical summary fragment', async () => {
       await createFragment(dataDir, storyId, {
