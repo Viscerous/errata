@@ -848,7 +848,7 @@ export function SettingsPanel({
                 label="Toggle disable auto analysis"
               />
             </SettingRow>
-            <SettingRow label="Auto-apply suggestions" description="Librarian auto applies suggested fragment creates, updates, and edits" helpTopic="librarian#auto-suggestions">
+            <SettingRow label="Auto-apply suggestions" description="Apply evidence-backed fragment corrections and new reusable records automatically" helpTopic="librarian#auto-suggestions">
               <Toggle
                 checked={story.settings.autoApplyLibrarianSuggestions ?? false}
                 onChange={(next) => updateMutation.mutate({ autoApplyLibrarianSuggestions: next })}
@@ -864,7 +864,7 @@ export function SettingsPanel({
                 label="Toggle disable directions"
               />
             </SettingRow>
-            <SettingRow label="Disable suggestions" description="Skip fragment create, update, and edit suggestions during analysis">
+            <SettingRow label="Disable suggestions" description="Skip fragment corrections and new-record suggestions during analysis">
               <Toggle
                 checked={story.settings.disableLibrarianSuggestions ?? false}
                 onChange={(next) => updateMutation.mutate({ disableLibrarianSuggestions: next })}

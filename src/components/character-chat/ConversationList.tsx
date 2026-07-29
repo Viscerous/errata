@@ -170,32 +170,37 @@ export function ConversationList({
                 )}
 
                 {convs.map((conv) => (
-                  <button
+                  <div
                     key={conv.id}
-                    onClick={() => onSelect(conv)}
-                    className="w-full flex items-start gap-3 px-3 py-2.5 rounded-lg text-left
+                    className="w-full flex items-start gap-3 px-3 py-2.5 rounded-lg
                       hover:bg-accent/50 transition-colors group"
                   >
-                    <div className="shrink-0 mt-0.5 text-muted-foreground">
-                      {personaIcon(conv.persona)}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-baseline gap-2">
-                        <span className="text-xs font-medium truncate">{conv.title}</span>
-                        <span className="text-[0.625rem] text-muted-foreground shrink-0 ml-auto">
-                          {formatRelativeTime(conv.updatedAt)}
-                        </span>
+                    <button
+                      type="button"
+                      onClick={() => onSelect(conv)}
+                      className="flex-1 min-w-0 flex items-start gap-3 text-left"
+                    >
+                      <div className="shrink-0 mt-0.5 text-muted-foreground">
+                        {personaIcon(conv.persona)}
                       </div>
-                      <div className="flex items-center gap-1.5 mt-0.5">
-                        <span className="text-[0.625rem] text-muted-foreground">
-                          {personaLabel(conv.persona, characters)}
-                        </span>
-                        <span className="text-[0.625rem] text-muted-foreground">·</span>
-                        <span className="text-[0.625rem] text-muted-foreground">
-                          {conv.messageCount} message{conv.messageCount !== 1 ? 's' : ''}
-                        </span>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-baseline gap-2">
+                          <span className="text-xs font-medium truncate">{conv.title}</span>
+                          <span className="text-[0.625rem] text-muted-foreground shrink-0 ml-auto">
+                            {formatRelativeTime(conv.updatedAt)}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5 mt-0.5">
+                          <span className="text-[0.625rem] text-muted-foreground">
+                            {personaLabel(conv.persona, characters)}
+                          </span>
+                          <span className="text-[0.625rem] text-muted-foreground">·</span>
+                          <span className="text-[0.625rem] text-muted-foreground">
+                            {conv.messageCount} message{conv.messageCount !== 1 ? 's' : ''}
+                          </span>
+                        </div>
                       </div>
-                    </div>
+                    </button>
                     <Button
                       variant="ghost"
                       size="icon"
@@ -204,7 +209,7 @@ export function ConversationList({
                     >
                       <Trash2 className="size-3" />
                     </Button>
-                  </button>
+                  </div>
                 ))}
               </div>
             )

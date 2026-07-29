@@ -939,9 +939,9 @@ return rules.map(r => r.content).join('\\n')`}</div>
           <>
             <P>
               The librarian is a background agent that runs automatically after each prose generation.
-              It reads through your <strong className="text-foreground/75">entire fragment collection</strong> — prose,
-              characters, guidelines, and knowledge — to maintain a rolling summary, detect character
-              mentions, flag contradictions, suggest new knowledge, and track the timeline.
+              It receives recent prose, promoted full fragments, and compact catalogs for everything else.
+              It maintains summaries, detects exact fragment mentions, records continuity, flags
+              contradictions, and proposes narrowly supported record corrections.
             </P>
             <P>
               Every time you generate prose, the librarian analyzes it in the context of everything
@@ -951,6 +951,31 @@ return rules.map(r => r.content).join('\\n')`}</div>
             <P>
               You can disable automatic post-generation analysis in Settings if you want generation
               to save prose without immediately running the librarian.
+            </P>
+          </>
+        ),
+      },
+      {
+        id: 'continuity-memory',
+        title: 'Continuity memory',
+        content: (
+          <>
+            <P>
+              Analysis records source-linked state changes, temporal framing, unresolved-thread lifecycle,
+              and explicit character knowledge changes. The Writer receives a compact continuity view without
+              waiting for another model call. Older event prose remains with summaries instead of forming a
+              second history channel.
+            </P>
+            <P>
+              Unresolved threads are memory, not a to-do list. A thread can be foreground, background, or
+              dormant; dormant threads remain recorded without pressuring the Writer to mention or resolve them.
+              Resolution and abandonment require an explicit event in the prose.
+            </P>
+            <P>
+              Character sheets and world fragments are omniscient author reference. They do not make every
+              character aware of their contents. The continuity view records only facts explicitly learned,
+              corrected, or forgotten, including whether they were witnessed, told, or inferred. It does not
+              infer a global roster of everyone present.
             </P>
           </>
         ),
@@ -1062,10 +1087,10 @@ return rules.map(r => r.content).join('\\n')`}</div>
               and the specific fragment IDs involved.
             </P>
             <P>
-              Each contradiction includes a <strong className="text-foreground/75">Fix</strong> button
-              that opens the Refine tool with pre-filled instructions to resolve the issue. The
-              librarian will rewrite the fragment to fix the inconsistency while preserving the
-              rest of its content.
+              Each contradiction includes a <strong className="text-foreground/75">Review</strong> button
+              that opens a librarian conversation with the relevant fragments attached. Dismiss a false
+              positive—or a finding you have already resolved—with the adjacent × button. Dismissed findings
+              remain in the saved analysis history but no longer appear or count as active contradictions.
             </P>
           </>
         ),
@@ -1076,15 +1101,18 @@ return rules.map(r => r.content).join('\\n')`}</div>
         content: (
           <>
             <P>
-              When the librarian detects new information in your prose — a new character, a world-building
-              detail, an important object — it creates a fragment suggestion. Each suggestion includes
-              a name, type, and description.
+              The librarian may suggest a fragment change when accepted prose makes a specific assertion
+              in an existing reusable fragment inaccurate, or establishes genuinely new reusable records.
+              Corrections and newly discovered records use separate proposal paths and appear as separate
+              review items. Every online suggestion cites supporting prose through a verbatim excerpt or
+              ordered verbatim spans.
             </P>
             <P>
-              Suggestions can either create a brand new fragment or update an existing one. Click
-              the <strong className="text-foreground/75">+</strong> button to accept a suggestion,
-              and the fragment will be created or updated immediately. The librarian can also
-              directly update existing fragments in-place when it detects changes to established details.
+              Existing-fragment suggestions are stored as small exact replacements rather than appended scene
+              histories or whole-sheet rewrites. If a model copies a whole sheet while changing one assertion,
+              Errata reduces it to the local difference; broad rewrites are rejected. Events, current conditions,
+              relationship movement, and open threads remain part of the passage analysis. Click the
+              <strong className="text-foreground/75"> +</strong> button to apply a pending suggestion.
             </P>
             <Tip>
               Suggestions that update existing fragments show which fragment they target, so you
@@ -1122,14 +1150,14 @@ return rules.map(r => r.content).join('\\n')`}</div>
           <>
             <P>
               The toggle at the top of the Librarian panel controls whether suggestions are
-              applied automatically. When enabled, the librarian will create and update fragments
-              on its own — for example, adding a character fragment when someone new appears in the prose,
-              or updating a knowledge fragment when details change.
+              applied automatically. When enabled, the librarian applies only proposals that passed
+              the online evidence and minimal-change contract: exact localized corrections and/or newly
+              established reusable records.
             </P>
             <Tip>
               This is off by default. Enable it if you want the librarian to proactively maintain
-              your story's knowledge base without manual intervention. Auto-applied suggestions
-              are marked with an "Auto" badge so you can review what changed.
+              your story's reusable records without checking every change. Auto-applied suggestions
+              remain source-linked, reversible, and marked with an "Auto" badge.
             </Tip>
           </>
         ),
@@ -1148,7 +1176,7 @@ return rules.map(r => r.content).join('\\n')`}</div>
               <strong className="text-foreground/75">Disable directions</strong> turns off guided story
               direction suggestions, while
               <strong className="text-foreground/75"> Disable suggestions</strong> turns off fragment
-              create, update, and edit suggestions. These let you keep summary and contradiction tracking while
+              corrections and new-record suggestions. These let you keep summary and contradiction tracking while
               reducing proactive librarian output.
             </P>
           </>

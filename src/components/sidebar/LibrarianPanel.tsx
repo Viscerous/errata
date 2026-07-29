@@ -13,6 +13,8 @@ import {
 import { qk, q, useActiveBranchId } from '@/lib/query-keys'
 import { cn } from '@/lib/utils'
 import { diffRows } from '@/lib/diff'
+import { toolResultOutcome } from '@/lib/librarian-outcome'
+import { continuityKeyLabel } from '@/lib/continuity-keys'
 import { DiffRowsView } from '@/components/DiffRowsView'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -278,12 +280,15 @@ function ConversationList({ conversations, onSelect, onNew, onDelete }: Conversa
             const timeStr = formatRelativeTime(date)
 
             return (
-              <button
+              <div
                 key={conv.id}
-                onClick={() => onSelect(conv.id)}
-                className="group w-full text-left rounded-md px-2.5 py-2 hover:bg-muted/50 transition-colors"
+                className="group w-full flex items-start gap-2 rounded-md px-2.5 py-2 hover:bg-muted/50 transition-colors"
               >
-                <div className="flex items-start gap-2">
+                <button
+                  type="button"
+                  onClick={() => onSelect(conv.id)}
+                  className="flex-1 min-w-0 flex items-start gap-2 text-left"
+                >
                   <MessageSquare className="size-3 text-muted-foreground/50 mt-0.5 shrink-0" />
                   <div className="flex-1 min-w-0">
                     <div className="text-[0.6875rem] text-foreground/80 truncate leading-tight">
@@ -293,15 +298,16 @@ function ConversationList({ conversations, onSelect, onNew, onDelete }: Conversa
                       {timeStr}
                     </div>
                   </div>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); onDelete(conv.id) }}
-                    className="opacity-0 group-hover:opacity-100 text-muted-foreground/40 hover:text-destructive transition-all p-0.5 rounded shrink-0"
-                    title="Delete conversation"
-                  >
-                    <Trash2 className="size-3" />
-                  </button>
-                </div>
-              </button>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onDelete(conv.id)}
+                  className="opacity-0 group-hover:opacity-100 text-muted-foreground/40 hover:text-destructive transition-all p-0.5 rounded shrink-0"
+                  title="Delete conversation"
+                >
+                  <Trash2 className="size-3" />
+                </button>
+              </div>
             )
           })}
         </div>
@@ -606,6 +612,123 @@ function SectionLabel({ children, icon }: { children: React.ReactNode; icon?: Re
   )
 }
 
+/**
+ * Two label levels inside an expanded analysis, so the card reads as a
+ * hierarchy. Both live in one register — uppercase, tracked, and smaller than
+ * body text — and rank by weight and contrast rather than size, matching
+ * SectionLabel above. Sentence-case sub-labels at a *larger* size than the
+ * fields containing them put the hierarchy exactly backwards, and left them
+ * sharing the plain register of the bullets they introduced.
+ */
+function AnalysisFieldLabel({
+  children,
+  tone = 'muted',
+}: {
+  children: React.ReactNode
+  tone?: 'muted' | 'destructive' | 'primary'
+}) {
+  return (
+    <span className={cn(
+      'text-[0.5625rem] uppercase tracking-[0.12em] font-medium',
+      tone === 'muted' && 'text-muted-foreground',
+      tone === 'destructive' && 'text-destructive/70',
+      tone === 'primary' && 'text-primary/70',
+    )}>
+      {children}
+    </span>
+  )
+}
+
+/** A span, not a paragraph, so it can also sit inline beside a single value. */
+function AnalysisSubLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="block text-[0.5625rem] uppercase tracking-[0.08em] text-foreground/40">
+      {children}
+    </span>
+  )
+}
+
+/**
+ * A subsection holding exactly one value, laid out on its own line. Giving a
+ * single datum a heading and then a one-item bullet list read as structural
+ * noise: "Temporal frame" above "- forward".
+ */
+function AnalysisInlineField({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <p className="flex flex-wrap items-baseline gap-x-1.5">
+      <AnalysisSubLabel>{label}</AnalysisSubLabel>
+      <span className="text-foreground/60 leading-relaxed">{children}</span>
+    </p>
+  )
+}
+
+/**
+ * One bullet grammar for every detail list in the card. Rows that open with
+ * their own marker — a timeline position badge, say — pass `marker={false}`, so
+ * the dash is not doubled up with something already doing its job.
+ */
+function AnalysisList({
+  items,
+  marker = true,
+}: {
+  items: Array<{ key: string; content: React.ReactNode }>
+  marker?: boolean
+}) {
+  return (
+    <ul className="mt-0.5 space-y-0.5">
+      {items.map((item) => (
+        <li key={item.key} className="text-foreground/60 leading-relaxed">
+          {marker ? '- ' : ''}{item.content}
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+
+const THREAD_ACTION_LABELS: Record<string, string> = {
+  open: 'opened',
+  advance: 'advanced',
+  resolve: 'resolved',
+  abandon: 'abandoned',
+}
+
+/**
+ * Lifecycle and focus are two lanes describing the same threads, so listing
+ * them end to end showed one thread twice — once as `advance`, once as
+ * `foreground`. One row per thread, in the order the analysis first mentions it.
+ */
+export function threadContinuityRows(
+  operations: Array<{ threadKey: string; action: string; label?: string }>,
+  focus: Array<{ threadKey: string; visibility: string }>,
+): Array<{ key: string; content: React.ReactNode }> {
+  type ThreadRow = { label: string; actions: string[]; visibility?: string }
+  const rows = new Map<string, ThreadRow>()
+  const rowFor = (threadKey: string, label?: string): ThreadRow => {
+    const existing = rows.get(threadKey)
+    if (existing) {
+      if (label) existing.label = label
+      return existing
+    }
+    const created: ThreadRow = { label: label ?? continuityKeyLabel(threadKey), actions: [] }
+    rows.set(threadKey, created)
+    return created
+  }
+  for (const operation of operations) {
+    rowFor(operation.threadKey, operation.label).actions
+      .push(THREAD_ACTION_LABELS[operation.action] ?? operation.action)
+  }
+  for (const entry of focus) rowFor(entry.threadKey).visibility = entry.visibility
+
+  return [...rows.entries()].map(([threadKey, row]) => ({
+    key: `continuity-thread-${threadKey}`,
+    content: [
+      row.label,
+      [...row.actions, ...(row.visibility ? [`in the ${row.visibility}`] : [])].join(', '),
+    ].filter(Boolean).join(' — '),
+  }))
+}
+
 function MentionGroupsSummary({
   groups,
   charName,
@@ -736,6 +859,15 @@ function AnalysisItem({
     },
   })
 
+  const dismissContradictionMutation = useMutation({
+    mutationFn: (index: number) =>
+      api.librarian.dismissContradiction(storyId, summary.id, index),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['librarian-analyses', storyId] })
+      queryClient.invalidateQueries({ queryKey: ['librarian-analysis', storyId, summary.id] })
+    },
+  })
+
   const deleteMutation = useMutation({
     mutationFn: () => api.librarian.deleteAnalysis(storyId, summary.id),
     onSuccess: () => {
@@ -776,44 +908,53 @@ function AnalysisItem({
 
   return (
     <div className="rounded-md border border-border/25 overflow-hidden">
-      <button
-        onClick={onToggle}
-        className="w-full flex items-center gap-1.5 px-2.5 py-2 text-[0.6875rem] hover:bg-accent/30 transition-colors"
-      >
-        {expanded
-          ? <ChevronDown className="size-3 text-muted-foreground shrink-0" />
-          : <ChevronRight className="size-3 text-muted-foreground shrink-0" />
-        }
-        <span className="font-mono text-foreground/60 truncate">{summary.fragmentId}</span>
-        <span className="text-muted-foreground shrink-0">{timeStr}</span>
-        <div className="ml-auto flex gap-1 shrink-0 items-center">
-          {summary.contradictionCount > 0 && (
-            <span className="inline-flex items-center justify-center size-4 rounded-full bg-destructive/15 text-destructive text-[0.5625rem] font-mono">
-              {summary.contradictionCount}
-            </span>
-          )}
-          {pendingSuggestions > 0 && (
-            <span className="inline-flex items-center justify-center size-4 rounded-full bg-primary/10 text-primary text-[0.5625rem] font-mono">
-              {pendingSuggestions}
-            </span>
-          )}
-          <button
-            className="size-5 inline-flex items-center justify-center text-muted-foreground hover:text-destructive transition-colors rounded"
-            onClick={(e) => {
-              e.stopPropagation()
-              deleteMutation.mutate()
-            }}
-          >
-            <Trash2 className="size-3" />
-          </button>
-        </div>
-      </button>
+      <div className="w-full flex items-center gap-1.5 px-2.5 py-2 text-[0.6875rem] hover:bg-accent/30 transition-colors">
+        <button
+          type="button"
+          onClick={onToggle}
+          className="flex-1 min-w-0 flex items-center gap-1.5 text-left"
+        >
+          {expanded
+            ? <ChevronDown className="size-3 text-muted-foreground shrink-0" />
+            : <ChevronRight className="size-3 text-muted-foreground shrink-0" />
+          }
+          <span className="font-mono text-foreground/60 truncate">{summary.fragmentId}</span>
+          <span className="text-muted-foreground shrink-0">{timeStr}</span>
+          <div className="ml-auto flex gap-1 shrink-0 items-center">
+            {summary.continuityStale && (
+              <span
+                className="inline-flex items-center justify-center size-4 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400"
+                title="The prose changed after this analysis, so its continuity notes are no longer used. Re-analyze this passage to restore them."
+              >
+                <AlertTriangle className="size-2.5" />
+              </span>
+            )}
+            {summary.contradictionCount > 0 && (
+              <span className="inline-flex items-center justify-center size-4 rounded-full bg-destructive/15 text-destructive text-[0.5625rem] font-mono">
+                {summary.contradictionCount}
+              </span>
+            )}
+            {pendingSuggestions > 0 && (
+              <span className="inline-flex items-center justify-center size-4 rounded-full bg-primary/10 text-primary text-[0.5625rem] font-mono">
+                {pendingSuggestions}
+              </span>
+            )}
+          </div>
+        </button>
+        <button
+          type="button"
+          className="size-5 shrink-0 inline-flex items-center justify-center text-muted-foreground hover:text-destructive transition-colors rounded"
+          onClick={() => deleteMutation.mutate()}
+        >
+          <Trash2 className="size-3" />
+        </button>
+      </div>
 
       {expanded && analysis && (
         <div className="border-t border-border/15 px-3 py-2.5 space-y-2.5 text-[0.6875rem] bg-muted/10">
           <div>
             <div className="flex items-center justify-between gap-2">
-              <span className="text-muted-foreground text-[0.625rem]">Summary update</span>
+              <AnalysisFieldLabel>Summary update</AnalysisFieldLabel>
               {!editingSummary ? (
                 <Button
                   size="sm"
@@ -863,44 +1004,84 @@ function AnalysisItem({
 
           {analysis.structuredSummary && (
             <div className="space-y-1.5">
-              <span className="text-muted-foreground text-[0.625rem]">Structured summary</span>
+              <AnalysisFieldLabel>Structured summary</AnalysisFieldLabel>
 
               {analysis.structuredSummary.events.length > 0 && (
                 <div>
-                  <p className="text-[0.625rem] text-foreground/45 uppercase tracking-wide">Events</p>
-                  <ul className="mt-0.5 space-y-0.5">
-                    {analysis.structuredSummary.events.map((event, i) => (
-                      <li key={`structured-event-${i}`} className="text-foreground/60 leading-relaxed">
-                        - {event}
-                      </li>
-                    ))}
-                  </ul>
+                  <AnalysisSubLabel>Events</AnalysisSubLabel>
+                  <AnalysisList items={analysis.structuredSummary.events.map((event, i) => ({
+                    key: `structured-event-${i}`,
+                    content: event,
+                  }))} />
                 </div>
               )}
 
               {analysis.structuredSummary.stateChanges.length > 0 && (
                 <div>
-                  <p className="text-[0.625rem] text-foreground/45 uppercase tracking-wide">State changes</p>
-                  <ul className="mt-0.5 space-y-0.5">
-                    {analysis.structuredSummary.stateChanges.map((change, i) => (
-                      <li key={`structured-state-${i}`} className="text-foreground/60 leading-relaxed">
-                        - {change}
-                      </li>
-                    ))}
-                  </ul>
+                  <AnalysisSubLabel>State changes</AnalysisSubLabel>
+                  <AnalysisList items={analysis.structuredSummary.stateChanges.map((change, i) => ({
+                    key: `structured-state-${i}`,
+                    content: change,
+                  }))} />
                 </div>
               )}
 
               {analysis.structuredSummary.openThreads.length > 0 && (
                 <div>
-                  <p className="text-[0.625rem] text-foreground/45 uppercase tracking-wide">Open threads</p>
-                  <ul className="mt-0.5 space-y-0.5">
-                    {analysis.structuredSummary.openThreads.map((thread, i) => (
-                      <li key={`structured-thread-${i}`} className="text-foreground/60 leading-relaxed">
-                        - {thread}
-                      </li>
-                    ))}
-                  </ul>
+                  <AnalysisSubLabel>Open threads</AnalysisSubLabel>
+                  <AnalysisList items={analysis.structuredSummary.openThreads.map((thread, i) => ({
+                    key: `structured-thread-${i}`,
+                    content: thread,
+                  }))} />
+                </div>
+              )}
+            </div>
+          )}
+
+          {analysis.continuityProjection && (
+            <div className="space-y-1.5">
+              <AnalysisFieldLabel>Continuity notes</AnalysisFieldLabel>
+              {summary.continuityStale && (
+                <p className="text-amber-600 dark:text-amber-400 leading-relaxed">
+                  The prose changed after this analysis ran, so these notes are excluded from story
+                  continuity. Re-analyze this passage to rebuild them.
+                </p>
+              )}
+              <AnalysisInlineField label="Temporal frame">
+                {analysis.continuityProjection.temporalFrame.relation}
+                {analysis.continuityProjection.temporalFrame.anchor
+                  ? ` — ${analysis.continuityProjection.temporalFrame.anchor}`
+                  : ''}
+              </AnalysisInlineField>
+
+              {analysis.continuityProjection.stateOperations.length > 0 && (
+                <div>
+                  <AnalysisSubLabel>Current state</AnalysisSubLabel>
+                  <AnalysisList items={analysis.continuityProjection.stateOperations.map((operation, i) => ({
+                    key: `continuity-state-${i}`,
+                    content: `${operation.subject}: ${operation.action === 'clear' ? 'no longer current' : operation.value}`,
+                  }))} />
+                </div>
+              )}
+
+              {(analysis.continuityProjection.threadOperations.length > 0
+                || analysis.continuityProjection.threadFocus.length > 0) && (
+                <div>
+                  <AnalysisSubLabel>Unresolved threads</AnalysisSubLabel>
+                  <AnalysisList items={threadContinuityRows(
+                    analysis.continuityProjection.threadOperations,
+                    analysis.continuityProjection.threadFocus,
+                  )} />
+                </div>
+              )}
+
+              {analysis.continuityProjection.knowledgeOperations.length > 0 && (
+                <div>
+                  <AnalysisSubLabel>Character awareness</AnalysisSubLabel>
+                  <AnalysisList items={analysis.continuityProjection.knowledgeOperations.map((operation, i) => ({
+                    key: `continuity-knowledge-${i}`,
+                    content: `${charName(operation.characterId)}: ${operation.action}${operation.fact ? ` — ${operation.fact}` : ''}`,
+                  }))} />
                 </div>
               )}
             </div>
@@ -908,7 +1089,7 @@ function AnalysisItem({
 
           {mentionGroups.map((group) => (
             <div key={group.type} className="flex items-center gap-1 flex-wrap">
-              <span className="text-muted-foreground text-[0.625rem] mr-1">{group.visual.label}</span>
+              <span className="mr-1"><AnalysisFieldLabel>{group.visual.label}</AnalysisFieldLabel></span>
               {group.entries.map(([id]) => (
                 <Badge key={id} variant="outline" className="text-[0.5625rem] h-4 px-1.5">
                   {charName(id)}
@@ -917,10 +1098,11 @@ function AnalysisItem({
             </div>
           ))}
 
-          {analysis.contradictions.length > 0 && (
+          {analysis.contradictions.some((contradiction) => !contradiction.dismissed) && (
             <div className="space-y-1.5">
-              <span className="text-destructive/70 text-[0.625rem] font-medium">Contradictions</span>
+              <AnalysisFieldLabel tone="destructive">Contradictions</AnalysisFieldLabel>
               {analysis.contradictions.map((c, i) => {
+                if (c.dismissed) return null
                 // Collect all unique fragment IDs: the analyzed prose + those cited in the contradiction
                 const allIds = [...new Set([summary.fragmentId, ...c.fragmentIds])]
                 return (
@@ -934,21 +1116,37 @@ function AnalysisItem({
                           </p>
                         )}
                       </div>
-                      {onOpenChat && (
+                      <div className="flex items-center gap-0.5 shrink-0">
+                        {onOpenChat && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-5 text-[0.5625rem] gap-1 text-destructive/60 hover:text-destructive px-1.5"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              const refs = allIds.map((id) => `@${id}`).join(' ')
+                              onOpenChat(`Review and fix this contradiction if it is valid: ${c.description}\n\n${refs}`)
+                            }}
+                          >
+                            <MessageSquare className="size-2.5" />
+                            Review
+                          </Button>
+                        )}
                         <Button
-                          size="sm"
+                          size="icon"
                           variant="ghost"
-                          className="h-5 text-[0.5625rem] gap-1 shrink-0 text-destructive/60 hover:text-destructive px-1.5"
+                          className="size-5 text-muted-foreground/50 hover:text-foreground"
+                          title="Dismiss contradiction"
+                          aria-label="Dismiss contradiction"
+                          disabled={dismissContradictionMutation.isPending}
                           onClick={(e) => {
                             e.stopPropagation()
-                            const refs = allIds.map((id) => `@${id}`).join(' ')
-                            onOpenChat(`Fix this contradiction: ${c.description}\n\n${refs}`)
+                            dismissContradictionMutation.mutate(i)
                           }}
                         >
-                          <MessageSquare className="size-2.5" />
-                          Fix
+                          <X className="size-2.5" />
                         </Button>
-                      )}
+                      </div>
                     </div>
                   </div>
                 )
@@ -958,7 +1156,7 @@ function AnalysisItem({
 
           {analysis.fragmentChangeProposals.length > 0 && (
             <div className="space-y-1.5">
-              <span className="text-primary/70 text-[0.625rem] font-medium">Suggestions</span>
+              <AnalysisFieldLabel tone="primary">Suggestions</AnalysisFieldLabel>
               {analysis.fragmentChangeProposals.map((proposal, i) => {
                 const title = proposal.title?.trim()
                   || `${proposal.operations.length} fragment change${proposal.operations.length === 1 ? '' : 's'}`
@@ -1078,6 +1276,11 @@ function AnalysisItem({
                     {proposal.rationale && (
                       <p className="text-muted-foreground mt-0.5 break-words">{proposal.rationale}</p>
                     )}
+                    {proposal.evidenceText && (
+                      <p className="text-muted-foreground/80 mt-0.5 break-words italic">
+                        Evidence: “{proposal.evidenceText}”
+                      </p>
+                    )}
                     <div className="mt-1 space-y-0.5">
                       {proposal.operations.slice(0, 5).map((operation, operationIndex) => {
                         const validation = validationResults.find((result) => result.operationId === operation.operationId)
@@ -1125,19 +1328,22 @@ function AnalysisItem({
 
           {analysis.timelineEvents.length > 0 && (
             <div className="space-y-1">
-              <span className="text-muted-foreground text-[0.625rem]">Timeline events</span>
-              {analysis.timelineEvents.map((t) => (
-                <div key={`${t.position}-${t.event}`} className="flex items-center gap-1.5">
-                  <Badge variant="outline" className="text-[0.5625rem] h-3.5 px-1">{t.position}</Badge>
-                  <span className="text-foreground/60">{t.event}</span>
-                </div>
-              ))}
+              <AnalysisFieldLabel>Timeline events</AnalysisFieldLabel>
+              <AnalysisList marker={false} items={analysis.timelineEvents.map((t) => ({
+                key: `${t.position}-${t.event}`,
+                content: (
+                  <>
+                    <Badge variant="outline" className="text-[0.5625rem] h-3.5 px-1 mr-1 align-middle">{t.position}</Badge>
+                    {t.event}
+                  </>
+                ),
+              }))} />
             </div>
           )}
 
           {analysis.passes && analysis.passes.length > 0 && (
             <div className="space-y-1">
-              <span className="text-muted-foreground text-[0.625rem]">Passes</span>
+              <AnalysisFieldLabel>Passes</AnalysisFieldLabel>
               <div className="flex flex-wrap gap-1">
                 {analysis.passes.map((pass, index) => (
                   <span
@@ -1201,6 +1407,17 @@ function StoredTraceViewer({ trace }: { trace: LibrarianAnalysis['trace'] }) {
   )
 }
 
+/**
+ * Every analysis tool refuses work by *returning* `{ ok: false, skipped: [...] }`
+ * rather than throwing, and reports partial losses by returning `ok: true`
+ * alongside a `skipped*` list. A row that renders a green "completed" for any
+ * result it received therefore reports a refusal as a success: Timeline 12 shows
+ * `proposeRecordCorrections completed` on a call whose payload had rejected the
+ * only correction in it, which made the whole surface untestable by eye.
+ *
+ * The row states what the payload says about itself, so no tool has to remember
+ * to signal failure a second way for the author to see it.
+ */
 type CollapsedTraceItem =
   | { kind: 'reasoning'; text: string }
   | { kind: 'text'; text: string }
@@ -1292,10 +1509,26 @@ function TraceItem({ item }: { item: CollapsedTraceItem }) {
   }
 
   if (item.kind === 'tool-result') {
+    const outcome = toolResultOutcome(item.result)
     return (
-      <div className="px-2 py-0.5 flex items-center gap-1">
-        <Check className="size-2.5 text-emerald-500/50" />
-        <span className="text-[0.5625rem] text-muted-foreground">{item.toolName} completed</span>
+      <div className="px-2 py-0.5 flex flex-col gap-0.5">
+        <div className="flex items-center gap-1">
+          {outcome.ok
+            ? <Check className="size-2.5 text-emerald-500/50" />
+            : <X className="size-2.5 text-amber-500/70" />}
+          <span className="text-[0.5625rem] text-muted-foreground">
+            {item.toolName} {outcome.ok ? 'completed' : 'rejected'}
+            {outcome.ok && outcome.dropped > 0 ? ` — ${outcome.dropped} skipped` : ''}
+          </span>
+        </div>
+        {outcome.reasons.map((reason, i) => (
+          <p key={i} className="pl-3.5 text-[0.5625rem] leading-relaxed text-amber-500/60">{reason}</p>
+        ))}
+        {outcome.dropped > outcome.reasons.length && (
+          <p className="pl-3.5 text-[0.5625rem] leading-relaxed text-amber-500/40 italic">
+            {outcome.dropped - outcome.reasons.length} gave no reason
+          </p>
+        )}
       </div>
     )
   }
