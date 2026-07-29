@@ -127,6 +127,29 @@ export async function deleteStory(
 
 // --- Fragment CRUD ---
 
+/**
+ * An id of `type` that no fragment in the story holds yet.
+ *
+ * Generation alone is not enough to assume uniqueness: the suffixes alternate
+ * consonants and vowels to stay pronounceable, so the space is 13^3 * 5^3 =
+ * 274,625 per type and the chance a fresh id is taken grows with the story.
+ * `createFragment` refuses to overwrite, so an unchecked id turns a collision
+ * into a failed write rather than silent loss — this is how callers avoid it.
+ */
+export async function generateUnusedFragmentId(
+  dataDir: string,
+  storyId: string,
+  type: string,
+  attempts = 10,
+): Promise<string> {
+  const { generateFragmentId } = await import('@/lib/fragment-ids')
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const id = generateFragmentId(type)
+    if (!existsSync(await fragmentPath(dataDir, storyId, id))) return id
+  }
+  throw new Error(`Failed to generate an unused ${type} fragment id after ${attempts} attempts`)
+}
+
 export async function createFragment(
   dataDir: string,
   storyId: string,

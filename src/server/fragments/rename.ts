@@ -1,11 +1,11 @@
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { rm, readFile, readdir } from 'node:fs/promises'
-import { getStory, updateStory, getFragment, updateFragment } from './storage'
+import { getStory, updateStory, getFragment, updateFragment, generateUnusedFragmentId } from './storage'
 import { getProseChain, saveProseChain } from './prose-chain'
 import { getAssociations, saveAssociations } from './associations'
 import { remapFragment, remapAssociations } from './remap'
-import { generateFragmentId, PREFIXES } from '@/lib/fragment-ids'
+import { PREFIXES } from '@/lib/fragment-ids'
 import { createLogger } from '../logging/logger'
 import { getContentRoot } from './branches'
 import { getState, saveState, getAnalysis, saveAnalysis, rebuildAnalysisIndex } from '../librarian/storage'
@@ -32,13 +32,10 @@ export async function renameFragmentIdAcrossStory(
   const suffix = oldId.includes('-') ? oldId.split('-').slice(1).join('-') : oldId
   let newId = `${newPrefix}-${suffix}`
 
-  // Check collision
-  let collisionCount = 0
-  while (existsSync(join(fragmentsDir, `${newId}.json`))) {
-    // If collision, generate entirely new ID for the new type
-    newId = generateFragmentId(newType)
-    collisionCount++
-    if (collisionCount > 10) throw new Error('Failed to generate unique fragment ID')
+  // Keeping the old suffix can land on a fragment that already holds it, so fall
+  // back to a fresh unused id for the new type.
+  if (existsSync(join(fragmentsDir, `${newId}.json`))) {
+    newId = await generateUnusedFragmentId(dataDir, storyId, newType)
   }
 
   log.info(`Renaming fragment ID ${oldId} -> ${newId} (type: ${newType}) in story ${storyId}`)

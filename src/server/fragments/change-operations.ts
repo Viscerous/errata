@@ -1,11 +1,12 @@
 import { createHash } from 'node:crypto'
 import { z } from 'zod/v4'
-import { generateFragmentId, PREFIXES } from '@/lib/fragment-ids'
+import { PREFIXES } from '@/lib/fragment-ids'
 import type { Fragment } from './schema'
 import {
   archiveFragment,
   createFragment as createFragmentInStorage,
   getFragment,
+  generateUnusedFragmentId,
   getStory,
   updateFragmentVersioned,
 } from './storage'
@@ -985,7 +986,7 @@ export async function applyOperations(
     }
 
     const now = new Date().toISOString()
-    const id = generateFragmentId(operation.type)
+    const id = await generateUnusedFragmentId(dataDir, storyId, operation.type)
     const fragment: Fragment = {
       id,
       type: operation.type,
