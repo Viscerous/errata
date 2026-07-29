@@ -25,6 +25,50 @@ for (const file of await sourceFiles('src')) {
   })
 }
 
+// Remote access serves the app over plain HTTP on a LAN address, which is not a
+// secure context, so secure-context-only browser APIs are absent there and throw
+// on the first call. `crypto.randomUUID()` in the generation path threw before the
+// request was built, leaving the UI generating forever with nothing reaching the
+// server — invisible on localhost, which is a secure context by definition.
+// `crypto.subtle` (pack publishing) and un-chained `navigator.clipboard` (copy
+// buttons) are the same class and still to be fixed; they are not enforced here
+// yet because both need a real fallback rather than a swap.
+const SECURE_CONTEXT_ONLY = [
+  { pattern: /\bcrypto\s*\.\s*randomUUID\s*\(/, api: 'crypto.randomUUID()', instead: 'generateRunId/randomHex from @/lib/client-ids' },
+]
+
+/** Blanks out comments so prose about a banned API doesn't trip the rule. */
+function stripComments(source: string): string[] {
+  let inBlock = false
+  return source.split(/\r?\n/).map((line) => {
+    let out = ''
+    for (let i = 0; i < line.length; i++) {
+      if (inBlock) {
+        if (line.startsWith('*/', i)) { inBlock = false; i++ }
+        continue
+      }
+      if (line.startsWith('/*', i)) { inBlock = true; i++; continue }
+      if (line.startsWith('//', i)) break
+      out += line[i]
+    }
+    return out
+  })
+}
+
+for (const file of await sourceFiles('src')) {
+  // Server code never runs in a browser, so the restriction does not apply.
+  if (/^src[/\\]server[/\\]/.test(file)) continue
+  stripComments(await readFile(file, 'utf-8')).forEach((line, index) => {
+    for (const { pattern, api, instead } of SECURE_CONTEXT_ONLY) {
+      if (pattern.test(line)) {
+        violations.push(
+          `${file}:${index + 1}: ${api} is secure-context only and absent over LAN HTTP; use ${instead}`,
+        )
+      }
+    }
+  })
+}
+
 // A row that is itself a button cannot also carry a delete button: the browser
 // unnests them, React's hydration disagrees, and the row stops being clickable.
 // Put the row's chrome on a div and make the two buttons siblings.

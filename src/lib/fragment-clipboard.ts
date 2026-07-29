@@ -1,5 +1,6 @@
 import { api, type Fragment, type BlockConfig, type AgentBlockConfig } from '@/lib/api'
 import { parseVisualRefs, type BoundaryBox } from '@/lib/fragment-visuals'
+import { randomToken } from '@/lib/client-ids'
 
 export interface ClipboardAttachment {
   kind: 'image' | 'icon'
@@ -64,7 +65,7 @@ export function getSourceId(): string {
   if (typeof window === 'undefined') return 'unknown'
   let id = localStorage.getItem(SOURCE_KEY)
   if (!id) {
-    id = crypto.randomUUID()
+    id = randomToken(16)
     localStorage.setItem(SOURCE_KEY, id)
   }
   return id

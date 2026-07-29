@@ -9,9 +9,10 @@ import { invalidateStoryContent } from '@/lib/branch-cache'
 import { qk, useActiveBranchId } from '@/lib/query-keys'
 import type { SuggestionDirection, ClarifyQuestion, Clarification } from '@/lib/api/types'
 import { QuestionCard } from '@/components/generation/QuestionCard'
+import { generateRunId } from '@/lib/client-ids'
 import { mergeDirectionSuggestions } from './direction-suggestions'
 
-// A round high enough that the server withholds the ask tool and must write —
+// A round high enough that the server withholds the ask tool and must write â€”
 // used by "Skip & write" to proceed without answering.
 const FORCE_PROCEED_ROUND = 99
 
@@ -30,7 +31,7 @@ interface InlineGenerationInputProps {
   /**
    * The active head passage of the current timeline (last section's active
    * fragment). Directions are anchored to the passage they were generated
-   * against and only stay relevant while that passage is still the head — once
+   * against and only stay relevant while that passage is still the head â€” once
    * the timeline advances, they're hidden.
    */
   latestFragmentId?: string
@@ -106,7 +107,7 @@ export function InlineGenerationInput({
     const prev = prevRunStatusRef.current
     const curr = librarianStatus?.runStatus
     prevRunStatusRef.current = curr
-    // When analysis transitions from running → idle/error, refresh analyses and prose fragments
+    // When analysis transitions from running â†’ idle/error, refresh analyses and prose fragments
     // (librarian writes annotations to fragment.meta, so prose fragments must be re-fetched)
     if (prev === 'running' && (curr === 'idle' || curr === 'error')) {
       queryClient.invalidateQueries({ queryKey: ['librarian-analyses', storyId] })
@@ -123,7 +124,7 @@ export function InlineGenerationInput({
   // Only surface the newest analysis's directions while the passage it was
   // generated against is still the timeline's head. Once a new passage is
   // written (or the tail is deleted / a variation switched), the analysis no
-  // longer describes "what comes next" and its directions drop out — until the
+  // longer describes "what comes next" and its directions drop out â€” until the
   // librarian re-analyses the new head.
   const latestSummary = analysesList?.[0]
   const latestAnalysisId =
@@ -223,7 +224,7 @@ export function InlineGenerationInput({
 
     const ac = new AbortController()
     abortRef.current = ac
-    const runId = `gen-${Date.now().toString(36)}-${crypto.randomUUID()}`
+    const runId = generateRunId()
     runIdRef.current = runId
     let askedQuestions: ClarifyQuestion[] | null = null
 
@@ -275,7 +276,7 @@ export function InlineGenerationInput({
           }
           thoughtsDirty = true
         } else if (value.type === 'prewriter-reset') {
-          // Prewriter re-wrote the brief in a new step — clear the live block so
+          // Prewriter re-wrote the brief in a new step â€” clear the live block so
           // it refills with the final version instead of showing it twice.
           const last = thoughtSteps[thoughtSteps.length - 1]
           if (last && last.type === 'prewriter-text') {
@@ -311,7 +312,7 @@ export function InlineGenerationInput({
       onGenerationStream(accumulatedText)
       if (thoughtSteps.length > 0) onGenerationThoughts?.([...thoughtSteps])
 
-      // The prewriter asked clarifying questions instead of writing — surface
+      // The prewriter asked clarifying questions instead of writing â€” surface
       // them and wait for answers (no prose was produced this round).
       if (askedQuestions) {
         setPendingQuestions(askedQuestions)
@@ -328,7 +329,7 @@ export function InlineGenerationInput({
       await invalidateStoryContent(queryClient, storyId)
 
       if (prewriterDirectionsRef.current?.length) {
-        // Anchor to the passage that was just written (now the head) — read it
+        // Anchor to the passage that was just written (now the head) â€” read it
         // from the chain refreshed by invalidateStoryContent above, since the
         // latestFragmentId prop may not have propagated yet in this callback.
         const chain = queryClient.getQueryData<{ entries: Array<{ active: string }> }>(
@@ -341,7 +342,7 @@ export function InlineGenerationInput({
       setInput('')
       onGenerationComplete()
     } catch (err) {
-      // User-initiated abort — not an error
+      // User-initiated abort â€” not an error
       if (ac.signal.aborted) {
         await invalidateStoryContent(queryClient, storyId)
         onGenerationComplete()
@@ -416,7 +417,7 @@ export function InlineGenerationInput({
     try {
       const result = await api.generation.proposeDirections(storyId)
       // proposeDirections is computed from the current story state, i.e. the
-      // current head — anchor to it so these retire when the timeline advances.
+      // current head â€” anchor to it so these retire when the timeline advances.
       setManualAnchor(latestFragmentId)
       setManualSuggestions(result.suggestions)
     } catch (err) {
@@ -511,7 +512,7 @@ export function InlineGenerationInput({
           </button>
         </div>
 
-        {/* Freeform mode — original textarea */}
+        {/* Freeform mode â€” original textarea */}
         {mode === 'freeform' && (
           <textarea
             ref={textareaRef}

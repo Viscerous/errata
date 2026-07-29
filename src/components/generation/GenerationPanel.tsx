@@ -16,6 +16,7 @@ import { DebugPanel } from './DebugPanel'
 import { QuestionCard } from './QuestionCard'
 import { Send, Eye, Square, Bug, ArrowLeft } from 'lucide-react'
 import type { ClarifyQuestion, Clarification } from '@/lib/api/types'
+import { generateRunId } from '@/lib/client-ids'
 
 interface GenerationPanelProps {
   storyId: string
@@ -63,7 +64,7 @@ export function GenerationPanel({ storyId, onBack }: GenerationPanelProps) {
 
     const ac = new AbortController()
     abortRef.current = ac
-    const runId = `gen-${Date.now().toString(36)}-${crypto.randomUUID()}`
+    const runId = generateRunId()
     runIdRef.current = runId
 
     let asked: ClarifyQuestion[] | null = null

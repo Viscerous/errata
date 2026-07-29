@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Plus, Trash2, Star, Pencil, RefreshCw, Loader2, X, ArrowLeft, Minus, Zap, Copy, KeyRound } from 'lucide-react'
 import { EmptyHint, Hint } from '@/components/ui/prose-text'
+import { randomToken } from '@/lib/client-ids'
 
 const PRESETS = {
   deepseek: { name: 'DeepSeek', baseURL: 'https://api.deepseek.com', defaultModel: 'deepseek-v4-flash', models: ['deepseek-v4-flash', 'deepseek-v4-pro'] },
@@ -170,7 +171,7 @@ export function ProviderPanel({ onClose }: { onClose: () => void }) {
       baseURL: provider.baseURL,
       apiKey: '',
       defaultModel: provider.defaultModel,
-      customHeaders: Object.entries(headers).map(([key, value]) => ({ key, value, _id: crypto.randomUUID() })),
+      customHeaders: Object.entries(headers).map(([key, value]) => ({ key, value, _id: randomToken() })),
       temperature: provider.temperature != null ? String(provider.temperature) : '',
     })
     setFetchedModels([])
@@ -399,7 +400,7 @@ export function ProviderPanel({ onClose }: { onClose: () => void }) {
                 <button
                   type="button"
                   className="text-[0.6875rem] text-muted-foreground hover:text-muted-foreground flex items-center gap-0.5 transition-colors"
-                  onClick={() => setForm({ ...form, customHeaders: [...form.customHeaders, { key: '', value: '', _id: crypto.randomUUID() }] })}
+                  onClick={() => setForm({ ...form, customHeaders: [...form.customHeaders, { key: '', value: '', _id: randomToken() }] })}
                 >
                   <Plus className="size-3" /> Add
                 </button>
