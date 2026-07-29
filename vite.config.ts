@@ -36,6 +36,15 @@ const config = defineConfig({
   optimizeDeps: {
     exclude: ['@huggingface/transformers'],
   },
+  // Fail loudly on a busy port instead of drifting upward: 7740 is the sharing
+  // proxy's port, so a silent fallback puts the dev server where the proxy
+  // expects to listen and remote access starts serving the wrong process.
+  // HMR needs no host or port here — the client derives its socket from the
+  // origin that served it, so it follows the proxy on its own.
+  server: {
+    port: 7739,
+    strictPort: true,
+  },
   plugins: [
     devtools(),
     nitro({

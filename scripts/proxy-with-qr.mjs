@@ -55,6 +55,41 @@ const server = createServer((req, res) => {
   req.pipe(proxyReq);
 });
 
+// Protocol upgrades — the dev server's HMR socket — must cross the proxy too.
+// Answering an upgrade as an ordinary request leaves the client stuck on
+// "[vite] connecting..." forever.
+server.on('upgrade', (req, clientSocket, head) => {
+  const proxyReq = request({
+    hostname: 'localhost',
+    port: TARGET_PORT,
+    path: req.url,
+    method: req.method,
+    headers: req.headers,
+  });
+
+  proxyReq.on('upgrade', (proxyRes, upstreamSocket, upstreamHead) => {
+    const lines = [`HTTP/1.1 ${proxyRes.statusCode} ${proxyRes.statusMessage}`];
+    for (const [key, value] of Object.entries(proxyRes.headers)) {
+      for (const one of Array.isArray(value) ? value : [value]) {
+        if (one !== undefined) lines.push(`${key}: ${one}`);
+      }
+    }
+    clientSocket.write(`${lines.join('\r\n')}\r\n\r\n`);
+    if (upstreamHead?.length) clientSocket.write(upstreamHead);
+    if (head?.length) upstreamSocket.write(head);
+
+    const drop = () => { upstreamSocket.destroy(); clientSocket.destroy(); };
+    upstreamSocket.on('error', drop);
+    clientSocket.on('error', drop);
+    upstreamSocket.pipe(clientSocket);
+    clientSocket.pipe(upstreamSocket);
+  });
+
+  proxyReq.on('error', () => clientSocket.destroy());
+  clientSocket.on('error', () => proxyReq.destroy());
+  proxyReq.end();
+});
+
 tryListen(server, START_PORT, MAX_PORT)
   .then((actualPort) => {
     console.log('\n🚀 Starting proxy server...\n');
