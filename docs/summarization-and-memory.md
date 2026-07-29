@@ -164,6 +164,13 @@ Runtime behavior:
 
 Summary fragments appear in prompt context as `Story Summary So Far` (unless excluded by options such as `excludeStorySummary` in specialized flows).
 
+Summaries are historical compression, not the current-state authority. The
+context builder separately folds source-linked Analysis projections into a
+`Continuity` block containing current keyed state, selectively focused
+unresolved continuity, temporal framing, and character awareness boundaries.
+This avoids asking a prose summary to imply what is still true now. Legacy
+free-text open-thread strings are not rendered as Writer tasks.
+
 When building `summaryBeforeFragmentId`, context rebuild also uses the same latest-analysis dedupe to avoid stale reanalysis summaries.
 
 Relevant file:
@@ -228,10 +235,11 @@ Mentions and fragment change suggestions are deduplicated across multi-turn tool
 
 ## Fragment Suggestions & Updates
 
-The librarian's analysis tools use `proposeFragmentChanges` to queue creates, localized edits, whole-field rewrites, and archive requests as reviewable `fragmentChangeProposals`. Each proposal stores the exact operation batch plus validation previews, so review and auto-apply use the same semantics as the tool call. Whole-field `set_fields` requires a `baseHash` from `readFragments`, descriptions are capped at 250 characters, and accepted or auto-applied proposals re-read the target and check locked, frozen, stale-hash, and exact-text protections before writing. When an anchor or base hash fails, validation reports the specific operation and recommends `readFragments` for the affected IDs.
+Online analysis separates `proposeRecordCorrections` from `proposeNewRecords`. Each queues an independently reviewable atomic proposal with accepted-prose evidence. A failed retry retains grounded evidence, and a copied whole field can be mechanically reduced to a localized replacement when only one assertion changed. Online analysis cannot append diary paragraphs, archive records, or apply broad whole-field rewrites. Accepted and auto-applied proposals re-read their targets and re-check source evidence, locked/frozen state, and exact-text anchors before writing. Broader editing surfaces retain the general fragment-change vocabulary for explicit user-directed work.
 
 ## Known Limitations
 
 - LLM compaction quality depends on the configured librarian model and prompt adherence.
 - Structured summary signals are optional and quality depends on model/tool-call discipline.
 - Chapter summaries must be created on marker fragments before hierarchical summary mode adds value.
+- Applied summary text is not yet rebuilt from source-linked contributions after a prose deletion or variation switch. Until summary projection coverage is implemented, branch edits can leave compressed history that requires manual summary review.

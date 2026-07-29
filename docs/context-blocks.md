@@ -95,7 +95,7 @@ authority:
   has selected for full context. These render in semantic aggregate blocks such
   as `fragment-pinned`, `fragment-recent`, `fragment-writer-context`, or
   `fragment-candidates`, each grouped by type. Writer provenance comes from
-  `writerContextIds`, a type-agnostic signal the writer records on each prose
+  the versioned context receipt, a type-agnostic record the Writer saves on each prose
   fragment's `meta`.
 - **Catalog** — one line per fragment (`` `id` | name | desc ``), grouped by
   type in a summary-index block such as `fragment-catalog` or
