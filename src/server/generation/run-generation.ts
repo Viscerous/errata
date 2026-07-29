@@ -12,6 +12,7 @@ import {
 } from '../fragments/prose-chain'
 import { generateFragmentId } from '@/lib/fragment-ids'
 import { buildContextState, createDefaultBlocks, compileBlocks, addCacheBreakpoints, expandMessagesFragmentTags } from '../llm/context-builder'
+import { createContextReceipt } from '../llm/context-receipt'
 import { applyBlockConfig } from '../blocks/apply'
 import { createScriptHelpers } from '../blocks/script-context'
 import { createFragmentTools } from '../llm/tools'
@@ -225,7 +226,12 @@ export async function runGeneration(
     // custom blocks, and the writer's operating instructions/tool guidance
     // ("write prose directly, don't use tools to save") — which would
     // otherwise confuse the planner, whose job is the opposite.
-    const WRITER_ONLY_BLOCKS = new Set(['author-input', 'instructions', 'tools'])
+    // Continuity is dropped here because the prewriter renders it as its own
+    // declared block; leaving it in the dump too would repeat it, and a small
+    // model reads repetition as emphasis. The empty-brief fallback below
+    // therefore runs without the continuity block, which is one more reason
+    // that path is already documented as degraded.
+    const WRITER_ONLY_BLOCKS = new Set(['author-input', 'instructions', 'tools', 'continuity-observations'])
     blocks = blocks.filter(b => !WRITER_ONLY_BLOCKS.has(b.id) && b.source !== 'custom')
   }
 
@@ -247,6 +253,10 @@ export async function runGeneration(
   let prewriterDirections: Array<{ pacing: string; title: string; description: string; instruction: string }> | undefined
   let prewriterToolCalls: ToolCallLog[] = []
   let logMessages = messages // messages saved to generation log — updated to writer context in prewriter mode
+  let writerContextBlocks = blocks
+  // In prewriter mode the fragment surfaces are presented to the planner, not
+  // the writer, so provenance has to be recorded from this set too.
+  const prewriterContextBlocks = isPrewriterMode ? blocks : undefined
 
   const modelMessages = addCacheBreakpoints(messages)
 
@@ -367,6 +377,7 @@ export async function runGeneration(
               const writerBlocks = createWriterBriefBlocks(ctxState.proseFragments, prewriterResult.brief, resolvedModelId)
               let finalWriterBlocks = await applyBlockConfig(writerBlocks, agentConfig, scriptContext)
               finalWriterBlocks = await runBeforeBlocks(enabledPlugins, finalWriterBlocks)
+              writerContextBlocks = finalWriterBlocks
               let writerCompiled = compileBlocks(finalWriterBlocks)
               writerCompiled = await expandMessagesFragmentTags(writerCompiled, dataDir, storyId)
               writerCompiled = await runBeforeGeneration(enabledPlugins, writerCompiled)
@@ -526,31 +537,20 @@ export async function runGeneration(
           const now = new Date().toISOString()
           let savedFragmentId: string
 
-          // Forward the writer's character/knowledge working set to the
-          // librarian via the prose meta — its full-context cast plus anything
-          // it looked up — so analyze audits against the same sheets the writer
-          // had.
-          const fragmentLookupIds = (calls: ToolCallLog[]) => calls.flatMap((tc) => {
-            if (tc.toolName !== 'readFragments') return []
-            const ids = (tc.args as Record<string, unknown>)?.fragmentIds
-            return Array.isArray(ids) ? ids.filter((x): x is string => typeof x === 'string') : []
+          const contextReceipt = createContextReceipt({
+            writerBlocks: writerContextBlocks,
+            prewriterBlocks: prewriterContextBlocks,
+            writerToolCalls: toolCalls,
+            prewriterToolCalls,
           })
-          const lookedUpIds = [
-            ...fragmentLookupIds(toolCalls),
-            ...fragmentLookupIds(prewriterToolCalls),
-          ]
-          const writerContextIds = [...new Set([
-            ...ctxState.stickyCharacters.map((f) => f.id),
-            ...(ctxState.recentCharacters ?? []).map((f) => f.id),
-            ...ctxState.stickyKnowledge.map((f) => f.id),
-            ...(ctxState.recentKnowledge ?? []).map((f) => f.id),
-            ...(ctxState.stickyCustomFragments ?? []).map((f) => f.id),
-            ...(ctxState.recentCustomFragments ?? []).flatMap((group) => group.fragments.map((f) => f.id)),
-            ...lookedUpIds,
-          ])]
 
           const isRegenOrRefine = (mode === 'regenerate' || mode === 'refine') && existingFragment
           const id = generateFragmentId('prose')
+          const inheritedMeta = isRegenOrRefine
+            ? Object.fromEntries(
+                Object.entries(existingFragment!.meta).filter(([key]) => key !== 'writerContextIds'),
+              )
+            : {}
 
           const fragment: Fragment = {
             id,
@@ -566,14 +566,14 @@ export async function runGeneration(
             updatedAt: now,
             order: isRegenOrRefine ? existingFragment!.order : 0,
             meta: {
-              ...(isRegenOrRefine ? existingFragment!.meta : {}),
+              ...inheritedMeta,
               generatedFrom: body.input,
               ...(isRegenOrRefine ? {
                 generationMode: mode,
                 previousFragmentId: existingFragment!.id,
                 variationOf: existingFragment!.id,
               } : {}),
-              ...(writerContextIds.length ? { writerContextIds } : {}),
+              contextReceipt,
             },
             version: 1,
             versions: [],

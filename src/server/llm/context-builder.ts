@@ -20,6 +20,8 @@ import {
   type FragmentContextMetadata,
 } from './fragment-context-blocks'
 import { collectRecentContextSignals } from './context-selection'
+import { fragmentTagPattern } from './fragment-tag'
+import { buildContinuityView, renderContinuityView, type ContinuityView } from '../librarian/continuity-view'
 import type { ModelMessage } from 'ai'
 
 export {
@@ -82,6 +84,8 @@ export interface ContextBuildState {
   recentKnowledge?: Fragment[]
   // Recently mentioned custom fragments can be injected like recent characters/knowledge.
   recentCustomFragments?: CustomFragmentGroup[]
+  /** Source-linked observations older than the raw prose window. */
+  continuityView?: ContinuityView
   authorInput?: string
   modelId?: string
 }
@@ -377,6 +381,12 @@ export async function buildContextState(
   // Apply the prose limit
   const recentProse = applyProseLimit(sortedProse, effectiveCompact)
 
+  const continuityView = await buildContinuityView({
+    dataDir,
+    storyId,
+    activeProseFragments: sortedProse,
+  })
+
   let chapterSummaries: Array<{ markerId: string; name: string; summary: string }> = []
   if (story.settings.enableHierarchicalSummary && activeProseIds.length > 0 && recentProse.length > 0) {
     const chain = await getProseChain(dataDir, storyId)
@@ -448,9 +458,8 @@ export async function buildContextState(
 
   // Fragments known to be active in recent prose ride along in full, so the
   // writer continues them from their current sheets rather than one-line
-  // summaries. The set is intentionally broader than annotations: recent
-  // writerContextIds bridge rapid follow-up generation before the background
-  // librarian has finished writing mention annotations.
+  // summaries. The immediately preceding receipt also supplies a one-turn
+  // bridge for explicit reads/tags while background mention analysis catches up.
   const recentSignals = collectRecentContextSignals(recentProse)
   const recentContextIds = new Set(recentSignals.keys())
   const recentCharacters = nonStickyCharacters.filter((f) => recentContextIds.has(f.id)).sort(sortByOrder)
@@ -478,6 +487,7 @@ export async function buildContextState(
     recentCharacters,
     recentKnowledge,
     recentCustomFragments,
+    continuityView,
     guidelineCatalog: nonStickyGuidelines,
     knowledgeCatalog,
     characterCatalog,
@@ -494,6 +504,9 @@ export async function buildContextState(
     recentCharacters: recentCharacters.length,
     recentKnowledge: recentKnowledge.length,
     recentCustomFragments: recentCustomFragments.reduce((sum, group) => sum + group.fragments.length, 0),
+    continuityState: continuityView?.currentState.length ?? 0,
+    continuityThreads: continuityView?.liveThreads.length ?? 0,
+    continuityKnowledge: continuityView?.characterKnowledge.length ?? 0,
     guidelineCatalog: nonStickyGuidelines.length,
     knowledgeCatalog: knowledgeCatalog.length,
     characterCatalog: characterCatalog.length,
@@ -573,6 +586,7 @@ export function createDefaultBlocks(state: ContextBuildState): ContextBlock[] {
     story,
     proseFragments,
     chapterSummaries = [],
+    continuityView,
     authorInput = '',
   } = state
 
@@ -647,6 +661,21 @@ export function createDefaultBlocks(state: ContextBuildState): ContextBlock[] {
         chapterSummaries.map((c) => markdownSection(3, c.name, c.summary))
       ),
       order: 410,
+      source: 'builtin',
+    })
+  }
+
+  if (continuityView) {
+    blocks.push({
+      id: 'continuity-observations',
+      role: 'user',
+      content: renderContinuityView(continuityView, {
+        characterIds: [
+          ...state.stickyCharacters.map((fragment) => fragment.id),
+          ...(state.recentCharacters ?? []).map((fragment) => fragment.id),
+        ],
+      }),
+      order: 420,
       source: 'builtin',
     })
   }
@@ -787,13 +816,6 @@ export async function buildContext(
 
 const ANTHROPIC_CACHE_CONTROL = { anthropic: { cacheControl: { type: 'ephemeral' } } }
 
-/**
- * Regex for fragment tag references: <@ch-bafego> or <@ch-bafego:short>
- * Matches valid fragment IDs (2-4 char prefix, hyphen, 6 lowercase alpha chars)
- * with an optional :short modifier.
- */
-const FRAGMENT_TAG_RE = /<@([a-z]{2,4}-[a-z]{6})(?::(short))?>/g
-
 export interface ExpandFragmentTagsOptions {
   /** Maximum recursion depth for expanding tags within expanded content. Default 0 (no recursion). */
   maxDepth?: number
@@ -821,9 +843,8 @@ export async function expandFragmentTags(
   // Collect all matches first to avoid async issues with replace
   const matches: Array<{ full: string; id: string; modifier?: string }> = []
   let match: RegExpExecArray | null
-  // Reset lastIndex since we reuse the global regex
-  FRAGMENT_TAG_RE.lastIndex = 0
-  while ((match = FRAGMENT_TAG_RE.exec(content)) !== null) {
+  const tagPattern = fragmentTagPattern()
+  while ((match = tagPattern.exec(content)) !== null) {
     matches.push({ full: match[0], id: match[1], modifier: match[2] })
   }
 

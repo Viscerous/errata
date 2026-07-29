@@ -11,6 +11,8 @@ export interface FragmentContextMetadata {
   mode: FragmentContextMode
   scope: FragmentContextScope
   fragmentType: string
+  /** Fragment identities represented by this structured block. */
+  fragmentIds?: string[]
 }
 
 export interface FragmentContextGroup {
@@ -428,6 +430,7 @@ export function fragmentCatalogBlock(opts: {
       mode: 'summary-index',
       scope: opts.scope ?? 'catalog',
       fragmentType: 'mixed',
+      fragmentIds: sections.flatMap((section) => section.fragments.map((fragment) => fragment.id)),
     },
   }
 }
@@ -490,6 +493,7 @@ export function fragmentFullContextBlock(opts: {
       mode: 'full',
       scope: opts.scope,
       fragmentType: 'mixed',
+      fragmentIds: sections.flatMap((section) => section.fragments.map((fragment) => fragment.id)),
     },
   }
 }
@@ -591,6 +595,7 @@ export function fragmentContextBlock(group: FragmentContextGroup): ContextBlock 
       mode: group.mode,
       scope: group.scope,
       fragmentType: group.type,
+      fragmentIds: group.fragments.map((fragment) => fragment.id),
     },
   }
 }

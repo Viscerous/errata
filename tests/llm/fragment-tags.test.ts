@@ -80,6 +80,21 @@ describe('expandFragmentTags', () => {
     expect(result).not.toContain('<@ch-bafego>')
   })
 
+  it('expands fragment IDs with the schema minimum suffix length', async () => {
+    const character = makeFragment({
+      id: 'ch-0001',
+      name: 'Scout',
+      content: 'The scout keeps watch.',
+    })
+    await createFragment(dataDir, storyId, character)
+
+    const result = await expandFragmentTags('Use <@ch-0001>.', dataDir, storyId)
+
+    expect(result).toContain('## Scout')
+    expect(result).toContain('The scout keeps watch.')
+    expect(result).not.toContain('<@ch-0001>')
+  })
+
   it('expands a :short tag with name and description', async () => {
     const character = makeFragment({
       id: 'ch-bafego',

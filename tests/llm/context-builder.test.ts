@@ -362,7 +362,7 @@ describe('context-builder', () => {
     expect(recent!.content).toContain('The dark lord rules with an iron fist.')
   })
 
-  it('promotes recent writerContextIds before librarian annotations exist', async () => {
+  it('uses an explicit receipt read as a one-turn bridge before librarian annotations exist', async () => {
     const story = makeStory()
     await createStory(dataDir, story)
 
@@ -382,7 +382,12 @@ describe('context-builder', () => {
       name: 'Ch1',
       content: 'The path narrowed under the old trees.',
       order: 1,
-      meta: { writerContextIds: ['ch-0003'] },
+      meta: {
+        contextReceipt: {
+          version: 1,
+          entries: [{ fragmentId: 'ch-0003', access: 'read', actor: 'writer', reason: 'explicit-read' }],
+        },
+      },
     })
     await createFragment(dataDir, story.id, prose)
 
@@ -395,6 +400,62 @@ describe('context-builder', () => {
     expect(recent).toBeDefined()
     expect(recent!.content).toContain('### Characters')
     expect(recent!.content).toContain('The scout hides a silver compass.')
+  })
+
+  it('does not let inherited full context renew itself through a receipt', async () => {
+    const story = makeStory()
+    await createStory(dataDir, story)
+
+    const character = makeFragment({
+      id: 'ch-0003',
+      type: 'character',
+      name: 'Scout',
+      description: 'A cautious scout',
+      content: 'The scout hides a silver compass.',
+      sticky: false,
+    })
+    await createFragment(dataDir, story.id, character)
+
+    await createFragment(dataDir, story.id, makeFragment({
+      id: 'pr-0002',
+      type: 'prose',
+      name: 'Earlier',
+      content: 'The scout checked the path.',
+      order: 1,
+      meta: {
+        contextReceipt: {
+          version: 1,
+          entries: [{
+            fragmentId: 'ch-0003',
+            access: 'read',
+            actor: 'writer',
+            reason: 'explicit-read',
+          }],
+        },
+      },
+    }))
+    await createFragment(dataDir, story.id, makeFragment({
+      id: 'pr-0003',
+      type: 'prose',
+      name: 'Latest',
+      content: 'The road continued north.',
+      order: 2,
+      meta: {
+        contextReceipt: {
+          version: 1,
+          entries: [{
+            fragmentId: 'ch-0003',
+            access: 'full',
+            actor: 'writer',
+            reason: 'recent-context',
+          }],
+        },
+      },
+    }))
+
+    const state = await buildContextState(dataDir, story.id, 'Continue')
+    expect((state.recentCharacters ?? []).map((c) => c.id)).not.toContain('ch-0003')
+    expect(state.characterCatalog.map((c) => c.id)).toContain('ch-0003')
   })
 
   it('promotes recently mentioned non-sticky knowledge to recentKnowledge and formats it', async () => {
@@ -517,6 +578,7 @@ describe('context-builder', () => {
       mode: 'summary-index',
       scope: 'catalog',
       fragmentType: 'mixed',
+      fragmentIds: ['loc-0002'],
     })
   })
 

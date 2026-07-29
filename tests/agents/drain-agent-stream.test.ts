@@ -58,6 +58,28 @@ describe('drainAgentStream', () => {
     })
   })
 
+  // Validation errors echo the whole rejected payload and only then say what
+  // was wrong with it, so head-only truncation made a rejected reportAnalysis
+  // read as a truncated copy of its own arguments with no diagnosis at all.
+  it('keeps the diagnosis when a tool error is too long to store whole', async () => {
+    const payload = JSON.stringify({ events: Array.from({ length: 40 }, (_, i) => `Event number ${i}.`) })
+    const diagnosis = 'Error message: [ { "path": [ "stateOperations", 0, "existingKey" ], "message": "Invalid option" } ]'
+    const result = await drainAgentStream(fullStreamOf([
+      {
+        type: 'tool-error',
+        toolCallId: 'bad-1',
+        toolName: 'reportAnalysis',
+        error: new Error(`Invalid input for tool reportAnalysis: Value: ${payload}. ${diagnosis}`),
+      },
+    ]))
+
+    const [{ error }] = result.toolErrors
+    expect(error.length).toBeLessThan(600)
+    expect(error).toContain('Invalid input for tool reportAnalysis')
+    expect(error).toContain('"existingKey"')
+    expect(error).toContain('Invalid option')
+  })
+
   it('correlates a tool-result to its own tool-call args when interleaved', async () => {
     const result = await drainAgentStream(fullStreamOf([
       { type: 'tool-call', toolCallId: 'a', toolName: 'listFragments', input: { type: 'character' } },

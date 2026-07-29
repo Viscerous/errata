@@ -7,6 +7,7 @@ import { compileAgentContext } from '../agents/compile-agent-context'
 import { instructionRegistry } from '../instructions'
 import { buildContextState } from './context-builder'
 import { type AgentBlockContext, baseBlockContext } from '../agents/agent-block-context'
+import { renderContinuityView } from '../librarian/continuity-view'
 import type { Fragment, StoryMeta } from '../fragments/schema'
 import type { TokenUsage, ToolCallLog } from './generation-logs'
 import { resolveAndReportUsage } from './usage-normalizer'
@@ -455,6 +456,22 @@ export function createPrewriterBlocks(_ctx: AgentBlockContext): ContextBlock[] {
       order: 100,
       source: 'builtin',
     },
+    // The planner decides what the passage does, so it needs current state as a
+    // block it owns. It previously only saw continuity flattened inside
+    // full-context, which meant the preview showed a placeholder and the block
+    // editor could not reach it.
+    ...(_ctx.continuityView ? [{
+      id: 'continuity-observations',
+      role: 'user' as const,
+      content: renderContinuityView(_ctx.continuityView, {
+        characterIds: [
+          ..._ctx.stickyCharacters.map((fragment) => fragment.id),
+          ...(_ctx.recentCharacters ?? []).map((fragment) => fragment.id),
+        ],
+      }),
+      order: 150,
+      source: 'builtin' as const,
+    }] : []),
     {
       id: 'planning-request',
       role: 'user' as const,

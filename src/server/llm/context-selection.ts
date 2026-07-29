@@ -1,6 +1,7 @@
 import { uniqueFragments } from './utils'
 import type { Fragment } from '../fragments/schema'
 import type { FragmentContextLane } from './fragment-context-blocks'
+import { contextReceiptBridgeIds } from './context-receipt'
 
 export type ContextSelectionSource =
   | 'sticky'
@@ -87,13 +88,14 @@ export function collectRecentContextSignals(proseFragments: Fragment[]): Map<str
         pushSource(signals, annotation.fragmentId, 'recent-context')
       }
     }
+  }
 
-    const writerContextIds = Array.isArray(prose.meta?.writerContextIds)
-      ? (prose.meta.writerContextIds as unknown[]).filter((id): id is string => typeof id === 'string')
-      : []
-    for (const fragmentId of writerContextIds) {
-      pushSource(signals, fragmentId, 'writer-context')
-    }
+  // Explicit reads/tags bridge exactly one generation while the background
+  // Librarian may still be annotating the newest passage. Full context merely
+  // presented to that passage does not renew itself.
+  const latestProse = proseFragments.at(-1)
+  for (const fragmentId of contextReceiptBridgeIds(latestProse)) {
+    pushSource(signals, fragmentId, 'writer-context')
   }
 
   return signals

@@ -880,7 +880,7 @@ describe('prewriter', () => {
       expect(streamMessagesText(0)).toContain('CTX_SENTINEL Test Story 1')
     })
 
-    it('forwards prewriter fragment lookups into saved writerContextIds', async () => {
+    it('records prewriter fragment lookups in the saved context receipt', async () => {
       await createStory(dataDir, makeStory({
         generationMode: 'prewriter',
         disableLibrarianAutoAnalysis: true,
@@ -916,7 +916,18 @@ describe('prewriter', () => {
         await new Promise((r) => setTimeout(r, 25))
       }
       expect(saved).toBeDefined()
-      expect(saved!.meta?.writerContextIds).toContain('ch-0002')
+      expect(saved!.meta?.writerContextIds).toBeUndefined()
+      expect(saved!.meta?.contextReceipt).toMatchObject({
+        version: 1,
+        entries: expect.arrayContaining([
+          {
+            fragmentId: 'ch-0002',
+            access: 'read',
+            actor: 'prewriter',
+            reason: 'explicit-read',
+          },
+        ]),
+      })
     })
 
     it('applies plugin beforeGeneration hooks to the final writer context in prewriter mode', async () => {
