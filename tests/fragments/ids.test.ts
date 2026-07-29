@@ -11,13 +11,30 @@ describe('generateFragmentId', () => {
     expect(generateFragmentId('icon')).toMatch(/^ic-[a-z0-9]{6}$/)
   })
 
-  it('generates unique IDs', () => {
-    const ids = new Set<string>()
-    for (let i = 0; i < 100; i++) {
-      ids.add(generateFragmentId('prose'))
+  /**
+   * Draws from the whole suffix space rather than asserting a sample came back
+   * collision-free. The IDs are consonant-vowel alternating for pronounceability,
+   * so the space is 13^3 * 5^3 = 274,625 — not 36^6. A sample of 100 collides on
+   * about 1 run in 55 (birthday: 1 - e^(-100*99/2*274625)), which this test used
+   * to call "extremely unlikely" and fail on intermittently.
+   *
+   * Callers must not assume uniqueness from generation alone: a space this size
+   * needs a collision check per creation, which `createFragment` enforces by
+   * refusing to overwrite.
+   */
+  it('draws suffixes spread across the available space', () => {
+    const ids = Array.from({ length: 2000 }, () => generateFragmentId('prose'))
+
+    expect(ids.every(id => /^pr-[bdfgkmnprstvz][aeiou][bdfgkmnprstvz][aeiou][bdfgkmnprstvz][aeiou]$/.test(id))).toBe(true)
+    // Every position must vary; a pool stuck on one character would still satisfy
+    // the format above while collapsing the space.
+    for (let position = 0; position < 6; position++) {
+      const distinct = new Set(ids.map(id => id.slice(3)[position]))
+      expect(distinct.size, `position ${position} should vary`).toBe(position % 2 === 0 ? 13 : 5)
     }
-    // With 6 chars of base36, collisions in 100 are extremely unlikely
-    expect(ids.size).toBe(100)
+    // Loose upper bound on duplicates: ~7 expected at this sample size, so 60 is
+    // unreachable by chance yet still catches a badly narrowed space.
+    expect(ids.length - new Set(ids).size).toBeLessThan(60)
   })
 
   it('falls back to first 4 chars for unknown types', () => {
