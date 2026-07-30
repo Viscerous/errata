@@ -156,7 +156,10 @@ export function FragmentImportDialog({
   const handlePasteFromClipboard = async () => {
     const text = await readClipboardText()
     if (text === null) {
-      setParseError('Could not read clipboard. Try pasting manually with Ctrl+V.')
+      // Names the target rather than a keystroke: this branch is reached whenever
+      // the browser withholds clipboard reads, which includes every phone on a LAN
+      // address, where Ctrl+V was never the gesture.
+      setParseError('Could not read the clipboard. Paste into the box below instead.')
       return
     }
     handleTextChange(text)

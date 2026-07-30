@@ -158,7 +158,8 @@ function StoryListPage() {
   const handleImportPaste = useCallback(async () => {
     const text = await readClipboardText()
     if (text === null) {
-      setParseError('Could not read clipboard. Try pasting manually with Ctrl+V.')
+      // Device-neutral on purpose; see the note in FragmentImportDialog.
+      setParseError('Could not read the clipboard. Paste into the box below instead.')
       return
     }
     handleImportTextChange(text)
