@@ -1,15 +1,12 @@
 import type { ContextBlock } from '../llm/context-builder'
 import {
   fragmentFullContextBlock,
-  joinMarkdownBlocks,
   markdownSection,
   renderFullFragmentSheet,
-  STORY_SUMMARY_HEADING,
 } from '../llm/fragment-context-blocks'
 import type { AgentBlockContext } from '../agents/agent-block-context'
 import { instructionRegistry } from '../instructions'
-import { buildBasePreviewContext, renderProseSummariesText } from '../agents/block-helpers'
-import { pinnedFragmentCatalogBlocks } from '../agents/fragment-summary-blocks'
+import { buildBasePreviewContext } from '../agents/block-helpers'
 import { renderContinuity } from '../librarian/continuity-view'
 
 export function createCharacterChatBlocks(ctx: AgentBlockContext): ContextBlock[] {
@@ -57,45 +54,16 @@ export function createCharacterChatBlocks(ctx: AgentBlockContext): ContextBlock[
     })
   }
 
-  const storyParts = [`Name: ${ctx.story.name}`]
-  if (ctx.story.description.trim()) {
-    storyParts.push(`Description: ${ctx.story.description}`)
-  }
-  const storyContextParts: string[] = [
-    markdownSection(3, 'Story', storyParts.join('\n')),
-  ]
-  if (ctx.story.summary) {
-    storyContextParts.push(markdownSection(3, STORY_SUMMARY_HEADING, ctx.story.summary))
-  }
-
-  if (ctx.proseFragments.length > 0) {
-    const content = renderProseSummariesText(ctx.proseFragments, 'Use readFragments or readProseChain to inspect full prose.')
-    storyContextParts.push(markdownSection(3, 'Story Events', content))
-  }
-
-  blocks.push({
-    id: 'story-context',
-    role: 'user',
-    content: markdownSection(2, 'Story Context', joinMarkdownBlocks(storyContextParts)),
-    order: 300,
-    source: 'builtin',
-  })
-
-  blocks.push(...pinnedFragmentCatalogBlocks(ctx, {
-    excludeIds: ctx.character ? [ctx.character.id] : [],
-  }))
-
-  // Last of the user blocks on purpose: everything above is authorial context —
-  // the story summary, prose events, other characters' sheets — and a character
-  // with no stated boundary answers from all of it. This draws the line after
-  // the material it has to exclude.
+  // No global story summary, prose catalog, or fragment tools are routed here:
+  // the selected cutoff and folded self-knowledge are an access boundary, not
+  // merely an instruction to ignore authorial facts already in the prompt.
   const awareness = renderContinuity(ctx, 'character-chat.chat')
   if (awareness) {
     blocks.push({
       id: 'character-awareness',
       role: 'user',
       content: awareness,
-      order: 350,
+      order: 300,
       source: 'builtin',
     })
   }

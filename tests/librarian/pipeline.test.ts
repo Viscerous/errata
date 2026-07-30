@@ -44,7 +44,6 @@ describe('librarian fragment routing', () => {
     const selection = selectAttentionContext([lane], {
       runner: 'librarian.analyze',
       catalogScope: 'all',
-      fullSignalSources: ['writer-context', 'current-observation', 'router'],
     }, signals)
 
     expect(selection.lanes[0].full.map((fragment) => fragment.id)).toEqual(['ch-0001'])
@@ -62,7 +61,6 @@ describe('librarian fragment routing', () => {
     const selection = selectAttentionContext([lane], {
       runner: 'librarian.analyze',
       catalogScope: 'all',
-      fullSignalSources: ['writer-context', 'current-observation', 'router'],
     })
 
     expect(selection.lanes[0].full).toEqual([])
@@ -85,7 +83,6 @@ describe('librarian fragment routing', () => {
     const selection = selectAttentionContext([lane], {
       runner: 'librarian.analyze',
       catalogScope: 'all',
-      fullSignalSources: ['writer-context', 'current-observation', 'router'],
     })
 
     expect(selection.lanes[0].full.map((fragment) => fragment.id)).toEqual(['ch-rec01', 'ch-pin01'])

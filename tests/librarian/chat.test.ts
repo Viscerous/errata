@@ -392,6 +392,7 @@ describe('librarian chat endpoint', () => {
     const config = mockAgentCtor.mock.calls[0][0]
     // The tool is provided via the SDK schema (not enumerated in the prompt).
     expect(config.tools.invokeAgent).toBeDefined()
+    expect(config.tools.readContinuity).toBeDefined()
   })
 
   it('includes conversation history in messages', async () => {

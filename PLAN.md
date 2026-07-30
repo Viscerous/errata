@@ -641,7 +641,6 @@ All routes mounted at `/api/*` via Elysia.
 |--------|------|-------------|
 | POST | `/api/stories/:id/generate` | Generate prose (streaming SSE) |
 | POST | `/api/stories/:id/setup/chat` | Continue conversational story setup (streaming NDJSON) |
-| POST | `/api/stories/:id/setup/complete` | Legacy explicit finalization for setup API clients |
 | GET | `/api/stories/:id/generation-logs` | List generation logs |
 | GET | `/api/stories/:id/generation-logs/:logId` | Get full log |
 

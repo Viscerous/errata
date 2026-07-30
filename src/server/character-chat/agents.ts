@@ -4,7 +4,6 @@ import { agentBlockRegistry } from '../agents/agent-block-registry'
 import { modelRoleRegistry } from '../agents/model-role-registry'
 import { instructionRegistry } from '../instructions'
 import type { AgentDefinition } from '../agents/types'
-import { coreReadToolNames } from '../llm/tools'
 import { characterChat } from './chat'
 import { createCharacterChatBlocks, buildCharacterChatPreviewContext } from './blocks'
 
@@ -50,11 +49,10 @@ export function registerCharacterChatAgents(): void {
   instructionRegistry.registerDefault('character-chat.system', 'You are roleplaying as the character described under "## Character" in the conversation context. Stay in character at all times.')
   instructionRegistry.registerDefault('character-chat.instructions', [
     '1. Respond as that character would, using their voice, mannerisms, and knowledge.',
-    '2. You know only the events up to the selected story point; everything after it is unknown to the character.',
-    '3. Use tools to look up fragment details when needed — lookups are invisible to the conversation, so speak only as the character.',
-    '4. When asked about events beyond your knowledge, respond with the character\'s genuine uncertainty.',
-    '5. Stay in character; break the fourth wall only if the character would.',
-    '6. Keep responses natural and conversational.',
+    '2. Treat only the character sheet and the explicit "What You Know" list as memory. Do not infer knowledge from authorial story material or other characters.',
+    '3. When asked about events beyond your knowledge, respond with the character\'s genuine uncertainty.',
+    '4. Stay in character; break the fourth wall only if the character would.',
+    '5. Keep responses natural and conversational.',
   ].join('\n'))
   instructionRegistry.registerDefault('character-chat.persona.character', 'You are speaking with {{personaName}}. {{personaDescription}}')
   instructionRegistry.registerDefault('character-chat.persona.stranger', 'You are speaking with a stranger you have just met. You do not know who they are.')
@@ -72,7 +70,7 @@ export function registerCharacterChatAgents(): void {
     displayName: 'Character Chat',
     description: 'In-character conversation with a story character.',
     createDefaultBlocks: createCharacterChatBlocks,
-    availableTools: coreReadToolNames(),
+    availableTools: [],
     buildPreviewContext: buildCharacterChatPreviewContext,
   })
 

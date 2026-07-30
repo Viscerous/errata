@@ -17,6 +17,7 @@ import {
   STORY_SUMMARY_HEADING,
 } from '../llm/fragment-context-blocks'
 import { instructionRegistry } from '../instructions'
+import { fragmentBaseHash } from '../fragments/change-operations'
 
 // ─── Block helpers ───
 
@@ -108,10 +109,14 @@ export function targetFragmentBlock(
   defaultGuidance: string,
 ): ContextBlock | null {
   if (!ctx.targetFragment) return null
-  const fragmentIdentity = [
+  const fragmentSnapshot = [
     `ID: ${ctx.targetFragment.id}`,
     `Type: ${ctx.targetFragment.type}`,
     `Name: "${ctx.targetFragment.name}"`,
+    `Description: ${ctx.targetFragment.description}`,
+    `Version: ${ctx.targetFragment.version ?? 1}`,
+    `Base hash: ${fragmentBaseHash(ctx.targetFragment)}`,
+    markdownSection(3, 'Current Content', ctx.targetFragment.content || '(empty)'),
   ].join('\n')
   const guidance = ctx.instructions
     ? markdownSection(3, 'User Instructions', ctx.instructions)
@@ -120,7 +125,7 @@ export function targetFragmentBlock(
     id: 'target',
     role: 'user',
     content: markdownSection(2, `Target ${label}`, [
-      fragmentIdentity,
+      fragmentSnapshot,
       guidance,
     ]),
     order: 400,
@@ -155,7 +160,9 @@ export async function buildBasePreviewContext(
 
 /**
  * Load fragments tagged 'pass-to-librarian-system-prompt' for a story.
- * Used by analyze, chat, and directions preview contexts.
+ * Used only by Librarian analyze and Librarian chat. The tag is intentionally
+ * not a general editorial instruction surface: refinement, optimization, and
+ * direction generation have narrower prompts and should not inherit it.
  */
 export async function loadSystemPromptFragments(
   dataDir: string,

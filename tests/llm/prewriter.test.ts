@@ -805,6 +805,13 @@ describe('prewriter', () => {
 
     it('applies disabled tools from the prewriter config independently of the writer config', async () => {
       await createStory(dataDir, makeStory({ generationMode: 'prewriter' }))
+      await createFragment(dataDir, storyId, makeFragment({
+        id: 'kn-catalog',
+        type: 'knowledge',
+        sticky: false,
+        name: 'Sealed Archive',
+        description: 'A record available on demand',
+      }))
 
       await saveAgentBlockConfig(dataDir, storyId, 'generation.prewriter', {
         customBlocks: [],
@@ -833,6 +840,10 @@ describe('prewriter', () => {
       const writerConfig = mockAgentCtor.mock.calls[1][0] as any
       expect(prewriterConfig.tools).not.toHaveProperty('readFragments')
       expect(writerConfig.tools).toHaveProperty('readFragments')
+      const prewriterPrompt = streamMessagesText(0)
+      expect(prewriterPrompt).toContain('[@block=full-context:fragment-catalog]')
+      expect(prewriterPrompt).toContain('You cannot open these rows')
+      expect(prewriterPrompt).not.toContain('[user]\n')
     })
 
     it('evaluates prewriter custom script blocks with the real generation context', async () => {

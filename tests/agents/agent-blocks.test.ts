@@ -462,20 +462,22 @@ describe('Librarian Refine Blocks', () => {
     expect(ids).toContain('instructions')
     expect(ids).toContain('story-info')
     const instructions = blocks.find(b => b.id === 'instructions')!
-    expect(instructions.content).toContain('read the target fragment using **readFragments**')
+    expect(instructions.content).toContain('complete target snapshot')
     expect(instructions.content).not.toContain('getCharacter')
   })
 
   it('includes target block when targetFragment provided', () => {
     const def = agentBlockRegistry.get('librarian.refine')!
     const blocks = def.createDefaultBlocks(makeBaseContext({
-      targetFragment: makeFragment({ id: 'ch-hero01', name: 'Hero' }),
+      targetFragment: makeFragment({ id: 'ch-hero01', name: 'Hero', content: 'Current hero sheet.' }),
       instructions: 'Update the backstory',
     }))
     const target = blocks.find(b => b.id === 'target')
     expect(target).toBeDefined()
     expect(target!.content).toContain('## Target fragment to refine\n\nID: ch-hero01')
     expect(target!.content).toContain('### User Instructions\n\nUpdate the backstory')
+    expect(target!.content).toContain('### Current Content\n\nCurrent hero sheet.')
+    expect(target!.content).toMatch(/Base hash: [a-f0-9]{16}/)
     expect(target!.content).toContain('ch-hero01')
     expect(target!.content).toContain('Update the backstory')
     expect(target!.content).not.toMatch(/\n{3,}/)
@@ -490,6 +492,23 @@ describe('Librarian Refine Blocks', () => {
     expect(prose).toBeDefined()
     expect(prose!.content).toContain('## Recent Prose\n\n### Ch 1 (pr-test01)\n\nStory text.')
     expect(prose!.content).not.toMatch(/\n{3,}/)
+  })
+
+  it('includes folded continuity and scopes character knowledge to its target', () => {
+    const target = makeFragment({ id: 'ch-target', type: 'character', name: 'Mara' })
+    const blocks = agentBlockRegistry.get('librarian.refine')!.createDefaultBlocks(makeBaseContext({
+      targetFragment: target,
+      continuityView: makeContinuityView({
+        characterKnowledge: [makeCharacterKnowledge({
+          characterId: target.id,
+          fact: 'Mara knows the gate is watched.',
+        })],
+      }),
+    }))
+    const continuity = blocks.find((block) => block.id === 'continuity-observations')!
+    expect(continuity.content).toContain('Mara knows or believes:')
+    expect(continuity.content).toContain('Mara knows the gate is watched.')
+    expect(continuity.content).toContain('Respect it as evidence while editing')
   })
 
   it('aggregates pinned fragment summaries into one pinned catalog', () => {
@@ -554,6 +573,24 @@ describe('Continuity reaches the agents that decide what happens next', () => {
       const def = agentBlockRegistry.get(agentName)!
       const blocks = def.createDefaultBlocks(makeBaseContext())
       expect(blocks.some((b) => b.id === 'continuity-observations'), agentName).toBe(false)
+    }
+  })
+
+  it('presents character names rather than internal IDs to every authorial generator', () => {
+    const zinozi = makeFragment({ id: 'ch-zinozi', type: 'character', name: 'Zinozi' })
+    const continuityView = makeContinuityView({
+      characterKnowledge: [makeCharacterKnowledge({
+        characterId: zinozi.id,
+        fact: 'Zinozi knows the bell was moved.',
+      })],
+    })
+
+    for (const agentName of ['generation.writer', 'generation.prewriter', 'directions.suggest']) {
+      const continuity = agentBlockRegistry.get(agentName)!
+        .createDefaultBlocks(makeBaseContext({ continuityView, stickyCharacters: [zinozi] }))
+        .find((block) => block.id === 'continuity-observations')!
+      expect(continuity.content, agentName).toContain('Zinozi knows or believes:')
+      expect(continuity.content, agentName).not.toContain('ch-zinozi knows or believes:')
     }
   })
 })
@@ -632,7 +669,7 @@ describe('Librarian Optimize Character Blocks', () => {
     const def = agentBlockRegistry.get('librarian.optimize-character')!
     const blocks = def.createDefaultBlocks(makeBaseContext())
     const instructions = blocks.find(b => b.id === 'instructions')!
-    expect(instructions.content).toContain('Read the target character fragment using readFragments')
+    expect(instructions.content).toContain('complete target character snapshot')
     expect(instructions.content).not.toContain('getCharacter')
   })
 
@@ -668,6 +705,23 @@ describe('Librarian Optimize Character Blocks', () => {
     expect(allCharacters!.content).toContain('## All Characters Catalog')
     expect(allCharacters!.content).toContain('ch-pin01')
     expect(allCharacters!.content).toContain('ch-oth01')
+  })
+
+  it('includes the target character\'s folded continuity even when they are not active', () => {
+    const target = makeFragment({ id: 'ch-target', type: 'character', name: 'Mara' })
+    const blocks = agentBlockRegistry.get('librarian.optimize-character')!.createDefaultBlocks(makeBaseContext({
+      targetFragment: target,
+      continuityView: makeContinuityView({
+        characterKnowledge: [makeCharacterKnowledge({
+          characterId: target.id,
+          fact: 'Mara knows the gate is watched.',
+        })],
+      }),
+    }))
+    const continuity = blocks.find((block) => block.id === 'continuity-observations')!
+    expect(continuity.content).toContain('Mara knows or believes:')
+    expect(continuity.content).toContain('Mara knows the gate is watched.')
+    expect(continuity.content).toContain('Respect it as evidence while editing')
   })
 })
 
@@ -903,14 +957,10 @@ describe('Writer Blocks', () => {
 })
 
 describe('Character Chat Blocks', () => {
-  it('produces story-context block at minimum', () => {
+  it('does not preload authorial story context without a character', () => {
     const def = agentBlockRegistry.get('character-chat.chat')!
     const blocks = def.createDefaultBlocks(makeBaseContext())
-    const story = blocks.find(b => b.id === 'story-context')
-    expect(story).toBeDefined()
-    expect(story!.content).toContain('## Story Context')
-    expect(story!.content).toContain('### Story')
-    expect(story!.content).toContain('Name: Test Story')
+    expect(blocks.map((block) => block.id)).toEqual(['instructions'])
   })
 
   it('includes character block when character provided', () => {
@@ -944,7 +994,7 @@ describe('Character Chat Blocks', () => {
     expect(persona!.content).toContain('village elder')
   })
 
-  it('includes prose summaries in story-context', () => {
+  it('does not expose global prose summaries to the character', () => {
     const def = agentBlockRegistry.get('character-chat.chat')!
     const blocks = def.createDefaultBlocks(makeBaseContext({
       proseFragments: [makeFragment({
@@ -955,13 +1005,10 @@ describe('Character Chat Blocks', () => {
         meta: { _librarian: { summary: 'Hero arrives at village' } },
       })],
     }))
-    const ctx = blocks.find(b => b.id === 'story-context')!
-    expect(ctx.role).toBe('user')
-    expect(ctx.content).toContain('### Story Events')
-    expect(ctx.content).toContain('Hero arrives at village')
+    expect(blocks.some((block) => block.content.includes('Hero arrives at village'))).toBe(false)
   })
 
-  it('uses an aggregate pinned catalog for story context fragments', () => {
+  it('does not expose pinned authorial memory to the character', () => {
     const def = agentBlockRegistry.get('character-chat.chat')!
     const blocks = def.createDefaultBlocks(makeBaseContext({
       stickyKnowledge: [makeFragment({
@@ -972,17 +1019,10 @@ describe('Character Chat Blocks', () => {
         content: 'Full magic details should not be in this summary list.',
       })],
     }))
-    const catalog = blocks.find(b => b.id === 'fragment-pinned-catalog')!
-    expect(catalog).toBeDefined()
-    expect(catalog.content).toContain('## Pinned Fragment Catalog')
-    expect(catalog.content).toContain('one-line catalog row, not the full fragment')
-    expect(catalog.content).toContain('### Knowledge')
-    expect(catalog.content).toContain('kn-test01')
-    expect(catalog.content).toContain('Rules for magic')
-    expect(catalog.content).not.toContain('Full magic details should not be in this summary list.')
+    expect(blocks.some((block) => block.content.includes('Magic System'))).toBe(false)
   })
 
-  it('does not duplicate the active character in pinned character summaries', () => {
+  it('shows the active character only in its full sheet', () => {
     const def = agentBlockRegistry.get('character-chat.chat')!
     const hero = makeFragment({
       id: 'ch-hero01',
@@ -997,8 +1037,7 @@ describe('Character Chat Blocks', () => {
       stickyCharacters: [hero],
     }))
 
-    const ctx = blocks.find(b => b.id === 'story-context')!
-    expect(ctx.content).not.toContain('ch-hero01')
+    expect(blocks.filter((block) => block.content.includes('ch-hero01'))).toHaveLength(1)
     expect(blocks.find(b => b.id === 'fragment-pinned-catalog')).toBeUndefined()
   })
 
@@ -1051,23 +1090,23 @@ describe('Character Chat Blocks', () => {
       expect(awareness.content).not.toContain('The key is missing')
     })
 
-    it('omits the block when there is no character or nothing folded yet', () => {
+    it('omits the block with no character but keeps the boundary before anything is folded', () => {
       const noCharacter = agentBlockRegistry.get('character-chat.chat')!
         .createDefaultBlocks(makeBaseContext({ continuityView: knowledgeView }))
       expect(noCharacter.some(b => b.id === 'character-awareness')).toBe(false)
 
       const noView = agentBlockRegistry.get('character-chat.chat')!
         .createDefaultBlocks(makeBaseContext({ character: hero }))
-      expect(noView.some(b => b.id === 'character-awareness')).toBe(false)
+      const awareness = noView.find(b => b.id === 'character-awareness')!
+      expect(awareness.content).toContain('you have not learned it')
+      expect(awareness.content).toContain('nothing beyond your character sheet')
     })
 
-    // The story context above it is the author's; the boundary has to be the
-    // last thing the model reads or it is read as one more source to draw on.
-    it('comes after the story context it is drawing a line around', () => {
+    it('comes after the character and persona it qualifies', () => {
       const blocks = agentBlockRegistry.get('character-chat.chat')!
         .createDefaultBlocks(makeBaseContext({ character: hero, continuityView: knowledgeView }))
       const awareness = blocks.find(b => b.id === 'character-awareness')!
-      for (const id of ['character', 'persona', 'story-context', 'fragment-pinned-catalog']) {
+      for (const id of ['character', 'persona']) {
         const earlier = blocks.find(b => b.id === id)
         if (earlier) expect(awareness.order, id).toBeGreaterThan(earlier.order)
       }

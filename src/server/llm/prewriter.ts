@@ -1,7 +1,7 @@
 import { tool, ToolLoopAgent, stepCountIs, hasToolCall, type ToolSet } from 'ai'
 import { z } from 'zod/v4'
 import { resolveAgentRuntime } from './client'
-import { addCacheBreakpoints, compileBlocks, expandMessagesFragmentTags, type ContextBlock, type ContextMessage } from './context-builder'
+import { addCacheBreakpoints, compileBlocks, expandMessagesFragmentTags, type ContextBlock } from './context-builder'
 import { proseWindowBlock } from './fragment-context-blocks'
 import { compileAgentContext } from '../agents/compile-agent-context'
 import { instructionRegistry } from '../instructions'
@@ -156,7 +156,8 @@ export interface RunPrewriterArgs {
   /** The story, already loaded by the caller — resolves the prewriter's own
    * runtime (model, thinking toggle, output cap) via `resolveAgentRuntime`. */
   story: StoryMeta
-  compiledMessages: ContextMessage[]
+  /** Structured Writer-owned story blocks projected into the planning prompt. */
+  contextBlocks: ContextBlock[]
   blockContext?: AgentBlockContext
   authorInput: string
   mode: 'generate' | 'regenerate' | 'refine'
@@ -185,6 +186,8 @@ export interface PrewriterResult {
   durationMs: number
   model: string
   usage?: TokenUsage
+  /** Structured story blocks actually presented through the full-context slot. */
+  presentedContextBlocks: ContextBlock[]
   /** Set when the prewriter asked the author clarifying questions instead of finalizing a brief. */
   questions?: ClarifyQuestion[]
 }
@@ -195,7 +198,7 @@ export interface PrewriterResult {
  * that the writer will use instead of the full context.
  */
 export async function runPrewriter(args: RunPrewriterArgs): Promise<PrewriterResult> {
-  const { dataDir, storyId, story, compiledMessages, authorInput, mode, tools, maxSteps = 3, abortSignal, onEvent, clarifyEnabled = false, clarifications = [], round = 0, reasoning = 'normal' } = args
+  const { dataDir, storyId, story, contextBlocks, authorInput, mode, tools, maxSteps = 3, abortSignal, onEvent, clarifyEnabled = false, clarifications = [], round = 0, reasoning = 'normal' } = args
   const requestLogger = logger.child({ storyId })
   const canAskQuestions = clarifyEnabled && round < MAX_CLARIFY_ROUNDS
 
@@ -225,16 +228,22 @@ export async function runPrewriter(args: RunPrewriterArgs): Promise<PrewriterRes
     prewriterBlocks = createPrewriterBlocks(blockContext)
   }
 
-  // Replace the full-context placeholder with the actual compiled messages
-  const fullContextContent = compiledMessages
-    .map(m => `[${m.role}]\n${typeof m.content === 'string' ? m.content : JSON.stringify(m.content)}`)
-    .join('\n\n---\n\n')
-
-  prewriterBlocks = prewriterBlocks.map(b =>
-    b.id === 'full-context'
-      ? { ...b, content: `## Full Story Context\n\n${fullContextContent}` }
-      : b,
-  )
+  // Replace the placeholder with real blocks rather than serializing a compiled
+  // Writer prompt into a second prompt. This preserves fragment metadata for
+  // receipts and keeps each context surface independently inspectable.
+  prewriterBlocks = prewriterBlocks.flatMap((block) => {
+    if (block.id !== 'full-context') return [block]
+    const projected = contextBlocks.map((contextBlock, index) => ({
+      ...contextBlock,
+      id: `full-context:${contextBlock.id}`,
+      order: block.order + ((index + 1) / 1000),
+      source: 'builtin' as const,
+    }))
+    return [
+      { ...block, content: '## Full Story Context' },
+      ...projected,
+    ]
+  })
 
   // Update planning-request based on mode
   const modePrompts: Record<string, string> = {
@@ -432,7 +441,20 @@ export async function runPrewriter(args: RunPrewriterArgs): Promise<PrewriterRes
 
   requestLogger.info('Prewriter steps used', { stepCount })
 
-  return { brief: briefText, reasoning: fullReasoning, messages: serializedMessages, customBlocks, directions: capturedDirections, toolCalls, stepCount, durationMs, model: modelId, usage, questions: capturedQuestions ?? undefined }
+  return {
+    brief: briefText,
+    reasoning: fullReasoning,
+    messages: serializedMessages,
+    customBlocks,
+    directions: capturedDirections,
+    toolCalls,
+    stepCount,
+    durationMs,
+    model: modelId,
+    usage,
+    presentedContextBlocks: prewriterBlocks.filter((block) => block.id.startsWith('full-context:')),
+    questions: capturedQuestions ?? undefined,
+  }
 }
 
 /**

@@ -322,37 +322,88 @@ export async function buildContinuityView(params: {
 /**
  * The agents that read folded continuity.
  *
- * A caller states which one it is; it does not get to state how the records
- * should be framed. The two framings are contradictory — "let these lie" for
- * whoever writes the next passage, "here is what you could pick up" for whoever
- * only proposes one — so pairing a reader with the wrong one is a mistake worth
- * making unavailable rather than documenting. Adding a reader here is a
- * deliberate choice about what that agent is allowed to see.
+ * A caller states which one it is; it does not get to choose how the records are
+ * framed or whose awareness is in scope. Writing, proposing, editing, analysis,
+ * and roleplay ask different questions of the same fold, so pairing a reader
+ * with the wrong policy is a mistake worth making unavailable rather than
+ * documenting. Adding a reader here is a deliberate choice about what that
+ * agent is allowed to see and what it may do with the records.
  */
 export type ContinuityReader =
   | 'generation.writer'
   | 'generation.prewriter'
   | 'directions.suggest'
   | 'librarian.analyze'
+  | 'librarian.chat'
+  | 'librarian.refine'
+  | 'librarian.optimize-character'
   | 'character-chat.chat'
 
-type ContinuityPresentation = 'constraints' | 'candidates' | 'registry' | 'self'
+type ContinuityPresentation =
+  | 'writing-constraints'
+  | 'direction-candidates'
+  | 'editing-reference'
+  | 'registry'
+  | 'self'
+type AuthorialPresentation = Exclude<ContinuityPresentation, 'registry' | 'self'>
+type CharacterScope = 'all' | 'active-cast' | 'passage-candidates' | 'target-related-cast' | 'target-character'
 
-const PRESENTATION_BY_READER: Record<ContinuityReader, ContinuityPresentation> = {
+type ContinuityPolicy =
+  | { presentation: Exclude<ContinuityPresentation, 'self'>; characterScope: CharacterScope }
+  | { presentation: 'self' }
+
+const POLICY_BY_READER: Record<ContinuityReader, ContinuityPolicy> = {
   // Limits, focused threads only. A dormant thread dragged into the present
   // scene is precisely the failure mode for whoever writes the next passage.
-  'generation.writer': 'constraints',
-  'generation.prewriter': 'constraints',
+  'generation.writer': { presentation: 'writing-constraints', characterScope: 'active-cast' },
+  'generation.prewriter': { presentation: 'writing-constraints', characterScope: 'active-cast' },
   // Latent material, every thread including dormant. A question the story raised
   // and let go is the richest source of a next move for a reader that proposes
   // moves and writes none of them.
-  'directions.suggest': 'candidates',
+  'directions.suggest': { presentation: 'direction-candidates', characterScope: 'active-cast' },
   // The keyed registry, because this reader writes the records back and has to
   // address them by the keys they already carry.
-  'librarian.analyze': 'registry',
+  'librarian.analyze': { presentation: 'registry', characterScope: 'passage-candidates' },
+  // General Librarian chat reads the fold only on demand, but when asked it
+  // needs the whole registry rather than a passage-local subset.
+  'librarian.chat': { presentation: 'registry', characterScope: 'all' },
+  // Refinement sees the standing cast plus a character target and any characters
+  // the target references. It uses continuity as evidence, not prose direction.
+  'librarian.refine': { presentation: 'editing-reference', characterScope: 'target-related-cast' },
+  // Character optimization is explicitly about one sheet. Pinning and recency
+  // must not decide whether that character's own knowledge reaches the editor.
+  'librarian.optimize-character': { presentation: 'editing-reference', characterScope: 'target-character' },
   // Second person, own knowledge only. This reader *is* the character, and one
   // given the authorial records starts answering from offstage facts.
-  'character-chat.chat': 'self',
+  'character-chat.chat': { presentation: 'self' },
+}
+
+interface AuthorialPresentationCopy {
+  introduction: string
+  includeDormantThreads: boolean
+  threadHeading: string
+  threadGuidance: string
+}
+
+const AUTHORIAL_PRESENTATION_COPY: Record<AuthorialPresentation, AuthorialPresentationCopy> = {
+  'writing-constraints': {
+    introduction: 'It constrains continuity but does not dictate what the next passage must do.',
+    includeDormantThreads: false,
+    threadHeading: '### Relevant unresolved continuity',
+    threadGuidance: 'These are not tasks, promised beats, or instructions to advance or resolve anything. Let them remain unresolved unless the present scene naturally engages them.',
+  },
+  'direction-candidates': {
+    introduction: 'It is material for proposing possible next moves, not a requirement that any one move happen.',
+    includeDormantThreads: true,
+    threadHeading: '### Unresolved continuity available to engage',
+    threadGuidance: 'These are open questions the story has raised and not answered. A dormant one has simply gone quiet, not been resolved; deliberately picking one up is a legitimate direction. None of them is owed an answer.',
+  },
+  'editing-reference': {
+    introduction: 'Respect it as evidence while editing, but do not copy transient state or unresolved questions into the target fragment.',
+    includeDormantThreads: false,
+    threadHeading: '### Open continuity relevant to this edit',
+    threadGuidance: 'These are unresolved story questions, not facts to bake into the target fragment. Do not advance, resolve, or turn them into permanent traits or lore while editing.',
+  },
 }
 
 /**
@@ -362,11 +413,15 @@ const PRESENTATION_BY_READER: Record<ContinuityReader, ContinuityPresentation> =
  */
 export interface ContinuitySource {
   continuityView?: ContinuityView
-  stickyCharacters?: Array<{ id: string }>
-  recentCharacters?: Array<{ id: string }>
+  stickyCharacters?: Array<{ id: string; name?: string }>
+  recentCharacters?: Array<{ id: string; name?: string }>
+  characterCatalog?: Array<{ id: string; name?: string }>
+  allCharacters?: Array<{ id: string; name?: string }>
   attentionCandidateIds?: string[]
   /** The character a `self` reader is speaking as. */
-  character?: { id: string }
+  character?: { id: string; name?: string }
+  /** The fragment an editing reader is changing. */
+  targetFragment?: { id: string; type: string; name?: string; refs?: string[] }
 }
 
 /**
@@ -377,19 +432,81 @@ export interface ContinuitySource {
  * does not settle whether these are the right characters — but it makes that one
  * question answerable in one place per reader instead of three.
  */
-function charactersInScope(source: ContinuitySource, presentation: ContinuityPresentation): Set<string> {
-  if (presentation === 'registry') {
-    // Analysis scopes knowledge to who this passage is actually about.
+function activeCast(source: ContinuitySource): Set<string> {
+  return new Set([
+    ...(source.stickyCharacters ?? []).map((fragment) => fragment.id),
+    ...(source.recentCharacters ?? []).map((fragment) => fragment.id),
+  ])
+}
+
+function charactersInScope(source: ContinuitySource, scope: CharacterScope): Set<string> {
+  if (scope === 'all') {
+    return new Set(source.continuityView?.characterKnowledge.map((entry) => entry.characterId) ?? [])
+  }
+  if (scope === 'passage-candidates') {
     return new Set([
       ...(source.attentionCandidateIds ?? []),
       ...(source.recentCharacters ?? []).map((fragment) => fragment.id),
     ])
   }
-  // Pinned, or active in the recent window: the cast the author is working with.
-  return new Set([
-    ...(source.stickyCharacters ?? []).map((fragment) => fragment.id),
-    ...(source.recentCharacters ?? []).map((fragment) => fragment.id),
-  ])
+  if (scope === 'target-character') {
+    return new Set(source.targetFragment?.type === 'character' ? [source.targetFragment.id] : [])
+  }
+  if (scope === 'target-related-cast') {
+    const characters = activeCast(source)
+    if (source.targetFragment?.type === 'character') characters.add(source.targetFragment.id)
+    for (const referencedId of source.targetFragment?.refs ?? []) characters.add(referencedId)
+    return characters
+  }
+  return activeCast(source)
+}
+
+/** Resolve mutable display names from the current context; folded records keep stable IDs. */
+function characterName(source: ContinuitySource, characterId: string): string | undefined {
+  const candidates = [
+    source.character,
+    source.targetFragment?.type === 'character' ? source.targetFragment : undefined,
+    ...(source.stickyCharacters ?? []),
+    ...(source.recentCharacters ?? []),
+    ...(source.characterCatalog ?? []),
+    ...(source.allCharacters ?? []),
+  ]
+  return candidates.find((candidate) => candidate?.id === characterId)?.name?.trim() || undefined
+}
+
+/**
+ * Give every authorial group an unambiguous display label without leaking its
+ * storage ID. Duplicate current names and unavailable sheets receive stable
+ * ordinals in the order their folded knowledge appears.
+ */
+function characterLabels(source: ContinuitySource, characterIds: Iterable<string>): Map<string, string> {
+  const resolved = [...characterIds].map((id) => ({ id, name: characterName(source, id) }))
+  const counts = new Map<string, number>()
+  for (const { name } of resolved) {
+    if (!name) continue
+    const key = name.toLocaleLowerCase()
+    counts.set(key, (counts.get(key) ?? 0) + 1)
+  }
+
+  const labels = new Map<string, string>()
+  const seenNames = new Map<string, number>()
+  let unavailable = 0
+  for (const { id, name } of resolved) {
+    if (!name) {
+      unavailable += 1
+      labels.set(id, `Unavailable character ${unavailable}`)
+      continue
+    }
+    const key = name.toLocaleLowerCase()
+    if ((counts.get(key) ?? 0) === 1) {
+      labels.set(id, name)
+      continue
+    }
+    const ordinal = (seenNames.get(key) ?? 0) + 1
+    seenNames.set(key, ordinal)
+    labels.set(id, `${name} (character ${ordinal})`)
+  }
+  return labels
 }
 
 /**
@@ -399,27 +516,33 @@ function charactersInScope(source: ContinuitySource, presentation: ContinuityPre
  */
 export function renderContinuity(source: ContinuitySource, reader: ContinuityReader): string | null {
   const view = source.continuityView
-  if (!view) return null
-
-  const presentation = PRESENTATION_BY_READER[reader]
+  const policy = POLICY_BY_READER[reader]
+  const presentation = policy.presentation
   if (presentation === 'self') {
     return source.character ? renderSelfAwareness(view, source.character.id) : null
   }
+  if (!view) return null
   if (presentation === 'registry') {
-    return renderContinuityRegistry(view, charactersInScope(source, presentation))
+    return renderContinuityRegistry(view, charactersInScope(source, policy.characterScope))
   }
-  return renderAuthorialContinuity(view, presentation, charactersInScope(source, presentation))
+  return renderAuthorialContinuity(
+    source,
+    view,
+    presentation,
+    charactersInScope(source, policy.characterScope),
+  )
 }
 
 function renderAuthorialContinuity(
+  source: ContinuitySource,
   view: ContinuityView,
-  presentation: Extract<ContinuityPresentation, 'constraints' | 'candidates'>,
+  presentation: AuthorialPresentation,
   characterIds: Set<string>,
 ): string {
-  const asCandidates = presentation === 'candidates'
+  const copy = AUTHORIAL_PRESENTATION_COPY[presentation]
   const parts = [
     '## Continuity',
-    'This is source-linked memory from accepted prose. It constrains continuity but does not dictate what the next passage must do. Information shown to the Writer is not automatically known by every character.',
+    `This is authorial, source-linked memory from accepted prose. ${copy.introduction} Information in this view is not automatically known by every character.`,
   ]
 
   if (view.temporalFrame && view.temporalFrame.relation !== 'forward') {
@@ -433,15 +556,13 @@ function renderAuthorialContinuity(
     ].join('\n'))
   }
 
-  const threads = asCandidates
+  const threads = copy.includeDormantThreads
     ? view.liveThreads
     : view.liveThreads.filter((thread) => thread.visibility !== 'dormant')
   if (threads.length > 0) {
     parts.push([
-      asCandidates ? '### Unresolved continuity available to engage' : '### Relevant unresolved continuity',
-      asCandidates
-        ? 'These are open questions the story has raised and not answered. A dormant one has simply gone quiet, not been resolved; deliberately picking one up is a legitimate direction. None of them is owed an answer.'
-        : 'These are not tasks, promised beats, or instructions to advance or resolve anything. Let them remain unresolved unless the present scene naturally engages them.',
+      copy.threadHeading,
+      copy.threadGuidance,
       ...threads.map((thread) => `- [${thread.visibility}] ${thread.label}${thread.note ? ` — ${thread.note}` : ''}`),
     ].join('\n'))
   }
@@ -454,10 +575,11 @@ function renderAuthorialContinuity(
       entries.push(entry)
       knowledgeByCharacter.set(entry.characterId, entries)
     }
+    const labels = characterLabels(source, knowledgeByCharacter.keys())
     parts.push([
       '### Character awareness boundaries',
       ...[...knowledgeByCharacter].map(([characterId, entries]) => [
-        `${characterId} explicitly knows:`,
+        `${labels.get(characterId)} knows or believes:`,
         ...entries.map((entry) => `- ${entry.fact}`),
       ].join('\n')),
     ].filter((line): line is string => Boolean(line)).join('\n\n'))
@@ -475,11 +597,11 @@ function renderAuthorialContinuity(
  * part that stops a reply from treating the story summary, which sits in the same
  * prompt, as the character's own memory.
  */
-function renderSelfAwareness(view: ContinuityView, characterId: string): string {
-  const known = view.characterKnowledge.filter((entry) => entry.characterId === characterId)
+function renderSelfAwareness(view: ContinuityView | undefined, characterId: string): string {
+  const known = view?.characterKnowledge.filter((entry) => entry.characterId === characterId) ?? []
   return [
     '## What You Know',
-    'Your character sheet and the list below are your memory. The story summary and events elsewhere in this prompt are context for the author, not for you: if something appears there and not here, you have not learned it.',
+    'Your character sheet and the list below are your memory. Do not infer knowledge from authorial story material or from what other characters know: if something does not appear here, you have not learned it.',
     ...(known.length > 0
       ? known.map((entry) => `- ${entry.fact} (${entry.acquisition})`)
       : ['- (nothing beyond your character sheet and the present conversation)']),

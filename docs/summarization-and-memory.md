@@ -217,7 +217,7 @@ Related context tests:
 The librarian analyze agent uses the **agent block system** for context assembly. The system prompt and user context (summary, characters, knowledge, new prose) are defined as blocks in `src/server/librarian/blocks.ts` and compiled via `compileAgentContext()`. This means:
 
 - The librarian's system prompt can be customized per-story through agent block overrides (Settings > Agent Context).
-- Fragments tagged `pass-to-librarian-system-prompt` are loaded into the block context and appended to the system message.
+- Fragments tagged `pass-to-librarian-system-prompt` are loaded for `librarian.analyze` and `librarian.chat` only, then appended to their system messages. Direction and editing agents deliberately do not inherit them.
 - Custom blocks can be added to inject additional instructions or context.
 
 The same block system is used by `librarian.chat`, `librarian.refine`, and `librarian.prose-transform` agents.

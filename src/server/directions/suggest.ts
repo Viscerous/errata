@@ -1,15 +1,13 @@
 import { ToolLoopAgent, stepCountIs } from 'ai'
 import { z } from 'zod/v4'
 import { resolveAgentRuntime } from '../llm/client'
-import { getStory, getFragment } from '../fragments/storage'
+import { getStory } from '../fragments/storage'
 import { buildContextState } from '../llm/context-builder'
 import { compileAgentContext } from '../agents/compile-agent-context'
-import { getFragmentsByTag } from '../fragments/associations'
 import { instructionRegistry } from '../instructions'
 import { resolveAndReportUsage } from '../llm/usage-normalizer'
 import { createLogger } from '../logging'
 import { type AgentBlockContext, baseBlockContext } from '../agents/agent-block-context'
-import { loadSystemPromptFragments } from '../agents/block-helpers'
 import { drainAgentStream } from '../agents/drain-agent-stream'
 
 const logger = createLogger('directions-suggest')
@@ -88,11 +86,9 @@ export async function proposeDirections(
   // Build context through the directions agent block system
   const ctxState = await buildContextState(dataDir, storyId, '')
 
-  const systemPromptFragments = await loadSystemPromptFragments(dataDir, storyId, getFragmentsByTag, getFragment)
-
   const blockContext: AgentBlockContext = {
     ...baseBlockContext(ctxState, ctxState.story),
-    systemPromptFragments,
+    systemPromptFragments: [],
     modelId,
   }
 

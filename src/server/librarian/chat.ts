@@ -20,6 +20,7 @@ import { withBranch } from '../fragments/branches'
 import type { ChatStreamEvent, ChatResult } from '../agents/stream-types'
 import { type AgentBlockContext, baseBlockContext } from '../agents/agent-block-context'
 import { loadSystemPromptFragments } from '../agents/block-helpers'
+import { renderContinuity } from './continuity-view'
 
 export type { ChatStreamEvent, ChatResult }
 
@@ -40,7 +41,11 @@ export interface ChatOptions {
  * handler and the agent's `resolveTools` (for the preview) share one source —
  * no drift between what the model gets and what the preview shows.
  */
-export function createLibrarianChatBespokeTools(dataDir: string, storyId: string): ToolSet {
+export function createLibrarianChatBespokeTools(
+  dataDir: string,
+  storyId: string,
+  continuitySource?: AgentBlockContext,
+): ToolSet {
   const log = logger.child({ storyId })
 
   const invokeAgent = tool({
@@ -102,7 +107,18 @@ export function createLibrarianChatBespokeTools(dataDir: string, storyId: string
     },
   })
 
-  return { invokeAgent, inspectRun }
+  const readContinuity = tool({
+    description: 'Read the folded continuity registry: current state, unresolved threads (including dormant ones), and explicit character knowledge. Use only when the request concerns continuity or current story state.',
+    inputSchema: z.object({}),
+    execute: async () => {
+      const source = continuitySource ?? await buildContextState(dataDir, storyId, '')
+      return {
+        continuity: renderContinuity(source, 'librarian.chat') ?? '(no folded continuity yet)',
+      }
+    },
+  })
+
+  return { invokeAgent, inspectRun, readContinuity }
 }
 
 export async function librarianChat(
@@ -144,8 +160,6 @@ async function librarianChatInner(
   const fragmentTools = createFragmentTools(dataDir, storyId, { readOnly: false })
   const pluginTools = collectPluginTools(enabledPlugins, dataDir, storyId)
 
-  const allTools = { ...fragmentTools, ...pluginTools, ...createLibrarianChatBespokeTools(dataDir, storyId) }
-
   // Build plugin tool descriptions for the block context
   const pluginToolDescriptions = Object.entries(pluginTools).map(([name, def]) => ({
     name,
@@ -158,6 +172,12 @@ async function librarianChatInner(
     systemPromptFragments,
     pluginToolDescriptions,
     modelId,
+  }
+
+  const allTools = {
+    ...fragmentTools,
+    ...pluginTools,
+    ...createLibrarianChatBespokeTools(dataDir, storyId, blockContext),
   }
 
   // Compile context via block system

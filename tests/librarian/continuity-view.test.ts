@@ -293,13 +293,14 @@ describe('continuity view', () => {
     expect(view?.staleProjectionCount).toBe(1)
 
     const rendered = renderContinuity(
-      { continuityView: view, stickyCharacters: [{ id: 'ch-0001' }] },
+      { continuityView: view, stickyCharacters: [{ id: 'ch-0001', name: 'Alice' }] },
       'generation.writer',
     )!
     expect(rendered).toContain('Alice location: great hall')
     expect(rendered).toContain('[background] The missing key')
     expect(rendered).toContain('not tasks, promised beats')
-    expect(rendered).toContain('ch-0001 explicitly knows:')
+    expect(rendered).toContain('Alice knows or believes:')
+    expect(rendered).not.toContain('ch-0001 knows or believes:')
     expect(rendered).toContain('The key is missing.')
     expect(rendered).not.toContain('Present:')
     expect(rendered).not.toContain('Direct witnesses:')
@@ -449,7 +450,7 @@ describe('continuity view', () => {
 /**
  * One entry point, and the reader's identity picks the presentation. These cases
  * are the presentation table read back as behaviour: the same records rendered
- * four incompatible ways, and no caller in a position to choose the wrong one.
+ * five incompatible ways, and no caller in a position to choose the wrong one.
  */
 describe('renderContinuity', () => {
   const view = makeContinuityView({
@@ -473,13 +474,14 @@ describe('renderContinuity', () => {
     ],
   })
 
-  it('returns nothing at all when there is nothing folded yet', () => {
+  it('returns nothing for authorial readers when there is nothing folded yet', () => {
     for (const reader of [
       'generation.writer',
       'generation.prewriter',
       'directions.suggest',
       'librarian.analyze',
-      'character-chat.chat',
+      'librarian.refine',
+      'librarian.optimize-character',
     ] as const) {
       expect(renderContinuity({ character: { id: 'ch-0001' } }, reader), reader).toBeNull()
     }
@@ -499,10 +501,90 @@ describe('renderContinuity', () => {
     it('scopes awareness to the pinned and recently active cast', () => {
       const rendered = renderContinuity({
         continuityView: view,
-        stickyCharacters: [{ id: 'ch-0001' }],
+        stickyCharacters: [{ id: 'ch-0001', name: 'Zinozi' }],
       }, 'generation.writer')!
+      expect(rendered).toContain('Zinozi knows or believes:')
+      expect(rendered).not.toContain('ch-0001 knows or believes:')
       expect(rendered).toContain('The key is missing.')
       expect(rendered).not.toContain('The hero lied')
+    })
+  })
+
+  describe('fragment editors, which must not contradict accepted prose', () => {
+    it('scopes generic refinement to its target-related and active cast', () => {
+      const rendered = renderContinuity({
+        continuityView: view,
+        stickyCharacters: [{ id: 'ch-0001', name: 'Zinozi' }],
+        targetFragment: { id: 'ch-0002', type: 'character', name: 'Mara' },
+      }, 'librarian.refine')!
+      expect(rendered).toContain('Mara knows or believes:')
+      expect(rendered).toContain('Zinozi knows or believes:')
+      expect(rendered).toContain('The hero lied')
+      expect(rendered).toContain('The key is missing.')
+      expect(rendered).toContain('Respect it as evidence while editing')
+      expect(rendered).toContain('not facts to bake into the target fragment')
+      expect(rendered).not.toContain('present scene naturally engages')
+      expect(rendered).toContain('The open wound')
+      expect(rendered).not.toContain('Who sent the letter')
+    })
+
+    it('includes characters referenced by a non-character refinement target', () => {
+      const rendered = renderContinuity({
+        continuityView: view,
+        targetFragment: { id: 'kn-0001', type: 'knowledge', name: 'The Key', refs: ['ch-0002'] },
+        characterCatalog: [{ id: 'ch-0002', name: 'Mara' }],
+      }, 'librarian.refine')!
+      expect(rendered).toContain('Mara knows or believes:')
+      expect(rendered).toContain('The hero lied')
+      expect(rendered).not.toContain('The key is missing.')
+    })
+
+    it('scopes character optimization to its target regardless of pinning or recency', () => {
+      const rendered = renderContinuity({
+        continuityView: view,
+        targetFragment: { id: 'ch-0002', type: 'character', name: 'Mara' },
+      }, 'librarian.optimize-character')!
+      expect(rendered).toContain('Mara knows or believes:')
+      expect(rendered).toContain('The hero lied')
+      expect(rendered).not.toContain('The key is missing.')
+      expect(rendered).toContain('Respect it as evidence while editing')
+    })
+
+    it('distinguishes unavailable and duplicate character names without leaking IDs', () => {
+      const rendered = renderContinuity({
+        continuityView: {
+          ...view,
+          characterKnowledge: [
+            ...view.characterKnowledge,
+            makeCharacterKnowledge({
+              characterId: 'ch-missing1',
+              knowledgeKey: 'missing_fact_1',
+              fact: 'One unavailable character knows the path.',
+            }),
+            makeCharacterKnowledge({
+              characterId: 'ch-missing2',
+              knowledgeKey: 'missing_fact_2',
+              fact: 'Another unavailable character knows the password.',
+            }),
+          ],
+        },
+        stickyCharacters: [
+          { id: 'ch-0001', name: 'Mara' },
+          { id: 'ch-0002', name: 'mara' },
+          { id: 'ch-missing1' },
+          { id: 'ch-missing2' },
+        ],
+      }, 'generation.writer')!
+      // Both folded characters resolve to the same case-insensitive name, so
+      // neither receives an ambiguous identical heading.
+      expect(rendered).toContain('Mara (character 1) knows or believes:')
+      expect(rendered).toContain('mara (character 2) knows or believes:')
+      expect(rendered).toContain('Unavailable character 1 knows or believes:')
+      expect(rendered).toContain('Unavailable character 2 knows or believes:')
+      expect(rendered).not.toContain('ch-0001')
+      expect(rendered).not.toContain('ch-0002')
+      expect(rendered).not.toContain('ch-missing1')
+      expect(rendered).not.toContain('ch-missing2')
     })
   })
 
@@ -554,6 +636,12 @@ describe('renderContinuity', () => {
 
     it('states the boundary even when the fold recorded nothing for the character', () => {
       const rendered = renderContinuity({ continuityView: view, character: { id: 'ch-9999' } }, 'character-chat.chat')!
+      expect(rendered).toContain('you have not learned it')
+      expect(rendered).toContain('nothing beyond your character sheet')
+    })
+
+    it('states the boundary before any continuity has been folded', () => {
+      const rendered = renderContinuity({ character: { id: 'ch-0001' } }, 'character-chat.chat')!
       expect(rendered).toContain('you have not learned it')
       expect(rendered).toContain('nothing beyond your character sheet')
     })

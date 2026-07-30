@@ -26,26 +26,21 @@ export interface PersistedStorySetupFragment extends StorySetupDraftFragment {
   id: string
 }
 
-export async function listStorySetupFragmentContext(
+export async function listStorySetupFragments(
   dataDir: string,
   storyId: string,
-): Promise<{ setupFragments: Fragment[]; referenceFragments: Fragment[] }> {
-  const fragments = await listFragments(dataDir, storyId)
+  snapshot?: Fragment[],
+): Promise<Fragment[]> {
+  const fragments = snapshot ?? await listFragments(dataDir, storyId)
   const setupFragments: Fragment[] = []
-  const referenceFragments: Fragment[] = []
 
   for (const fragment of fragments) {
     if (typeof fragment.meta.storySetupKey === 'string') {
       setupFragments.push(fragment)
-    } else if (['guideline', 'knowledge', 'character'].includes(fragment.type)) {
-      referenceFragments.push(fragment)
     }
   }
 
-  return {
-    setupFragments: setupFragments.sort((a, b) => a.order - b.order),
-    referenceFragments: referenceFragments.sort((a, b) => a.order - b.order),
-  }
+  return setupFragments.sort((a, b) => a.order - b.order)
 }
 
 function makeSetupFragment(draft: StorySetupDraftFragment, order: number): Fragment {

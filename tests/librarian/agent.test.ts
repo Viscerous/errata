@@ -9,7 +9,6 @@ import {
 } from '@/server/fragments/storage'
 import { getState, getAnalysis, listAnalyses, saveAnalysis, getBackfillJob } from '@/server/librarian/storage'
 import { createBackfillJob, runBackfillJob } from '@/server/librarian/backfill'
-import { runContinuityAuditBatch } from '@/server/librarian/audit'
 import { saveAgentBlockConfig } from '@/server/agents/agent-block-storage'
 import { initProseChain, addProseSection } from '@/server/fragments/prose-chain'
 import { addTag } from '@/server/fragments/associations'
@@ -822,7 +821,6 @@ describe('librarian agent', () => {
     expect(byId.get('kn-0001')?.sources).toEqual(expect.arrayContaining(['writer-context']))
     expect(analysis.mentions).toEqual([])
     expect((await getFragment(dataDir, storyId, 'pr-0001'))!.meta.annotations).toBeUndefined()
-    expect(analysis.passes?.find((pass) => pass.name === 'router')).toBeUndefined()
   })
 
   it('keeps writer provenance context when suggestion tools are disabled', async () => {
@@ -896,7 +894,6 @@ describe('librarian agent', () => {
 
     expect(analysis.candidateFragmentIds).toEqual([])
     expect(analysis.fragmentChangeProposals).toEqual([])
-    expect(analysis.passes?.find((pass) => pass.name === 'router')).toBeUndefined()
     expect(analysis.passes?.find((pass) => pass.name === 'analyze')?.status).toBe('complete')
   })
 
@@ -1677,60 +1674,4 @@ describe('librarian agent', () => {
     expect(complete.completedFragmentIds).toEqual(['pr-0001', 'pr-0002'])
   })
 
-  it('audits continuity against an explicit knowledge batch only', async () => {
-    await createStory(dataDir, makeStory())
-    await createFragment(dataDir, storyId, makeFragment({ id: 'pr-0001', content: 'Alice opened the sealed gate.' }))
-    await createFragment(dataDir, storyId, makeFragment({
-      id: 'kn-0001',
-      type: 'knowledge',
-      name: 'Sealed Gate',
-      description: 'Rules for the old gate',
-      content: 'The sealed gate can only open under a red moon.',
-    }))
-    await createFragment(dataDir, storyId, makeFragment({
-      id: 'kn-0002',
-      type: 'knowledge',
-      name: 'Blue Harbor',
-      description: 'A distant port',
-      content: 'This content should not be in the full audit batch.',
-    }))
-
-    let capturedPrompt = ''
-    mockAgentStream.mockImplementation(async (
-      args: { prompt?: string },
-      tools: Record<string, { execute: (args: unknown) => Promise<unknown> }>,
-    ) => {
-      if (args.prompt) capturedPrompt = args.prompt
-      return {
-        fullStream: (async function* () {
-          const input = {
-            findings: [{
-              description: 'The prose opens a gate that should require a red moon.',
-              fragmentIds: ['pr-0001', 'kn-0001', 'kn-0002'],
-              severity: 'warning',
-            }],
-          }
-          yield { type: 'tool-call' as const, toolCallId: 'call-audit', toolName: 'reportContinuityAudit', input }
-          yield { type: 'tool-result' as const, toolCallId: 'call-audit', toolName: 'reportContinuityAudit', output: await tools.reportContinuityAudit.execute(input) }
-          yield { type: 'finish' as const, finishReason: 'stop' }
-        })(),
-      }
-    })
-
-    const result = await runContinuityAuditBatch(dataDir, storyId, (await getStory(dataDir, storyId))!, {
-      proseFragmentId: 'pr-0001',
-      knowledgeFragmentIds: ['kn-0001'],
-    })
-
-    expect(result.pass.status).toBe('complete')
-    expect(result.batchFragmentIds).toEqual(['kn-0001'])
-    expect(result.findings).toEqual([{
-      description: 'The prose opens a gate that should require a red moon.',
-      fragmentIds: ['pr-0001', 'kn-0001'],
-      severity: 'warning',
-    }])
-    expect(capturedPrompt).toContain('The sealed gate can only open under a red moon.')
-    expect(capturedPrompt).toContain('kn-0002 | Blue Harbor | A distant port')
-    expect(capturedPrompt).not.toContain('This content should not be in the full audit batch.')
-  })
 })

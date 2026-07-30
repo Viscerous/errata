@@ -173,6 +173,7 @@ export function registerLibrarianAgents(): void {
       ...coreProposalToolNames(),
       'invokeAgent',
       'inspectRun',
+      'readContinuity',
     ],
     resolveTools: ({ dataDir, storyId }) => ({
       ...createFragmentTools(dataDir, storyId, { readOnly: false }),

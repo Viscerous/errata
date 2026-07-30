@@ -6,7 +6,7 @@ import { contextReceiptProvenanceIds } from '../llm/context-receipt'
 
 export type FragmentCandidateSource = Extract<
   ContextSelectionSource,
-  'current-observation' | 'writer-context' | 'router'
+  'current-observation' | 'writer-context'
 >
 
 export interface FragmentCandidate {

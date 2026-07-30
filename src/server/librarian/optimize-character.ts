@@ -1,4 +1,4 @@
-import { getFragment, listFragments } from '../fragments/storage'
+import { getFragment } from '../fragments/storage'
 import { createStreamingRunner } from '../agents/create-streaming-runner'
 import type { Fragment } from '../fragments/schema'
 import type { AgentStreamResult } from '../agents/stream-types'
@@ -24,8 +24,8 @@ export const optimizeCharacter = createStreamingRunner<OptimizeCharacterOptions,
 
   contextOptions: (opts) => ({ excludeFragmentId: opts.fragmentId }),
 
-  extraContext: async ({ dataDir, storyId, validated, opts }) => ({
-    allCharacters: await listFragments(dataDir, storyId, 'character'),
+  extraContext: async ({ ctxState, validated, opts }) => ({
+    allCharacters: (ctxState?.allFragments ?? []).filter((fragment) => fragment.type === 'character'),
     targetFragment: validated.fragment,
     instructions: opts.instructions,
   }),

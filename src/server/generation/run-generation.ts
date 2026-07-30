@@ -11,7 +11,7 @@ import {
   findSectionIndex,
 } from '../fragments/prose-chain'
 import { generateFragmentId } from '@/lib/fragment-ids'
-import { buildContextState, createDefaultBlocks, compileBlocks, addCacheBreakpoints, expandMessagesFragmentTags } from '../llm/context-builder'
+import { buildContextState, createDefaultBlocks, compileBlocks, addCacheBreakpoints, expandMessagesFragmentTags, type ContextBlock } from '../llm/context-builder'
 import { createContextReceipt } from '../llm/context-receipt'
 import { applyBlockConfig } from '../blocks/apply'
 import { createScriptHelpers } from '../blocks/script-context'
@@ -205,10 +205,19 @@ export async function runGeneration(
   }
   requestLogger.info('Tools prepared', { toolCount: Object.keys(tools).length })
 
+  const isPrewriterMode = story.settings.generationMode === 'prewriter'
+  const prewriterConfig = isPrewriterMode
+    ? await getAgentBlockConfig(dataDir, storyId, 'generation.prewriter')
+    : undefined
+  const prewriterDisabledTools = new Set(prewriterConfig?.disabledTools ?? [])
+  const contextToolNames = isPrewriterMode
+    ? Object.keys(allTools).filter((name) => !prewriterDisabledTools.has(name))
+    : Object.keys(tools)
+
   // Blocks whose wording depends on the toolset need the resolved list, not a
   // guess: an author who disables readFragments here must not still be told by
   // the catalog to call it.
-  ctxState = { ...ctxState, enabledTools: Object.keys(tools) }
+  ctxState = { ...ctxState, enabledTools: contextToolNames }
 
   const scriptContext = { ...ctxState, ...createScriptHelpers(dataDir, storyId) }
   let blocks = createDefaultBlocks(ctxState)
@@ -220,7 +229,6 @@ export async function runGeneration(
   // planning-request for author direction and its own custom blocks — writer
   // custom blocks and author-input would leak through and bypass the
   // prewriter's block config.
-  const isPrewriterMode = story.settings.generationMode === 'prewriter'
   // Clarify-before-generate only applies in prewriter mode.
   const clarifyEnabled = isPrewriterMode && (story.settings.clarifyBeforeGenerate ?? false)
   const clarifications = body.clarifications ?? []
@@ -261,7 +269,7 @@ export async function runGeneration(
   let writerContextBlocks = blocks
   // In prewriter mode the fragment surfaces are presented to the planner, not
   // the writer, so provenance has to be recorded from this set too.
-  const prewriterContextBlocks = isPrewriterMode ? blocks : undefined
+  let prewriterContextBlocks: ContextBlock[] | undefined
 
   const modelMessages = addCacheBreakpoints(messages)
 
@@ -313,7 +321,7 @@ export async function runGeneration(
               dataDir,
               storyId,
               story,
-              compiledMessages: messages,
+              contextBlocks: blocks,
               blockContext: { ...ctxState, systemPromptFragments: [] },
               authorInput: effectiveInput,
               mode,
@@ -363,6 +371,7 @@ export async function runGeneration(
             prewriterUsage = prewriterResult.usage
             prewriterLogMessages = prewriterResult.messages
             prewriterToolCalls = prewriterResult.toolCalls
+            prewriterContextBlocks = prewriterResult.presentedContextBlocks
             prewriterStepCount = prewriterResult.stepCount
             if (prewriterResult.directions.length > 0) {
               prewriterDirections = prewriterResult.directions

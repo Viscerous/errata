@@ -342,7 +342,7 @@ describe('character chat endpoints', () => {
       expect(reasoningEvent!.text).toContain('riddles')
     })
 
-    it('uses read-only tools (no write tools)', async () => {
+    it('exposes no repository tools across the character knowledge boundary', async () => {
       const story = makeStory()
       await createStory(dataDir, story)
       await createFragment(dataDir, story.id, makeFragment())
@@ -366,13 +366,7 @@ describe('character chat endpoints', () => {
       const config = mockAgentCtor.mock.calls[0][0]
       const toolNames = Object.keys(config.tools)
 
-      // Should have read tools but NOT write/proposal tools
-      expect(toolNames).toContain('readFragments')
-      expect(toolNames).toContain('findFragments')
-      expect(toolNames).not.toContain('editProse')
-      expect(toolNames).not.toContain('createFragment')
-      expect(toolNames).not.toContain('deleteFragment')
-      expect(toolNames).not.toContain('applyProposedChanges')
+      expect(toolNames).toEqual([])
     })
 
     it('keeps character instructions in system prompt and sends character details as user context', async () => {
@@ -403,9 +397,10 @@ describe('character chat endpoints', () => {
       expect(mockAgentStream).toHaveBeenCalled()
       const streamArgs = mockAgentStream.mock.calls[0][0]
       expect(streamArgs.messages[0].role).toBe('user')
-      expect(streamArgs.messages[0].content).toContain('Story and character context')
+      expect(streamArgs.messages[0].content).toContain('Character memory and conversation context')
       expect(streamArgs.messages[0].content).toContain('Kael')
       expect(streamArgs.messages[0].content).toContain('riddles')
+      expect(streamArgs.messages[0].content).not.toContain('A hero enters a forest.')
       expect(streamArgs.messages.at(-1)).toEqual({ role: 'user', content: 'Hello' })
     })
 

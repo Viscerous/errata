@@ -8,7 +8,6 @@ export type ContextSelectionSource =
   | 'recent-context'
   | 'writer-context'
   | 'current-observation'
-  | 'router'
   | 'catalog'
 
 export interface FragmentSignal {
@@ -18,11 +17,6 @@ export interface FragmentSignal {
 
 export interface AttentionProfile {
   runner: string
-  maxFullOverall?: number
-  maxFullPerType?: Record<string, number>
-  includeStickyFull?: boolean
-  includeRecentFull?: boolean
-  fullSignalSources?: ContextSelectionSource[]
   catalogScope?: 'all' | 'available' | 'none'
 }
 
@@ -39,11 +33,6 @@ export interface AttentionDiagnostics {
   promotedFull: Array<{ fragmentId: string; type: string; sources: ContextSelectionSource[] }>
   catalogOnly: Array<{ fragmentId: string; type: string; sources: ContextSelectionSource[] }>
   omitted: Array<{ fragmentId: string; type: string; reason: string; sources: ContextSelectionSource[] }>
-  demoted: Array<{ fragmentId: string; type: string; reason: string; sources: ContextSelectionSource[] }>
-  budgets: {
-    maxFullOverall?: number
-    maxFullPerType?: Record<string, number>
-  }
 }
 
 export interface AttentionSelection {
@@ -120,11 +109,10 @@ function sourcesFor(
 function sourceRank(source: ContextSelectionSource): number {
   switch (source) {
     case 'current-observation': return 0
-    case 'router': return 1
-    case 'writer-context': return 2
-    case 'recent-context': return 3
-    case 'sticky': return 4
-    case 'catalog': return 5
+    case 'writer-context': return 1
+    case 'recent-context': return 2
+    case 'sticky': return 3
+    case 'catalog': return 4
   }
 }
 
@@ -135,11 +123,11 @@ function bestSourceRank(sources: ContextSelectionSource[]): number {
 function hasPromotedSignal(
   fragment: Fragment,
   extraSignals: Map<string, Set<ContextSelectionSource>>,
-  fullSignalSources: Set<ContextSelectionSource>,
+  promotedSources: Set<ContextSelectionSource>,
 ): boolean {
   const sources = extraSignals.get(fragment.id)
   if (!sources) return false
-  return [...sources].some((source) => fullSignalSources.has(source))
+  return [...sources].some((source) => promotedSources.has(source))
 }
 
 export function selectAttentionContext(
@@ -150,17 +138,13 @@ export function selectAttentionContext(
   const promotedFull: AttentionDiagnostics['promotedFull'] = []
   const catalogOnly: AttentionDiagnostics['catalogOnly'] = []
   const omitted: AttentionDiagnostics['omitted'] = []
-  const demoted: AttentionDiagnostics['demoted'] = []
   const selectedLanes: AttentionLaneSelection[] = []
-  let fullTotal = 0
-  const promotedSignalSources = new Set<ContextSelectionSource>(
-    profile.fullSignalSources ?? ['current-observation', 'router', 'writer-context'],
-  )
+  const promotedSignalSources = new Set<ContextSelectionSource>(['current-observation', 'writer-context'])
 
   for (const lane of lanes) {
     const fullCandidates = uniqueFragments([
-      profile.includeStickyFull === false ? [] : lane.sticky,
-      profile.includeRecentFull === false ? [] : lane.recent,
+      lane.sticky,
+      lane.recent,
       lane.all.filter((fragment) => hasPromotedSignal(fragment, extraSignals, promotedSignalSources)),
     ]).sort((a, b) => {
       const aSources = sourcesFor(a, lane, extraSignals)
@@ -169,20 +153,9 @@ export function selectAttentionContext(
       if (rankDiff !== 0) return rankDiff
       return a.order - b.order || a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id)
     })
-    const maxForType = profile.maxFullPerType?.[lane.type] ?? profile.maxFullPerType?.default
-    const full: Fragment[] = []
-
-    for (const fragment of fullCandidates) {
-      const wouldExceedType = maxForType !== undefined && full.length >= maxForType
-      const wouldExceedOverall = profile.maxFullOverall !== undefined && fullTotal >= profile.maxFullOverall
+    const full = fullCandidates
+    for (const fragment of full) {
       const sources = sourcesFor(fragment, lane, extraSignals)
-      if (wouldExceedType || wouldExceedOverall) {
-        const reason = wouldExceedType ? 'demoted-by-type-budget' : 'demoted-by-overall-budget'
-        demoted.push({ fragmentId: fragment.id, type: fragment.type, reason, sources })
-        continue
-      }
-      full.push(fragment)
-      fullTotal += 1
       promotedFull.push({ fragmentId: fragment.id, type: fragment.type, sources })
     }
 
@@ -224,11 +197,6 @@ export function selectAttentionContext(
       promotedFull,
       catalogOnly,
       omitted,
-      demoted,
-      budgets: {
-        maxFullOverall: profile.maxFullOverall,
-        maxFullPerType: profile.maxFullPerType,
-      },
     },
   }
 }

@@ -349,7 +349,7 @@ describe('compileAgentContext', () => {
     const result = await compileAgentContext(dataDir, STORY_ID, 'character-chat.chat', makeContext(), {})
     expect(result.messages.length).toBeGreaterThan(0)
     const blockIds = result.blocks.map(b => b.id)
-    expect(blockIds).toContain('story-context')
+    expect(blockIds).toEqual(['instructions'])
   })
 
   it('script custom blocks receive agent context', async () => {

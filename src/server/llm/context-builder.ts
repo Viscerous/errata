@@ -65,6 +65,8 @@ export interface CustomFragmentGroup {
 
 export interface ContextBuildState {
   story: StoryMeta
+  /** The single active-fragment snapshot this state was derived from. */
+  allFragments?: Fragment[]
   proseFragments: Fragment[]
   stickyGuidelines: Fragment[]
   stickyKnowledge: Fragment[]
@@ -216,14 +218,17 @@ export async function loadSummaryContent(
   storyId: string,
 ): Promise<string> {
   const summaries = await listFragments(dataDir, storyId, 'summary')
+  return summaryContent(summaries)
+}
+
+function summaryContent(summaries: Fragment[]): string {
   if (summaries.length === 0) return ''
-  summaries.sort((a, b) => {
+  return [...summaries].sort((a, b) => {
     const aEra = a.meta?.isEraSummary ? 0 : 1
     const bEra = b.meta?.isEraSummary ? 0 : 1
     if (aEra !== bEra) return aEra - bEra
     return a.createdAt.localeCompare(b.createdAt)
-  })
-  return summaries.map(f => f.content.trim()).filter(Boolean).join('\n\n')
+  }).map(f => f.content.trim()).filter(Boolean).join('\n\n')
 }
 
 /**
@@ -238,6 +243,10 @@ export async function loadSummaryContentBefore(
   proseIdsInWindow: string[],
 ): Promise<string> {
   const summaries = await listFragments(dataDir, storyId, 'summary')
+  return summaryContentBefore(summaries, proseIdsInWindow)
+}
+
+function summaryContentBefore(summaries: Fragment[], proseIdsInWindow: string[]): string {
   if (summaries.length === 0) return ''
 
   const windowIds = new Set(proseIdsInWindow)
@@ -247,13 +256,12 @@ export async function loadSummaryContentBefore(
     if (!cov) return false
     return windowIds.has(cov)
   })
-  relevant.sort((a, b) => {
+  return relevant.sort((a, b) => {
     const aEra = a.meta?.isEraSummary ? 0 : 1
     const bEra = b.meta?.isEraSummary ? 0 : 1
     if (aEra !== bEra) return aEra - bEra
     return a.createdAt.localeCompare(b.createdAt)
-  })
-  return relevant.map(f => f.content.trim()).filter(Boolean).join('\n\n')
+  }).map(f => f.content.trim()).filter(Boolean).join('\n\n')
 }
 
 async function resolveBeforeSectionIndex(
@@ -300,14 +308,19 @@ export async function buildContextState(
     throw new Error(`Story not found: ${storyId}`)
   }
 
-  // Load all fragments by type
-  requestLogger.debug('Loading fragments by type...')
-  const allGuidelines = await listFragments(dataDir, storyId, 'guideline')
-  const allKnowledge = await listFragments(dataDir, storyId, 'knowledge')
-  const allCharacters = await listFragments(dataDir, storyId, 'character')
+  // One storage snapshot, then cheap in-memory grouping. `listFragments(type)`
+  // still scans and parses every file, so doing that once per type multiplied
+  // context-build latency as custom fragment types accumulated.
+  requestLogger.debug('Loading fragment snapshot...')
+  const allFragments = await listFragments(dataDir, storyId)
+  const fragmentById = new Map(allFragments.map((fragment) => [fragment.id, fragment]))
+  const fragmentsOfType = (type: string) => allFragments.filter((fragment) => fragment.type === type)
+  const allGuidelines = fragmentsOfType('guideline')
+  const allKnowledge = fragmentsOfType('knowledge')
+  const allCharacters = fragmentsOfType('character')
   const customFragmentGroups: CustomFragmentGroup[] = []
   for (const def of customContextFragmentTypes(story)) {
-    const fragments = await listFragments(dataDir, storyId, def.type)
+    const fragments = fragmentsOfType(def.type)
     if (fragments.length > 0) {
       customFragmentGroups.push({ ...def, fragments })
     }
@@ -320,10 +333,10 @@ export async function buildContextState(
 
   if (activeProseIds.length === 0) {
     requestLogger.debug('No prose chain found, falling back to listing all prose')
-    proseFragments = await listFragments(dataDir, storyId, 'prose')
+    proseFragments = fragmentsOfType('prose')
 
     if (proseBeforeFragmentId) {
-      const beforeFragment = await getFragment(dataDir, storyId, proseBeforeFragmentId)
+      const beforeFragment = fragmentById.get(proseBeforeFragmentId)
       if (beforeFragment) {
         proseFragments = proseFragments.filter(f =>
           f.order < beforeFragment.order ||
@@ -358,7 +371,7 @@ export async function buildContextState(
         requestLogger.debug('Excluding fragment from context', { excludedId: excludeFragmentId })
         continue
       }
-      const fragment = await getFragment(dataDir, storyId, proseId)
+      const fragment = fragmentById.get(proseId)
       if (fragment && !fragment.archived && fragment.type !== 'marker') {
         proseFragments.push(fragment)
       } else if (!fragment) {
@@ -414,7 +427,7 @@ export async function buildContextState(
         for (let i = 0; i < chain.entries.length; i++) {
           const entry = chain.entries[i]
           const activeId = entry.active
-          const fragment = await getFragment(dataDir, storyId, activeId)
+          const fragment = fragmentById.get(activeId)
           if (fragment?.type === 'marker') {
             markerIndexes.push(i)
           }
@@ -430,7 +443,7 @@ export async function buildContextState(
           if (chapterEnd < start || chapterStart > end) continue
 
           const markerId = chain.entries[markerIndex].active
-          const marker = await getFragment(dataDir, storyId, markerId)
+          const marker = fragmentById.get(markerId)
           if (!marker || marker.type !== 'marker') continue
           const summary = marker.content.trim()
           if (!summary) continue
@@ -449,9 +462,9 @@ export async function buildContextState(
   if (excludeStorySummary) {
     effectiveSummary = ''
   } else if (summaryBeforeFragmentId && activeProseIds.length > 0) {
-    effectiveSummary = await loadSummaryContentBefore(dataDir, storyId, activeProseIds)
+    effectiveSummary = summaryContentBefore(fragmentsOfType('summary'), activeProseIds)
   } else {
-    effectiveSummary = await loadSummaryContent(dataDir, storyId)
+    effectiveSummary = summaryContent(fragmentsOfType('summary'))
   }
 
   // Split guidelines, knowledge, and characters into sticky full context vs catalog rows.
@@ -488,6 +501,7 @@ export async function buildContextState(
 
   const state = {
     story: { ...story, summary: effectiveSummary },
+    allFragments,
     proseFragments: recentProse,
     chapterSummaries,
     stickyGuidelines,

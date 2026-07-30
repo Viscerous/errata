@@ -18,7 +18,6 @@ export interface AgentBlockContext extends ContextBuildState {
   // Story setup
   storySetupFragments?: Fragment[]
   storySetupReadOnly?: boolean
-  storySetupReferenceFragments?: Fragment[]
 
   // Librarian analyze
   allCharacters?: Fragment[]
@@ -70,6 +69,7 @@ export interface AgentBlockContext extends ContextBuildState {
 export function baseBlockContext(ctxState: ContextBuildState | null | undefined, story: StoryMeta): ContextBuildState {
   return ctxState ?? {
     story,
+    allFragments: [],
     proseFragments: [],
     stickyGuidelines: [],
     stickyKnowledge: [],

@@ -188,7 +188,7 @@ export async function buildOptimizeCharacterPreviewContext(
 }
 ```
 
-`buildBasePreviewContext` handles `story`, `proseFragments`, all sticky/catalog-source fields, and `systemPromptFragments: []`. If your agent needs system prompt fragments loaded, use `loadSystemPromptFragments()`:
+`buildBasePreviewContext` handles `story`, `proseFragments`, all sticky/catalog-source fields, and `systemPromptFragments: []`. The `pass-to-librarian-system-prompt` tag is deliberately scoped to `librarian.analyze` and `librarian.chat`; those previews use `loadSystemPromptFragments()`:
 
 ```ts
 export async function buildChatPreviewContext(dataDir: string, storyId: string): Promise<AgentBlockContext> {

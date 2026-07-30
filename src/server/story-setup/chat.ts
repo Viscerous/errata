@@ -1,7 +1,7 @@
 import { createStreamingRunner } from '../agents/create-streaming-runner'
 import { tool } from 'ai'
 import { StorySetupAssessmentSchema, StorySetupSnapshotSchema } from './schema'
-import { listStorySetupFragmentContext, syncStorySetupSnapshot } from './sync'
+import { listStorySetupFragments, syncStorySetupSnapshot } from './sync'
 
 export interface StorySetupChatOptions {
   messages: Array<{ role: 'user' | 'assistant'; content: string }>
@@ -16,11 +16,10 @@ const runStorySetupChat = createStreamingRunner<StorySetupChatOptions>({
   name: 'story-setup.chat',
   role: 'story-setup.chat',
   readOnly: true,
-  extraContext: async ({ dataDir, storyId, opts }) => {
-    const { setupFragments, referenceFragments } = await listStorySetupFragmentContext(dataDir, storyId)
+  extraContext: async ({ dataDir, storyId, opts, ctxState }) => {
+    const setupFragments = await listStorySetupFragments(dataDir, storyId, ctxState?.allFragments)
     return {
       storySetupFragments: setupFragments,
-      storySetupReferenceFragments: referenceFragments,
       storySetupReadOnly: resolveStorySetupMode(opts) === 'assess',
     }
   },
@@ -33,7 +32,7 @@ const runStorySetupChat = createStreamingRunner<StorySetupChatOptions>({
           inputSchema: StorySetupAssessmentSchema,
           execute: async ({ checklist }) => {
             try {
-              const { setupFragments } = await listStorySetupFragmentContext(dataDir, storyId)
+              const setupFragments = await listStorySetupFragments(dataDir, storyId)
               return {
                 saved: false,
                 checklist,

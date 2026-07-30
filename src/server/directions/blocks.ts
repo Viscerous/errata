@@ -11,13 +11,9 @@ import {
 import { selectAttentionContext } from '../llm/context-selection'
 import { renderContinuity } from '../librarian/continuity-view'
 import type { AgentBlockContext } from '../agents/agent-block-context'
-import { getFragment } from '../fragments/storage'
-import { getFragmentsByTag } from '../fragments/associations'
 import {
   instructionsBlock,
-  systemFragmentsBlock,
   buildBasePreviewContext,
-  loadSystemPromptFragments,
 } from '../agents/block-helpers'
 
 export const DIRECTIONS_SYSTEM_PROMPT = `You are a story development editor. Propose distinct, compelling directions the narrative could take next. Give each direction a short evocative title, a brief description, and a detailed instruction prompt a prose writer could follow directly.`
@@ -35,9 +31,6 @@ export function createDirectionsSuggestBlocks(ctx: AgentBlockContext): ContextBl
   })
 
   blocks.push(instructionsBlock('directions.system', ctx))
-
-  const sysFrags = systemFragmentsBlock(ctx)
-  if (sysFrags) blocks.push(sysFrags)
 
   blocks.push(storySummaryBlock(ctx.story.summary, {
     id: 'story-summary',
@@ -121,7 +114,5 @@ export function createDirectionsSuggestBlocks(ctx: AgentBlockContext): ContextBl
 }
 
 export async function buildDirectionsPreviewContext(dataDir: string, storyId: string): Promise<AgentBlockContext> {
-  const base = await buildBasePreviewContext(dataDir, storyId)
-  const systemPromptFragments = await loadSystemPromptFragments(dataDir, storyId, getFragmentsByTag, getFragment)
-  return { ...base, systemPromptFragments }
+  return buildBasePreviewContext(dataDir, storyId)
 }

@@ -318,7 +318,7 @@ export interface LibrarianAnalysis {
   candidateFragmentIds?: string[]
   candidateFragments?: Array<{
     fragmentId: string
-    sources: Array<'current-observation' | 'writer-context' | 'router'>
+    sources: Array<'current-observation' | 'writer-context'>
     reasons?: string[]
     score?: number
   }>

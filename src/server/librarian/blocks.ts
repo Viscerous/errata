@@ -19,7 +19,7 @@ import { contextSignalMap, selectAttentionContext } from '../llm/context-selecti
 import { renderSegments, segmentText } from '../llm/segments'
 import { baseBlockContext, type AgentBlockContext } from '../agents/agent-block-context'
 import type { Fragment, StoryMeta } from '../fragments/schema'
-import { getStory, listFragments, getFragment } from '../fragments/storage'
+import { getStory, getFragment } from '../fragments/storage'
 import { getActiveProseIds } from '../fragments/prose-chain'
 import { getFragmentsByTag } from '../fragments/associations'
 import { instructionRegistry } from '../instructions'
@@ -46,7 +46,23 @@ import {
   mergeFragmentCandidates,
   writerProvenanceFragmentCandidates,
 } from './candidates'
-import { renderContinuity } from './continuity-view'
+import { renderContinuity, type ContinuityReader } from './continuity-view'
+
+function continuityBlock(
+  ctx: AgentBlockContext,
+  reader: ContinuityReader,
+  id: string,
+  order: number,
+): ContextBlock | null {
+  const content = renderContinuity(ctx, reader)
+  return content ? {
+    id,
+    role: 'user',
+    content,
+    order,
+    source: 'builtin',
+  } : null
+}
 
 /**
  * A full sheet whose body is sentence-numbered, so `proposeRecordCorrections`
@@ -157,11 +173,11 @@ export async function buildAnalyzeContext(
     } : {}),
   })
   const effectiveStory = ctxState.story
-  const allCharacters = await listFragments(dataDir, storyId, 'character')
-  const allKnowledge = await listFragments(dataDir, storyId, 'knowledge')
+  const allCharacters = (ctxState.allFragments ?? []).filter((fragment) => fragment.type === 'character')
+  const allKnowledge = (ctxState.allFragments ?? []).filter((fragment) => fragment.type === 'knowledge')
   const allCustomFragments: CustomFragmentGroup[] = []
   for (const def of customContextFragmentTypes(effectiveStory)) {
-    const fragments = await listFragments(dataDir, storyId, def.type)
+    const fragments = (ctxState.allFragments ?? []).filter((fragment) => fragment.type === def.type)
     if (fragments.length > 0) {
       allCustomFragments.push({ ...def, fragments })
     }
@@ -215,22 +231,13 @@ export function createLibrarianAnalyzeBlocks(ctx: AgentBlockContext): ContextBlo
     placeholder: STORY_SUMMARY_PLACEHOLDER,
   }))
 
-  const continuityMemory = renderContinuity(ctx, 'librarian.analyze')
-  if (continuityMemory) {
-    blocks.push({
-      id: 'continuity-memory',
-      role: 'user',
-      content: continuityMemory,
-      order: 150,
-      source: 'builtin',
-    })
-  }
+  const continuityMemory = continuityBlock(ctx, 'librarian.analyze', 'continuity-memory', 150)
+  if (continuityMemory) blocks.push(continuityMemory)
 
   const lanes = buildFragmentContextLanes(ctx)
   const selection = selectAttentionContext(lanes, {
     runner: 'librarian.analyze',
     catalogScope: 'all',
-    fullSignalSources: ['writer-context', 'current-observation', 'router'],
   },
     contextSignalMap({
       fragmentIds: ctx.attentionCandidateIds,
@@ -281,7 +288,7 @@ export function createLibrarianAnalyzeBlocks(ctx: AgentBlockContext): ContextBlo
         scope: 'candidate',
         order: 210,
         intro: 'These fragments are candidate memory targets. Treat them as relevant context, not as confirmed prose mentions.',
-        matches: (sources) => sources.includes('current-observation') || sources.includes('router'),
+        matches: (sources) => sources.includes('current-observation'),
       },
     ],
   }))
@@ -351,6 +358,7 @@ You are the Librarian, the author's story continuity assistant. Answer the autho
 ## Reading
 
 - Your context holds the story summary and fragment summaries (IDs, names, descriptions) — the full content stays on disk. Use **readFragments** to batch-read full content before relying on details or making whole-field rewrites.
+- Folded current state, unresolved threads, and character knowledge stay out of the default prompt. Use **readContinuity** when the author's request actually concerns continuity.
 - For sweeping requests (e.g., "update all characters to reflect the time skip"), survey first with **listFragments**, **findFragments**, and **readFragments**, then edit in one batch.
 
 ## Editing
@@ -411,8 +419,8 @@ export const REFINE_SYSTEM_PROMPT = `You are a story editor refining a single fr
 
 ## Instructions
 
-1. First, read the target fragment using **readFragments** so you have its baseHash.
-2. Analyze the story context provided: prose, summary, and other fragments.
+1. Analyze the complete target snapshot and story context provided: prose, summary, continuity, and other fragments. Its baseHash is included with the target.
+2. Batch-read any additional records you genuinely need with **readFragments**.
 3. Use **editFragments** to apply your edits. ${OPERATION_GUIDANCE}
 4. Explain what you changed and why in your text response.
 
@@ -429,6 +437,7 @@ export function createLibrarianRefineBlocks(ctx: AgentBlockContext): ContextBloc
     instructionsBlock('librarian.refine.system', ctx),
     storyInfoBlock(ctx),
     recentProseBlock(ctx),
+    continuityBlock(ctx, 'librarian.refine', 'continuity-observations', 250),
     ...pinnedFragmentCatalogBlocks(ctx),
     targetFragmentBlock(ctx,
       'fragment to refine',
@@ -550,8 +559,8 @@ export const OPTIMIZE_CHARACTER_SYSTEM_PROMPT = `You are a character development
 
 ## Instructions
 
-1. Read the target character fragment using readFragments so you have its baseHash.
-2. Read relevant prose fragments using readFragments or readProseChain to understand how the character actually behaves in the story — not just how they're described on paper.
+1. Analyze the complete target character snapshot provided; its baseHash is included with the target.
+2. Read older relevant prose using readFragments or readProseChain only when the provided recent prose is insufficient to understand how the character actually behaves in the story — not just how they're described on paper.
 3. Analyze gaps between the current fragment and the methodology above. Where are there bare adjectives without cause? Where is friction missing? Which of Egri's dimensions are underdeveloped?
 4. Rewrite the character fragment with depth and causality. Build the ramp of how this person grew up and why they think the way they do. Preserve existing voice and any details that already have depth — improve, don't replace what works.
 5. Use editFragments with set_fields and the baseHash to apply the rewrite. Write the full final character sheet as the content field. Keep descriptions within the 250 character limit.
@@ -564,6 +573,7 @@ export function createOptimizeCharacterBlocks(ctx: AgentBlockContext): ContextBl
     instructionsBlock('librarian.optimize-character.system', ctx),
     storyInfoBlock(ctx),
     recentProseBlock(ctx),
+    continuityBlock(ctx, 'librarian.optimize-character', 'continuity-observations', 250),
     ...pinnedFragmentCatalogBlocks(ctx, { includeCharacters: false }),
     allCharactersCatalogBlock(ctx),
     targetFragmentBlock(ctx,
@@ -575,7 +585,7 @@ export function createOptimizeCharacterBlocks(ctx: AgentBlockContext): ContextBl
 
 export async function buildOptimizeCharacterPreviewContext(dataDir: string, storyId: string): Promise<AgentBlockContext> {
   const base = await buildBasePreviewContext(dataDir, storyId)
-  const allCharacters = await listFragments(dataDir, storyId, 'character')
+  const allCharacters = (base.allFragments ?? []).filter((fragment) => fragment.type === 'character')
   return {
     ...base,
     allCharacters,

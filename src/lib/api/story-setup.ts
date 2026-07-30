@@ -1,4 +1,4 @@
-import { apiFetch, fetchEventStream } from './client'
+import { fetchEventStream } from './client'
 
 export interface StorySetupMessage {
   role: 'user' | 'assistant'
@@ -31,20 +31,6 @@ export interface StorySetupDraftFragment {
   content: string
 }
 
-export interface StorySetupPlan {
-  name: string
-  description: string
-  guideline: string | null
-  knowledge: Array<{ name: string; description: string; content: string }>
-  characters: Array<{ name: string; description: string; content: string }>
-  opening: string | null
-}
-
-export interface StorySetupResult {
-  plan: StorySetupPlan
-  created: Array<{ id: string; type: string; name: string }>
-}
-
 export const storySetup = {
   chat: (
     storyId: string,
@@ -52,14 +38,4 @@ export const storySetup = {
     mode: StorySetupChatMode,
     signal?: AbortSignal,
   ) => fetchEventStream(`/stories/${storyId}/setup/chat`, { messages, mode }, signal),
-
-  complete: (
-    storyId: string,
-    messages: StorySetupMessage[],
-    draftFragments: StorySetupDraftFragment[],
-  ) =>
-    apiFetch<StorySetupResult>(`/stories/${storyId}/setup/complete`, {
-      method: 'POST',
-      body: JSON.stringify({ messages, draftFragments }),
-    }),
 }
