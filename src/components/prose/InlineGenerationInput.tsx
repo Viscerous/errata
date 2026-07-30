@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { flushSync } from 'react-dom'
 import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { Button } from '@/components/ui/button'
@@ -715,9 +716,24 @@ export function InlineGenerationInput({
                                 type="button"
                                 disabled={isGenerating}
                                 onClick={() => {
-                                  setInput(s.instruction)
-                                  handleModeChange('freeform')
-                                  requestAnimationFrame(() => textareaRef.current?.focus())
+                                  // The textarea mounts with the mode change, and iOS
+                                  // opens the keyboard only for a focus() inside the
+                                  // gesture's own task — which a rAF callback is not.
+                                  // flushSync commits the mount while the click still owns
+                                  // the task.
+                                  // The textarea mounts with the mode change, and iOS
+                                  // opens the keyboard only for a focus() inside the
+                                  // gesture's own task — which a rAF callback is not.
+                                  // flushSync commits the mount while the click still owns
+                                  // the task.
+                                  flushSync(() => {
+                                    setInput(s.instruction)
+                                    handleModeChange('freeform')
+                                  })
+                                  const el = textareaRef.current
+                                  el?.focus()
+                                  // Editing continues at the end, not in front of the text.
+                                  el?.setSelectionRange(el.value.length, el.value.length)
                                 }}
                                 aria-label={`Edit ${s.title} before sending`}
                                 // 32px suits a cursor; 44px is the WCAG 2.5.5 floor.

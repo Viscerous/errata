@@ -193,6 +193,23 @@ describe('direction card activation', () => {
     expect(onGenerationStart).toHaveBeenCalledWith(DIRECTION.instruction)
   })
 
+  it('focuses the editable direction inside the press that asked for it', async () => {
+    await renderCards()
+
+    press(screen.getByLabelText(`Edit ${DIRECTION.title} before sending`))
+
+    // Asserted with nothing awaited on purpose. The textarea mounts with the mode
+    // change, and iOS raises the keyboard only for a focus() in the gesture's own
+    // task — so a focus that waits for a frame is one the reader has to tap for
+    // a second time.
+    const textarea = screen.getByRole('textbox') as HTMLTextAreaElement
+    expect(document.activeElement).toBe(textarea)
+    expect(textarea.value).toBe(DIRECTION.instruction)
+    // Typing continues at the end rather than in front of the text.
+    expect(textarea.selectionStart).toBe(DIRECTION.instruction.length)
+    expect(onGenerationStart).not.toHaveBeenCalled()
+  })
+
   it('sizes the edit control for a fingertip on coarse pointers', async () => {
     await renderCards()
     const edit = screen.getByLabelText(`Edit ${DIRECTION.title} before sending`)
