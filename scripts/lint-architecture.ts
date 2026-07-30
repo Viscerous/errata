@@ -37,6 +37,11 @@ const SECURE_CONTEXT_ONLY = [
     instead: 'generateRunId/randomHex from @/lib/client-ids',
   },
   {
+    pattern: /\bcrypto\s*\.\s*subtle\b/,
+    api: 'crypto.subtle',
+    instead: 'a server route — the server hashes with node:crypto and has the bytes anyway',
+  },
+  {
     // The property itself, not just a call: `navigator.clipboard` is undefined
     // outside a secure context, so even reading `.writeText` off it throws.
     pattern: /\bnavigator\s*\.\s*clipboard\b/,

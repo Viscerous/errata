@@ -7,6 +7,7 @@ import {
   type ErratapackManifest,
   type ErratapackJson,
   type ContentKind,
+  type PackManifestDraft,
 } from '@/lib/erratanet/pack-schema'
 import type { FragmentBundleData } from '@/lib/fragment-clipboard'
 import { exportStoryAsZip } from '../story-archive'
@@ -23,25 +24,14 @@ import { exportStoryAsZip } from '../story-archive'
 // --- Manifest input ---
 
 /**
- * The caller-supplied half of a manifest. The build derives the rest
- * (`contentKind`, `fragmentTypes`, `fragmentCount`, `errataFormatVersion`,
- * `payloadHash`, `capabilities`, `createdAt`, `errataPack`).
+ * What the build needs from its caller: the publisher's draft, plus two fields no
+ * client sets today. The build derives the rest (`contentKind`, `fragmentTypes`,
+ * `fragmentCount`, `errataFormatVersion`, `payloadHash`, `capabilities`,
+ * `createdAt`, `errataPack`).
  */
-export interface PackManifestInput {
-  id: string
-  version: string
-  title: string
-  description: string
-  license: string
-  tags?: string[]
-  nsfw?: boolean
-  readme?: string
-  contentRating?: string
-  chapters?: { title: string; order?: number }[]
-  thumbnail?: string
+export type PackManifestInput = PackManifestDraft & {
   dependencies?: ErratapackManifest['dependencies']
   engines?: ErratapackManifest['engines']
-  publisher?: string
 }
 
 export interface BuildFragmentPackResult {
@@ -375,9 +365,7 @@ function buildManifest(args: {
     tags: input.tags ?? [],
     nsfw: input.nsfw ?? false,
     ...(input.readme ? { readme: input.readme } : {}),
-    ...(input.contentRating
-      ? { contentRating: input.contentRating as ErratapackManifest['contentRating'] }
-      : {}),
+    ...(input.contentRating ? { contentRating: input.contentRating } : {}),
     ...(input.chapters ? { chapters: input.chapters } : {}),
     ...(input.thumbnail ? { thumbnail: input.thumbnail } : {}),
     capabilities: [],

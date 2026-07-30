@@ -78,10 +78,15 @@ function normalizeSearchItem(p: Record<string, unknown>): Record<string, unknown
 }
 
 /**
- * The caller-supplied half of a pack manifest, shared by the publish endpoint.
- * The build derives everything else (contentKind, hashes, counts, createdAt).
+ * The publisher-supplied half of a manifest, and the whole of what a publish
+ * accepts. It carries no `payloadHash` / `contentKind` / fragment facets because
+ * the build derives those from the payload; a client is in no position to state
+ * them. Kept in step with `PackManifestDraft` by the assignment in each handler.
+ *
+ * Shared with the agent-config publish route: two copies drifted once already,
+ * leaving `contentRating` a bare string on one side of the same contract.
  */
-const manifestBody = t.Object({
+export const packManifestBody = t.Object({
   id: t.String(),
   version: t.String(),
   title: t.String(),
@@ -90,7 +95,9 @@ const manifestBody = t.Object({
   tags: t.Optional(t.Array(t.String())),
   nsfw: t.Optional(t.Boolean()),
   readme: t.Optional(t.String()),
-  contentRating: t.Optional(t.String()),
+  contentRating: t.Optional(
+    t.Union([t.Literal('general'), t.Literal('mature'), t.Literal('r18')]),
+  ),
   chapters: t.Optional(
     t.Array(t.Object({ title: t.String(), order: t.Optional(t.Number()) })),
   ),
@@ -257,20 +264,10 @@ export function erratanetRoutes(dataDir: string) {
         return { error: 'Provide either bundleJson or storyId to publish.' }
       }
 
-      const manifestInput: PackManifestInput = {
-        id: body.manifest.id,
-        version: body.manifest.version,
-        title: body.manifest.title,
-        description: body.manifest.description,
-        license: body.manifest.license,
-        ...(body.manifest.tags ? { tags: body.manifest.tags } : {}),
-        ...(body.manifest.nsfw !== undefined ? { nsfw: body.manifest.nsfw } : {}),
-        ...(body.manifest.readme ? { readme: body.manifest.readme } : {}),
-        ...(body.manifest.contentRating ? { contentRating: body.manifest.contentRating } : {}),
-        ...(body.manifest.chapters ? { chapters: body.manifest.chapters } : {}),
-        ...(body.manifest.thumbnail ? { thumbnail: body.manifest.thumbnail } : {}),
-        ...(body.manifest.publisher ? { publisher: body.manifest.publisher } : {}),
-      }
+      // A straight assignment, not a field-by-field copy: the body schema and the
+      // draft type describe the same contract, so this fails to compile if they
+      // ever drift apart.
+      const manifestInput: PackManifestInput = body.manifest
 
       try {
         const built = body.bundleJson
@@ -308,7 +305,7 @@ export function erratanetRoutes(dataDir: string) {
         storyId: t.Optional(t.String()),
         fragmentIds: t.Optional(t.Array(t.String())),
         unlisted: t.Optional(t.Boolean()),
-        manifest: manifestBody,
+        manifest: packManifestBody,
       }),
     })
 

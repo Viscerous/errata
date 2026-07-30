@@ -134,6 +134,28 @@ export const ErratapackManifestSchema = z.object({
 export type ErratapackManifest = z.infer<typeof ErratapackManifestSchema>
 
 /**
+ * The half of a manifest a publisher states. Everything else — `contentKind`, the
+ * fragment facets, `capabilities`, `payloadHash`, `createdAt` — is derived by the
+ * build from the payload it just assembled, and the publish routes accept only
+ * these fields.
+ *
+ * Derived fields are absent here rather than sent and dropped: a client that had
+ * somewhere to put a `payloadHash` would try to compute one, and hashing in the
+ * browser needs `crypto.subtle`, which is secure-context only and therefore
+ * missing over LAN HTTP. Nothing to fill in, nothing to break.
+ */
+export type PackManifestDraft = Pick<
+  ErratapackManifest,
+  'id' | 'version' | 'title' | 'description' | 'license'
+> &
+  Partial<
+    Pick<
+      ErratapackManifest,
+      'tags' | 'nsfw' | 'readme' | 'contentRating' | 'chapters' | 'thumbnail' | 'publisher'
+    >
+  >
+
+/**
  * Pure-JSON form of a pack (no zip). `payload` is left as `unknown` here so the
  * format contract stays decoupled from the fragment-bundle / story-archive
  * schemas. `assetsInline` maps an asset uri (`asset://<name>`) to base64/dataURL

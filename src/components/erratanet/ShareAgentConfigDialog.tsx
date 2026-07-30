@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
-import type { ErratapackManifest } from '@/lib/erratanet/pack-schema'
+import type { PackManifestDraft } from '@/lib/erratanet/pack-schema'
 import { GLOBAL_PACK_ID_REGEX, packPageUrl } from '@/lib/erratanet/pack-schema'
 import { slugify, bumpVersion, type BumpKind } from '@/lib/erratanet/publish-utils'
 import type { AgentConfigSnapshotResponse } from '@/lib/api/types'
@@ -199,28 +199,19 @@ export function ShareAgentConfigDialog({ open, onOpenChange, storyId, storyName,
       if (description.length > 250) throw new Error('Description must be 250 characters or fewer.')
       if (selectionIsEmpty(selection)) throw new Error('Select at least one part of the configuration.')
 
-      const manifest = {
-        errataPack: 1 as const,
+      // The server derives contentKind, capabilities, the agentConfig summary,
+      // fragment fields, and the payload hash from the snapshot.
+      const manifest: PackManifestDraft = {
         id,
         version: nextVersion,
         title: title.trim(),
         description: description.trim(),
         license,
-        // The server derives contentKind, capabilities, the agentConfig summary,
-        // fragment fields, and the payload hash from the snapshot.
-        contentKind: 'agent-config' as const,
-        errataFormatVersion: 1,
-        fragmentTypes: [] as string[],
-        fragmentCount: 0,
         tags,
         nsfw: false,
         ...(readme.trim() ? { readme: readme.trim() } : {}),
-        capabilities: [] as string[],
-        dependencies: [] as ErratapackManifest['dependencies'],
-        payloadHash: '',
         publisher: `@${handle}`,
-        createdAt: new Date().toISOString(),
-      } as ErratapackManifest
+      }
       return api.erratanet.agentConfig.publish({
         storyId,
         selection: toSelectionPayload(selection),

@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api, type Fragment } from '@/lib/api'
 import { q, useActiveBranchId } from '@/lib/query-keys'
-import type { ErratapackManifest } from '@/lib/erratanet/pack-schema'
+import type { PackManifestDraft } from '@/lib/erratanet/pack-schema'
 import { GLOBAL_PACK_ID_REGEX, packPageUrl } from '@/lib/erratanet/pack-schema'
 import { slugify, bumpVersion, type BumpKind } from '@/lib/erratanet/publish-utils'
 import { serializeBundle } from '@/lib/fragment-clipboard'
@@ -66,16 +66,6 @@ const README_MAX = 8000
 
 const sectionLabel =
   'text-[0.5625rem] text-muted-foreground uppercase tracking-[0.15em] font-medium mb-2'
-
-/** Browser SHA-256 over a UTF-8 string, formatted as `sha256:<hex>`. */
-async function sha256Hex(text: string): Promise<string> {
-  const bytes = new TextEncoder().encode(text)
-  const digest = await crypto.subtle.digest('SHA-256', bytes)
-  const hex = Array.from(new Uint8Array(digest))
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('')
-  return `sha256:${hex}`
-}
 
 export function PublishPackDialog({
   open,
@@ -247,55 +237,38 @@ export function PublishPackDialog({
       const thumbnailFragment = thumbnailId ? mediaById.get(thumbnailId) : undefined
       const trimmedReadme = readme.trim()
 
-      // Fields shared by both content kinds. The server fills in contentKind,
-      // fragment counts, and the payload hash; MVP packs carry no blockConfig /
-      // agentBlockConfigs.
-      const base = {
-        errataPack: 1 as const,
+      // Fields shared by both content kinds. Everything the build can work out
+      // from the payload — content kind, fragment facets, the payload hash — is
+      // the server's to fill in and absent from the draft.
+      const base: PackManifestDraft = {
         id,
         version: nextVersion,
         title: title.trim(),
         description: description.trim(),
         license,
-        errataFormatVersion: 1,
         tags,
         // R18 implies NSFW; general / mature are not flagged (mature is a soft label).
         nsfw: contentRating === 'r18',
         contentRating,
         ...(trimmedReadme ? { readme: trimmedReadme } : {}),
         ...(thumbnailFragment ? { thumbnail: thumbnailFragment.content } : {}),
-        capabilities: [] as string[],
-        dependencies: [] as ErratapackManifest['dependencies'],
         ...(handle ? { publisher: `@${handle}` } : {}),
-        createdAt: new Date().toISOString(),
       }
 
       if (isStory) {
         if (!storyId) throw new Error('No story to publish.')
-        // The server derives fragmentTypes/count + payloadHash from the story zip.
-        const manifest: ErratapackManifest = {
+        const manifest: PackManifestDraft = {
           ...base,
-          contentKind: 'story',
           ...(chapters.length > 0 ? { chapters } : {}),
-          fragmentTypes: [],
-          fragmentCount: 0,
-          payloadHash: '',
         }
         return api.erratanet.publish({ storyId, manifest, unlisted: visibility === 'unlisted' })
       }
 
       if (selectedFragments.length === 0) throw new Error('Select at least one fragment to publish.')
       const bundleJson = serializeBundle(selectedFragments, mediaById, storyName)
-      const manifest: ErratapackManifest = {
-        ...base,
-        contentKind: 'fragment-pack',
-        fragmentTypes: Array.from(new Set(selectedFragments.map((f) => f.type))),
-        fragmentCount: selectedFragments.length,
-        payloadHash: await sha256Hex(bundleJson),
-      }
       return api.erratanet.publish({
         bundleJson,
-        manifest,
+        manifest: base,
         unlisted: visibility === 'unlisted',
         // Tie the pack to this story so the sidebar can track + re-sync it.
         ...(storyId ? { storyId, fragmentIds: selectedFragments.map((f) => f.id) } : {}),

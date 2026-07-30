@@ -63,9 +63,7 @@ function buildAgentConfigManifest(
     tags: input.tags ?? [],
     nsfw: input.nsfw ?? false,
     ...(input.readme ? { readme: input.readme } : {}),
-    ...(input.contentRating
-      ? { contentRating: input.contentRating as ErratapackManifest['contentRating'] }
-      : {}),
+    ...(input.contentRating ? { contentRating: input.contentRating } : {}),
     ...(input.thumbnail ? { thumbnail: input.thumbnail } : {}),
     agentConfig: summary,
     capabilities,

@@ -22,27 +22,13 @@ import {
   deleteAgentPreset,
 } from '../erratanet/agent-preset-store'
 import type { PackManifestInput } from '../erratanet/pack-build'
+import { packManifestBody } from './erratanet'
 import { getStory, updateStory } from '../fragments/storage'
 
 /** Normalize an unknown error into a message string. */
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : 'Could not reach the hub.'
 }
-
-/** Caller half of an agent-config manifest (the build derives the rest). */
-const manifestBody = t.Object({
-  id: t.String(),
-  version: t.String(),
-  title: t.String(),
-  description: t.String(),
-  license: t.String(),
-  tags: t.Optional(t.Array(t.String())),
-  nsfw: t.Optional(t.Boolean()),
-  readme: t.Optional(t.String()),
-  contentRating: t.Optional(t.String()),
-  thumbnail: t.Optional(t.String()),
-  publisher: t.Optional(t.String()),
-})
 
 const includesBody = t.Optional(t.Array(t.String()))
 
@@ -78,19 +64,8 @@ export function erratanetAgentConfigRoutes(dataDir: string) {
         set.status = 404
         return { error: 'Story not found.' }
       }
-      const manifestInput: PackManifestInput = {
-        id: body.manifest.id,
-        version: body.manifest.version,
-        title: body.manifest.title,
-        description: body.manifest.description,
-        license: body.manifest.license,
-        ...(body.manifest.tags ? { tags: body.manifest.tags } : {}),
-        ...(body.manifest.nsfw !== undefined ? { nsfw: body.manifest.nsfw } : {}),
-        ...(body.manifest.readme ? { readme: body.manifest.readme } : {}),
-        ...(body.manifest.contentRating ? { contentRating: body.manifest.contentRating } : {}),
-        ...(body.manifest.thumbnail ? { thumbnail: body.manifest.thumbnail } : {}),
-        ...(body.manifest.publisher ? { publisher: body.manifest.publisher } : {}),
-      }
+      // See the note on `packManifestBody`: the assignment is the drift guard.
+      const manifestInput: PackManifestInput = body.manifest
       try {
         // A `selection` narrows the snapshot to specific agents/blocks/items;
         // otherwise fall back to the surface-level `includes` (or everything).
@@ -127,7 +102,7 @@ export function erratanetAgentConfigRoutes(dataDir: string) {
         includes: includesBody,
         selection: t.Optional(t.Unknown()),
         unlisted: t.Optional(t.Boolean()),
-        manifest: manifestBody,
+        manifest: packManifestBody,
       }),
     })
 

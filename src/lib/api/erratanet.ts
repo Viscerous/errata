@@ -1,5 +1,5 @@
 import { apiFetch } from './client'
-import type { ErratapackManifest } from '../erratanet/pack-schema'
+import type { PackManifestDraft } from '../erratanet/pack-schema'
 import type {
   AgentConfigApplyResponse,
   AgentConfigInclude,
@@ -43,7 +43,7 @@ export const erratanet = {
     /** For a fragment pack published from a story: the fragments it contains. */
     fragmentIds?: string[]
     unlisted?: boolean
-    manifest: ErratapackManifest
+    manifest: PackManifestDraft
   }) =>
     apiFetch<ErratanetPublishResponse>('/erratanet/publish', {
       method: 'POST',
@@ -71,7 +71,7 @@ export const erratanet = {
       includes?: AgentConfigInclude[]
       selection?: AgentConfigSelection
       unlisted?: boolean
-      manifest: ErratapackManifest
+      manifest: PackManifestDraft
     }) =>
       apiFetch<ErratanetPublishResponse>('/erratanet/agent-config/publish', {
         method: 'POST',
