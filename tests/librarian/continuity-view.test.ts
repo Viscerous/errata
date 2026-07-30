@@ -2,7 +2,7 @@ import { readdir, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { getContentRoot } from '@/server/fragments/branches'
-import { buildContinuityView, renderCharacterAwareness, renderContinuityView } from '@/server/librarian/continuity-view'
+import { buildContinuityView, renderContinuity } from '@/server/librarian/continuity-view'
 import {
   createTempDir,
   makeCharacterKnowledge,
@@ -292,7 +292,10 @@ describe('continuity view', () => {
     expect(view?.temporalFrame).toMatchObject({ relation: 'flashback', anchor: 'years earlier' })
     expect(view?.staleProjectionCount).toBe(1)
 
-    const rendered = renderContinuityView(view!, { characterIds: ['ch-0001'] })
+    const rendered = renderContinuity(
+      { continuityView: view, stickyCharacters: [{ id: 'ch-0001' }] },
+      'generation.writer',
+    )!
     expect(rendered).toContain('Alice location: great hall')
     expect(rendered).toContain('[background] The missing key')
     expect(rendered).toContain('not tasks, promised beats')
@@ -356,7 +359,8 @@ describe('continuity view', () => {
     const view = await buildContinuityView({ dataDir, storyId: story.id, activeProseFragments: passages })
 
     expect(view?.liveThreads).toMatchObject([{ threadKey: 'the_missing_key', visibility: 'foreground' }])
-    expect(renderContinuityView(view!)).toContain('[foreground] The missing key')
+    expect(renderContinuity({ continuityView: view }, 'generation.writer'))
+      .toContain('[foreground] The missing key')
   })
 
   // Threads leave the live list only when resolved, so an uncapped list grows
@@ -437,18 +441,18 @@ describe('continuity view', () => {
       visibility: 'foreground',
     })
     // The rendered block must never put a raw snake_case key in front of the author.
-    expect(renderContinuityView(view!)).not.toContain('who_sent_the_letter |')
+    expect(renderContinuity({ continuityView: view }, 'generation.writer'))
+      .not.toContain('who_sent_the_letter |')
   })
 })
 
 /**
- * The same records read two opposite ways, so a caller has to get exactly one
- * framing: "let these lie" for whoever writes the next passage, "here is what
- * you could pick up" for whoever proposes it.
+ * One entry point, and the reader's identity picks the presentation. These cases
+ * are the presentation table read back as behaviour: the same records rendered
+ * four incompatible ways, and no caller in a position to choose the wrong one.
  */
-describe('continuity thread framing', () => {
+describe('renderContinuity', () => {
   const view = makeContinuityView({
-    currentState: [],
     liveThreads: [
       makeLiveThread({ threadKey: 'the_open_wound', label: 'The open wound' }),
       makeLiveThread({
@@ -458,30 +462,6 @@ describe('continuity thread framing', () => {
         visibility: 'dormant',
       }),
     ],
-    characterKnowledge: [],
-  })
-
-  it('hides dormant threads and frames the rest as limits by default', () => {
-    const rendered = renderContinuityView(view)
-    expect(rendered).toContain('The open wound')
-    expect(rendered).not.toContain('Who sent the letter')
-    expect(rendered).toContain('not tasks, promised beats')
-    expect(rendered).not.toContain('legitimate direction')
-  })
-
-  it('offers every thread as latent material when asked for candidates', () => {
-    const rendered = renderContinuityView(view, { threads: 'candidates' })
-    expect(rendered).toContain('The open wound')
-    expect(rendered).toContain('Who sent the letter — Never followed up.')
-    expect(rendered).toContain('has simply gone quiet, not been resolved')
-    expect(rendered).toContain('None of them is owed an answer')
-    // The constraint framing is the opposite instruction; both at once is noise.
-    expect(rendered).not.toContain('not tasks, promised beats')
-  })
-})
-
-describe('renderCharacterAwareness', () => {
-  const view = makeContinuityView({
     characterKnowledge: [
       makeCharacterKnowledge({ knowledgeKey: 'key_missing', fact: 'The key is missing.' }),
       makeCharacterKnowledge({
@@ -493,24 +473,93 @@ describe('renderCharacterAwareness', () => {
     ],
   })
 
-  it('gives one character their own facts and how they came by them', () => {
-    const rendered = renderCharacterAwareness(view, 'ch-0001')
-    expect(rendered).toContain('The key is missing. (witnessed)')
-    expect(rendered).not.toContain('The hero lied')
+  it('returns nothing at all when there is nothing folded yet', () => {
+    for (const reader of [
+      'generation.writer',
+      'generation.prewriter',
+      'directions.suggest',
+      'librarian.analyze',
+      'character-chat.chat',
+    ] as const) {
+      expect(renderContinuity({ character: { id: 'ch-0001' } }, reader), reader).toBeNull()
+    }
   })
 
-  // A character handed the authorial records answers from offstage facts, which
-  // is the one failure this block exists to prevent.
-  it('withholds the durable state and open threads that belong to the author', () => {
-    const rendered = renderCharacterAwareness(view, 'ch-0001')
-    expect(rendered).not.toContain('north tower')
-    expect(rendered).not.toContain('Who sent the letter')
-    expect(rendered).not.toContain('ch-0001')
+  describe('the writer and the planner, who write the next passage', () => {
+    it('hides dormant threads and frames the rest as limits', () => {
+      for (const reader of ['generation.writer', 'generation.prewriter'] as const) {
+        const rendered = renderContinuity({ continuityView: view }, reader)!
+        expect(rendered, reader).toContain('The open wound')
+        expect(rendered, reader).not.toContain('Who sent the letter')
+        expect(rendered, reader).toContain('not tasks, promised beats')
+        expect(rendered, reader).not.toContain('legitimate direction')
+      }
+    })
+
+    it('scopes awareness to the pinned and recently active cast', () => {
+      const rendered = renderContinuity({
+        continuityView: view,
+        stickyCharacters: [{ id: 'ch-0001' }],
+      }, 'generation.writer')!
+      expect(rendered).toContain('The key is missing.')
+      expect(rendered).not.toContain('The hero lied')
+    })
   })
 
-  it('states the boundary even when the fold recorded nothing for the character', () => {
-    const rendered = renderCharacterAwareness(view, 'ch-9999')
-    expect(rendered).toContain('you have not learned it')
-    expect(rendered).toContain('nothing beyond your character sheet')
+  describe('directions, which only proposes', () => {
+    it('offers every thread as latent material', () => {
+      const rendered = renderContinuity({ continuityView: view }, 'directions.suggest')!
+      expect(rendered).toContain('The open wound')
+      expect(rendered).toContain('Who sent the letter — Never followed up.')
+      expect(rendered).toContain('has simply gone quiet, not been resolved')
+      expect(rendered).toContain('None of them is owed an answer')
+      // The constraint framing is the opposite instruction; both at once is noise.
+      expect(rendered).not.toContain('not tasks, promised beats')
+    })
+  })
+
+  describe('the librarian, which writes the records back', () => {
+    it('exposes the keys, and scopes knowledge to this passage rather than the cast', () => {
+      const rendered = renderContinuity({
+        continuityView: view,
+        // Pinned characters are deliberately not the analyst's scope: pinning is
+        // standing author intent, not evidence the new passage is about them.
+        stickyCharacters: [{ id: 'ch-0001' }],
+        attentionCandidateIds: ['ch-0002'],
+      }, 'librarian.analyze')!
+      expect(rendered).toContain('who_sent_the_letter |')
+      expect(rendered).toContain('ch-0002 | hero_lied')
+      expect(rendered).not.toContain('key_missing')
+    })
+  })
+
+  describe('character chat, which is the character', () => {
+    const source = { continuityView: view, character: { id: 'ch-0001' } }
+
+    it('gives one character their own facts and how they came by them', () => {
+      const rendered = renderContinuity(source, 'character-chat.chat')!
+      expect(rendered).toContain('The key is missing. (witnessed)')
+      expect(rendered).not.toContain('The hero lied')
+    })
+
+    // A character handed the authorial records answers from offstage facts, which
+    // is the one failure this presentation exists to prevent.
+    it('withholds the durable state, open threads, and keys that belong to the author', () => {
+      const rendered = renderContinuity(source, 'character-chat.chat')!
+      expect(rendered).not.toContain('north tower')
+      expect(rendered).not.toContain('Who sent the letter')
+      expect(rendered).not.toContain('key_missing')
+      expect(rendered).not.toContain('ch-0001')
+    })
+
+    it('states the boundary even when the fold recorded nothing for the character', () => {
+      const rendered = renderContinuity({ continuityView: view, character: { id: 'ch-9999' } }, 'character-chat.chat')!
+      expect(rendered).toContain('you have not learned it')
+      expect(rendered).toContain('nothing beyond your character sheet')
+    })
+
+    it('renders nothing when no character has been chosen', () => {
+      expect(renderContinuity({ continuityView: view }, 'character-chat.chat')).toBeNull()
+    })
   })
 })

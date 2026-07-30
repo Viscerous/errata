@@ -46,7 +46,7 @@ import {
   mergeFragmentCandidates,
   writerProvenanceFragmentCandidates,
 } from './candidates'
-import { renderContinuityMemoryForAnalysis } from './continuity-view'
+import { renderContinuity } from './continuity-view'
 
 /**
  * A full sheet whose body is sentence-numbered, so `proposeRecordCorrections`
@@ -215,16 +215,12 @@ export function createLibrarianAnalyzeBlocks(ctx: AgentBlockContext): ContextBlo
     placeholder: STORY_SUMMARY_PLACEHOLDER,
   }))
 
-  if (ctx.continuityView) {
+  const continuityMemory = renderContinuity(ctx, 'librarian.analyze')
+  if (continuityMemory) {
     blocks.push({
       id: 'continuity-memory',
       role: 'user',
-      content: renderContinuityMemoryForAnalysis(ctx.continuityView, {
-        characterIds: [
-          ...(ctx.attentionCandidateIds ?? []),
-          ...(ctx.recentCharacters ?? []).map((fragment) => fragment.id),
-        ],
-      }),
+      content: continuityMemory,
       order: 150,
       source: 'builtin',
     })

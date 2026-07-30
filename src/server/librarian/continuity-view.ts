@@ -319,27 +319,104 @@ export async function buildContinuityView(params: {
   return view
 }
 
-export interface ContinuityViewOptions {
-  characterIds?: Iterable<string>
-  /**
-   * How unresolved threads are framed, because the two audiences want opposite
-   * things from the same records:
-   *
-   * - `constraints` (default) — focused threads only, presented as limits. What
-   *   the Writer and Prewriter need: a dormant thread dragged into the present
-   *   scene is exactly the failure mode.
-   * - `candidates` — every thread including dormant, presented as latent
-   *   material. What Directions needs: a question the story raised and dropped
-   *   is its richest source of a next move, and the default filter hides it.
-   */
-  threads?: 'constraints' | 'candidates'
+/**
+ * The agents that read folded continuity.
+ *
+ * A caller states which one it is; it does not get to state how the records
+ * should be framed. The two framings are contradictory — "let these lie" for
+ * whoever writes the next passage, "here is what you could pick up" for whoever
+ * only proposes one — so pairing a reader with the wrong one is a mistake worth
+ * making unavailable rather than documenting. Adding a reader here is a
+ * deliberate choice about what that agent is allowed to see.
+ */
+export type ContinuityReader =
+  | 'generation.writer'
+  | 'generation.prewriter'
+  | 'directions.suggest'
+  | 'librarian.analyze'
+  | 'character-chat.chat'
+
+type ContinuityPresentation = 'constraints' | 'candidates' | 'registry' | 'self'
+
+const PRESENTATION_BY_READER: Record<ContinuityReader, ContinuityPresentation> = {
+  // Limits, focused threads only. A dormant thread dragged into the present
+  // scene is precisely the failure mode for whoever writes the next passage.
+  'generation.writer': 'constraints',
+  'generation.prewriter': 'constraints',
+  // Latent material, every thread including dormant. A question the story raised
+  // and let go is the richest source of a next move for a reader that proposes
+  // moves and writes none of them.
+  'directions.suggest': 'candidates',
+  // The keyed registry, because this reader writes the records back and has to
+  // address them by the keys they already carry.
+  'librarian.analyze': 'registry',
+  // Second person, own knowledge only. This reader *is* the character, and one
+  // given the authorial records starts answering from offstage facts.
+  'character-chat.chat': 'self',
 }
 
-export function renderContinuityView(
+/**
+ * What the renderer needs, stated as the minimum rather than as a context type:
+ * ids to scope knowledge by, and the folded view itself. Every agent's block
+ * context already satisfies this, so a call site passes itself.
+ */
+export interface ContinuitySource {
+  continuityView?: ContinuityView
+  stickyCharacters?: Array<{ id: string }>
+  recentCharacters?: Array<{ id: string }>
+  attentionCandidateIds?: string[]
+  /** The character a `self` reader is speaking as. */
+  character?: { id: string }
+}
+
+/**
+ * Which characters' awareness the reader is entitled to see.
+ *
+ * Derived here rather than at each call site, where the same spread was written
+ * three times and could drift independently. It encodes today's behaviour; it
+ * does not settle whether these are the right characters — but it makes that one
+ * question answerable in one place per reader instead of three.
+ */
+function charactersInScope(source: ContinuitySource, presentation: ContinuityPresentation): Set<string> {
+  if (presentation === 'registry') {
+    // Analysis scopes knowledge to who this passage is actually about.
+    return new Set([
+      ...(source.attentionCandidateIds ?? []),
+      ...(source.recentCharacters ?? []).map((fragment) => fragment.id),
+    ])
+  }
+  // Pinned, or active in the recent window: the cast the author is working with.
+  return new Set([
+    ...(source.stickyCharacters ?? []).map((fragment) => fragment.id),
+    ...(source.recentCharacters ?? []).map((fragment) => fragment.id),
+  ])
+}
+
+/**
+ * The single way an agent gets folded continuity. Returns null when there is
+ * nothing to show — nothing folded yet, or a `self` reader with no character —
+ * so a call site guards once on the content instead of on the inputs.
+ */
+export function renderContinuity(source: ContinuitySource, reader: ContinuityReader): string | null {
+  const view = source.continuityView
+  if (!view) return null
+
+  const presentation = PRESENTATION_BY_READER[reader]
+  if (presentation === 'self') {
+    return source.character ? renderSelfAwareness(view, source.character.id) : null
+  }
+  if (presentation === 'registry') {
+    return renderContinuityRegistry(view, charactersInScope(source, presentation))
+  }
+  return renderAuthorialContinuity(view, presentation, charactersInScope(source, presentation))
+}
+
+function renderAuthorialContinuity(
   view: ContinuityView,
-  options: ContinuityViewOptions = {},
+  presentation: Extract<ContinuityPresentation, 'constraints' | 'candidates'>,
+  characterIds: Set<string>,
 ): string {
-  const asCandidates = options.threads === 'candidates'
+  const asCandidates = presentation === 'candidates'
   const parts = [
     '## Continuity',
     'This is source-linked memory from accepted prose. It constrains continuity but does not dictate what the next passage must do. Information shown to the Writer is not automatically known by every character.',
@@ -369,10 +446,7 @@ export function renderContinuityView(
     ].join('\n'))
   }
 
-  const requestedCharacters = new Set([
-    ...(options.characterIds ?? []),
-  ])
-  const knowledge = view.characterKnowledge.filter((entry) => requestedCharacters.has(entry.characterId))
+  const knowledge = view.characterKnowledge.filter((entry) => characterIds.has(entry.characterId))
   if (knowledge.length > 0) {
     const knowledgeByCharacter = new Map<string, CharacterKnowledgeEntry[]>()
     for (const entry of knowledge) {
@@ -393,16 +467,15 @@ export function renderContinuityView(
 }
 
 /**
- * What one character knows, addressed to them, for an agent that *is* that
- * character rather than an author planning around them.
+ * What one character knows, addressed to them.
  *
- * Deliberately narrower than `renderContinuityView`: durable state and story
- * threads are authorial records, and a character allowed to read them starts
- * acting on offstage facts. The awareness boundary is the part that is theirs —
- * and the part that stops a reply from treating the story summary, which sits in
- * the same prompt, as the character's own memory.
+ * Deliberately narrower than the authorial view: durable state and story threads
+ * are authorial records, and a character allowed to read them starts acting on
+ * offstage facts. The awareness boundary is the part that is theirs — and the
+ * part that stops a reply from treating the story summary, which sits in the same
+ * prompt, as the character's own memory.
  */
-export function renderCharacterAwareness(view: ContinuityView, characterId: string): string {
+function renderSelfAwareness(view: ContinuityView, characterId: string): string {
   const known = view.characterKnowledge.filter((entry) => entry.characterId === characterId)
   return [
     '## What You Know',
@@ -414,10 +487,7 @@ export function renderCharacterAwareness(view: ContinuityView, characterId: stri
 }
 
 /** Full keyed registry for the Librarian, including dormant unresolved threads. */
-export function renderContinuityMemoryForAnalysis(
-  view: ContinuityView,
-  options: { characterIds?: Iterable<string> } = {},
-): string {
+function renderContinuityRegistry(view: ContinuityView, characterIds: Set<string>): string {
   const parts = [
     '## Continuity Registry Before This Passage',
     'Reuse the exact keys below. Thread omission means dormancy, never resolution; resolve or abandon only with explicit source evidence.',
@@ -434,7 +504,6 @@ export function renderContinuityMemoryForAnalysis(
       ...view.liveThreads.map((thread) => `- ${thread.threadKey} | ${thread.visibility} | ${thread.label}${thread.note ? ` | ${thread.note}` : ''}`),
     ].join('\n'))
   }
-  const characterIds = new Set(options.characterIds ?? [])
   const knowledge = characterIds.size > 0
     ? view.characterKnowledge.filter((entry) => characterIds.has(entry.characterId))
     : []

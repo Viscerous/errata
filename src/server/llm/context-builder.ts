@@ -22,7 +22,7 @@ import {
 } from './fragment-context-blocks'
 import { collectRecentContextSignals } from './context-selection'
 import { fragmentTagPattern } from './fragment-tag'
-import { buildContinuityView, renderContinuityView, type ContinuityView } from '../librarian/continuity-view'
+import { buildContinuityView, renderContinuity, type ContinuityView } from '../librarian/continuity-view'
 import type { ModelMessage } from 'ai'
 
 export {
@@ -596,7 +596,6 @@ export function createDefaultBlocks(state: ContextBuildState): ContextBlock[] {
     story,
     proseFragments,
     chapterSummaries = [],
-    continuityView,
     authorInput = '',
   } = state
 
@@ -675,16 +674,12 @@ export function createDefaultBlocks(state: ContextBuildState): ContextBlock[] {
     })
   }
 
-  if (continuityView) {
+  const continuity = renderContinuity(state, 'generation.writer')
+  if (continuity) {
     blocks.push({
       id: 'continuity-observations',
       role: 'user',
-      content: renderContinuityView(continuityView, {
-        characterIds: [
-          ...state.stickyCharacters.map((fragment) => fragment.id),
-          ...(state.recentCharacters ?? []).map((fragment) => fragment.id),
-        ],
-      }),
+      content: continuity,
       order: 420,
       source: 'builtin',
     })

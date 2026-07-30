@@ -9,7 +9,7 @@ import {
   storySummaryBlock,
 } from '../llm/fragment-context-blocks'
 import { selectAttentionContext } from '../llm/context-selection'
-import { renderContinuityView } from '../librarian/continuity-view'
+import { renderContinuity } from '../librarian/continuity-view'
 import type { AgentBlockContext } from '../agents/agent-block-context'
 import { getFragment } from '../fragments/storage'
 import { getFragmentsByTag } from '../fragments/associations'
@@ -97,20 +97,12 @@ export function createDirectionsSuggestBlocks(ctx: AgentBlockContext): ContextBl
   // Directions set macro trajectory, so they must not be proposed against a
   // less-informed picture than the Writer's. Timeline 8 recorded exactly that
   // failure: a direction generated without a record the following Writer had.
-  if (ctx.continuityView) {
+  const continuity = renderContinuity(ctx, 'directions.suggest')
+  if (continuity) {
     blocks.push({
       id: 'continuity-observations',
       role: 'user',
-      // Directions is the one reader for which a dormant thread is an asset
-      // rather than a hazard: it proposes, it does not write, so picking up a
-      // question the story dropped is the job.
-      content: renderContinuityView(ctx.continuityView, {
-        threads: 'candidates',
-        characterIds: [
-          ...ctx.stickyCharacters.map((fragment) => fragment.id),
-          ...(ctx.recentCharacters ?? []).map((fragment) => fragment.id),
-        ],
-      }),
+      content: continuity,
       order: 200,
       source: 'builtin',
     })

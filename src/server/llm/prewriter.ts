@@ -7,7 +7,7 @@ import { compileAgentContext } from '../agents/compile-agent-context'
 import { instructionRegistry } from '../instructions'
 import { buildContextState } from './context-builder'
 import { type AgentBlockContext, baseBlockContext } from '../agents/agent-block-context'
-import { renderContinuityView } from '../librarian/continuity-view'
+import { renderContinuity } from '../librarian/continuity-view'
 import type { Fragment, StoryMeta } from '../fragments/schema'
 import type { TokenUsage, ToolCallLog } from './generation-logs'
 import { resolveAndReportUsage } from './usage-normalizer'
@@ -441,6 +441,7 @@ export async function runPrewriter(args: RunPrewriterArgs): Promise<PrewriterRes
  * customized by users via the block editor.
  */
 export function createPrewriterBlocks(_ctx: AgentBlockContext): ContextBlock[] {
+  const planningContinuity = renderContinuity(_ctx, 'generation.prewriter')
   return [
     {
       id: 'instructions',
@@ -460,15 +461,10 @@ export function createPrewriterBlocks(_ctx: AgentBlockContext): ContextBlock[] {
     // block it owns. It previously only saw continuity flattened inside
     // full-context, which meant the preview showed a placeholder and the block
     // editor could not reach it.
-    ...(_ctx.continuityView ? [{
+    ...(planningContinuity ? [{
       id: 'continuity-observations',
       role: 'user' as const,
-      content: renderContinuityView(_ctx.continuityView, {
-        characterIds: [
-          ..._ctx.stickyCharacters.map((fragment) => fragment.id),
-          ...(_ctx.recentCharacters ?? []).map((fragment) => fragment.id),
-        ],
-      }),
+      content: planningContinuity,
       order: 150,
       source: 'builtin' as const,
     }] : []),

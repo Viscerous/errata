@@ -10,7 +10,7 @@ import type { AgentBlockContext } from '../agents/agent-block-context'
 import { instructionRegistry } from '../instructions'
 import { buildBasePreviewContext, renderProseSummariesText } from '../agents/block-helpers'
 import { pinnedFragmentCatalogBlocks } from '../agents/fragment-summary-blocks'
-import { renderCharacterAwareness } from '../librarian/continuity-view'
+import { renderContinuity } from '../librarian/continuity-view'
 
 export function createCharacterChatBlocks(ctx: AgentBlockContext): ContextBlock[] {
   const blocks: ContextBlock[] = []
@@ -89,11 +89,12 @@ export function createCharacterChatBlocks(ctx: AgentBlockContext): ContextBlock[
   // the story summary, prose events, other characters' sheets — and a character
   // with no stated boundary answers from all of it. This draws the line after
   // the material it has to exclude.
-  if (ctx.continuityView && ctx.character) {
+  const awareness = renderContinuity(ctx, 'character-chat.chat')
+  if (awareness) {
     blocks.push({
       id: 'character-awareness',
       role: 'user',
-      content: renderCharacterAwareness(ctx.continuityView, ctx.character.id),
+      content: awareness,
       order: 350,
       source: 'builtin',
     })
