@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
+import { readClipboardText } from '@/lib/clipboard'
 import type { AgentBlockConfig, ImportConfigsPayload } from '@/contracts/block-config'
 import {
   parseErrataExport,
@@ -105,19 +106,18 @@ export function FragmentImportDialog({
         initConfigSelections(initialData)
       }
     } else {
-      navigator.clipboard.readText().then((text) => {
+      // Best-effort prefill: a clipboard we cannot read just leaves the box empty.
+      void readClipboardText().then((text) => {
+        if (text === null) return
         const result = parseErrataExport(text)
-        if (result) {
-          setParsed(result)
-          setJsonText(text)
-          setParseError(null)
-          if (isBundle(result)) {
-            setSelectedIndices(new Set(result.fragments.map((_, i) => i)))
-            initConfigSelections(result)
-          }
+        if (!result) return
+        setParsed(result)
+        setJsonText(text)
+        setParseError(null)
+        if (isBundle(result)) {
+          setSelectedIndices(new Set(result.fragments.map((_, i) => i)))
+          initConfigSelections(result)
         }
-      }).catch(() => {
-        // Clipboard read not available, that's fine
       })
     }
   }, [open, initialData])
@@ -154,12 +154,12 @@ export function FragmentImportDialog({
   }
 
   const handlePasteFromClipboard = async () => {
-    try {
-      const text = await navigator.clipboard.readText()
-      handleTextChange(text)
-    } catch {
+    const text = await readClipboardText()
+    if (text === null) {
       setParseError('Could not read clipboard. Try pasting manually with Ctrl+V.')
+      return
     }
+    handleTextChange(text)
   }
 
   const handleFileDrop = useCallback(async (e: React.DragEvent) => {

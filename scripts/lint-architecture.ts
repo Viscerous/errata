@@ -30,11 +30,20 @@ for (const file of await sourceFiles('src')) {
 // on the first call. `crypto.randomUUID()` in the generation path threw before the
 // request was built, leaving the UI generating forever with nothing reaching the
 // server — invisible on localhost, which is a secure context by definition.
-// `crypto.subtle` (pack publishing) and un-chained `navigator.clipboard` (copy
-// buttons) are the same class and still to be fixed; they are not enforced here
-// yet because both need a real fallback rather than a swap.
 const SECURE_CONTEXT_ONLY = [
-  { pattern: /\bcrypto\s*\.\s*randomUUID\s*\(/, api: 'crypto.randomUUID()', instead: 'generateRunId/randomHex from @/lib/client-ids' },
+  {
+    pattern: /\bcrypto\s*\.\s*randomUUID\s*\(/,
+    api: 'crypto.randomUUID()',
+    instead: 'generateRunId/randomHex from @/lib/client-ids',
+  },
+  {
+    // The property itself, not just a call: `navigator.clipboard` is undefined
+    // outside a secure context, so even reading `.writeText` off it throws.
+    pattern: /\bnavigator\s*\.\s*clipboard\b/,
+    api: 'navigator.clipboard',
+    instead: 'copyText/readClipboardText from @/lib/clipboard',
+    allow: ['src/lib/clipboard.ts'],
+  },
 ]
 
 /** Blanks out comments so prose about a banned API doesn't trip the rule. */
@@ -55,11 +64,14 @@ function stripComments(source: string): string[] {
   })
 }
 
-for (const file of await sourceFiles('src')) {
+// Plugin panels are browser code too, and hit the same wall.
+for (const file of [...await sourceFiles('src'), ...await sourceFiles('plugins')]) {
   // Server code never runs in a browser, so the restriction does not apply.
   if (/^src[/\\]server[/\\]/.test(file)) continue
+  const path = file.replace(/\\/g, '/')
   stripComments(await readFile(file, 'utf-8')).forEach((line, index) => {
-    for (const { pattern, api, instead } of SECURE_CONTEXT_ONLY) {
+    for (const { pattern, api, instead, allow } of SECURE_CONTEXT_ONLY) {
+      if (allow?.includes(path)) continue
       if (pattern.test(line)) {
         violations.push(
           `${file}:${index + 1}: ${api} is secure-context only and absent over LAN HTTP; use ${instead}`,

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo, memo } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, type Fragment, type ProseChainEntry } from '@/lib/api'
+import { copyText } from '@/lib/clipboard'
 import { invalidateStoryContent } from '@/lib/branch-cache'
 import { Button } from '@/components/ui/button'
 import { StreamMarkdown } from '@/components/ui/stream-markdown'
@@ -647,7 +648,7 @@ export const ProseBlock = memo(function ProseBlock({
               <div className="flex items-center gap-1.5 px-2.5 py-1 min-w-0">
                 <button
                   className="text-[0.625rem] font-mono text-muted-foreground/60 hover:text-foreground transition-colors shrink-0 select-all"
-                  onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(fragment.id) }}
+                  onClick={(e) => { e.stopPropagation(); void copyText(fragment.id) }}
                   title="Copy ID"
                 >
                   {fragment.id}

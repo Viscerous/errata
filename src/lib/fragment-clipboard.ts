@@ -1,6 +1,7 @@
 import { api, type Fragment, type BlockConfig, type AgentBlockConfig } from '@/lib/api'
 import { parseVisualRefs, type BoundaryBox } from '@/lib/fragment-visuals'
 import { randomToken } from '@/lib/client-ids'
+import { copyText, readClipboardText } from '@/lib/clipboard'
 
 export interface ClipboardAttachment {
   kind: 'image' | 'icon'
@@ -212,21 +213,17 @@ export function parseErrataExport(text: string): ErrataExportData | null {
   return parseFragmentClipboard(text) ?? parseBundleClipboard(text)
 }
 
+/** Copies the fragment as Errata JSON. False when the clipboard refused it. */
 export async function copyFragmentToClipboard(
   fragment: Fragment,
   mediaById?: Map<string, Fragment>,
-): Promise<void> {
-  const text = serializeFragment(fragment, mediaById)
-  await navigator.clipboard.writeText(text)
+): Promise<boolean> {
+  return copyText(serializeFragment(fragment, mediaById))
 }
 
 export async function readFragmentFromClipboard(): Promise<FragmentClipboardData | null> {
-  try {
-    const text = await navigator.clipboard.readText()
-    return parseFragmentClipboard(text)
-  } catch {
-    return null
-  }
+  const text = await readClipboardText()
+  return text === null ? null : parseFragmentClipboard(text)
 }
 
 export function downloadExportFile(json: string, filename: string): void {

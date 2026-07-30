@@ -11,6 +11,7 @@ import { BlockContentView } from '@/components/blocks/BlockContentView'
 import { X, ChevronDown, ChevronRight, Copy, Check, Brain, FileText } from 'lucide-react'
 import { EmptyHint } from '@/components/ui/prose-text'
 import { cn } from '@/lib/utils'
+import { copyText } from '@/lib/clipboard'
 
 interface DebugPanelProps {
   storyId: string
@@ -271,12 +272,11 @@ function CopyButton({ text, className }: { text: string; className?: string }) {
   const [copied, setCopied] = useState(false)
 
   const handleCopy = useCallback(
-    (e: React.MouseEvent) => {
+    async (e: React.MouseEvent) => {
       e.stopPropagation()
-      navigator.clipboard.writeText(text).then(() => {
-        setCopied(true)
-        setTimeout(() => setCopied(false), 1500)
-      })
+      if (!await copyText(text)) return
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
     },
     [text],
   )

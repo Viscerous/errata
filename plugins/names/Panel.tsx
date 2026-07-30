@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import type { PluginPanelProps } from '@/lib/plugin-panels'
+import { copyText } from '@/lib/clipboard'
 
 const THEMES = ['fantasy', 'scifi', 'historical'] as const
 const GENDERS = ['male', 'female', 'neutral'] as const
@@ -38,7 +39,7 @@ export function NamesPanel(_props: PluginPanelProps) {
   }
 
   const handleCopy = async (name: string) => {
-    await navigator.clipboard.writeText(name)
+    if (!await copyText(name)) return
     setCopied(name)
     setTimeout(() => setCopied(null), 1500)
   }

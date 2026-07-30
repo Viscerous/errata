@@ -4,6 +4,7 @@ import { api, type Fragment } from '@/lib/api'
 import { q, useActiveBranchId } from '@/lib/query-keys'
 import { resolveFragmentVisual, generateBubbles, hexagonPoints, diamondPoints, type Bubble } from '@/lib/fragment-visuals'
 import { serializeFragment, serializeBundle, downloadExportFile } from '@/lib/fragment-clipboard'
+import { copyText } from '@/lib/clipboard'
 import { PublishPackDialog } from '@/components/erratanet/PublishPackDialog'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -175,7 +176,7 @@ export function FragmentExportPanel({ storyId, storyName, onClose }: FragmentExp
       json = serializeBundle(selectedFragments, mediaById, storyName, bundleConfigs)
     }
 
-    await navigator.clipboard.writeText(json)
+    if (!await copyText(json)) return
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }, [selectedFragments, mediaById, storyName, bundleConfigs])

@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import type { SharingStatusResponse } from '@/lib/api/types'
 import { cn } from '@/lib/utils'
+import { copyText } from '@/lib/clipboard'
 import { Lock, Wifi, Globe, Loader2, Copy, Check, AlertTriangle, ShieldCheck } from 'lucide-react'
 import { Toggle } from './primitives'
 
@@ -12,7 +13,11 @@ function CopyButton({ value }: { value: string }) {
   const [copied, setCopied] = useState(false)
   return (
     <button
-      onClick={() => { navigator.clipboard?.writeText(value).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1200) }) }}
+      onClick={async () => {
+        if (!await copyText(value)) return
+        setCopied(true)
+        setTimeout(() => setCopied(false), 1200)
+      }}
       className="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
       title="Copy"
       aria-label="Copy link"

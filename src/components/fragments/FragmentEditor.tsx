@@ -543,7 +543,7 @@ export function FragmentEditor({
                   variant="ghost"
                   className="h-7 text-xs gap-1"
                   onClick={async () => {
-                    await copyFragmentToClipboard(fragment, mediaById)
+                    if (!await copyFragmentToClipboard(fragment, mediaById)) return
                     setCopied(true)
                     setTimeout(() => setCopied(false), 2000)
                   }}

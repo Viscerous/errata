@@ -4,6 +4,7 @@ import { useMemo, useState, useRef, useCallback, useEffect } from 'react'
 import { useWindowFileDrop } from '@/hooks/use-window-file-drop'
 import { useNavigate } from '@tanstack/react-router'
 import { api, type StoryMeta } from '@/lib/api'
+import { readClipboardText } from '@/lib/clipboard'
 import {
   parseErrataExport,
   readFileAsText,
@@ -155,12 +156,12 @@ function StoryListPage() {
   }, [handleImportTextChange])
 
   const handleImportPaste = useCallback(async () => {
-    try {
-      const text = await navigator.clipboard.readText()
-      handleImportTextChange(text)
-    } catch {
+    const text = await readClipboardText()
+    if (text === null) {
       setParseError('Could not read clipboard. Try pasting manually with Ctrl+V.')
+      return
     }
+    handleImportTextChange(text)
   }, [handleImportTextChange])
 
   const toggleBundleItem = useCallback((index: number) => {

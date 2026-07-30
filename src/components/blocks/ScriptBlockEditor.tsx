@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { q, useActiveBranchId } from '@/lib/query-keys'
 import type { BlockPreviewResponse } from '@/lib/api/types'
+import { copyText } from '@/lib/clipboard'
 import { ScriptEditor } from './ScriptEditor'
 import { BlockContentView } from './BlockContentView'
 import {
@@ -508,8 +509,8 @@ export function FragmentReference({ storyId }: { storyId: string }) {
     return map
   }, [fragments])
 
-  const handleCopy = useCallback((id: string) => {
-    navigator.clipboard.writeText(id)
+  const handleCopy = useCallback(async (id: string) => {
+    if (!await copyText(id)) return
     setCopiedId(id)
     setTimeout(() => setCopiedId(null), 1200)
   }, [])
