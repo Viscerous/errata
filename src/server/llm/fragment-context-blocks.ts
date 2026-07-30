@@ -25,6 +25,8 @@ export interface FragmentContextGroup {
   order: number
   role?: ContextBlock['role']
   editable?: boolean
+  /** Pass `canReadFragments(ctx)`; only read in `summary-index` mode. */
+  canReadFragments?: boolean
   heading?: string
   summaryNote?: (fragment: Fragment) => string | undefined
   renderFragment?: (fragment: Fragment) => string
@@ -372,14 +374,42 @@ export function fragmentSummaryIndexHeading(label: string, scope?: FragmentConte
   return `${normalized} Catalog`
 }
 
+/** The core read tool a catalog row points at when it tells a reader to expand it. */
+const CATALOG_EXPAND_TOOL = 'readFragments'
+
+/**
+ * Whether a catalog's reader can open the rows it is shown.
+ *
+ * `undefined` — the toolset is unknown at this call site — is deliberately not
+ * `false`, and reads downstream as "assume it can". Every tool-using agent
+ * predates this signal, and telling a reader that holds readFragments not to use
+ * it is the more damaging of the two mistakes.
+ */
+export function canReadFragments(source: { enabledTools?: string[] }): boolean | undefined {
+  return source.enabledTools ? source.enabledTools.includes(CATALOG_EXPAND_TOOL) : undefined
+}
+
+/**
+ * The one place a catalog decides how it tells the reader to expand a row —
+ * derived from whether the reader can, never restated by a caller.
+ */
+function catalogExpandNote(opts: { editable?: boolean; canReadFragments?: boolean }): string {
+  // A reader without the tool must not be pointed at it: on a small model that
+  // is either a fabricated detail or a step it cannot take.
+  if (opts.canReadFragments === false) {
+    return 'You cannot open these rows; a row is the whole of what you are given about it. State nothing beyond what it shows.'
+  }
+  return opts.editable
+    ? 'Read full fragments with readFragments before editing them or relying on details.'
+    : 'Use readFragments to read the full fragment before relying on details.'
+}
+
 export function fragmentSummaryList<T extends { id: string; name: string; description: string }>(
   heading: string,
   items: T[],
-  opts: { editable?: boolean; summaryNote?: (item: T) => string | undefined } = {},
+  opts: { editable?: boolean; canReadFragments?: boolean; summaryNote?: (item: T) => string | undefined } = {},
 ): string {
-  const expand = opts.editable
-    ? 'Read full fragments with readFragments before editing them or relying on details.'
-    : 'Use readFragments to read the full fragment before relying on details.'
+  const expand = catalogExpandNote(opts)
   return joinMarkdownBlocks([
     markdownHeading(2, heading),
     `Each line is a one-line catalog row, not the full fragment. Format: \`id\` | name | desc. ${expand}`,
@@ -389,12 +419,10 @@ export function fragmentSummaryList<T extends { id: string; name: string; descri
 
 export function fragmentCatalogContent(
   sections: FragmentCatalogSection[],
-  opts: { heading?: string; editable?: boolean } = {},
+  opts: { heading?: string; editable?: boolean; canReadFragments?: boolean } = {},
 ): string {
   const nonEmpty = sections.filter((section) => section.fragments.length > 0)
-  const expand = opts.editable
-    ? 'Read full fragments with readFragments before editing them or relying on details.'
-    : 'Use readFragments to read the full fragment before relying on details.'
+  const expand = catalogExpandNote(opts)
   return joinMarkdownBlocks([
     markdownHeading(2, opts.heading ?? 'Fragment Catalog'),
     `Each line is a one-line catalog row, not the full fragment. Format: \`id\` | name | desc. ${expand}`,
@@ -413,6 +441,8 @@ export function fragmentCatalogBlock(opts: {
   role?: ContextBlock['role']
   editable?: boolean
   heading?: string
+  /** Pass `canReadFragments(ctx)`; omit only where no toolset is in scope. */
+  canReadFragments?: boolean
   scope?: Extract<FragmentContextScope, 'pinned' | 'available' | 'catalog' | 'all'>
 }): ContextBlock | null {
   const sections = opts.sections.filter((section) => section.fragments.length > 0)
@@ -423,6 +453,7 @@ export function fragmentCatalogBlock(opts: {
     content: fragmentCatalogContent(sections, {
       heading: opts.heading,
       editable: opts.editable,
+      canReadFragments: opts.canReadFragments,
     }),
     order: opts.order,
     source: 'builtin',
@@ -566,6 +597,7 @@ export function renderFragmentContextGroup(group: FragmentContextGroup): string 
   if (group.mode === 'summary-index') {
     return fragmentSummaryList(heading, group.fragments, {
       editable: group.editable,
+      canReadFragments: group.canReadFragments,
       summaryNote: group.summaryNote,
     })
   }

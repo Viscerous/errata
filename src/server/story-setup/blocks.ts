@@ -4,6 +4,7 @@ import { buildBasePreviewContext } from '../agents/block-helpers'
 import { instructionRegistry } from '../instructions'
 import {
   buildFragmentContextLanes,
+  canReadFragments,
   fragmentCatalogBlock,
   fragmentFullContextBlocksBySource,
   proseWindowBlock,
@@ -111,6 +112,7 @@ export function createStorySetupBlocks(ctx: AgentBlockContext): ContextBlock[] {
       fragments: lane.catalog,
     })),
     order: 220,
+    canReadFragments: canReadFragments(ctx),
   })
   if (catalog) blocks.push(catalog)
 

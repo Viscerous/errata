@@ -41,6 +41,48 @@ async function createStory(): Promise<string> {
   return data.id
 }
 
+/**
+ * Blocks that word themselves from the toolset have to read the same way in the
+ * preview as in the run. Agents registered without a resolveTools factory used to
+ * reach createDefaultBlocks with no toolset at all, so the author inspected a
+ * prompt the model never received.
+ */
+describe('Context preview reflects the agent toolset', () => {
+  it('stops telling a catalog reader to call readFragments once the author disables it', async () => {
+    const storyId = await createStory()
+    await api('/agent-blocks')
+    // A pinned fragment gives character chat a catalog to word in the first place.
+    const created = await apiJson(`/stories/${storyId}/fragments`, {
+      type: 'knowledge',
+      name: 'Magic System',
+      description: 'Rules for magic',
+      content: 'Full magic details.',
+    })
+    const fragmentId = (await created.json()).id
+    await apiJson(`/stories/${storyId}/fragments/${fragmentId}/sticky`, { sticky: true }, 'PATCH')
+
+    const withTool = await (await api(`/stories/${storyId}/agent-blocks/character-chat.chat/preview`)).json()
+    const before = withTool.messages.map((m: { content: string }) => m.content).join('\n')
+    expect(before).toContain('Pinned Fragment Catalog')
+    expect(before).toContain('Use readFragments')
+
+    // character-chat.chat declares availableTools but has no resolveTools, so
+    // this is exactly the path that previously left the toolset unknown.
+    const patched = await apiJson(
+      `/stories/${storyId}/agent-blocks/character-chat.chat/config`,
+      { disabledTools: ['readFragments'] },
+      'PATCH',
+    )
+    expect(patched.status).toBe(200)
+
+    const withoutTool = await (await api(`/stories/${storyId}/agent-blocks/character-chat.chat/preview`)).json()
+    const after = withoutTool.messages.map((m: { content: string }) => m.content).join('\n')
+    expect(after).toContain('Pinned Fragment Catalog')
+    expect(after).not.toContain('readFragments')
+    expect(after).toContain('You cannot open these rows')
+  })
+})
+
 describe('Per-agent config export/import routes', () => {
   it('GET /agent-blocks/:agentName/export returns config for agent', async () => {
     const storyId = await createStory()

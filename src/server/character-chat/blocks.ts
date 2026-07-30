@@ -10,6 +10,7 @@ import type { AgentBlockContext } from '../agents/agent-block-context'
 import { instructionRegistry } from '../instructions'
 import { buildBasePreviewContext, renderProseSummariesText } from '../agents/block-helpers'
 import { pinnedFragmentCatalogBlocks } from '../agents/fragment-summary-blocks'
+import { renderCharacterAwareness } from '../librarian/continuity-view'
 
 export function createCharacterChatBlocks(ctx: AgentBlockContext): ContextBlock[] {
   const blocks: ContextBlock[] = []
@@ -84,14 +85,33 @@ export function createCharacterChatBlocks(ctx: AgentBlockContext): ContextBlock[
     excludeIds: ctx.character ? [ctx.character.id] : [],
   }))
 
+  // Last of the user blocks on purpose: everything above is authorial context —
+  // the story summary, prose events, other characters' sheets — and a character
+  // with no stated boundary answers from all of it. This draws the line after
+  // the material it has to exclude.
+  if (ctx.continuityView && ctx.character) {
+    blocks.push({
+      id: 'character-awareness',
+      role: 'user',
+      content: renderCharacterAwareness(ctx.continuityView, ctx.character.id),
+      order: 350,
+      source: 'builtin',
+    })
+  }
+
   return blocks
 }
 
 export async function buildCharacterChatPreviewContext(dataDir: string, storyId: string): Promise<AgentBlockContext> {
   const base = await buildBasePreviewContext(dataDir, storyId)
+  // A real character, not a blank: half this context — the sheet, the awareness
+  // boundary, which sheets the catalog then omits — only exists once one is
+  // chosen, and a preview that hides those blocks hides what the author came to
+  // inspect. Stories with no characters still preview, minus those blocks.
+  const character = base.stickyCharacters[0] ?? base.characterCatalog[0]
   return {
     ...base,
-    character: undefined,
+    character,
     personaDescription: 'You are speaking with a stranger you have just met. You do not know who they are.',
   }
 }

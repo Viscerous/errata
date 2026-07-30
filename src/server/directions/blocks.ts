@@ -1,6 +1,8 @@
 import { STORY_SUMMARY_PLACEHOLDER, type ContextBlock } from '../llm/context-builder'
 import {
   buildFragmentContextLanes,
+  canReadFragments,
+  fragmentCatalogBlock,
   fragmentFullContextBlocksBySource,
   isBuiltinContextFragmentType,
   proseWindowBlock,
@@ -25,7 +27,11 @@ export function createDirectionsSuggestBlocks(ctx: AgentBlockContext): ContextBl
   const lanes = buildFragmentContextLanes(ctx)
   const selection = selectAttentionContext(lanes, {
     runner: 'directions.suggest',
-    catalogScope: 'none',
+    // A direction that only ever engages what the last few passages happened to
+    // mention is a direction that can never reintroduce anyone. The catalog is
+    // the story's cast and lore by name — enough to propose bringing something
+    // back, not enough to invent its details.
+    catalogScope: 'available',
   })
 
   blocks.push(instructionsBlock('directions.system', ctx))
@@ -70,6 +76,24 @@ export function createDirectionsSuggestBlocks(ctx: AgentBlockContext): ContextBl
     ],
   }))
 
+  // Named, not detailed: these rows exist so a direction can reach past the
+  // recent window. Directions runs with no tools, so the note derived here is
+  // the one that does not point at a call it cannot make.
+  {
+    const catalog = fragmentCatalogBlock({
+      sections: orderedSelection.lanes.map((lane) => ({
+        type: lane.type,
+        label: lane.label,
+        fragments: lane.catalog,
+      })),
+      order: 250,
+      heading: 'Also In This Story',
+      scope: 'available',
+      canReadFragments: canReadFragments(ctx),
+    })
+    if (catalog) blocks.push(catalog)
+  }
+
   // Directions set macro trajectory, so they must not be proposed against a
   // less-informed picture than the Writer's. Timeline 8 recorded exactly that
   // failure: a direction generated without a record the following Writer had.
@@ -77,7 +101,11 @@ export function createDirectionsSuggestBlocks(ctx: AgentBlockContext): ContextBl
     blocks.push({
       id: 'continuity-observations',
       role: 'user',
+      // Directions is the one reader for which a dormant thread is an asset
+      // rather than a hazard: it proposes, it does not write, so picking up a
+      // question the story dropped is the job.
       content: renderContinuityView(ctx.continuityView, {
+        threads: 'candidates',
         characterIds: [
           ...ctx.stickyCharacters.map((fragment) => fragment.id),
           ...(ctx.recentCharacters ?? []).map((fragment) => fragment.id),
@@ -88,8 +116,12 @@ export function createDirectionsSuggestBlocks(ctx: AgentBlockContext): ContextBl
     })
   }
 
+  // The author's configured prose window, which is the same window the Writer
+  // gets — the parity the continuity block above exists to preserve. A hardcoded
+  // slice(-3) here quietly broke it in the other direction: a no-op below three
+  // passages, a silent truncation above.
   {
-    const prose = proseWindowBlock(ctx.proseFragments.slice(-3), { order: 300 })
+    const prose = proseWindowBlock(ctx.proseFragments, { order: 300 })
     if (prose) blocks.push(prose)
   }
 

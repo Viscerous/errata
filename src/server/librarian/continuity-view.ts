@@ -319,10 +319,27 @@ export async function buildContinuityView(params: {
   return view
 }
 
+export interface ContinuityViewOptions {
+  characterIds?: Iterable<string>
+  /**
+   * How unresolved threads are framed, because the two audiences want opposite
+   * things from the same records:
+   *
+   * - `constraints` (default) — focused threads only, presented as limits. What
+   *   the Writer and Prewriter need: a dormant thread dragged into the present
+   *   scene is exactly the failure mode.
+   * - `candidates` — every thread including dormant, presented as latent
+   *   material. What Directions needs: a question the story raised and dropped
+   *   is its richest source of a next move, and the default filter hides it.
+   */
+  threads?: 'constraints' | 'candidates'
+}
+
 export function renderContinuityView(
   view: ContinuityView,
-  options: { characterIds?: Iterable<string> } = {},
+  options: ContinuityViewOptions = {},
 ): string {
+  const asCandidates = options.threads === 'candidates'
   const parts = [
     '## Continuity',
     'This is source-linked memory from accepted prose. It constrains continuity but does not dictate what the next passage must do. Information shown to the Writer is not automatically known by every character.',
@@ -339,12 +356,16 @@ export function renderContinuityView(
     ].join('\n'))
   }
 
-  const focusedThreads = view.liveThreads.filter((thread) => thread.visibility !== 'dormant')
-  if (focusedThreads.length > 0) {
+  const threads = asCandidates
+    ? view.liveThreads
+    : view.liveThreads.filter((thread) => thread.visibility !== 'dormant')
+  if (threads.length > 0) {
     parts.push([
-      '### Relevant unresolved continuity',
-      'These are not tasks, promised beats, or instructions to advance or resolve anything. Let them remain unresolved unless the present scene naturally engages them.',
-      ...focusedThreads.map((thread) => `- [${thread.visibility}] ${thread.label}${thread.note ? ` — ${thread.note}` : ''}`),
+      asCandidates ? '### Unresolved continuity available to engage' : '### Relevant unresolved continuity',
+      asCandidates
+        ? 'These are open questions the story has raised and not answered. A dormant one has simply gone quiet, not been resolved; deliberately picking one up is a legitimate direction. None of them is owed an answer.'
+        : 'These are not tasks, promised beats, or instructions to advance or resolve anything. Let them remain unresolved unless the present scene naturally engages them.',
+      ...threads.map((thread) => `- [${thread.visibility}] ${thread.label}${thread.note ? ` — ${thread.note}` : ''}`),
     ].join('\n'))
   }
 
@@ -369,6 +390,27 @@ export function renderContinuityView(
   }
 
   return parts.join('\n\n')
+}
+
+/**
+ * What one character knows, addressed to them, for an agent that *is* that
+ * character rather than an author planning around them.
+ *
+ * Deliberately narrower than `renderContinuityView`: durable state and story
+ * threads are authorial records, and a character allowed to read them starts
+ * acting on offstage facts. The awareness boundary is the part that is theirs —
+ * and the part that stops a reply from treating the story summary, which sits in
+ * the same prompt, as the character's own memory.
+ */
+export function renderCharacterAwareness(view: ContinuityView, characterId: string): string {
+  const known = view.characterKnowledge.filter((entry) => entry.characterId === characterId)
+  return [
+    '## What You Know',
+    'Your character sheet and the list below are your memory. The story summary and events elsewhere in this prompt are context for the author, not for you: if something appears there and not here, you have not learned it.',
+    ...(known.length > 0
+      ? known.map((entry) => `- ${entry.fact} (${entry.acquisition})`)
+      : ['- (nothing beyond your character sheet and the present conversation)']),
+  ].join('\n')
 }
 
 /** Full keyed registry for the Librarian, including dormant unresolved threads. */

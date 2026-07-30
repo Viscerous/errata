@@ -53,9 +53,20 @@ async function applyToolContextToPreview(
   config: AgentBlockConfig,
 ): Promise<ToolSet | null> {
   ctx.disabledTools = config.disabledTools ?? []
-  if (!def.resolveTools) return null
-  const resolved = await def.resolveTools({ dataDir, storyId })
   const disabled = new Set(ctx.disabledTools)
+  if (!def.resolveTools) {
+    // No factory to call, but the definition may still declare its toolset.
+    // Leaving enabledTools unset made the preview disagree with the run for
+    // every agent without resolveTools, so blocks that word themselves from the
+    // toolset rendered one way for the author and another for the model. A
+    // definition that declares nothing stays unknown rather than becoming "no
+    // tools" — those are different claims.
+    if (def.availableTools) {
+      ctx.enabledTools = def.availableTools.filter((name) => !disabled.has(name))
+    }
+    return null
+  }
+  const resolved = await def.resolveTools({ dataDir, storyId })
   ctx.enabledTools = Object.keys(resolved).filter((name) => !disabled.has(name))
   return resolved
 }

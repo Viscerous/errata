@@ -1,5 +1,10 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { makeTestSettings } from '../setup'
+import {
+  makeCharacterKnowledge,
+  makeContinuityView,
+  makeLiveThread,
+  makeTestSettings,
+} from '../setup'
 import { ensureCoreAgentsRegistered } from '@/server/agents'
 import { agentBlockRegistry } from '@/server/agents/agent-block-registry'
 import { modelRoleRegistry } from '@/server/agents/model-role-registry'
@@ -520,7 +525,7 @@ describe('Librarian Refine Blocks', () => {
 // The fold runs inside buildContextState for nearly every agent, so an agent
 // that decides what a passage does must render it rather than silently drop it.
 describe('Continuity reaches the agents that decide what happens next', () => {
-  const viewFixture = {
+  const viewFixture = makeContinuityView({
     currentState: [{
       sourceFragmentId: 'pr-0001',
       analysisId: 'la-1',
@@ -531,9 +536,8 @@ describe('Continuity reaches the agents that decide what happens next', () => {
     }],
     liveThreads: [],
     characterKnowledge: [],
-    temporalFrame: { relation: 'forward' as const },
-    staleProjectionCount: 0,
-  }
+    temporalFrame: { relation: 'forward' },
+  })
 
   it('renders a continuity block for the writer, the planner, and directions', () => {
     for (const agentName of ['generation.writer', 'generation.prewriter', 'directions.suggest']) {
@@ -746,13 +750,22 @@ describe('Directions Blocks', () => {
     expect(blocks.find(b => b.id === 'knowledge-recent')).toBeUndefined()
   })
 
-  it('uses narrow custom context without broad catalog rows', () => {
+  // A direction may reintroduce material the recent window dropped, so the rest
+  // of the story has to be nameable — by name only, since Directions runs with
+  // no tools and cannot open anything it is shown a row for.
+  it('names the rest of the story in a catalog it is told it cannot open', () => {
     const def = agentBlockRegistry.get('directions.suggest')!
     const stickyLocation = makeFragment({ id: 'loc-sticky', type: 'location', name: 'Library', description: 'Pinned place', content: 'Pinned place lore', sticky: true })
     const recentLocation = makeFragment({ id: 'loc-recent', type: 'location', name: 'Market', description: 'Recent place', content: 'Recent place lore', sticky: false })
     const catalogLocation = makeFragment({ id: 'loc-short', type: 'location', name: 'Bridge', description: 'Optional place', content: 'Catalog row full lore', sticky: false })
 
+    // Declared empty at registration, which is what makes both real paths — the
+    // runtime toolset and the preview fallback — resolve to no tools. The
+    // enabledTools below is that fact, not a convenient fiction.
+    expect(def.availableTools).toEqual([])
+
     const blocks = def.createDefaultBlocks(makeBaseContext({
+      enabledTools: [],
       stickyCustomFragments: [stickyLocation],
       recentCustomFragments: [{ type: 'location', name: 'Locations', fragments: [recentLocation] }],
       customFragmentCatalogs: [{ type: 'location', name: 'Locations', fragments: [catalogLocation] }],
@@ -769,9 +782,65 @@ describe('Directions Blocks', () => {
     expect(recent!.content).toContain('Recent place lore')
 
     const catalog = blocks.find(b => b.id === 'fragment-catalog')
-    expect(catalog).toBeUndefined()
+    expect(catalog).toBeDefined()
+    expect(catalog!.content).toContain('## Also In This Story')
+    expect(catalog!.content).toContain('loc-short')
+    expect(catalog!.content).toContain('Optional place')
+    // Names, not bodies: the catalog is a reach, not a second full-context lane.
+    expect(catalog!.content).not.toContain('Catalog row full lore')
+    // A toolless agent told to call readFragments either fabricates or stalls.
+    expect(catalog!.content).not.toContain('readFragments')
+    expect(catalog!.content).toContain('You cannot open these rows')
+    // Fragments already presented in full are not repeated as rows.
+    expect(catalog!.content).not.toContain('loc-recent')
+    expect(catalog!.content).not.toContain('loc-sticky')
+
     expect(blocks.find(b => b.id === 'custom-sticky')).toBeUndefined()
     expect(blocks.find(b => b.id === 'location-recent')).toBeUndefined()
+  })
+
+  // The Writer must not drag a dormant thread into the present scene, so its
+  // render drops them. Directions is the opposite case: a question the story
+  // raised and let go is its richest source of a next move.
+  it('offers dormant threads as candidates where the writer is not shown them', () => {
+    const dormantView = makeContinuityView({
+      currentState: [],
+      characterKnowledge: [],
+      liveThreads: [makeLiveThread({
+        threadKey: 'who_sent_the_letter',
+        label: 'Who sent the letter',
+        visibility: 'dormant',
+      })],
+    })
+
+    const directions = agentBlockRegistry.get('directions.suggest')!
+      .createDefaultBlocks(makeBaseContext({ continuityView: dormantView }))
+      .find((b) => b.id === 'continuity-observations')
+    expect(directions!.content).toContain('Who sent the letter')
+    expect(directions!.content).toContain('deliberately picking one up is a legitimate direction')
+
+    const writer = agentBlockRegistry.get('generation.writer')!
+      .createDefaultBlocks(makeBaseContext({ continuityView: dormantView }))
+      .find((b) => b.id === 'continuity-observations')
+    expect(writer!.content).not.toContain('Who sent the letter')
+  })
+
+  // Directions set macro trajectory against the same passages the Writer will
+  // continue from. A window of its own means proposing from a shorter story.
+  it('reads the author-configured prose window, not a window of its own', () => {
+    const prose = Array.from({ length: 5 }, (_, i) => makeFragment({
+      id: `pr-000${i + 1}`,
+      type: 'prose',
+      name: `Passage ${i + 1}`,
+      content: `Passage ${i + 1} body`,
+      order: i + 1,
+    }))
+    const blocks = agentBlockRegistry.get('directions.suggest')!
+      .createDefaultBlocks(makeBaseContext({ proseFragments: prose }))
+    const window = blocks.find((b) => b.id === 'prose-recent')!
+    for (const fragment of prose) {
+      expect(window.content, fragment.id).toContain(`${fragment.name} body`)
+    }
   })
 })
 
@@ -931,5 +1000,77 @@ describe('Character Chat Blocks', () => {
     const ctx = blocks.find(b => b.id === 'story-context')!
     expect(ctx.content).not.toContain('ch-hero01')
     expect(blocks.find(b => b.id === 'fragment-pinned-catalog')).toBeUndefined()
+  })
+
+  // The fold already knows what each character learned and how, and character
+  // chat was building that view and throwing it away — so the character answered
+  // from the story summary sitting in the same prompt.
+  describe('awareness boundary', () => {
+    const hero = makeFragment({ id: 'ch-hero01', type: 'character', name: 'Hero', content: 'A brave hero.' })
+    const knowledgeView = makeContinuityView({
+      characterKnowledge: [
+        makeCharacterKnowledge({
+          characterId: 'ch-hero01',
+          knowledgeKey: 'key_missing',
+          fact: 'The key is missing.',
+        }),
+        makeCharacterKnowledge({
+          characterId: 'ch-other1',
+          knowledgeKey: 'hero_lied',
+          fact: 'The hero lied about the key.',
+          acquisition: 'told',
+        }),
+      ],
+    })
+
+    it('tells the character what it knows and what is only the author\'s to know', () => {
+      const blocks = agentBlockRegistry.get('character-chat.chat')!
+        .createDefaultBlocks(makeBaseContext({ character: hero, continuityView: knowledgeView }))
+      const awareness = blocks.find(b => b.id === 'character-awareness')!
+      expect(awareness).toBeDefined()
+      expect(awareness.content).toContain('The key is missing. (witnessed)')
+      // Another character's knowledge is not this one's.
+      expect(awareness.content).not.toContain('The hero lied')
+      // Durable state and open threads are authorial records; a character given
+      // them starts acting on offstage facts.
+      expect(awareness.content).not.toContain('north tower')
+      expect(awareness.content).not.toContain('Who sent the letter')
+      // The boundary has to be stated, not implied by omission.
+      expect(awareness.content).toContain('you have not learned it')
+    })
+
+    it('still draws the boundary for a character the fold recorded nothing for', () => {
+      const blocks = agentBlockRegistry.get('character-chat.chat')!
+        .createDefaultBlocks(makeBaseContext({
+          character: makeFragment({ id: 'ch-newcomer', type: 'character', name: 'Newcomer' }),
+          continuityView: knowledgeView,
+        }))
+      const awareness = blocks.find(b => b.id === 'character-awareness')!
+      expect(awareness.content).toContain('you have not learned it')
+      expect(awareness.content).toContain('nothing beyond your character sheet')
+      expect(awareness.content).not.toContain('The key is missing')
+    })
+
+    it('omits the block when there is no character or nothing folded yet', () => {
+      const noCharacter = agentBlockRegistry.get('character-chat.chat')!
+        .createDefaultBlocks(makeBaseContext({ continuityView: knowledgeView }))
+      expect(noCharacter.some(b => b.id === 'character-awareness')).toBe(false)
+
+      const noView = agentBlockRegistry.get('character-chat.chat')!
+        .createDefaultBlocks(makeBaseContext({ character: hero }))
+      expect(noView.some(b => b.id === 'character-awareness')).toBe(false)
+    })
+
+    // The story context above it is the author's; the boundary has to be the
+    // last thing the model reads or it is read as one more source to draw on.
+    it('comes after the story context it is drawing a line around', () => {
+      const blocks = agentBlockRegistry.get('character-chat.chat')!
+        .createDefaultBlocks(makeBaseContext({ character: hero, continuityView: knowledgeView }))
+      const awareness = blocks.find(b => b.id === 'character-awareness')!
+      for (const id of ['character', 'persona', 'story-context', 'fragment-pinned-catalog']) {
+        const earlier = blocks.find(b => b.id === id)
+        if (earlier) expect(awareness.order, id).toBeGreaterThan(earlier.order)
+      }
+    })
   })
 })

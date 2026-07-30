@@ -205,6 +205,11 @@ export async function runGeneration(
   }
   requestLogger.info('Tools prepared', { toolCount: Object.keys(tools).length })
 
+  // Blocks whose wording depends on the toolset need the resolved list, not a
+  // guess: an author who disables readFragments here must not still be told by
+  // the catalog to call it.
+  ctxState = { ...ctxState, enabledTools: Object.keys(tools) }
+
   const scriptContext = { ...ctxState, ...createScriptHelpers(dataDir, storyId) }
   let blocks = createDefaultBlocks(ctxState)
   blocks = await applyBlockConfig(blocks, agentConfig, scriptContext)

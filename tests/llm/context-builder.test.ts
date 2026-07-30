@@ -11,6 +11,8 @@ import {
   buildContext,
   buildContextState,
   assembleMessages,
+  canReadFragments,
+  fragmentCatalogContent,
   createDefaultBlocks,
   compileBlocks,
   addCacheBreakpoints,
@@ -835,6 +837,42 @@ describe('context-builder', () => {
 
     expect(state.proseFragments.length).toBe(1)
     expect(state.proseFragments[0].id).toBe('pr-0003')
+  })
+})
+
+/**
+ * A catalog row tells its reader how to expand it, and that sentence is only
+ * correct if it matches the reader's toolset. Three states, not two: a call site
+ * that never said is not the same claim as an agent that has no tools.
+ */
+describe('catalog expansion note', () => {
+  const sections = [{ type: 'character', label: 'Characters', fragments: [makeFragment({ id: 'ch-a', type: 'character', name: 'Alice', description: 'A person' })] }]
+
+  it('reads a silent call site as able to read, so no existing prompt changes', () => {
+    expect(canReadFragments({})).toBeUndefined()
+    expect(fragmentCatalogContent(sections, { canReadFragments: canReadFragments({}) }))
+      .toContain('Use readFragments')
+  })
+
+  it('tells an agent with no tools that a row is all it gets', () => {
+    expect(canReadFragments({ enabledTools: [] })).toBe(false)
+    const content = fragmentCatalogContent(sections, { canReadFragments: canReadFragments({ enabledTools: [] }) })
+    expect(content).not.toContain('readFragments')
+    expect(content).toContain('You cannot open these rows')
+  })
+
+  // An author disabling readFragments on an agent that otherwise has tools is
+  // the same situation as a toolless agent, and must read the same way.
+  it('follows the resolved toolset, not merely the presence of some tool', () => {
+    expect(canReadFragments({ enabledTools: ['listFragments', 'readProseChain'] })).toBe(false)
+    expect(canReadFragments({ enabledTools: ['readFragments'] })).toBe(true)
+    expect(fragmentCatalogContent(sections, { canReadFragments: canReadFragments({ enabledTools: ['listFragments'] }) }))
+      .toContain('You cannot open these rows')
+  })
+
+  it('keeps the editing wording for a reader that both reads and edits', () => {
+    expect(fragmentCatalogContent(sections, { editable: true, canReadFragments: true }))
+      .toContain('Read full fragments with readFragments before editing')
   })
 })
 

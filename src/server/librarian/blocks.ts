@@ -6,6 +6,7 @@ import {
 } from '../llm/context-builder'
 import {
   buildFragmentContextLanes,
+  canReadFragments,
   customContextFragmentTypes,
   fragmentCatalogBlock,
   fragmentFullContextBlocksBySource,
@@ -297,6 +298,7 @@ export function createLibrarianAnalyzeBlocks(ctx: AgentBlockContext): ContextBlo
     })),
     order: 390,
     editable: true,
+    canReadFragments: canReadFragments(ctx),
   }))
 
   if (ctx.newProse) {

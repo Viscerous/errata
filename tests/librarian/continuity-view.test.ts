@@ -2,8 +2,14 @@ import { readdir, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { getContentRoot } from '@/server/fragments/branches'
-import { buildContinuityView, renderContinuityView } from '@/server/librarian/continuity-view'
-import { createTempDir, makeTestSettings } from '../setup'
+import { buildContinuityView, renderCharacterAwareness, renderContinuityView } from '@/server/librarian/continuity-view'
+import {
+  createTempDir,
+  makeCharacterKnowledge,
+  makeContinuityView,
+  makeLiveThread,
+  makeTestSettings,
+} from '../setup'
 import { createStory, createFragment, getFragment } from '@/server/fragments/storage'
 import { saveAnalysis, type LibrarianAnalysis } from '@/server/librarian/storage'
 import type { Fragment, StoryMeta } from '@/server/fragments/schema'
@@ -432,5 +438,79 @@ describe('continuity view', () => {
     })
     // The rendered block must never put a raw snake_case key in front of the author.
     expect(renderContinuityView(view!)).not.toContain('who_sent_the_letter |')
+  })
+})
+
+/**
+ * The same records read two opposite ways, so a caller has to get exactly one
+ * framing: "let these lie" for whoever writes the next passage, "here is what
+ * you could pick up" for whoever proposes it.
+ */
+describe('continuity thread framing', () => {
+  const view = makeContinuityView({
+    currentState: [],
+    liveThreads: [
+      makeLiveThread({ threadKey: 'the_open_wound', label: 'The open wound' }),
+      makeLiveThread({
+        threadKey: 'who_sent_the_letter',
+        label: 'Who sent the letter',
+        note: 'Never followed up.',
+        visibility: 'dormant',
+      }),
+    ],
+    characterKnowledge: [],
+  })
+
+  it('hides dormant threads and frames the rest as limits by default', () => {
+    const rendered = renderContinuityView(view)
+    expect(rendered).toContain('The open wound')
+    expect(rendered).not.toContain('Who sent the letter')
+    expect(rendered).toContain('not tasks, promised beats')
+    expect(rendered).not.toContain('legitimate direction')
+  })
+
+  it('offers every thread as latent material when asked for candidates', () => {
+    const rendered = renderContinuityView(view, { threads: 'candidates' })
+    expect(rendered).toContain('The open wound')
+    expect(rendered).toContain('Who sent the letter — Never followed up.')
+    expect(rendered).toContain('has simply gone quiet, not been resolved')
+    expect(rendered).toContain('None of them is owed an answer')
+    // The constraint framing is the opposite instruction; both at once is noise.
+    expect(rendered).not.toContain('not tasks, promised beats')
+  })
+})
+
+describe('renderCharacterAwareness', () => {
+  const view = makeContinuityView({
+    characterKnowledge: [
+      makeCharacterKnowledge({ knowledgeKey: 'key_missing', fact: 'The key is missing.' }),
+      makeCharacterKnowledge({
+        characterId: 'ch-0002',
+        knowledgeKey: 'hero_lied',
+        fact: 'The hero lied about the key.',
+        acquisition: 'told',
+      }),
+    ],
+  })
+
+  it('gives one character their own facts and how they came by them', () => {
+    const rendered = renderCharacterAwareness(view, 'ch-0001')
+    expect(rendered).toContain('The key is missing. (witnessed)')
+    expect(rendered).not.toContain('The hero lied')
+  })
+
+  // A character handed the authorial records answers from offstage facts, which
+  // is the one failure this block exists to prevent.
+  it('withholds the durable state and open threads that belong to the author', () => {
+    const rendered = renderCharacterAwareness(view, 'ch-0001')
+    expect(rendered).not.toContain('north tower')
+    expect(rendered).not.toContain('Who sent the letter')
+    expect(rendered).not.toContain('ch-0001')
+  })
+
+  it('states the boundary even when the fold recorded nothing for the character', () => {
+    const rendered = renderCharacterAwareness(view, 'ch-9999')
+    expect(rendered).toContain('you have not learned it')
+    expect(rendered).toContain('nothing beyond your character sheet')
   })
 })

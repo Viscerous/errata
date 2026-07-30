@@ -5,6 +5,7 @@ import { getActiveProseIds, findSectionIndex, getProseChain } from '../fragments
 import { type Fragment, type StoryMeta } from '../fragments/schema'
 import {
   buildFragmentContextLanes,
+  canReadFragments,
   customContextFragmentTypes,
   findFragmentContextLane,
   fragmentCatalogBlock,
@@ -26,6 +27,7 @@ import type { ModelMessage } from 'ai'
 
 export {
   buildFragmentContextLanes,
+  canReadFragments,
   customContextFragmentTypes,
   findFragmentContextLane,
   fragmentCatalogBlock,
@@ -88,6 +90,14 @@ export interface ContextBuildState {
   continuityView?: ContinuityView
   authorInput?: string
   modelId?: string
+  /**
+   * Tool names the model will actually be offered, for blocks whose wording
+   * depends on them — a catalog telling a reader to expand a row is wrong if it
+   * cannot. Lives here rather than on AgentBlockContext alone because the Writer
+   * renders straight from this state, same as `modelId`. Undefined means the
+   * caller did not say; see `canReadFragments`.
+   */
+  enabledTools?: string[]
 }
 
 export interface ContextMessage {
@@ -718,6 +728,7 @@ export function createDefaultBlocks(state: ContextBuildState): ContextBlock[] {
         .map((entry) => ({ type: entry.type, label: entry.label, fragments: entry.available })),
     ],
     order: 330,
+    canReadFragments: canReadFragments(state),
   }))
 
   {
