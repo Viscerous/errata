@@ -27,6 +27,17 @@ export const BUILTIN_FRAGMENT_TYPES = new Set([
   'summary',
 ])
 
+export const NON_VERSIONED_FRAGMENT_TYPES = new Set([
+  'image',
+  'icon',
+  'marker',
+  'summary',
+])
+
+export function isVersionedFragmentType(type: string): boolean {
+  return !NON_VERSIONED_FRAGMENT_TYPES.has(type)
+}
+
 export interface FragmentTypeVisual {
   type: string
   label: string

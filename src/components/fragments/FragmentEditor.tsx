@@ -28,6 +28,7 @@ import { Hint, EmptyHint, MetaLabel } from '@/components/ui/prose-text'
 import {
   compareFragmentTypeVisuals,
   getFragmentTypeVisual,
+  isVersionedFragmentType,
 } from '@/components/fragments/fragment-type-icons'
 import { describeVersionReason } from './fragment-version-label'
 
@@ -43,7 +44,7 @@ interface FragmentEditorProps {
   mode: 'view' | 'edit'
   onClose: () => void
   onSaved: () => void
-  onFragmentChange?: (fragment: Fragment) => void
+  onFragmentChange?: (fragment: Fragment | null) => void
 }
 
 export function FragmentEditor({
@@ -57,6 +58,20 @@ export function FragmentEditor({
   const queryClient = useQueryClient()
   const branchId = useActiveBranchId(storyId)
   const confirm = useConfirm()
+
+  // Fetch live fragment data so sticky/placement updates are reflected immediately.
+  // initialDataUpdatedAt prevents TanStack Query from treating initialData as immediately
+  // stale and firing a background refetch on every fragment selection.
+  const { data: liveFragment } = useQuery({
+    ...q.fragment(storyId, branchId, fragmentProp?.id),
+    enabled: !!fragmentProp?.id,
+    initialData: fragmentProp ?? undefined,
+    initialDataUpdatedAt: fragmentProp ? Date.now() : undefined,
+  })
+
+  const fragment = liveFragment ?? fragmentProp
+  const isVersionedType = !!fragment && isVersionedFragmentType(fragment.type)
+
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [content, setContent] = useState('')
@@ -74,19 +89,6 @@ export function FragmentEditor({
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const savedStatusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const userEditedRef = useRef(false)
-
-  // Fetch live fragment data so sticky/placement updates are reflected immediately.
-  // initialDataUpdatedAt prevents TanStack Query from treating initialData as immediately
-  // stale and firing a background refetch on every fragment selection.
-  const { data: liveFragment } = useQuery({
-    ...q.fragment(storyId, branchId, fragmentProp?.id),
-    enabled: !!fragmentProp?.id,
-    initialData: fragmentProp ?? undefined,
-    initialDataUpdatedAt: fragmentProp ? Date.now() : undefined,
-  })
-
-  const fragment = liveFragment ?? fragmentProp
-  const isVersionedType = !!fragment && ['prose', 'character', 'guideline', 'knowledge'].includes(fragment.type)
 
   // Media queries for clipboard copy (embed attached images)
   const { data: _imageFragments } = useQuery({ ...q.fragments(storyId, branchId, 'image'), staleTime: 10_000 })
