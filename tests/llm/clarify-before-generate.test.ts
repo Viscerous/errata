@@ -36,7 +36,6 @@ function makeStory(overrides?: Partial<StoryMeta['settings']>): StoryMeta {
     name: 'Test Story',
     description: 'A test story',
     coverImage: null,
-    summary: 'A summary of the test story.',
     createdAt: now,
     updatedAt: now,
     settings: makeTestSettings(overrides),
@@ -144,7 +143,6 @@ describe('clarify-before-generate', () => {
       name: 'X',
       description: '',
       coverImage: null,
-      summary: '',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     })

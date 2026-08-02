@@ -23,6 +23,7 @@ import { getStory, getFragment } from '../fragments/storage'
 import { getActiveProseIds } from '../fragments/prose-chain'
 import { getFragmentsByTag } from '../fragments/associations'
 import { instructionRegistry } from '../instructions'
+import { renderSummaryProjection } from './summary-projection'
 import { OPERATION_GUIDANCE } from '../fragments/change-operations'
 import {
   instructionsBlock,
@@ -128,7 +129,7 @@ export function buildAnalyzeSystemPrompt(opts?: {
     actions.push(proposalActions.join(' '))
   }
   if (canSuggestDirections) {
-    actions.push('call **proposeDirections** with next directions for the story. Offer scene intents rather than conclusions: do not turn interpretation, temporary emotion, or an implied protagonist decision into settled psychology or canon.')
+    actions.push('call **proposeDirections** with next directions for the story. This lane is required whenever the tool is available; when automatic directions are disabled, the tool and this instruction are both absent. Offer scene intents rather than conclusions: do not turn interpretation, temporary emotion, or an implied protagonist decision into settled psychology or canon.')
   }
   if (canFinish) {
     actions.push('call **finishAnalysis** upon completion of all steps.')
@@ -169,7 +170,6 @@ export async function buildAnalyzeContext(
     excludeFragmentId: input.proseFragment?.id,
     ...(input.proseFragment ? {
       proseBeforeFragmentId: input.proseFragment.id,
-      summaryBeforeFragmentId: input.proseFragment.id,
     } : {}),
   })
   const effectiveStory = ctxState.story
@@ -225,7 +225,7 @@ export function createLibrarianAnalyzeBlocks(ctx: AgentBlockContext): ContextBlo
   const sysFrags = systemFragmentsBlock(ctx)
   if (sysFrags) blocks.push(sysFrags)
 
-  pushFragmentBlock(storySummaryBlock(ctx.story.summary, {
+  pushFragmentBlock(storySummaryBlock(renderSummaryProjection(ctx.summaryProjection, 'librarian.analyze') ?? undefined, {
     id: 'story-summary',
     order: 100,
     placeholder: STORY_SUMMARY_PLACEHOLDER,
@@ -482,7 +482,7 @@ export function createProseTransformBlocks(ctx: AgentBlockContext): ContextBlock
     })
   }
 
-  const summary = storySummaryBlock(ctx.story.summary, {
+  const summary = storySummaryBlock(renderSummaryProjection(ctx.summaryProjection, 'editing') ?? undefined, {
     id: 'story-summary',
     order: 200,
     placeholder: STORY_SUMMARY_PLACEHOLDER,

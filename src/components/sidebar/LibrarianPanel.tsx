@@ -160,7 +160,7 @@ export function LibrarianPanel({ storyId, askFragmentId, askPrefill, onAskFragme
           </TabsTrigger>
           <TabsTrigger value="summaries" className="text-[0.6875rem] gap-1.5 flex-1 px-1" data-component-id="librarian-tab-summaries">
             <Bookmark className="size-3" />
-            Summaries
+            Memory
           </TabsTrigger>
         </TabsList>
       </div>
@@ -1536,7 +1536,7 @@ function TraceItem({ item }: { item: CollapsedTraceItem }) {
   return null
 }
 
-// ── Summaries tab ────────────────────────────────────────────
+// ── Authored memory tab ──────────────────────────────────────
 
 function SummariesTab({ storyId }: { storyId: string }) {
   const [showArchived, setShowArchived] = useState(false)
@@ -1559,12 +1559,7 @@ function SummariesTab({ storyId }: { storyId: string }) {
 
   const sorted = useMemo(() => {
     if (!summaries) return []
-    return [...summaries].sort((a, b) => {
-      const aEra = a.meta?.isEraSummary ? 0 : 1
-      const bEra = b.meta?.isEraSummary ? 0 : 1
-      if (aEra !== bEra) return aEra - bEra
-      return a.createdAt.localeCompare(b.createdAt)
-    })
+    return [...summaries].sort((a, b) => a.order - b.order || a.createdAt.localeCompare(b.createdAt))
   }, [summaries])
 
   const editingFragment = useMemo(() => {
@@ -1581,8 +1576,8 @@ function SummariesTab({ storyId }: { storyId: string }) {
           <div className="pt-6">
             <EmptyState
               icon={<Bookmark className="size-5" />}
-              title="No summaries yet"
-              hint="The librarian will record a rolling summary here as you write. Generate prose to give it something to summarize."
+              title="No authored memory"
+              hint="Story history is derived automatically from source-linked analyses. Optional summary fragments you author appear here."
               variant="panel"
             />
           </div>
@@ -1647,9 +1642,6 @@ function SummaryCard({
   archived?: boolean
 }) {
   const queryClient = useQueryClient()
-  const chapterId = (fragment.meta?.chapterId as string | null | undefined) ?? null
-  const isEra = !!fragment.meta?.isEraSummary
-
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ['fragments', storyId] })
     queryClient.invalidateQueries({ queryKey: ['fragments-archived', storyId] })
@@ -1672,19 +1664,13 @@ function SummaryCard({
         onClick={onOpen}
         className="w-full text-left p-2.5 flex items-start gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 rounded-md"
       >
-        <Bookmark className={`size-3 mt-0.5 shrink-0 ${isEra ? 'text-primary/60' : 'text-muted-foreground/60'}`} />
+        <Bookmark className="size-3 mt-0.5 shrink-0 text-muted-foreground/60" />
         <div className="flex-1 min-w-0">
           <p className="text-[0.8125rem] font-display italic leading-tight text-foreground/90 truncate">{fragment.name}</p>
           <div className="flex items-center gap-1.5 mt-0.5 text-[0.5625rem] text-muted-foreground uppercase tracking-[0.12em]">
-            {isEra && <span>era</span>}
-            {isEra && <span aria-hidden className="text-muted-foreground/40">·</span>}
+            <span>authored</span>
+            <span aria-hidden className="text-muted-foreground/40">·</span>
             <span className="tabular-nums normal-case tracking-normal">{fragment.content.length.toLocaleString()} chars</span>
-            {chapterId && (
-              <>
-                <span aria-hidden className="text-muted-foreground/40">·</span>
-                <span className="font-mono normal-case tracking-normal text-muted-foreground/60">{chapterId}</span>
-              </>
-            )}
           </div>
           <p className="mt-1.5 text-[0.6875rem] font-prose text-foreground/60 leading-relaxed line-clamp-2">
             {fragment.content || <span className="italic text-muted-foreground/40">(empty)</span>}
@@ -1735,9 +1721,6 @@ function FullscreenSummaryEditor({
   const savedRef = useRef(fragment.content)
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
   const savedFlashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  const chapterId = (fragment.meta?.chapterId as string | null | undefined) ?? null
-  const isEra = !!fragment.meta?.isEraSummary
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ['fragments', storyId] })
@@ -1820,19 +1803,11 @@ function FullscreenSummaryEditor({
             {fragment.name}
           </p>
           <div className="flex items-center gap-2 text-[0.625rem] uppercase tracking-[0.15em] text-muted-foreground">
-            <span>{isEra ? 'era summary' : 'chapter summary'}</span>
+            <span>authored memory</span>
             <span aria-hidden className="text-muted-foreground/40">·</span>
             <span className="normal-case tracking-normal tabular-nums">
               {draft.length.toLocaleString()} chars
             </span>
-            {chapterId && (
-              <>
-                <span aria-hidden className="text-muted-foreground/40">·</span>
-                <span className="font-mono normal-case tracking-normal text-muted-foreground/60">
-                  {chapterId}
-                </span>
-              </>
-            )}
             {fragment.archived && (
               <>
                 <span aria-hidden className="text-muted-foreground/40">·</span>
@@ -1881,7 +1856,7 @@ function FullscreenSummaryEditor({
             value={draft}
             onChange={e => setDraft(e.target.value)}
             onBlur={saveIfDirty}
-            placeholder="Write a summary the librarian can remember…"
+            placeholder="Write author-owned story memory…"
             autoFocus
             spellCheck
             className="w-full min-h-[60vh] font-prose text-[1.0625rem] leading-[1.75] bg-transparent border-none shadow-none px-0 py-0 resize-none focus-visible:ring-0 focus-visible:outline-none placeholder:text-muted-foreground/35 placeholder:italic"
@@ -1909,4 +1884,3 @@ function FullscreenSummaryEditor({
     document.body,
   )
 }
-

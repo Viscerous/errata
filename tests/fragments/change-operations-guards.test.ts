@@ -20,7 +20,6 @@ function makeStory(): StoryMeta {
     name: 'Guards Story',
     description: '',
     coverImage: null,
-    summary: '',
     createdAt: now,
     updatedAt: now,
     settings: makeTestSettings(),

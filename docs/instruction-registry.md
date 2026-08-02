@@ -4,7 +4,8 @@
 
 The instruction registry provides centralized management of all LLM prompt instructions. Instead of hardcoding system prompts in agent modules, each instruction is registered under a dot-separated key and resolved at runtime.
 
-> **Removed:** the model-specific override layer (`data/instruction-sets/*.json`, `modelMatch`, `loadOverridesSync`, `InstructionSetSchema`) no longer exists. Per-agent block configuration (the Agent Context panel) supersedes it — customize prompts there instead. Leftover files in `data/instruction-sets/` are ignored, and the server logs a startup warning when it finds any.
+The registry stores built-in defaults. Story-specific prompt customization lives
+in per-agent block configuration through the Agent Context panel.
 
 ## API
 
@@ -20,7 +21,7 @@ The singleton `instructionRegistry` is exported from `src/server/instructions/in
 
 ## Registered Instruction Keys
 
-All 19 keys grouped by module:
+All registered keys grouped by module:
 
 ### Generation (5)
 
@@ -32,7 +33,7 @@ All 19 keys grouped by module:
 | `generation.writer-brief.tools-suffix` | `src/server/llm/agents.ts` | Tool suffix for brief-mode writer |
 | `generation.prewriter.system` | `src/server/llm/agents.ts` | Prewriter agent system prompt |
 
-### Librarian (6)
+### Librarian (5)
 
 | Key | Registered in | Description |
 |---|---|---|
@@ -41,7 +42,6 @@ All 19 keys grouped by module:
 | `librarian.refine.system` | `src/server/librarian/agents.ts` | Fragment refinement system prompt |
 | `librarian.optimize-character.system` | `src/server/librarian/agents.ts` | Character optimization system prompt (depth methodology) |
 | `librarian.prose-transform.system` | `src/server/librarian/agents.ts` | Prose selection transform system prompt |
-| `librarian.summary-compaction` | `src/server/librarian/agents.ts` | Summary compaction prompt template |
 
 ### Character Chat (5)
 
@@ -68,7 +68,11 @@ All 19 keys grouped by module:
 
 ## Customizing Instructions
 
-Per-model JSON overrides were replaced by **agent blocks**: every agent's prompt is assembled from blocks that can be overridden, reordered, disabled, or extended per story in the Agent Context panel. To customize an instruction, override the block that carries it (typically the `instructions` block) for the agent in question. See `docs/context-blocks.md` and `docs/adding-agents.md`.
+Every agent's prompt is assembled from blocks that can be overridden, reordered,
+disabled, or extended per story in the Agent Context panel. To customize an
+instruction, override the block that carries it (typically the `instructions`
+block) for the agent in question. See `docs/context-blocks.md` and
+`docs/adding-agents.md`.
 
 ## Template Variables
 
@@ -95,4 +99,3 @@ Instructions flow into agent contexts through `instructionRegistry.resolve(key)`
 |---|---|
 | `src/server/instructions/registry.ts` | `InstructionRegistry` class and singleton |
 | `src/server/instructions/index.ts` | Re-exports |
-| `tests/instructions/registry.test.ts` | Full test suite |

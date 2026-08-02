@@ -8,7 +8,7 @@ export const stories = {
   get: (id: string) => apiFetch<StoryMeta>(`/stories/${id}`),
   create: (data: { name: string; description: string; coverImage?: string | null }) =>
     apiFetch<StoryMeta>('/stories', { method: 'POST', body: JSON.stringify(data) }),
-  update: (id: string, data: { name: string; description: string; summary?: string; coverImage?: string | null }) =>
+  update: (id: string, data: { name: string; description: string; coverImage?: string | null }) =>
     apiFetch<StoryMeta>(`/stories/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   delete: (id: string) =>
     apiFetch<{ ok: boolean }>(`/stories/${id}`, { method: 'DELETE' }),

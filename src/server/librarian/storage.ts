@@ -68,13 +68,8 @@ export interface LibrarianAnalysis {
   sourceRevision?: AnalysisSourceRevision
   /** The summary text the librarian intended to record (intent). */
   summaryUpdate: string
-  /**
-   * ID of the summary fragment this analysis contributed to (artifact).
-   * Set when the deferred-summary application creates or appends to a
-   * chapter summary fragment. Undefined for legacy analyses written before
-   * summary fragments existed.
-   */
-  summaryFragmentId?: string
+  /** Prompt contract used to write summaryUpdate. */
+  summaryContractVersion?: number
   structuredSummary?: {
     events: string[]
     stateChanges: string[]
@@ -104,11 +99,31 @@ export interface LibrarianAnalysis {
     description: string
     instruction: string
   }>
+  /** Logical completion state for the lanes sharing the fused Analyze model session. */
+  analyzeLanes?: LibrarianAnalyzeLaneStatus
   passes?: LibrarianPassRecord[]
   trace?: Array<{
     type: string
     [key: string]: unknown
   }>
+}
+
+export type LibrarianAnalyzeLaneRequirement = 'required' | 'conditional' | 'disabled'
+export type LibrarianAnalyzeLaneCompletion = 'complete' | 'not-needed' | 'incomplete' | 'disabled'
+
+export interface LibrarianAnalyzeLaneStatus {
+  observation: {
+    requirement: 'required'
+    completion: Exclude<LibrarianAnalyzeLaneCompletion, 'not-needed' | 'disabled'>
+  }
+  recordMaintenance: {
+    requirement: 'conditional' | 'disabled'
+    completion: LibrarianAnalyzeLaneCompletion
+  }
+  directions: {
+    requirement: 'required' | 'disabled'
+    completion: Exclude<LibrarianAnalyzeLaneCompletion, 'not-needed'>
+  }
 }
 
 export type LibrarianMention = { fragmentId: string; text: string }
@@ -195,8 +210,6 @@ export interface LibrarianAnalysisSummary {
 
 export interface LibrarianState {
   lastAnalyzedFragmentId: string | null
-  /** Fragment ID up to which analysis summaries have been applied to summary fragments. */
-  summarizedUpTo: string | null
   recentMentions: Record<string, string[]>
   timeline: Array<{ event: string; fragmentId: string }>
 }
@@ -211,6 +224,23 @@ export interface LibrarianAnalysisIndex {
   updatedAt: string
   latestByFragmentId: Record<string, LibrarianAnalysisIndexEntry>
   appliedSummarySequence?: string[]
+}
+
+const MAX_ANALYSIS_READ_CACHE_ENTRIES = 512
+const analysisReadCache = new Map<string, Promise<LibrarianAnalysis | null>>()
+
+function cloneAnalysis(analysis: LibrarianAnalysis | null): LibrarianAnalysis | null {
+  return analysis ? structuredClone(analysis) : null
+}
+
+function cacheAnalysisRead(path: string, pending: Promise<LibrarianAnalysis | null>): void {
+  analysisReadCache.delete(path)
+  analysisReadCache.set(path, pending)
+  while (analysisReadCache.size > MAX_ANALYSIS_READ_CACHE_ENTRIES) {
+    const oldest = analysisReadCache.keys().next().value
+    if (typeof oldest !== 'string') break
+    analysisReadCache.delete(oldest)
+  }
 }
 
 export interface LibrarianBackfillJob {
@@ -372,10 +402,12 @@ export async function saveAnalysis(
 ): Promise<void> {
   const dir = await analysesDir(dataDir, storyId)
   await mkdir(dir, { recursive: true })
+  const path = await analysisPath(dataDir, storyId, analysis.id)
   await writeJsonAtomic(
-    await analysisPath(dataDir, storyId, analysis.id),
+    path,
     analysis,
   )
+  cacheAnalysisRead(path, Promise.resolve(cloneAnalysis(analysis)))
 
   // Index read-modify-write must be serialized: concurrent saves would each read
   // the same index and the later write would drop the earlier entry.
@@ -399,9 +431,24 @@ export async function getAnalysis(
   analysisId: string,
 ): Promise<LibrarianAnalysis | null> {
   const path = await analysisPath(dataDir, storyId, analysisId)
-  if (!existsSync(path)) return null
-  const raw = await readFile(path, 'utf-8')
-  return normalizeAnalysis(JSON.parse(raw))
+  const cached = analysisReadCache.get(path)
+  if (cached) {
+    cacheAnalysisRead(path, cached)
+    return cloneAnalysis(await cached)
+  }
+
+  const pending = (async () => {
+    if (!existsSync(path)) return null
+    const raw = await readFile(path, 'utf-8')
+    return normalizeAnalysis(JSON.parse(raw))
+  })()
+  cacheAnalysisRead(path, pending)
+  try {
+    return cloneAnalysis(await pending)
+  } catch (error) {
+    if (analysisReadCache.get(path) === pending) analysisReadCache.delete(path)
+    throw error
+  }
 }
 
 function normalizeAnalysis(data: Record<string, unknown>): LibrarianAnalysis {
@@ -425,6 +472,7 @@ export async function deleteAnalysis(
   const analysis = normalizeAnalysis(JSON.parse(raw))
 
   await unlink(path)
+  analysisReadCache.delete(path)
 
   // Clean up index entry if it points to this analysis
   await withIndexLock(storyId, async () => {
@@ -539,7 +587,6 @@ export async function getState(
   if (!existsSync(path)) {
     return {
       lastAnalyzedFragmentId: null,
-      summarizedUpTo: null,
       recentMentions: {},
       timeline: [],
     }

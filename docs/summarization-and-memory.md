@@ -1,245 +1,142 @@
 # Summarization and Story Memory
 
-This document describes how Errata maintains long-term story memory, how deferred summary application works, and how summary fragments prevent unbounded prompt growth.
+Errata represents long-term story history as a projection over source-linked
+librarian analyses. It does not append analyses into a mutable rolling-summary
+document.
 
-## Overview
+The recursive roll-up architecture and its rationale are specified in
+[Summary Projection](summary-projection-design.md). The current implementation
+ships the source-current level-0 fold, reader-specific renderer, and recursive
+background level-1+ roll-ups. No generation request waits for a roll-up or adds
+a second model call.
+
+## Runtime flow
+
+1. Accepted prose is saved.
+2. Librarian analysis records a retrospective `summaryUpdate`, the exact
+   `sourceRevision`, and `summaryContractVersion`.
+3. A reader builds its ordinary context.
+4. Prose inside the recent context window remains verbatim.
+5. For prose before that window, the summary projection selects the latest
+   analysis for each active prose fragment and verifies its source hash and
+   contract version.
+6. The projection is rendered with reader-specific guidance, exact passage
+   positions, explicit gaps, a recent-prose seam statement, and a closing fence.
+
+This makes deletion, variation switching, branching, and source edits affect
+memory by selection rather than by mutating another document.
+
+Key files:
 
-Errata uses `summary` fragments as long-term memory for prose that has fallen outside the active prose context window. The legacy `story.summary` string is migrated into a summary fragment and then cleared.
+- `src/server/librarian/summary-projection.ts` — source selection, validation,
+  budgeting, caching, and presentation
+- `src/server/librarian/agent.ts` — writes level-0 analysis contributions
+- `src/server/llm/context-builder.ts` — constructs the projection once per
+  context and shares the analysis index with continuity
+- `src/server/librarian/blocks.ts`, `src/server/directions/blocks.ts`, and
+  `src/server/agents/block-helpers.ts` — reader-specific routing
 
-The pipeline is:
+## Data contract
 
-1. A prose fragment is generated/saved or manually re-analyzed.
-2. Librarian analyzes that fragment and produces `summaryUpdate` and optional `structuredSummary` signals.
-3. Deferred summary application appends eligible `summaryUpdate` entries into chapter-scoped summary fragments.
-4. Oversized chapter summaries split into an era summary fragment plus a fresh active chapter summary.
+Each eligible level-0 contribution is an immutable analysis artifact with:
 
-Key implementation files:
+- `fragmentId` — the source prose fragment
+- `sourceRevision.contentHash` — the exact prose revision analyzed
+- `summaryUpdate` — retrospective historical record
+- `summaryContractVersion` — prompt/output contract used to write it
 
-- `src/server/librarian/agent.ts` — analysis runner and deferred summary application
-- `src/server/librarian/blocks.ts` — agent block definitions for librarian analyze context
+The active analysis index resolves a prose fragment to its latest analysis ID.
+The projection does not accept a contribution when the analysis is missing,
+empty, source-unverified, source-stale, or written under an older contract.
+Those cases render as coverage gaps at the source passage's position.
 
-## Data Model
+The current contract version is `SUMMARY_CONTRACT_VERSION` in
+`src/server/librarian/summary-projection.ts`.
 
-Relevant story settings include:
+## Context budget and seam
 
-```ts
-disableLibrarianAutoAnalysis: boolean
-disableLibrarianDirections: boolean
-disableLibrarianSuggestions: boolean
-enableHierarchicalSummary: boolean
-summaryCompact: { // legacy compatibility only
-  maxCharacters: number
-  targetCharacters: number
-}
-```
+`SUMMARY_TOKEN_BUDGET` bounds the derived memory block. Selection proceeds
+newest-first because history nearest the recent-prose seam has the highest
+continuity value. The six nearest level-0 entries are always retained even when
+they exceed the nominal budget.
 
-Defaults:
+When older entries do not fit, the renderer reports their omitted position
+range. It never silently presents the remaining projection as complete. Future
+content-addressed roll-up nodes can replace those omitted level-0 spans without
+changing the rendering contract.
 
-- `maxCharacters: 12000` (legacy setting; no longer read by the summary-fragment path)
-- `targetCharacters: 9000` (legacy setting; no longer read by the summary-fragment path)
-- `disableLibrarianAutoAnalysis: false`
-- `disableLibrarianDirections: false`
-- `disableLibrarianSuggestions: false`
-- `enableHierarchicalSummary: false`
+The renderer also states whether the newest memory entry is contiguous with the
+first recent prose passage, then terminates with `## End of Story Summary`.
 
-Schema source:
+## Reader-specific presentation
 
-- `src/server/fragments/schema.ts`
+All readers consume the same structured projection, but not identical prose:
 
-API settings PATCH support:
+- Writer receives historical-record guidance and is warned not to continue the
+  compressed text as a live scene.
+- Directions uses the record for narrative shape and deliberate thread return.
+- Librarian Analyze uses coverage labels to avoid re-reporting old material.
+- Editing flows use it as evidence, not replacement prose.
+- Character Chat does not receive omniscient global story memory.
 
-- `src/server/api.ts`
-- `src/lib/api/settings.ts`
+Rendering is deterministic and does not invoke a model.
 
-## Deferred Summary Application
+## Authored memory
 
-Function:
+`summary` fragments remain as optional author-owned memory records. The
+librarian does not create, append, compact, or splice them.
 
-- `applyDeferredSummaries(...)` in `src/server/librarian/agent.ts`
+At the live story head, active authored records are included with the derived
+projection. In target-relative regeneration or editing, a record is included
+only when `meta.validThrough` identifies an active prose fragment before the
+target boundary. Unscoped records are excluded so future editorial knowledge
+cannot leak backward.
 
-Inputs:
+## Continuity is separate
 
-- `state.summarizedUpTo` (watermark)
-- active prose chain order
-- `summarizationThreshold`
-- latest librarian analysis per prose fragment (`summaryUpdate`)
+Summary answers "what happened." The continuity projection separately folds
+source-linked keyed state, live threads, temporal framing, and character
+knowledge boundaries. Both views share one analysis-index read during context
+construction, and analysis-file reads are promise-cached so their cold paths do
+not race to open the same files.
 
-### Latest-analysis dedupe
+## Controls
 
-Reanalysis can create multiple analysis records for the same prose fragment. Deferred application now resolves each `fragmentId` to the latest analysis first, then applies summaries using that deduped set.
+The relevant settings control whether automatic librarian analysis, automatic
+directions, or suggestions run. Disabling automatic directions removes that
+lane from Analyze but does not prevent a manual direction request. Disabling
+librarian auto-analysis prevents new memory contributions but does not change
+projection behavior for existing ones.
 
-Selection rules:
+When older source-current L0 records still overflow the summary budget, the
+projection marks one branch-scoped background roll-up as needed. The scheduler
+releases it only after foreground analysis is idle. The request receives
+only six exact ordered children, returns only a title and retrospective text,
+and writes an immutable content-addressed cache node. Analyze and Writer never
+await this maintenance; until it finishes, the lower-level frontier or explicit
+budget omission continues to render.
 
-- prefer newest `createdAt`
-- break timestamp ties by lexicographically larger analysis `id`
+## Editing and reanalysis
 
-Implementation:
+Editing an analysis summary changes only `analysis.summaryUpdate`. It does not
+rewrite an authored summary fragment. Editing source prose makes the old
+contribution stale until the passage is reanalyzed.
 
-- `selectLatestAnalysesByFragment(...)` in `src/server/librarian/storage.ts`
-- used by deferred summary application in `src/server/librarian/agent.ts`
+Manual analysis is available through:
 
-### Threshold semantics
+- `POST /stories/:storyId/librarian/analyze`
+- the prose block's Analyze action
 
-`summarizationThreshold` defines how many most-recent prose positions are *not yet folded* into summary fragments.
+The analysis-index endpoint continues to power the prose view's analyzed state:
 
-Given `proseIds.length = N`, the apply cutoff is:
+- `GET /stories/:storyId/librarian/analysis-index`
 
-- `cutoffIndex = max(0, N - summarizationThreshold)`
+## Performance properties
 
-Only prose in `[startIndex, cutoffIndex)` are candidates, where:
-
-- `startIndex = indexOf(summarizedUpTo) + 1`
-
-### Contiguous watermark behavior
-
-Application is contiguous. The algorithm stops at first gap:
-
-- missing analysis for a prose ID, or
-- analysis exists but `summaryUpdate` is empty/whitespace.
-
-This guarantees `summarizedUpTo` does not leap over missing data.
-
-Diagnostic logs emitted on stop:
-
-- `gapFragmentId`
-- `gapReason` (`missing_analysis` | `empty_summary_update`)
-
-### State update rules
-
-If one or more contiguous updates are applied:
-
-- append joined updates to the active summary fragment for each chapter
-- advance `state.summarizedUpTo` to last applied prose ID
-- write `analysis.summaryFragmentId` on each contributing analysis
-
-If none are applicable:
-
-- no summary append
-- watermark unchanged
-
-## Analysis Triggers and Controls
-
-Librarian analysis can start in three ways:
-
-1. automatically after prose generation
-2. manually from the prose block `Analyze` action
-3. indirectly after material prose edits that re-trigger analysis
-
-Automatic post-generation analysis is disabled when either of these flags is set:
-
-- `story.settings.disableLibrarianAutoAnalysis`
-- `agent-blocks/librarian.analyze.json` with `disableAutoAnalysis: true`
-
-Analysis behavior can also be narrowed without disabling memory entirely:
-
-- `disableLibrarianDirections` keeps summary/continuity analysis but skips direction cards
-- `disableLibrarianSuggestions` keeps summary/continuity analysis but skips fragment create/update/edit suggestions
-
-## Summary Fragment Overflow
-
-Overflow function:
-
-- `appendAndMaybeSplit(...)` in `src/server/librarian/agent.ts`
-
-Strategy:
-
-- If the active chapter summary remains under `SUMMARY_OVERFLOW_THRESHOLD`, append in place.
-- If it exceeds the threshold, split near the middle on a paragraph boundary.
-- The older half becomes an archived-era summary fragment after deterministic character compaction.
-- The newer half becomes the fresh active chapter summary.
-
-Behavioral implications:
-
-- Memory stays bounded for very long stories.
-- Context loading reads active summary fragments, with era summaries first and chapter summaries after them.
-
-### Guardrails
-
-Runtime behavior:
-
-- Summary overflow is deterministic and does not add an LLM call to the hot path.
-- Legacy `summaryCompact` settings remain in the schema only for compatibility.
-
-## Context Builder Interaction
-
-Summary fragments appear in prompt context as `Story Summary So Far` (unless excluded by options such as `excludeStorySummary` in specialized flows).
-
-Summaries are historical compression, not the current-state authority. The
-context builder separately folds source-linked Analysis projections into a
-`Continuity` block containing current keyed state, selectively focused
-unresolved continuity, temporal framing, and character awareness boundaries.
-This avoids asking a prose summary to imply what is still true now. Legacy
-free-text open-thread strings are not rendered as Writer tasks.
-
-When building `summaryBeforeFragmentId`, context rebuild also uses the same latest-analysis dedupe to avoid stale reanalysis summaries.
-
-Relevant file:
-
-- `src/server/llm/context-builder.ts`
-
-When `enableHierarchicalSummary` is on, chapter marker summaries are also included as an intermediate memory layer between long-term summary fragments and the recent prose window.
-
-## Analysis Index
-
-The prose view uses a lightweight fragment-to-analysis index to track which prose fragments have current librarian analysis.
-
-- Route: `GET /stories/:storyId/librarian/analysis-index`
-- Manual trigger: `POST /stories/:storyId/librarian/analyze`
-
-This powers the analyzed-dot indicator on prose blocks and the manual `Analyze` action in the prose block menu.
-
-## Tests
-
-Primary tests:
-
-- `tests/librarian/agent.test.ts`
-
-Important coverage:
-
-- contiguous application does not skip gaps
-- summary fragments split when chapter summaries exceed the overflow threshold
-- overflow handling stays deterministic and does not call an LLM
-- deferred apply uses latest analysis per fragment
-- librarian can derive `summaryUpdate` from structured signals when summary text is empty
-
-Related context tests:
-
-- `tests/llm/context-builder.test.ts`
-
-## Operational Notes
-
-- For short stories, defaults are usually sufficient.
-- For long-running projects, monitor summary-fragment growth and lower the code-level overflow threshold only if active summary fragments become too large in practice.
-- If summaries stall, check for gap logs from deferred application.
-
-## Agent Block System Integration
-
-The librarian analyze agent uses the **agent block system** for context assembly. The system prompt and user context (summary, characters, knowledge, new prose) are defined as blocks in `src/server/librarian/blocks.ts` and compiled via `compileAgentContext()`. This means:
-
-- The librarian's system prompt can be customized per-story through agent block overrides (Settings > Agent Context).
-- Fragments tagged `pass-to-librarian-system-prompt` are loaded for `librarian.analyze` and `librarian.chat` only, then appended to their system messages. Direction and editing agents deliberately do not inherit them.
-- Custom blocks can be added to inject additional instructions or context.
-
-The same block system is used by `librarian.chat`, `librarian.refine`, and `librarian.prose-transform` agents.
-
-## Direction Suggestions
-
-When guided mode asks for them, Errata can produce **direction suggestions** — possible next steps for the story. The `directions.suggest` agent uses a directions-specific, tiered context profile to generate titled suggestion cards, each with a description and a ready-to-use writing instruction.
-
-- Agent module: `src/server/directions/suggest.ts`
-- Block definitions: `src/server/directions/blocks.ts`
-- Runtime path: guided mode or the explicit directions endpoint invokes `directions.suggest`. Routine librarian analysis can also record direction cards in the fused analyze pass when directions are enabled.
-- Directions requested for the current head passage are surfaced in the generation input's **guided mode**.
-
-Mentions and fragment change suggestions are deduplicated across multi-turn tool calls to prevent duplicate entries when the librarian's analysis spans several steps.
-
-## Fragment Suggestions & Updates
-
-Online analysis separates `proposeRecordCorrections` from `proposeNewRecords`. Each queues an independently reviewable atomic proposal with accepted-prose evidence. A failed retry retains grounded evidence, and a copied whole field can be mechanically reduced to a localized replacement when only one assertion changed. Online analysis cannot append diary paragraphs, archive records, or apply broad whole-field rewrites. Accepted and auto-applied proposals re-read their targets and re-check source evidence, locked/frozen state, and exact-text anchors before writing. Broader editing surfaces retain the general fragment-change vocabulary for explicit user-directed work.
-
-## Known Limitations
-
-- LLM compaction quality depends on the configured librarian model and prompt adherence.
-- Structured summary signals are optional and quality depends on model/tool-call discipline.
-- Chapter summaries must be created on marker fragments before hierarchical summary mode adds value.
-- Applied summary text is not yet rebuilt from source-linked contributions after a prose deletion or variation switch. Until summary projection coverage is implemented, branch edits can leave compressed history that requires manual summary review.
+- No foreground roll-up model call.
+- No foreground summary writes.
+- One shared analysis-index read for summary and continuity.
+- In-flight and warm analysis reads are cached by branch-specific file path.
+- Projection views are bounded and cloned before exposure.
+- Missing roll-up cache degrades to finer-grained records or an
+  explicit omitted span; generation must never wait for cache production.

@@ -21,7 +21,6 @@ describe('prose generation cancellation', () => {
       name: 'Cancellation test',
       description: '',
       coverImage: null,
-      summary: '',
       createdAt: now,
       updatedAt: now,
       settings: makeTestSettings(),

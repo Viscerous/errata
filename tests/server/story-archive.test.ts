@@ -12,7 +12,6 @@ function makeStory(): StoryMeta {
     name: 'Source Story',
     description: 'A story to export',
     coverImage: null,
-    summary: '',
     createdAt: now,
     updatedAt: now,
     settings: makeTestSettings(),

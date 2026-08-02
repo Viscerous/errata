@@ -16,7 +16,7 @@ Join the community on Discord: https://discord.gg/ywVFKvdH49
 - **Character Chat mode** — story-scoped chat with streaming responses, provider/model selection, and character portraits
 - **Block-based context** — visual editor for reordering, overriding, and extending LLM prompt structure, including JavaScript-powered script blocks with live preview
 - **Agent context panel** — per-agent block editor for customizing any agent's prompt, disabling tools, and setting model overrides
-- **Librarian memory tools** — rolling continuity, hierarchical summaries, contradiction tracking, and summary compaction controls
+- **Librarian memory tools** — source-linked story summaries, recursive background roll-ups, rolling continuity, contradiction tracking, and record-maintenance proposals
 - **Universal import/export** — drag-and-drop JSON, bundle ZIPs, and SillyTavern/Tavern cards (PNG/JSON with lorebook support)
 - **Story cover images** — cover art with gallery grid layout on the story list
 - **Plugin system** — bundled + external runtime plugins with iframe UI panels
@@ -138,7 +138,7 @@ Plugins can register fragment types, LLM tools, API routes, and pipeline hooks. 
 
 ## Documentation
 
-- [Architecture & data model](PLAN.md)
+- [Architecture and feature documentation](docs/README.md)
 - [Generation pipeline](docs/generation-pipeline.md)
 - [Context block system](docs/context-blocks.md)
 - [Instruction registry](docs/instruction-registry.md)
@@ -146,7 +146,6 @@ Plugins can register fragment types, LLM tools, API routes, and pipeline hooks. 
 - [Prose Writing Panel](docs/prose-writing-panel.md)
 - [Component ID contract](docs/component-ids.md)
 - [Publishing the plugin SDK](docs/publishing-plugin-sdk.md)
-- [Full docs index](docs/README.md)
 
 ---
 

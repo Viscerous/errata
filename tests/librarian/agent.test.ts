@@ -2,12 +2,11 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { createTempDir, seedTestProvider, makeTestSettings } from '../setup'
 import {
   createStory,
-  getStory,
   createFragment,
   getFragment,
   listFragments,
 } from '@/server/fragments/storage'
-import { getState, getAnalysis, listAnalyses, saveAnalysis, getBackfillJob } from '@/server/librarian/storage'
+import { getState, getAnalysis, listAnalyses, getBackfillJob } from '@/server/librarian/storage'
 import { createBackfillJob, runBackfillJob } from '@/server/librarian/backfill'
 import { saveAgentBlockConfig } from '@/server/agents/agent-block-storage'
 import { initProseChain, addProseSection } from '@/server/fragments/prose-chain'
@@ -38,6 +37,7 @@ vi.mock('ai', async () => {
 })
 
 import { runLibrarian } from '@/server/librarian/agent'
+import { proposeDirections } from '@/server/directions/suggest'
 import { ensureCoreAgentsRegistered } from '@/server/agents'
 
 function makeStory(
@@ -45,7 +45,6 @@ function makeStory(
 ): StoryMeta {
   const now = new Date().toISOString()
   const defaultSettings: StoryMeta['settings'] = makeTestSettings({
-    summarizationThreshold: 0,
     disableLibrarianDirections: true,
   })
 
@@ -54,7 +53,6 @@ function makeStory(
     name: 'Test Story',
     description: 'A test story',
     coverImage: null,
-    summary: '',
     createdAt: now,
     updatedAt: now,
     settings: defaultSettings,
@@ -136,20 +134,6 @@ function newFragmentProposalArgs(
 ) {
   const { action: _action, ...newFragment } = operation
   return { evidenceSegments, rationale, newFragments: [newFragment] }
-}
-
-// Concatenate all summary fragments for a story in the same order the
-// context builder reads them (era summaries first, then chapter summaries
-// by createdAt). Replaces assertions on the removed story.summary field.
-async function readSummaries(dataDir: string, storyId: string): Promise<string> {
-  const fragments = await listFragments(dataDir, storyId, 'summary')
-  fragments.sort((a, b) => {
-    const aEra = a.meta?.isEraSummary ? 0 : 1
-    const bEra = b.meta?.isEraSummary ? 0 : 1
-    if (aEra !== bEra) return aEra - bEra
-    return a.createdAt.localeCompare(b.createdAt)
-  })
-  return fragments.map(f => f.content.trim()).filter(Boolean).join('\n\n')
 }
 
 // Helper to set up prose chain for tests
@@ -240,8 +224,8 @@ describe('librarian agent', () => {
     await runLibrarian(dataDir, storyId, 'pr-0001')
   })
 
-  it('appends summary update to a summary fragment (preserving legacy story.summary)', async () => {
-    await createStory(dataDir, makeStory({ summary: 'The hero was born in a small village.' }))
+  it('stores the summary as a source-linked analysis contribution without creating a summary fragment', async () => {
+    await createStory(dataDir, makeStory())
     await createFragment(dataDir, storyId, makeFragment({
       id: 'pr-0001',
       content: 'The hero walked into the dark forest.',
@@ -252,21 +236,20 @@ describe('librarian agent', () => {
       { toolName: 'reportAnalysis', args: { summary: 'The hero ventured into the dark forest.' } },
     ])
 
-    await runLibrarian(dataDir, storyId, 'pr-0001')
+    const result = await runLibrarian(dataDir, storyId, 'pr-0001')
 
-    // Legacy story.summary gets migrated to an era summary fragment; the new
-    // analysis produces an Opening chapter summary fragment. Reading all
-    // summary fragments together reproduces the original rolling string.
-    const combined = await readSummaries(dataDir, storyId)
-    expect(combined).toContain('The hero was born in a small village.')
-    expect(combined).toContain('The hero ventured into the dark forest.')
-
-    // Legacy field is cleared after migration.
-    const story = await getStory(dataDir, storyId)
-    expect(story!.summary).toBe('')
+    expect(result.summaryUpdate).toBe('The hero ventured into the dark forest.')
+    expect(result.sourceRevision?.contentHash).toBeTruthy()
+    expect(result.summaryContractVersion).toBe(1)
+    expect(result.analyzeLanes).toEqual({
+      observation: { requirement: 'required', completion: 'complete' },
+      recordMaintenance: { requirement: 'conditional', completion: 'not-needed' },
+      directions: { requirement: 'disabled', completion: 'disabled' },
+    })
+    expect(await listFragments(dataDir, storyId, 'summary')).toHaveLength(0)
   })
 
-  it('embeds summary and analysisId in prose fragment meta._librarian', async () => {
+  it('keeps summary history in the source-linked analysis artifact', async () => {
     await createStory(dataDir, makeStory())
     await createFragment(dataDir, storyId, makeFragment({
       id: 'pr-0001',
@@ -282,13 +265,11 @@ describe('librarian agent', () => {
 
     const fragment = await getFragment(dataDir, storyId, 'pr-0001')
     expect(fragment).toBeTruthy()
-    const librarian = fragment!.meta._librarian as { summary: string; analysisId: string }
-    expect(librarian).toBeDefined()
-    expect(librarian.summary).toBe('The hero ventured into the dark forest.')
-    expect(librarian.analysisId).toBe(analysis.id)
+    expect(fragment!.meta._librarian).toBeUndefined()
+    expect(analysis.summaryUpdate).toBe('The hero ventured into the dark forest.')
   })
 
-  it('embeds summary alongside mention annotations', async () => {
+  it('stores mention annotations without duplicating the summary into prose metadata', async () => {
     await createStory(dataDir, makeStory())
     await createFragment(dataDir, storyId, makeFragment({
       id: 'ch-0001',
@@ -312,10 +293,8 @@ describe('librarian agent', () => {
     const fragment = await getFragment(dataDir, storyId, 'pr-0001')
     expect(fragment).toBeTruthy()
 
-    // Summary and analysisId embedded
-    const librarian = fragment!.meta._librarian as { summary: string; analysisId: string }
-    expect(librarian.summary).toBe('Alice drew her sword.')
-    expect(librarian.analysisId).toBe(analysis.id)
+    expect(fragment!.meta._librarian).toBeUndefined()
+    expect(analysis.summaryUpdate).toBe('Alice drew her sword.')
 
     // Annotations also present
     const annotations = fragment!.meta.annotations as Array<{ type: string; fragmentId: string; text: string }>
@@ -345,10 +324,21 @@ describe('librarian agent', () => {
     await setupProseChain(dataDir, storyId, ['pr-0001'])
 
     let capturedPrompt = ''
-    mockAgentStream.mockImplementation((args: { prompt?: string }) => {
+    mockAgentStream.mockImplementation((
+      args: { prompt?: string },
+      tools: Record<string, { execute: (args: unknown) => Promise<unknown> }>,
+    ) => {
       if (!capturedPrompt && args.prompt) capturedPrompt = args.prompt
       return {
         fullStream: (async function* () {
+          const input = { summary: 'Alice fought bravely.' }
+          yield { type: 'tool-call' as const, toolCallId: 'call-report', toolName: 'reportAnalysis', input }
+          yield {
+            type: 'tool-result' as const,
+            toolCallId: 'call-report',
+            toolName: 'reportAnalysis',
+            output: await tools.reportAnalysis.execute(input),
+          }
           yield { type: 'finish' as const, finishReason: 'stop' }
         })(),
       }
@@ -360,134 +350,6 @@ describe('librarian agent', () => {
     expect(capturedPrompt).toContain('### Characters')
     expect(capturedPrompt).toContain('#### `ch-0001` | Alice | The protagonist')
     expect(capturedPrompt).toContain('Alice carries a rune-etched blade.')
-  })
-
-  it('creates a new summary fragment when story had no prior summary', async () => {
-    await createStory(dataDir, makeStory({ summary: '' }))
-    await createFragment(dataDir, storyId, makeFragment({ id: 'pr-0001' }))
-    await setupProseChain(dataDir, storyId, ['pr-0001'])
-
-    mockStreamWithToolCalls([
-      { toolName: 'reportAnalysis', args: { summary: 'The story begins.' } },
-    ])
-
-    await runLibrarian(dataDir, storyId, 'pr-0001')
-
-    expect(await readSummaries(dataDir, storyId)).toBe('The story begins.')
-    const summaries = await listFragments(dataDir, storyId, 'summary')
-    expect(summaries).toHaveLength(1)
-    expect(summaries[0].meta?.isEraSummary).toBeFalsy()
-  })
-
-  it('applies deferred summaries contiguously and does not skip gaps', async () => {
-    await createStory(dataDir, makeStory({
-      settings: {
-        summarizationThreshold: 1,
-      },
-    }))
-
-    for (const [idx, id] of ['pr-0001', 'pr-0002', 'pr-0003', 'pr-0004'].entries()) {
-      await createFragment(dataDir, storyId, makeFragment({
-        id,
-        content: `Prose ${idx + 1}`,
-      }))
-    }
-    await setupProseChain(dataDir, storyId, ['pr-0001', 'pr-0002', 'pr-0003', 'pr-0004'])
-
-    mockStreamWithToolCalls([
-      { toolName: 'reportAnalysis', args: { summary: 'Summary one.' } },
-    ])
-    await runLibrarian(dataDir, storyId, 'pr-0001')
-
-    const stateAfterFirst = await getState(dataDir, storyId)
-    expect(await readSummaries(dataDir, storyId)).toBe('Summary one.')
-    expect(stateAfterFirst.summarizedUpTo).toBe('pr-0001')
-
-    // pr-0002 remains unanalyzed. Even though pr-0003 has an analysis,
-    // summarizedUpTo must not leap over the gap.
-    mockStreamWithToolCalls([
-      { toolName: 'reportAnalysis', args: { summary: 'Summary three should wait.' } },
-    ])
-    await runLibrarian(dataDir, storyId, 'pr-0003')
-
-    const stateAfterSecond = await getState(dataDir, storyId)
-    const combined = await readSummaries(dataDir, storyId)
-    expect(combined).toBe('Summary one.')
-    expect(combined).not.toContain('Summary three should wait.')
-    expect(stateAfterSecond.summarizedUpTo).toBe('pr-0001')
-  })
-
-  it('splits the chapter summary into an era summary + fresh chapter when the overflow threshold is exceeded', async () => {
-    await createStory(dataDir, makeStory({
-      settings: { summarizationThreshold: 0 },
-    }))
-    await createFragment(dataDir, storyId, makeFragment({ id: 'pr-0001', content: 'First prose' }))
-    await setupProseChain(dataDir, storyId, ['pr-0001'])
-
-    // Overflow threshold is 2000. Two large summaries combined should split.
-    const big = 'Lorem ipsum dolor sit amet. '.repeat(50) // ≈1400 chars
-    mockStreamWithToolCalls([
-      { toolName: 'reportAnalysis', args: { summary: big + 'A' } },
-    ])
-    await runLibrarian(dataDir, storyId, 'pr-0001')
-
-    await createFragment(dataDir, storyId, makeFragment({ id: 'pr-0002', content: 'Second prose' }))
-    await setupProseChain(dataDir, storyId, ['pr-0001', 'pr-0002'])
-
-    mockStreamWithToolCalls([
-      { toolName: 'reportAnalysis', args: { summary: big + 'B' } },
-    ])
-    await runLibrarian(dataDir, storyId, 'pr-0002')
-
-    const active = await listFragments(dataDir, storyId, 'summary')
-    const archived = await listFragments(dataDir, storyId, 'summary', { includeArchived: true })
-
-    // The original chapter summary was archived; a new era summary and a
-    // fresh chapter summary should both exist among the active fragments.
-    expect(active.some(f => f.meta?.isEraSummary)).toBe(true)
-    expect(active.some(f => !f.meta?.isEraSummary)).toBe(true)
-    expect(archived.length).toBeGreaterThan(active.length)
-  })
-
-  it('uses latest analysis per fragment in deferred summary application', async () => {
-    await createStory(dataDir, makeStory({
-      settings: {
-        summarizationThreshold: 0,
-      },
-    }))
-    await createFragment(dataDir, storyId, makeFragment({ id: 'pr-0001', content: 'First prose' }))
-    await createFragment(dataDir, storyId, makeFragment({ id: 'pr-0002', content: 'Second prose' }))
-    await setupProseChain(dataDir, storyId, ['pr-0001', 'pr-0002'])
-
-    await saveAnalysis(dataDir, storyId, {
-      id: 'la-old',
-      createdAt: '2025-01-01T00:00:00.000Z',
-      fragmentId: 'pr-0001',
-      summaryUpdate: 'Old version should not be used.',
-      mentions: [],
-      contradictions: [],
-      fragmentChangeProposals: [],
-      timelineEvents: [],
-    })
-    await saveAnalysis(dataDir, storyId, {
-      id: 'la-new',
-      createdAt: '2025-01-02T00:00:00.000Z',
-      fragmentId: 'pr-0001',
-      summaryUpdate: 'New version should be used.',
-      mentions: [],
-      contradictions: [],
-      fragmentChangeProposals: [],
-      timelineEvents: [],
-    })
-
-    mockStreamWithToolCalls([
-      { toolName: 'reportAnalysis', args: { summary: 'Second prose summary.' } },
-    ])
-    await runLibrarian(dataDir, storyId, 'pr-0002')
-
-    const combined = await readSummaries(dataDir, storyId)
-    expect(combined).toContain('New version should be used.')
-    expect(combined).not.toContain('Old version should not be used.')
   })
 
   it('detects character mentions', async () => {
@@ -642,6 +504,79 @@ describe('librarian agent', () => {
     expect(analyzePass?.status).toBe('complete')
     expect(analyzePass?.diagnostics?.directionToolCallCount).toBe(1)
     expect(analysis.directions).toEqual(directions)
+    expect(analysis.analyzeLanes?.directions).toEqual({ requirement: 'required', completion: 'complete' })
+  })
+
+  it('treats enabled automatic directions as required while preserving the observation', async () => {
+    await createStory(dataDir, makeStory({ settings: { disableLibrarianDirections: false } }))
+    await createFragment(dataDir, storyId, makeFragment({ id: 'pr-0001' }))
+    await setupProseChain(dataDir, storyId, ['pr-0001'])
+
+    mockStreamWithToolCalls([
+      { toolName: 'reportAnalysis', args: { summary: 'The hero reached the gate.' } },
+    ])
+
+    await expect(runLibrarian(dataDir, storyId, 'pr-0001')).rejects.toThrow(
+      'without completing automatic directions required by the story setting',
+    )
+    const summaries = await listAnalyses(dataDir, storyId)
+    expect(summaries).toHaveLength(1)
+    const analysis = await getAnalysis(dataDir, storyId, summaries[0].id)
+    expect(analysis?.summaryUpdate).toBe('The hero reached the gate.')
+    expect(analysis?.analyzeLanes?.observation.completion).toBe('complete')
+    expect(analysis?.analyzeLanes?.directions).toEqual({ requirement: 'required', completion: 'incomplete' })
+  })
+
+  it('allows manual directions when automatic directions are disabled', async () => {
+    await createStory(dataDir, makeStory({ settings: { disableLibrarianDirections: true } }))
+    await createFragment(dataDir, storyId, makeFragment({ id: 'pr-0001' }))
+    await setupProseChain(dataDir, storyId, ['pr-0001'])
+    const directions = [
+      { title: 'Wait at Dawn', description: 'The hero waits outside.', instruction: 'Write the quiet vigil.' },
+    ]
+    mockAgentStream.mockResolvedValue({
+      fullStream: (async function* () {
+        yield { type: 'text-delta' as const, text: JSON.stringify(directions) }
+        yield { type: 'finish' as const, finishReason: 'stop' }
+      })(),
+    })
+
+    const result = await proposeDirections(dataDir, storyId, { count: 1 })
+
+    expect(result.suggestions).toEqual(directions)
+  })
+
+  it('saves a valid observation when a later fused-lane stream step fails', async () => {
+    await createStory(dataDir, makeStory())
+    await createFragment(dataDir, storyId, makeFragment({ id: 'pr-0001' }))
+    await setupProseChain(dataDir, storyId, ['pr-0001'])
+
+    mockAgentStream.mockImplementation(async (
+      _args: unknown,
+      tools: Record<string, { execute: (args: unknown) => Promise<unknown> }>,
+    ) => ({
+      fullStream: (async function* () {
+        const input = { summary: 'The hero reached the gate.' }
+        yield { type: 'tool-call' as const, toolCallId: 'call-observe', toolName: 'reportAnalysis', input }
+        yield {
+          type: 'tool-result' as const,
+          toolCallId: 'call-observe',
+          toolName: 'reportAnalysis',
+          output: await tools.reportAnalysis.execute(input),
+        }
+        throw new Error('late proposal connection failure')
+      })(),
+    }))
+
+    await expect(runLibrarian(dataDir, storyId, 'pr-0001')).rejects.toThrow(
+      'was saved but did not fully complete: late proposal connection failure',
+    )
+    const summaries = await listAnalyses(dataDir, storyId)
+    expect(summaries).toHaveLength(1)
+    const analysis = await getAnalysis(dataDir, storyId, summaries[0].id)
+    expect(analysis?.summaryUpdate).toBe('The hero reached the gate.')
+    expect(analysis?.passes?.[0]).toMatchObject({ name: 'analyze', status: 'failed' })
+    expect(analysis?.analyzeLanes?.observation.completion).toBe('complete')
   })
 
   it('uses candidate fragments for memory context without recording mention annotations', async () => {
@@ -663,6 +598,7 @@ describe('librarian agent', () => {
       {
         toolName: 'reportAnalysis',
         args: {
+          summary: 'The captain resigned from the guard.',
           candidateFragmentIds: ['ch-0001'],
         },
       },
@@ -755,6 +691,13 @@ describe('librarian agent', () => {
             newText: 'Alice is the former captain of the guard.',
           }],
         ),
+      },
+      {
+        toolName: 'finishAnalysis',
+        args: {
+          completed: ['reportAnalysis'],
+          skipped: [{ toolName: 'proposeRecordCorrections', reason: 'The correction target was invalid.' }],
+        },
       },
     ])
 
@@ -979,7 +922,7 @@ describe('librarian agent', () => {
   })
 
   it('flags contradictions', async () => {
-    await createStory(dataDir, makeStory({ summary: 'Alice has blue eyes.' }))
+    await createStory(dataDir, makeStory())
     await createFragment(dataDir, storyId, makeFragment({
       id: 'ch-0001',
       type: 'character',
@@ -1056,7 +999,6 @@ describe('librarian agent', () => {
     await createStory(dataDir, makeStory({
       settings: {
         autoApplyLibrarianSuggestions: true,
-        summarizationThreshold: 0,
       },
     }))
     await createFragment(dataDir, storyId, makeFragment({
@@ -1137,7 +1079,6 @@ describe('librarian agent', () => {
     await createStory(dataDir, makeStory({
       settings: {
         autoApplyLibrarianSuggestions: true,
-        summarizationThreshold: 0,
       },
     }))
     await createFragment(dataDir, storyId, makeFragment({
@@ -1192,7 +1133,6 @@ describe('librarian agent', () => {
     await createStory(dataDir, makeStory({
       settings: {
         autoApplyLibrarianSuggestions: true,
-        summarizationThreshold: 0,
       },
     }))
     await createFragment(dataDir, storyId, makeFragment({
@@ -1253,7 +1193,6 @@ describe('librarian agent', () => {
     await createStory(dataDir, makeStory({
       settings: {
         autoApplyLibrarianSuggestions: true,
-        summarizationThreshold: 0,
       },
     }))
     await createFragment(dataDir, storyId, makeFragment({
@@ -1324,7 +1263,7 @@ describe('librarian agent', () => {
    */
   it('composes a record whose edits span a sentence and its whole description', async () => {
     await createStory(dataDir, makeStory({
-      settings: { autoApplyLibrarianSuggestions: true, summarizationThreshold: 0 },
+      settings: { autoApplyLibrarianSuggestions: true },
     }))
     await createFragment(dataDir, storyId, makeFragment({
       id: 'ch-0001',
@@ -1385,7 +1324,6 @@ describe('librarian agent', () => {
     await createStory(dataDir, makeStory({
       settings: {
         autoApplyLibrarianSuggestions: true,
-        summarizationThreshold: 0,
       },
     }))
     await createFragment(dataDir, storyId, makeFragment({
@@ -1456,7 +1394,6 @@ describe('librarian agent', () => {
     await createStory(dataDir, makeStory({
       settings: {
         autoApplyLibrarianSuggestions: true,
-        summarizationThreshold: 0,
       },
     }))
     await createFragment(dataDir, storyId, makeFragment({
@@ -1578,7 +1515,7 @@ describe('librarian agent', () => {
     )
   })
 
-  it('falls back to text when no reportAnalysis summary is called', async () => {
+  it('rejects free text that does not complete the required observation lane', async () => {
     await createStory(dataDir, makeStory())
     await createFragment(dataDir, storyId, makeFragment({ id: 'pr-0001' }))
     await setupProseChain(dataDir, storyId, ['pr-0001'])
@@ -1593,8 +1530,10 @@ describe('librarian agent', () => {
       }
     })
 
-    const analysis = await runLibrarian(dataDir, storyId, 'pr-0001')
-    expect(analysis.summaryUpdate).toBe('This is the summary from text.')
+    await expect(runLibrarian(dataDir, storyId, 'pr-0001')).rejects.toThrow(
+      'without completing the required observation lane',
+    )
+    expect(await listAnalyses(dataDir, storyId)).toHaveLength(0)
   })
 
   it('derives summary from structured reportAnalysis payload when summary text is empty', async () => {

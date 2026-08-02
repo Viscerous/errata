@@ -227,7 +227,7 @@ const messages = compileBlocks(blocks)
 
 The current block editor lives inside the **Agents** panel. It gives users full control over each agent's LLM context structure without writing plugins. Users can disable builtin blocks, override their content, create custom blocks (including dynamic script blocks), and reorder everything via drag-and-drop.
 
-Open it from the sidebar under **Management > Agents**, then pick an agent such as **Writer**, **Prewriter**, **Librarian Analyze**, or **Character Chat**. The older story-level Block Editor UI was removed when per-agent configuration became the source of truth. The separate **Fragment Order** panel is still gated by **Settings > Generation > Context > Fragment ordering: Custom**.
+Open it from the sidebar under **Management > Agents**, then pick an agent such as **Writer**, **Prewriter**, **Librarian Analyze**, or **Character Chat**. The separate **Fragment Order** panel is gated by **Settings > Generation > Context > Fragment ordering: Custom**.
 
 ## How It Works
 
@@ -287,7 +287,7 @@ The `ctx` object contains:
 
 | Field | Type | Description |
 |---|---|---|
-| `ctx.story` | `StoryMeta` | Story metadata (name, description, summary, settings) |
+| `ctx.story` | `StoryMeta` | Story metadata (name, description, cover image, settings) |
 | `ctx.proseFragments` | `Fragment[]` | Recent prose fragments included in context |
 | `ctx.stickyGuidelines` | `Fragment[]` | Pinned guideline fragments |
 | `ctx.stickyKnowledge` | `Fragment[]` | Pinned knowledge fragments |
@@ -326,11 +326,11 @@ if (proseCount > 15) return 'The story is well underway. Begin moving toward res
 return ''
 ```
 
-Summary-aware context:
+Authored-memory-aware context:
 ```js
-if (!ctx.story.summary) return ''
-const words = ctx.story.summary.split(/\s+/).length
-return `Story summary (${words} words) is available. Avoid contradicting established events.`
+const records = await ctx.getFragments('summary')
+if (records.length === 0) return ''
+return `${records.length} author-owned memory record(s) are available by ID.`
 ```
 
 Input-aware formatting:
@@ -391,11 +391,9 @@ This order means:
 - Per-block `order` overrides can fine-tune positions beyond what drag-and-drop provides.
 - Disabling happens last, so a disabled block's content is never evaluated for overrides.
 
-## Legacy Generation Block APIs
+## Block Utility APIs
 
-The old story-level generation block CRUD API was removed. Per-agent block configuration now lives under `/api/stories/:storyId/agent-blocks/:agentName` (see [Agent Block System](#agent-block-system)).
-
-The remaining `/api/stories/:storyId/blocks` routes are compatibility utilities:
+Per-agent block configuration lives under `/api/stories/:storyId/agent-blocks/:agentName` (see [Agent Block System](#agent-block-system)). The `/api/stories/:storyId/blocks` namespace also exposes this utility:
 
 | Method | Path | Description |
 |---|---|---|
@@ -516,9 +514,6 @@ return ''
 | `src/components/agents/AgentConfigurePanel.tsx` | Main per-agent block editor component |
 | `src/components/blocks/BlockCreateDialog.tsx` | Custom block creation dialog |
 | `src/components/blocks/BlockContentView.tsx` | Context preview renderer |
-| `tests/agents/agent-block-storage.test.ts` | Storage CRUD tests |
-| `tests/blocks/apply.test.ts` | Config application logic tests |
-| `tests/api/blocks-routes.test.ts` | Compatibility route tests |
 
 ---
 
@@ -718,6 +713,3 @@ The **Agent Configure** panel is accessible from the sidebar under **Management 
 | `src/server/routes/agent-blocks.ts` | API routes |
 | `src/lib/api/agent-blocks.ts` | Frontend API client |
 | `src/components/agents/AgentConfigurePanel.tsx` | UI panel |
-| `tests/agents/agent-block-storage.test.ts` | Storage tests |
-| `tests/agents/agent-blocks.test.ts` | Block registration tests |
-| `tests/agents/compile-agent-context.test.ts` | Context compilation tests |

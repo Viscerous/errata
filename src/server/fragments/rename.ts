@@ -175,10 +175,6 @@ export async function renameFragmentIdAcrossStory(
       libState.lastAnalyzedFragmentId = newId
       libStateModified = true
     }
-    if (libState.summarizedUpTo === oldId) {
-      libState.summarizedUpTo = newId
-      libStateModified = true
-    }
     // recentMentions
     if (libState.recentMentions[oldId]) {
       libState.recentMentions[newId] = libState.recentMentions[oldId]
@@ -224,10 +220,6 @@ export async function renameFragmentIdAcrossStory(
           let analysisModified = false
           if (analysis.fragmentId === oldId) {
             analysis.fragmentId = newId
-            analysisModified = true
-          }
-          if (analysis.summaryFragmentId === oldId) {
-            analysis.summaryFragmentId = newId
             analysisModified = true
           }
           for (const m of analysis.mentions) {

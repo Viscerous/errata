@@ -120,7 +120,7 @@ export const HELP_SECTIONS: HelpSection[] = [
             <div className="rounded-md border border-border/25 bg-accent/10 px-3 py-2.5 mb-2.5 space-y-0.5">
               {[
                 'Story name and description',
-                'Rolling summary (maintained by the librarian)',
+                'Source-linked story memory (when older analyzed prose exists)',
                 'Sticky fragments (user-placed) — full content',
                 'Non-sticky catalog rows — one line per fragment',
                 'Recent prose from the chain (context-limited)',
@@ -173,7 +173,7 @@ export const HELP_SECTIONS: HelpSection[] = [
               />
               <ToolCard
                 name="readStorySummary()"
-                description="Read the current rolling summary and the summary fragments behind it."
+                description="Read the source-linked story-memory projection and any authored memory records."
               />
             </div>
 
@@ -296,56 +296,47 @@ export const HELP_SECTIONS: HelpSection[] = [
             </P>
             <P>
               After each generation, the librarian reads the new prose and writes a short
-              summary update. These updates are stitched together into a rolling summary that
-              appears in the prompt as "Story Summary So Far", positioned before the recent prose.
+              retrospective summary tied to that exact prose revision. When older prose falls
+              outside the raw context window, Errata derives a bounded story-memory projection
+              from those source-current records.
             </P>
             <P>
-              The <strong className="text-foreground/75">summarization threshold</strong> controls
-              how many most-recent prose positions are kept out of the rolling summary.
-              In other words, the newest N prose sections stay as raw prose context first,
-              and older sections are folded into the summary as they age past that threshold.
-              Setting it to 0 means new summaries are applied immediately.
+              Memory is never appended into a mutable global summary. Editing prose, switching a
+              variation, or regenerating from an earlier point automatically changes which
+              source-linked records qualify. Missing, stale, and older-contract analyses are shown
+              as explicit coverage gaps instead of being silently treated as truth.
             </P>
             <P>
-              <strong className="text-foreground/75">Summary compaction</strong> keeps the rolling
-              summary bounded for long stories. When the summary would exceed
-              <strong className="text-foreground/75"> Max characters</strong>, Errata compacts it down
-              toward <strong className="text-foreground/75">Target characters</strong> so summary growth
-              does not consume your prompt budget over time.
-            </P>
-            <P>
-              If you also use chapter markers, see <strong className="text-foreground/75">Hierarchical summaries</strong>
-              for a meso-level memory layer between the rolling summary and recent prose.
+              The projection has a fixed token budget and always retains the records nearest the
+              recent-prose seam. Its wording is adapted for the reader—Writer, Directions,
+              Librarian, or an editing flow—without another model call on the foreground path.
             </P>
             <Tip>
               Summarization and the context limit work as a pair: the context limit controls how
-              much raw prose the model sees, and summarization ensures everything before that
-              window is still represented. If you increase the context limit, you may be able to
-              lower the summarization threshold (or vice versa). For very long stories, use
-              summary compaction to keep the summary stable while still preserving continuity.
+              much raw prose the model sees, while story memory represents analyzed prose before
+              that window. Re-analyze a passage when its memory entry reports a stale or missing gap.
             </Tip>
           </>
         ),
       },
       {
-        id: 'hierarchical-summaries',
-        title: 'Hierarchical summaries',
+        id: 'authored-memory',
+        title: 'Authored memory',
         content: (
           <>
             <P>
-              The <strong className="text-foreground/75">Hierarchical summaries</strong> toggle adds
-              chapter-level summaries into generation context when available. This works with marker
-              fragments: when a marker has summary content, that summary can be included as a meso-level
-              memory layer between the global rolling summary and recent raw prose.
+              Summary fragments are optional authored memory records. They are not written or
+              compacted by the librarian; use them when you want to state a durable editorial fact,
+              premise, or high-level interpretation that is not derived from one prose passage.
             </P>
             <P>
-              In practice, this gives the model three memory tiers:
+              Authored records are kept separate from derived story history:
             </P>
             <div className="rounded-md border border-border/25 bg-accent/10 px-3 py-2.5 mb-2.5 space-y-0.5">
               {[
-                'Macro: rolling story summary maintained by the librarian.',
-                'Meso: chapter/arc summaries from marker fragments near the current prose window.',
-                'Micro: recent prose fragments included by your context limit.',
+                'Authored memory: explicit editorial context you control.',
+                'Derived memory: source-linked librarian records for older prose.',
+                'Recent prose: verbatim fragments selected by the context limit.',
               ].map((item, i) => (
                 <p key={item} className="text-[0.71875rem] text-foreground/55 leading-snug">
                   <span className="text-muted-foreground mr-1.5">{i + 1}.</span>{item}
@@ -353,8 +344,8 @@ export const HELP_SECTIONS: HelpSection[] = [
               ))}
             </div>
             <Tip>
-              Enable this for long stories with chapter markers. It helps preserve arc-level continuity
-              without increasing raw prose context as much.
+              For regeneration or editing before the live head, an authored record is included only
+              when it declares a valid-through prose fragment before that target. This prevents future facts leaking backward.
             </Tip>
           </>
         ),
@@ -387,8 +378,8 @@ export const HELP_SECTIONS: HelpSection[] = [
             </P>
             <P>
               In all modes, at least one prose fragment is always included even if it exceeds the
-              budget. Everything before the limit is represented by the librarian's rolling summary,
-              so the model still has awareness of earlier events — just not the raw text.
+              budget. Analyzed prose before the limit is represented by the source-linked memory
+              projection, so the model retains bounded historical awareness without receiving the raw text.
             </P>
             <Tip>
               A larger context limit means the model sees more of your actual prose, which
@@ -581,7 +572,7 @@ export const HELP_SECTIONS: HelpSection[] = [
               <div className="space-y-1.5">
                 {[
                   ['story-info', 'Story name and description.'],
-                  ['summary', 'Rolling story summary maintained by the librarian.'],
+                  ['summary', 'Bounded, source-linked story memory for prose before the recent window.'],
                   ['user-fragments', 'Sticky fragments placed in "user" position (if any).'],
                   ['fragment-catalog', 'One-line catalog rows grouped by fragment type.'],
                   ['prose', 'Recent prose from the chain, limited by your context limit setting.'],
@@ -595,8 +586,8 @@ export const HELP_SECTIONS: HelpSection[] = [
               </div>
             </div>
             <Tip>
-              Some blocks are conditional — <Mono>summary</Mono> only appears if the librarian has
-              produced a summary, and <Mono>system-fragments</Mono> only appears if you have sticky
+              Some blocks are conditional — <Mono>summary</Mono> only appears when source-linked
+              memory or authored memory is available, and <Mono>system-fragments</Mono> only appears if you have sticky
               fragments placed in the system message.
             </Tip>
           </>
@@ -613,7 +604,7 @@ export const HELP_SECTIONS: HelpSection[] = [
             </P>
             <P>
               Common uses: disable the <Mono>tools</Mono> block if you don't want the model to call tools,
-              disable <Mono>summary</Mono> if the librarian's summary is causing issues, or disable
+              disable <Mono>summary</Mono> if historical memory is not useful for a specific agent, or disable
               catalog rows to keep the prompt shorter.
             </P>
             <Tip>
@@ -740,7 +731,7 @@ export const HELP_SECTIONS: HelpSection[] = [
               <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wider mb-2">Available on ctx</p>
               <div className="space-y-1 mb-3">
                 {[
-                  ['ctx.story', 'Story metadata — name, description, summary, settings.'],
+                  ['ctx.story', 'Story metadata — name, description, cover image, and settings.'],
                   ['ctx.proseFragments', 'Recent prose fragments included in context.'],
                   ['ctx.stickyGuidelines', 'Pinned guideline fragments (full content).'],
                   ['ctx.stickyKnowledge', 'Pinned knowledge fragments (full content).'],
@@ -1030,30 +1021,28 @@ return rules.map(r => r.content).join('\\n')`}</div>
       },
       {
         id: 'summaries',
-        title: 'Summaries',
+        title: 'Authored memory',
         content: (
           <>
             <P>
-              The <strong className="text-foreground/75">Summaries</strong> tab lists the rolling
-              summary the librarian maintains. Each chapter gets its own summary fragment; once a
-              chapter's summary grows past a threshold, older material is promoted into an
-              <strong className="text-foreground/75"> era summary</strong> that floats to the top of
-              the list.
+              The <strong className="text-foreground/75">Memory</strong> tab lists optional summary
+              fragments written by you. Librarian history is derived from source-linked analyses
+              and is not stored here as an editable rolling document.
             </P>
             <P>
               Tap any summary to open it in a <strong className="text-foreground/75">fullscreen
               editor</strong> — a centered reading column set in the prose font, generous line-height,
-              autosave on blur. Press <Kbd>Esc</Kbd> to close. Your edits persist through future
-              librarian runs; the librarian appends to what's there rather than overwriting you.
+              autosave on blur. Press <Kbd>Esc</Kbd> to close. These records are author-owned;
+              librarian runs neither append to nor overwrite them.
             </P>
             <P>
-              Archive a summary to exclude it from the prompt without deleting it. A <strong className="text-foreground/75">show archived</strong> toggle
+              Archive an authored record to exclude it from the prompt without deleting it. A <strong className="text-foreground/75">show archived</strong> toggle
               at the bottom of the list reveals archived entries so you can restore them later.
             </P>
             <Tip>
-              Summaries are regular fragments of type <Mono>summary</Mono>. They appear in the prompt
-              through the <Mono>summary</Mono> block and can be exported, imported, and referenced
-              like any other fragment.
+              Authored records are regular fragments of type <Mono>summary</Mono>. At a regeneration
+              or editing target they require <Mono>meta.validThrough</Mono> pointing to earlier prose;
+              unscoped records render only at the live story head.
             </Tip>
           </>
         ),
@@ -1173,8 +1162,8 @@ return rules.map(r => r.content).join('\\n')`}</div>
               librarian from running automatically after prose generation.
             </P>
             <P>
-              <strong className="text-foreground/75">Disable directions</strong> turns off guided story
-              direction suggestions, while
+              <strong className="text-foreground/75">Disable automatic directions</strong> turns off
+              directions generated during Librarian analysis; manually requested suggestions remain available, while
               <strong className="text-foreground/75"> Disable suggestions</strong> turns off fragment
               corrections and new-record suggestions. These let you keep summary and contradiction tracking while
               reducing proactive librarian output.

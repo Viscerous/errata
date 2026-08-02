@@ -1,3 +1,5 @@
+import { readFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { createTempDir, makeTestSettings } from '../setup'
 import {
@@ -38,7 +40,6 @@ const makeStory = (overrides: Partial<StoryMeta> = {}): StoryMeta => ({
   name: 'Test Story',
   description: 'A test story',
     coverImage: null,
-  summary: '',
   createdAt: '2026-01-01T00:00:00.000Z',
   updatedAt: '2026-01-01T00:00:00.000Z',
   settings: makeTestSettings(),
@@ -68,6 +69,27 @@ describe('Story CRUD', () => {
     await createStory(dataDir, story)
     const retrieved = await getStory(dataDir, story.id)
     expect(retrieved).toEqual(story)
+  })
+
+  it('strips metadata and settings outside the current story schema before storage', async () => {
+    const story = {
+      ...makeStory(),
+      summary: 'obsolete story summary',
+      settings: {
+        ...makeTestSettings(),
+        summarizationThreshold: 4,
+        summaryCompact: { maxCharacters: 12000, targetCharacters: 9000 },
+        enableHierarchicalSummary: false,
+      },
+    } as StoryMeta
+
+    await createStory(dataDir, story)
+
+    const stored = JSON.parse(await readFile(join(dataDir, 'stories', story.id, 'meta.json'), 'utf8'))
+    expect(stored).not.toHaveProperty('summary')
+    expect(stored.settings).not.toHaveProperty('summarizationThreshold')
+    expect(stored.settings).not.toHaveProperty('summaryCompact')
+    expect(stored.settings).not.toHaveProperty('enableHierarchicalSummary')
   })
 
   it('lists all stories', async () => {

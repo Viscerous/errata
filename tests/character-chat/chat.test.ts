@@ -35,7 +35,6 @@ function makeStory(overrides: Partial<StoryMeta> = {}): StoryMeta {
     name: 'Test Story',
     description: 'A test story',
     coverImage: null,
-    summary: 'A hero enters a forest.',
     createdAt: now,
     updatedAt: now,
     settings: makeTestSettings(),

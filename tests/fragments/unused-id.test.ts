@@ -24,7 +24,16 @@ describe('generateUnusedFragmentId', () => {
     const tmp = await createTempDir()
     dataDir = tmp.path
     cleanup = tmp.cleanup
-    await createStory(dataDir, { id: storyId, name: 'Collide', description: '', settings: makeTestSettings() } as never)
+    const now = new Date().toISOString()
+    await createStory(dataDir, {
+      id: storyId,
+      name: 'Collide',
+      description: '',
+      coverImage: null,
+      createdAt: now,
+      updatedAt: now,
+      settings: makeTestSettings(),
+    })
   })
 
   afterEach(async () => {

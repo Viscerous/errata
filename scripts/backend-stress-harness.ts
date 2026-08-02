@@ -15,6 +15,13 @@ import {
   getAnalysisIndex,
   type LibrarianAnalysis,
 } from '../src/server/librarian/storage'
+import { analysisSourceRevision } from '../src/server/librarian/continuity-source'
+import {
+  buildSummaryProjection,
+  renderSummaryProjection,
+  SUMMARY_CONTRACT_VERSION,
+} from '../src/server/librarian/summary-projection'
+import type { Fragment } from '../src/server/fragments/schema'
 
 type CompactType = 'proseLimit' | 'maxTokens' | 'maxCharacters'
 
@@ -219,6 +226,7 @@ async function summaryBeforeIndexed(
 async function seedStory(dataDir: string, options: HarnessOptions): Promise<{
   storyId: string
   proseIds: string[]
+  proseFragments: Fragment[]
   markerCount: number
   analysisCount: number
   reanalysisCount: number
@@ -231,19 +239,18 @@ async function seedStory(dataDir: string, options: HarnessOptions): Promise<{
     name: 'Stress Story',
     description: 'Synthetic story for backend stress harness',
     coverImage: null,
-    summary: '',
     createdAt: now,
     updatedAt: now,
     settings: {
       ...StoryMetaSchema.shape.settings.parse(undefined),
       contextCompact: { type: options.compactType, value: options.compactValue },
-      enableHierarchicalSummary: true,
     },
   })
 
   const proseIds: string[] = []
   let markerCount = 0
   let analysisCount = 0
+  const proseFragments = new Map<string, Fragment>()
 
   for (let i = 1; i <= options.proseCount; i += 1) {
     if ((i - 1) % options.chapterEvery === 0) {
@@ -272,7 +279,7 @@ async function seedStory(dataDir: string, options: HarnessOptions): Promise<{
 
     const proseId = fragmentId('pr', i)
     proseIds.push(proseId)
-    await createFragment(dataDir, storyId, {
+    const proseFragment: Fragment = {
       id: proseId,
       type: 'prose',
       name: `Prose ${i}`,
@@ -289,14 +296,18 @@ async function seedStory(dataDir: string, options: HarnessOptions): Promise<{
       archived: false,
       version: 1,
       versions: [],
-    })
+    }
+    await createFragment(dataDir, storyId, proseFragment)
+    proseFragments.set(proseId, proseFragment)
     await addProseSection(dataDir, storyId, proseId)
 
     const analysis: LibrarianAnalysis = {
       id: fragmentId('la', i),
       createdAt: isoAt(i * 1000 + 10),
       fragmentId: proseId,
+      sourceRevision: analysisSourceRevision(proseFragment),
       summaryUpdate: makeSummaryUpdate(i),
+      summaryContractVersion: SUMMARY_CONTRACT_VERSION,
       structuredSummary: {
         events: [`Event beat ${i}`],
         stateChanges: [`State shift ${i % 11}`],
@@ -340,11 +351,15 @@ async function seedStory(dataDir: string, options: HarnessOptions): Promise<{
     let created = 0
     for (let i = 1; i <= options.proseCount && created < reanalysisCount; i += stride) {
       const proseId = fragmentId('pr', i)
+      const proseFragment = proseFragments.get(proseId)
+      if (!proseFragment) continue
       const analysis: LibrarianAnalysis = {
         id: fragmentId('la', options.proseCount + created + 1),
         createdAt: isoAt(5_000_000 + created),
         fragmentId: proseId,
+        sourceRevision: analysisSourceRevision(proseFragment),
         summaryUpdate: makeSummaryUpdate(i, 'reanalysis'),
+        summaryContractVersion: SUMMARY_CONTRACT_VERSION,
         structuredSummary: {
           events: [`Reanalysis event ${i}`],
           stateChanges: [`Reanalysis state ${i % 11}`],
@@ -361,7 +376,14 @@ async function seedStory(dataDir: string, options: HarnessOptions): Promise<{
     }
   }
 
-  return { storyId, proseIds, markerCount, analysisCount, reanalysisCount }
+  return {
+    storyId,
+    proseIds,
+    proseFragments: [...proseFragments.values()],
+    markerCount,
+    analysisCount,
+    reanalysisCount,
+  }
 }
 
 function formatMs(v: number): string {
@@ -422,6 +444,21 @@ async function main(): Promise<void> {
       },
     )
 
+    const projectionStats = await benchmark(
+      'summary projection (warm)',
+      options.runs,
+      options.warmups,
+      async () => {
+        const projection = await buildSummaryProjection({
+          dataDir,
+          storyId: seeded.storyId,
+          activeProseFragments: seeded.proseFragments,
+          recentProseFragments: seeded.proseFragments.slice(-options.compactValue),
+        })
+        renderSummaryProjection(projection, 'generation.writer')
+      },
+    )
+
     const buildContextStats = await benchmark(
       'buildContextState (normal)',
       options.runs,
@@ -438,7 +475,6 @@ async function main(): Promise<void> {
       async () => {
         await buildContextState(dataDir, seeded.storyId, 'Regenerate current section.', {
           proseBeforeFragmentId: targetFragmentId,
-          summaryBeforeFragmentId: targetFragmentId,
           excludeFragmentId: targetFragmentId,
         })
       },
@@ -461,7 +497,7 @@ async function main(): Promise<void> {
         summaryRebuildMatchesLegacy: legacySummary === indexedSummary,
         summaryLengthChars: indexedSummary.length,
       },
-      timings: [legacySummaryStats, indexedSummaryStats, buildContextStats, rebuildContextStats],
+      timings: [legacySummaryStats, indexedSummaryStats, projectionStats, buildContextStats, rebuildContextStats],
       indexSpeedupVsLegacySummaryRebuild:
         indexedSummaryStats.meanMs > 0 ? legacySummaryStats.meanMs / indexedSummaryStats.meanMs : 0,
     }

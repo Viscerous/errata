@@ -271,15 +271,12 @@ export function StoryInfoPanel({ storyId, story, onLaunchWizard, onExport, onDow
       {/* Divider */}
       <div className="mx-5 border-t border-border/40" />
 
-      {/* Summary — ordering mirrors the server's loadSummaryContent so the panel
-          shows the same concatenation the LLM receives: era summaries first, then createdAt. */}
+      {/* Optional authored memory. Derived source-linked memory is assembled on
+          the server for each reader and is intentionally not stored as prose. */}
       <SummarySection
         summary={(allFragmentsQuery.data ?? [])
           .filter((fragment) => fragment.type === 'summary' && !fragment.archived)
-          .sort((a, b) => {
-            const eraOrder = Number(!a.meta?.isEraSummary) - Number(!b.meta?.isEraSummary)
-            return eraOrder || a.createdAt.localeCompare(b.createdAt)
-          })
+          .sort((a, b) => a.order - b.order || a.createdAt.localeCompare(b.createdAt))
           .map((fragment) => fragment.content.trim())
           .filter(Boolean)
           .join('\n\n')}
@@ -385,7 +382,6 @@ const SOURCE_LABELS: Record<string, string> = {
   'generation.writer': 'Writer',
   'generation.prewriter': 'Prewriter',
   'librarian.analyze': 'Librarian',
-  'librarian.summary-compaction': 'Summary compaction',
   'librarian.chat': 'Librarian chat',
   'librarian.refine': 'Librarian refine',
   'librarian.prose-transform': 'Prose transform',
@@ -503,15 +499,15 @@ function SummarySection({ summary }: { summary: string | undefined }) {
   if (!summary) {
     return (
       <div className="px-5 py-4">
-        <label className="text-[0.5625rem] text-muted-foreground uppercase tracking-[0.15em] font-medium">Summary</label>
-        <p className="text-[0.8125rem] text-muted-foreground mt-1.5 italic">No summary yet</p>
+        <label className="text-[0.5625rem] text-muted-foreground uppercase tracking-[0.15em] font-medium">Authored memory</label>
+        <p className="text-[0.8125rem] text-muted-foreground mt-1.5 italic">No authored memory</p>
       </div>
     )
   }
 
   return (
     <div className="px-5 py-4">
-      <label className="text-[0.5625rem] text-muted-foreground uppercase tracking-[0.15em] font-medium">Summary</label>
+      <label className="text-[0.5625rem] text-muted-foreground uppercase tracking-[0.15em] font-medium">Authored memory</label>
       <div className="relative">
         <div
           ref={contentRef}

@@ -20,7 +20,6 @@ function makeStory(overrides: Partial<StoryMeta> = {}): StoryMeta {
     name: 'Test Story',
     description: 'A test story for block builder tests',
     coverImage: null,
-    summary: 'The hero journeyed through the forest.',
     createdAt: now,
     updatedAt: now,
     settings: makeTestSettings(),
@@ -400,12 +399,11 @@ describe('Librarian Chat Blocks', () => {
         type: 'prose',
         name: 'Chapter 1',
         content: 'A long prose fragment content here.',
-        meta: { _librarian: { summary: 'Hero begins journey' } },
       })],
     }))
     const proseBlock = blocks.find(b => b.id === 'prose-summaries')
     expect(proseBlock).toBeDefined()
-    expect(proseBlock!.content).toContain('Hero begins journey')
+    expect(proseBlock!.content).toContain('A long prose fragment content here.')
   })
 
   it('combines pinned, recent, and available fragment summaries into one catalog', () => {
@@ -1002,7 +1000,6 @@ describe('Character Chat Blocks', () => {
         type: 'prose',
         name: 'Ch 1',
         content: 'Short prose.',
-        meta: { _librarian: { summary: 'Hero arrives at village' } },
       })],
     }))
     expect(blocks.some((block) => block.content.includes('Hero arrives at village'))).toBe(false)

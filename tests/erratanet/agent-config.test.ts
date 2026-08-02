@@ -36,7 +36,6 @@ function makeStory(id: string, overrides?: Partial<StoryMeta['settings']>): Stor
     name: id,
     description: '',
     coverImage: null,
-    summary: '',
     createdAt: now,
     updatedAt: now,
     settings: makeTestSettings(overrides),

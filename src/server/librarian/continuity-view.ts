@@ -1,5 +1,10 @@
 import type { Fragment } from '../fragments/schema'
-import { getAnalysis, getAnalysisIndex, type LibrarianAnalysis } from './storage'
+import {
+  getAnalysis,
+  getAnalysisIndex,
+  type LibrarianAnalysis,
+  type LibrarianAnalysisIndex,
+} from './storage'
 import { proseContentHash } from './continuity-source'
 import { continuityKeyLabel, normalizeContinuityKey } from '@/lib/continuity-keys'
 import type { TemporalFrame } from './continuity-types'
@@ -147,8 +152,11 @@ export async function buildContinuityView(params: {
   dataDir: string
   storyId: string
   activeProseFragments: Fragment[]
+  analysisIndex?: LibrarianAnalysisIndex | null
 }): Promise<ContinuityView | undefined> {
-  const index = await getAnalysisIndex(params.dataDir, params.storyId)
+  const index = 'analysisIndex' in params
+    ? params.analysisIndex
+    : await getAnalysisIndex(params.dataDir, params.storyId)
   if (!index) return undefined
 
   const fragmentHashes = new Map(

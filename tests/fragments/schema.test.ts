@@ -105,7 +105,7 @@ describe('StoryMetaSchema', () => {
 
   it('accepts a valid story with defaults', () => {
     const result = StoryMetaSchema.parse(validStory)
-    expect(result.summary).toBe('')
+    expect('summary' in result).toBe(false)
     expect(result.settings.outputFormat).toBe('markdown')
     expect(result.settings.enabledPlugins).toEqual([])
     expect(result.settings.customFragmentTypes).toEqual([])
@@ -115,7 +115,6 @@ describe('StoryMetaSchema', () => {
   it('accepts full story metadata', () => {
     const full = {
       ...validStory,
-      summary: 'A story about...',
       settings: {
         outputFormat: 'plaintext' as const,
         enabledPlugins: ['names'],

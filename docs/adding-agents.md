@@ -130,9 +130,9 @@ export function createLibrarianAnalyzeBlocks(ctx: AgentBlockContext): ContextBlo
 
   // Unique block shape — not covered by helpers
   blocks.push({
-    id: 'story-summary',
+    id: 'new-prose',
     role: 'user',
-    content: ['## Story Summary So Far', ctx.story.summary || '(No summary yet)'].join('\n'),
+    content: ['## New Prose', ctx.newProse?.content ?? '(Preview)'].join('\n'),
     order: 100,
     source: 'builtin',
   })
@@ -282,7 +282,6 @@ export const characterChat = createStreamingRunner<CharacterChatOptions>({
 
   contextOptions: (opts) => ({
     proseBeforeFragmentId: opts.storyPointFragmentId ?? undefined,
-    summaryBeforeFragmentId: opts.storyPointFragmentId ?? undefined,
   }),
 
   extraContext: async ({ opts, validated, modelId }) => ({
@@ -621,7 +620,7 @@ The instruction registry holds the built-in default text for each prompt. When y
 instructionRegistry.registerDefault('librarian.optimize-character.system', OPTIMIZE_CHARACTER_SYSTEM_PROMPT)
 ```
 
-`instructionRegistry.resolve(key)` returns that default at request time. Users customize the prompt per story through the Agent Context panel — the block built from this instruction can be overridden, disabled, or reordered like any other agent block. (The older model-specific JSON override layer at `data/instruction-sets/` was removed in favor of agent blocks.) See `docs/instruction-registry.md` for the key listing.
+`instructionRegistry.resolve(key)` returns that default at request time. Users customize the prompt per story through the Agent Context panel — the block built from this instruction can be overridden, disabled, or reordered like any other agent block. See `docs/instruction-registry.md` for the key listing.
 
 ## Testing
 
@@ -630,7 +629,7 @@ instructionRegistry.registerDefault('librarian.optimize-character.system', OPTIM
 Test that `createDefaultBlocks()` produces the expected blocks for various context shapes. No filesystem needed.
 
 ```ts
-// tests/librarian/optimize-character-blocks.test.ts
+// Example block-builder test
 import { describe, it, expect, beforeEach } from 'vitest'
 import { ensureCoreAgentsRegistered } from '@/server/agents'
 import { agentBlockRegistry } from '@/server/agents/agent-block-registry'
@@ -697,7 +696,7 @@ describe('optimize-character blocks', () => {
 
 ### Registry count test
 
-Update the existing test in `tests/agents/agent-blocks.test.ts` to include your new agent:
+Extend the agent-registry coverage to include the new agent:
 
 ```ts
 it('registers all N agents', () => {
@@ -709,7 +708,9 @@ it('registers all N agents', () => {
 
 ### Integration tests
 
-For agents with complex runtime logic, write integration tests that mock `streamText`/`ToolLoopAgent` and verify context assembly. Use `createTempDir()` + `createStory()` for filesystem isolation. See `tests/librarian/refine.test.ts` and `tests/librarian/chat.test.ts` for patterns.
+For agents with complex runtime logic, write integration coverage that mocks
+`streamText` or `ToolLoopAgent` and verifies context assembly. Use the shared
+temporary-directory and story helpers for filesystem isolation.
 
 ## Runner Safety
 
@@ -740,7 +741,7 @@ When adding a new agent:
 - [ ] Add to `AGENT_ORDER` in `AgentConfigurePanel.tsx`
 - [ ] Add to `AGENT_GROUPS` if new namespace
 - [ ] Write block builder tests
-- [ ] Update registry count assertion in `agent-blocks.test.ts`
+- [ ] Extend the agent-registry coverage
 - [ ] Run `bun run test` — all tests pass
 
 ## File Reference

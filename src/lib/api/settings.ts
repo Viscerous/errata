@@ -5,7 +5,6 @@ export const settings = {
   update: (storyId: string, data: {
     enabledPlugins?: string[]
     outputFormat?: 'plaintext' | 'markdown'
-    summarizationThreshold?: number
     maxSteps?: number
     modelOverrides?: Record<string, { providerId?: string | null; modelId?: string | null; temperature?: number | null }>
     // Legacy fields (backward compat)
@@ -22,8 +21,6 @@ export const settings = {
     fragmentOrder?: string[]
     customFragmentTypes?: CustomFragmentType[]
     contextCompact?: { type: 'proseLimit' | 'maxTokens' | 'maxCharacters'; value: number }
-    summaryCompact?: { maxCharacters: number; targetCharacters: number }
-    enableHierarchicalSummary?: boolean
     guidedContinuePrompt?: string
     guidedSceneSettingPrompt?: string
     guidedSuggestPrompt?: string

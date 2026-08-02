@@ -31,7 +31,7 @@ What it measures:
 - `summaryBefore (legacy scan)`: rebuild summary by scanning all analyses + dedupe
 - `summaryBefore (index)`: rebuild summary from `librarian/index.json` lookups
 - `buildContextState (normal)`: standard context assembly
-- `buildContextState (regenerate path)`: `summaryBeforeFragmentId` + `proseBeforeFragmentId`
+- `buildContextState (regenerate path)`: target-relative `proseBeforeFragmentId`
 
 Output includes:
 

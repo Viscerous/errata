@@ -31,7 +31,7 @@ const TARGET = 'story-tgt'
 
 function makeStory(id: string, overrides?: Partial<StoryMeta['settings']>): StoryMeta {
   const now = new Date().toISOString()
-  return { id, name: id, description: '', coverImage: null, summary: '', createdAt: now, updatedAt: now, settings: makeTestSettings(overrides) }
+  return { id, name: id, description: '', coverImage: null, createdAt: now, updatedAt: now, settings: makeTestSettings(overrides) }
 }
 
 function makeAgentConfig(): AgentBlockConfig {

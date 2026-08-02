@@ -1,1 +1,52 @@
-# Historical test observations removed.
+# Documentation Index
+
+- `docs/fragments-and-prose-chain.md`
+  - Fragment system and prose chain: complete schema reference, fragment types, ID conventions, prose chain structure, filesystem storage layout, full API reference, import/export format, SillyTavern character card import (PNG + JSON with lorebook/world book support), and porting guide.
+- `docs/context-blocks.md`
+  - Context block system: structured LLM prompt blocks, the `beforeBlocks` plugin hook, Block Editor UI, custom blocks (simple + script), and block configuration API.
+- `docs/summarization-and-memory.md`
+  - Technical reference for source-linked story memory: contribution currency, target-relative projection, explicit coverage gaps, reader-specific presentation, authored memory, prompt budgeting, and performance properties.
+- `docs/summary-projection-design.md`
+  - Current tiered-memory contract: source-current contributions, recursive content-addressed roll-ups, target-safe frontier selection, retrospective register, coverage spans, explicit gaps, and reader-specific presentation.
+- `docs/analyze-context-design.md`
+  - Analyze context strategy: character working-set tiering, explicit tool lanes, and edit-safety via proposals against preloaded sheets.
+- `docs/context-provenance-and-continuity.md`
+  - Architecture for context receipts, source-linked continuity projections, chronology, open-thread lifecycle, character knowledge, and authority boundaries.
+- `docs/timelines.md`
+  - Timelines (branches): isolated story copies, forking, switching, storage layout, and API.
+- `docs/character-chat.md`
+  - Character Chat architecture and API: conversation storage model, NDJSON streaming chat endpoint, persona modes, model/provider resolution, and frontend integration points.
+- `docs/prose-writing-panel.md`
+  - Prose Writing Panel flow: Tiptap-based editor behavior, autosave rules, selection transform operations (`rewrite`/`expand`/`compress`/custom), and the `librarian/prose-transform` API.
+- `docs/backend-stress-harness.md`
+  - How to run the synthetic backend stress harness for summary/index scalability and context build latency benchmarking.
+- `docs/third-party-plugins.md`
+  - How to build external plugins, use runtime iframe UI, scaffold from templates, client-side panel hooks (`onPanelOpen`/`onPanelClose` for bundled, `postMessage` for iframe), query cache invalidation, and validate in dev.
+- `docs/runtime-plugins-and-binary-packaging.md`
+  - Runtime plugin loading, binary build/package workflow, CI release automation, and deployment notes.
+- `docs/component-ids.md`
+  - Frontend `data-component-id` contract for extensibility and automation.
+- `docs/publishing-plugin-sdk.md`
+  - How to publish `@tealios/errata-plugin-sdk` manually and via GitHub Actions.
+- `docs/instruction-registry.md`
+  - Instruction registry: centralized built-in prompt defaults, registered keys, and the per-agent block customization path.
+- `docs/generation-pipeline.md`
+  - Generation pipeline: standard and prewriter modes, context assembly, streaming events, generation logs, and mode-specific behavior.
+- `docs/adding-agents.md`
+  - Contributor guide for adding new agents: file structure, system prompts, block builders, runtime logic, registration, model resolution, UI integration, testing checklist.
+- `docs/agent-observability.md`
+  - Agent observability: active registry, live activity stream, run traces, and the persistent librarian analyses/generation logs — which system answers which question, and who wires them (you don't).
+- `docs/documentation-sync-skill.md`
+  - Implementation notes and usage for the commit-driven documentation sync skill.
+
+Related:
+
+- `plugins/templates/README.md`
+  - Plugin recipe template catalog.
+- `packages/errata-plugin-sdk/package.json`
+  - Local SDK package: `@tealios/errata-plugin-sdk`.
+
+Automation:
+
+- `bun run docs:sync`
+  - Rebuilds `docs/commit-doc-sync.md` from git history and stores state in `.agent/docs-sync-state.json`.

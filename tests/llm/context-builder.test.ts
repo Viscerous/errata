@@ -4,9 +4,13 @@ import { createTempDir, makeTestSettings } from '../setup'
 import {
   createStory,
   createFragment,
+  getFragment,
 } from '@/server/fragments/storage'
 import { addProseSection } from '@/server/fragments/prose-chain'
 import type { StoryMeta, Fragment } from '@/server/fragments/schema'
+import { saveAnalysis } from '@/server/librarian/storage'
+import { analysisSourceRevision } from '@/server/librarian/continuity-source'
+import { SUMMARY_CONTRACT_VERSION } from '@/server/librarian/summary-projection'
 import {
   buildContext,
   buildContextState,
@@ -33,7 +37,6 @@ function makeStory(overrides: Partial<StoryMeta> = {}): StoryMeta {
     name: 'Test Story',
     description: 'A test story',
     coverImage: null,
-    summary: 'The hero embarked on a journey.',
     createdAt: now,
     updatedAt: now,
     settings: makeTestSettings(),
@@ -89,7 +92,6 @@ describe('context-builder', () => {
     expect(msg).toBeDefined()
     expect(msg!.content).toContain('Test Story')
     expect(msg!.content).toContain('A test story')
-    expect(msg!.content).toContain('The hero embarked on a journey.')
   })
 
   it('includes recent prose fragments in context', async () => {
@@ -630,8 +632,14 @@ describe('context-builder', () => {
   })
 
   it('omits story summary when excludeStorySummary is true', async () => {
-    const story = makeStory({ summary: 'Late events that should not leak into regenerate context.' })
+    const story = makeStory()
     await createStory(dataDir, story)
+    await createFragment(dataDir, story.id, makeFragment({
+      id: 'sm-authored',
+      type: 'summary',
+      name: 'Author overview',
+      content: 'Late events that should not leak into regenerate context.',
+    }))
 
     const messages = await buildContext(dataDir, story.id, 'Regenerate this section', {
       excludeStorySummary: true,
@@ -642,8 +650,8 @@ describe('context-builder', () => {
     expect(user.content).not.toContain('Late events that should not leak into regenerate context.')
   })
 
-  it('renders summary fragments into the context and filters by coverageEnd when summaryBeforeFragmentId is set', async () => {
-    const story = makeStory({ summary: '' })
+  it('renders source-current analysis memory before the recent prose window', async () => {
+    const story = makeStory()
     await createStory(dataDir, story)
 
     const proseIds = ['pr-0001', 'pr-0002', 'pr-0003', 'pr-0004']
@@ -659,39 +667,31 @@ describe('context-builder', () => {
       await addProseSection(dataDir, story.id, fragment.id)
     }
 
-    // Summary fragment covering up to pr-0002 — should appear in the context
-    // when target is pr-0003.
-    await createFragment(dataDir, story.id, makeFragment({
-      id: 'sm-a1a1a1',
-      type: 'summary',
-      name: 'Opening summary',
-      content: 'Summary A and B.',
-      placement: 'system',
-      meta: { chapterId: null, isEraSummary: false, coverageEnd: 'pr-0002' },
-    }))
-    // Summary fragment covering up to pr-0004 — should be excluded at pr-0003.
-    await createFragment(dataDir, story.id, makeFragment({
-      id: 'sm-b2b2b2',
-      type: 'summary',
-      name: 'Later summary',
-      content: 'Summary D.',
-      placement: 'system',
-      meta: { chapterId: null, isEraSummary: false, coverageEnd: 'pr-0004' },
-    }))
+    const first = await getFragment(dataDir, story.id, 'pr-0001')
+    await saveAnalysis(dataDir, story.id, {
+      id: 'la-first',
+      createdAt: new Date().toISOString(),
+      fragmentId: 'pr-0001',
+      sourceRevision: analysisSourceRevision(first!),
+      summaryUpdate: 'By then, Summary A had happened.',
+      summaryContractVersion: SUMMARY_CONTRACT_VERSION,
+      mentions: [], contradictions: [], fragmentChangeProposals: [], timelineEvents: [],
+    })
 
     const messages = await buildContext(dataDir, story.id, 'Regenerate C', {
       proseBeforeFragmentId: 'pr-0003',
-      summaryBeforeFragmentId: 'pr-0003',
       excludeFragmentId: 'pr-0003',
+      contextCompact: { type: 'proseLimit', value: 1 },
     })
     const joined = messages.map(m => m.content).join('\n')
 
-    expect(joined).toContain('Summary A and B.')
-    expect(joined).not.toContain('Summary D.')
+    expect(joined).toContain('By then, Summary A had happened.')
+    expect(joined).toContain('## End of Story Summary')
+    expect(joined).not.toContain('Passage 3')
   })
 
-  it('keeps era summaries in before-fragment context even when they have no coverageEnd', async () => {
-    const story = makeStory({ summary: '' })
+  it('excludes unscoped authored summaries from target-relative context', async () => {
+    const story = makeStory()
     await createStory(dataDir, story)
 
     const proseIds = ['pr-0001', 'pr-0002', 'pr-0003']
@@ -713,21 +713,20 @@ describe('context-builder', () => {
       name: 'Opening era',
       content: 'Old arc summary.',
       placement: 'system',
-      meta: { chapterId: null, isEraSummary: true },
+      meta: {},
     }))
 
     const messages = await buildContext(dataDir, story.id, 'Regenerate C', {
       proseBeforeFragmentId: 'pr-0003',
-      summaryBeforeFragmentId: 'pr-0003',
       excludeFragmentId: 'pr-0003',
     })
     const joined = messages.map(m => m.content).join('\n')
 
-    expect(joined).toContain('Old arc summary.')
+    expect(joined).not.toContain('Old arc summary.')
   })
 
   it('omits the summary block when no summary fragments exist', async () => {
-    const story = makeStory({ summary: '' })
+    const story = makeStory()
     await createStory(dataDir, story)
 
     const proseA = makeFragment({ id: 'pr-0001', type: 'prose', name: 'A', content: 'A', order: 1 })
@@ -906,7 +905,7 @@ describe('context blocks', () => {
       expect(ids).toContain('instructions')
       expect(ids).toContain('tools')
       expect(ids).toContain('story-info')
-      expect(ids).toContain('summary')
+      expect(ids).not.toContain('summary')
       expect(ids).toContain('author-input')
     })
 
@@ -927,7 +926,7 @@ describe('context blocks', () => {
     })
 
     it('omits summary block when summary is empty', async () => {
-      const story = makeStory({ summary: '' })
+      const story = makeStory()
       await createStory(dataDir, story)
 
       const state = await buildContextState(dataDir, story.id, 'Continue')
@@ -1011,56 +1010,6 @@ describe('context blocks', () => {
       }
     })
 
-    it('includes hierarchical chapter summaries when enabled', async () => {
-      const story = makeStory({
-        settings: makeTestSettings({
-          enableHierarchicalSummary: true,
-          contextCompact: { type: 'proseLimit', value: 2 },
-        }),
-      })
-      await createStory(dataDir, story)
-
-      const marker1 = makeFragment({ id: 'mk-0001', type: 'marker', name: 'Chapter 1', content: 'Meso summary for chapter 1.' })
-      const marker2 = makeFragment({ id: 'mk-0002', type: 'marker', name: 'Chapter 2', content: 'Meso summary for chapter 2.' })
-      const marker3 = makeFragment({ id: 'mk-0003', type: 'marker', name: 'Chapter 3', content: 'Meso summary for chapter 3.' })
-      const prose1 = makeFragment({ id: 'pr-0001', type: 'prose', content: 'Prose 1', order: 1 })
-      const prose2 = makeFragment({ id: 'pr-0002', type: 'prose', content: 'Prose 2', order: 2 })
-      const prose3 = makeFragment({ id: 'pr-0003', type: 'prose', content: 'Prose 3', order: 3 })
-      const prose4 = makeFragment({ id: 'pr-0004', type: 'prose', content: 'Prose 4', order: 4 })
-      const prose5 = makeFragment({ id: 'pr-0005', type: 'prose', content: 'Prose 5', order: 5 })
-
-      for (const fragment of [marker1, prose1, prose2, marker2, prose3, prose4, marker3, prose5]) {
-        await createFragment(dataDir, story.id, fragment)
-        await addProseSection(dataDir, story.id, fragment.id)
-      }
-
-      const state = await buildContextState(dataDir, story.id, 'Continue')
-      const blocks = createDefaultBlocks(state)
-
-      const chapterSummaries = findBlock(blocks, 'chapter-summaries')
-      expect(chapterSummaries).toBeDefined()
-      expect(chapterSummaries!.content).toContain('Meso summary for chapter 2.')
-      expect(chapterSummaries!.content).toContain('Meso summary for chapter 3.')
-      expect(chapterSummaries!.content).not.toContain('Meso summary for chapter 1.')
-    })
-
-    it('does not include chapter summaries block when hierarchical summaries are disabled', async () => {
-      const story = makeStory({
-        settings: makeTestSettings({
-          enableHierarchicalSummary: false,
-        }),
-      })
-      await createStory(dataDir, story)
-
-      const marker = makeFragment({ id: 'mk-0001', type: 'marker', name: 'Chapter 1', content: 'Meso summary.' })
-      await createFragment(dataDir, story.id, marker)
-      await addProseSection(dataDir, story.id, marker.id)
-
-      const state = await buildContextState(dataDir, story.id, 'Continue')
-      const blocks = createDefaultBlocks(state)
-
-      expect(findBlock(blocks, 'chapter-summaries')).toBeUndefined()
-    })
   })
 
   describe('compileBlocks', () => {

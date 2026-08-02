@@ -155,7 +155,6 @@ export async function runGeneration(
     ? {
         excludeFragmentId: existingFragment.id,
         proseBeforeFragmentId: existingFragment.id,
-        summaryBeforeFragmentId: existingFragment.id,
       }
     : {}
   let ctxState = await buildContextState(dataDir, storyId, effectiveInput, buildContextOpts)

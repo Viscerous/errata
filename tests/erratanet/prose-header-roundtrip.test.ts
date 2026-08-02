@@ -23,7 +23,6 @@ function makeStory(): StoryMeta {
     name: 'Host',
     description: 'Receives an illustrated passage',
     coverImage: null,
-    summary: '',
     createdAt: now,
     updatedAt: now,
     settings: makeTestSettings(),

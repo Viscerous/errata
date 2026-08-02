@@ -59,7 +59,6 @@ export const characterChat = createStreamingRunner<CharacterChatOptions, { chara
 
   contextOptions: (opts) => ({
     proseBeforeFragmentId: opts.storyPointFragmentId ?? undefined,
-    summaryBeforeFragmentId: opts.storyPointFragmentId ?? undefined,
   }),
 
   extraContext: async ({ opts, validated, modelId }) => ({

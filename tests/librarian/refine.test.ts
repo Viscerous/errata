@@ -29,7 +29,6 @@ function makeStory(overrides: Partial<StoryMeta> = {}): StoryMeta {
     name: 'Test Story',
     description: 'A test story',
     coverImage: null,
-    summary: 'A hero enters a forest.',
     createdAt: now,
     updatedAt: now,
     settings: makeTestSettings({ maxSteps: 5 }),
@@ -206,7 +205,7 @@ describe('librarian refine endpoint', () => {
   })
 
   it('includes story context in messages', async () => {
-    const story = makeStory({ summary: 'Epic quest' })
+    const story = makeStory()
     await createStory(dataDir, story)
 
     // Use a character fragment instead of prose (prose can't be refined via this endpoint)

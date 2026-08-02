@@ -22,7 +22,6 @@ function makeStory(): StoryMeta {
     name: 'Continuity Story',
     description: '',
     coverImage: null,
-    summary: '',
     createdAt: now,
     updatedAt: now,
     settings: makeTestSettings(),

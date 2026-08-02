@@ -9,6 +9,9 @@ import { resolveAndReportUsage } from '../llm/usage-normalizer'
 import { createLogger } from '../logging'
 import { type AgentBlockContext, baseBlockContext } from '../agents/agent-block-context'
 import { drainAgentStream } from '../agents/drain-agent-stream'
+import { suggestionDirectionSchema, type SuggestionDirection } from './schema'
+
+export type { SuggestionDirection } from './schema'
 
 const logger = createLogger('directions-suggest')
 
@@ -25,12 +28,6 @@ export interface DirectionProposalInput {
   count?: number
 }
 
-export interface SuggestionDirection {
-  title: string
-  description: string
-  instruction: string
-}
-
 export interface DirectionProposalResult {
   suggestions: SuggestionDirection[]
   modelId: string
@@ -38,12 +35,6 @@ export interface DirectionProposalResult {
   stepCount?: number
   finishReason?: string
 }
-
-const suggestionDirectionSchema = z.object({
-  title: z.string().trim().min(1),
-  description: z.string().trim().min(1),
-  instruction: z.string().trim().min(1),
-})
 
 export function parseSuggestionDirectionsResponse(text: string, count: number): SuggestionDirection[] {
   const jsonStr = text.trim().replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '')
@@ -73,10 +64,6 @@ export async function proposeDirections(
   // Load story to get custom prompt if configured
   const story = await getStory(dataDir, storyId)
   if (!story) throw new Error(`Story not found: ${storyId}`)
-  if (story.settings.disableLibrarianDirections === true) {
-    throw new Error('Direction suggestions are disabled for this story')
-  }
-
   const { model, modelId, temperature, providerOptions, guards } = await resolveAgentRuntime(dataDir, storyId, 'directions.suggest', story)
 
   const resolvedTemplate = instructionRegistry.resolve('directions.suggest-template', modelId)

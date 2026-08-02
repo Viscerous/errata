@@ -10,6 +10,7 @@ import {
 } from '../llm/fragment-context-blocks'
 import { selectAttentionContext } from '../llm/context-selection'
 import { renderContinuity } from '../librarian/continuity-view'
+import { renderSummaryProjection } from '../librarian/summary-projection'
 import type { AgentBlockContext } from '../agents/agent-block-context'
 import {
   instructionsBlock,
@@ -32,7 +33,7 @@ export function createDirectionsSuggestBlocks(ctx: AgentBlockContext): ContextBl
 
   blocks.push(instructionsBlock('directions.system', ctx))
 
-  blocks.push(storySummaryBlock(ctx.story.summary, {
+  blocks.push(storySummaryBlock(renderSummaryProjection(ctx.summaryProjection, 'directions.suggest') ?? undefined, {
     id: 'story-summary',
     order: 100,
     placeholder: STORY_SUMMARY_PLACEHOLDER,

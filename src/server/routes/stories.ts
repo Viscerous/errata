@@ -25,13 +25,11 @@ export function storyRoutes(dataDir: string) {
         name: body.name,
         description: body.description,
         coverImage: body.coverImage ?? null,
-        summary: '',
         createdAt: now,
         updatedAt: now,
         settings: {
           outputFormat: 'markdown',
           enabledPlugins: [],
-          summarizationThreshold: 4,
           maxSteps: 10,
           modelOverrides: {},
           generationMode: 'standard' as const,
@@ -47,8 +45,6 @@ export function storyRoutes(dataDir: string) {
           fragmentOrder: [],
           customFragmentTypes: [],
           contextCompact: { type: 'proseLimit' as const, value: 10 },
-          summaryCompact: { maxCharacters: 12000, targetCharacters: 9000 },
-          enableHierarchicalSummary: false,
         },
       }
       await createStory(dataDir, story)
@@ -149,7 +145,6 @@ export function storyRoutes(dataDir: string) {
         ...existing.settings,
         ...(body.enabledPlugins !== undefined ? { enabledPlugins: body.enabledPlugins } : {}),
         ...(body.outputFormat !== undefined ? { outputFormat: body.outputFormat } : {}),
-        ...(body.summarizationThreshold !== undefined ? { summarizationThreshold: body.summarizationThreshold } : {}),
         ...(body.maxSteps !== undefined ? { maxSteps: body.maxSteps } : {}),
         ...(body.modelOverrides !== undefined ? { modelOverrides: body.modelOverrides } : {}),
         // Legacy fields (kept for backward compat with older clients)
@@ -166,8 +161,6 @@ export function storyRoutes(dataDir: string) {
         ...(body.fragmentOrder !== undefined ? { fragmentOrder: body.fragmentOrder } : {}),
         ...(body.customFragmentTypes !== undefined ? { customFragmentTypes: body.customFragmentTypes } : {}),
         ...(body.contextCompact !== undefined ? { contextCompact: body.contextCompact } : {}),
-        ...(body.summaryCompact !== undefined ? { summaryCompact: body.summaryCompact } : {}),
-        ...(body.enableHierarchicalSummary !== undefined ? { enableHierarchicalSummary: body.enableHierarchicalSummary } : {}),
         ...(body.disableThinking !== undefined ? { disableThinking: body.disableThinking } : {}),
         ...(body.expandThoughtsByDefault !== undefined ? { expandThoughtsByDefault: body.expandThoughtsByDefault } : {}),
       }
@@ -199,7 +192,6 @@ export function storyRoutes(dataDir: string) {
       body: t.Object({
         enabledPlugins: t.Optional(t.Array(t.String())),
         outputFormat: t.Optional(t.Union([t.Literal('plaintext'), t.Literal('markdown')])),
-        summarizationThreshold: t.Optional(t.Number()),
         maxSteps: t.Optional(t.Number()),
         modelOverrides: t.Optional(t.Record(t.String(), t.Object({
           providerId: t.Optional(t.Union([t.String(), t.Null()])),
@@ -229,11 +221,6 @@ export function storyRoutes(dataDir: string) {
           type: t.Union([t.Literal('proseLimit'), t.Literal('maxTokens'), t.Literal('maxCharacters')]),
           value: t.Number(),
         })),
-        summaryCompact: t.Optional(t.Object({
-          maxCharacters: t.Number(),
-          targetCharacters: t.Number(),
-        })),
-        enableHierarchicalSummary: t.Optional(t.Boolean()),
         guidedContinuePrompt: t.Optional(t.String()),
         guidedSceneSettingPrompt: t.Optional(t.String()),
         guidedSuggestPrompt: t.Optional(t.String()),

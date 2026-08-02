@@ -1,5 +1,5 @@
 import { Elysia, t } from 'elysia'
-import { getStory, getFragment, mutateFragment, updateFragmentVersioned } from '../fragments/storage'
+import { getStory, getFragment } from '../fragments/storage'
 import {
   getGenerationLog,
   listGenerationLogs,
@@ -125,46 +125,10 @@ export function librarianRoutes(dataDir: string) {
         return { error: 'Story not found' }
       }
 
-      const previousSummary = analysis.summaryUpdate
       const nextSummary = body.summaryUpdate.trim()
-
-      // With an empty previous intent there is no text to locate in the
-      // fragment, so only the analysis record is updated below.
-      if (analysis.summaryFragmentId && previousSummary && previousSummary !== nextSummary) {
-        const summaryFragment = await getFragment(dataDir, params.storyId, analysis.summaryFragmentId)
-        if (!summaryFragment) {
-          set.status = 409
-          return { error: 'Linked summary fragment not found' }
-        }
-        const occurrenceCount = summaryFragment.content.split(previousSummary).length - 1
-        if (occurrenceCount !== 1) {
-          set.status = 409
-          return { error: 'Summary fragment changed; edit it from the Summaries panel' }
-        }
-        await updateFragmentVersioned(
-          dataDir,
-          params.storyId,
-          summaryFragment.id,
-          { content: summaryFragment.content.replace(previousSummary, nextSummary) },
-          { reason: 'librarian-summary-edit' },
-        )
-      }
 
       analysis.summaryUpdate = nextSummary
       await saveLibrarianAnalysis(dataDir, params.storyId, analysis)
-
-      const latestByFragment = await getLatestAnalysisIdsByFragment(dataDir, params.storyId)
-      if (latestByFragment.get(analysis.fragmentId) === analysis.id) {
-        await mutateFragment(dataDir, params.storyId, analysis.fragmentId, (fragment) => {
-          const meta = { ...fragment.meta }
-          const existing = (meta._librarian ?? {}) as Record<string, unknown>
-          meta._librarian = { ...existing, summary: nextSummary, analysisId: analysis.id }
-          return {
-            ...fragment,
-            meta,
-          }
-        })
-      }
 
       return analysis
     }, {

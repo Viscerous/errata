@@ -48,7 +48,7 @@ All notable changes to Errata are documented here. Format loosely follows
   (`story.summary`, `analysis.summaryUpdate`, `fragment.meta._librarian.summary`)
   into a first-class `summary` fragment type (`sm-` prefix). Summaries are now
   editable, taggable, versionable, reorderable, and referenceable via
-  `ctx.getFragment`. See `docs/summary-fragments-plan.md`.
+  `ctx.getFragment`.
   - Per-chapter summary fragments with overflow → era-summary compaction.
   - One-shot migration from `story.summary` on story load (idempotent).
   - `hiddenFromList` registry flag keeps summaries out of the fragment list by default.

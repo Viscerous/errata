@@ -42,7 +42,6 @@ describe('librarian storage', () => {
       name: 'Test Story',
       description: 'For librarian tests',
     coverImage: null,
-      summary: '',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       settings: makeTestSettings(),
@@ -60,6 +59,17 @@ describe('librarian storage', () => {
 
       const loaded = await getAnalysis(dataDir, storyId, 'analysis-a')
       expect(loaded).toEqual(analysis)
+    })
+
+    it('returns isolated values from the analysis read cache', async () => {
+      const analysis = makeAnalysis({ id: 'analysis-isolated' })
+      await saveAnalysis(dataDir, storyId, analysis)
+
+      const first = await getAnalysis(dataDir, storyId, analysis.id)
+      first!.summaryUpdate = 'Caller-local mutation'
+
+      const second = await getAnalysis(dataDir, storyId, analysis.id)
+      expect(second!.summaryUpdate).toBe('The hero entered the cave.')
     })
 
     it('returns null for non-existent analysis', async () => {
@@ -233,7 +243,6 @@ describe('librarian storage', () => {
       const state = await getState(dataDir, storyId)
       expect(state).toEqual({
         lastAnalyzedFragmentId: null,
-        summarizedUpTo: null,
         recentMentions: {},
         timeline: [],
       })
@@ -242,7 +251,6 @@ describe('librarian storage', () => {
     it('saves and loads state', async () => {
       const state: LibrarianState = {
         lastAnalyzedFragmentId: 'pr-0001',
-        summarizedUpTo: null,
         recentMentions: {
           'ch-0001': ['pr-0001', 'pr-0002'],
         },
@@ -259,14 +267,12 @@ describe('librarian storage', () => {
     it('overwrites previous state on save', async () => {
       await saveState(dataDir, storyId, {
         lastAnalyzedFragmentId: 'pr-0001',
-        summarizedUpTo: null,
         recentMentions: {},
         timeline: [],
       })
 
       await saveState(dataDir, storyId, {
         lastAnalyzedFragmentId: 'pr-0002',
-        summarizedUpTo: null,
         recentMentions: { 'ch-0001': ['pr-0002'] },
         timeline: [{ event: 'Battle', fragmentId: 'pr-0002' }],
       })

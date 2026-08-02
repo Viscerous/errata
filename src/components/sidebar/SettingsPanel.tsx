@@ -485,8 +485,6 @@ export function SettingsPanel({
     return onDesktopBridgeReady(() => setHasDesktopBridge(true))
   }, [])
 
-  const summaryCompact = story.settings.summaryCompact ?? { maxCharacters: 12000, targetCharacters: 9000 }
-
   if (customCssPanelOpen) {
     return <CustomCssPanel onClose={() => setCustomCssPanelOpen(false)} />
   }
@@ -770,75 +768,6 @@ export function SettingsPanel({
             </div>
           </SettingsGroup>
 
-          <SettingsGroup title="Memory" description="How story state is summarized and carried forward over time.">
-            <SettingRow label="Summarization" description="Positions back before summarizing" helpTopic="generation#summarization">
-              <NumberField
-                value={story.settings.summarizationThreshold ?? 4}
-                min={0}
-                max={20}
-                onChange={(v) => updateMutation.mutate({ summarizationThreshold: v })}
-                disabled={updateMutation.isPending}
-              />
-            </SettingRow>
-            <div className="px-3 py-2.5">
-              <p className="text-[0.75rem] font-medium text-foreground/80">Summary compaction</p>
-              <p className="text-[0.625rem] text-muted-foreground mt-0.5 leading-snug">Keeps rolling summary bounded as stories grow</p>
-
-              <div className="mt-2.5 space-y-2.5">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-[0.6875rem] text-muted-foreground">Max characters</span>
-                  <NumberField
-                    value={summaryCompact.maxCharacters}
-                    min={100}
-                    max={100000}
-                    onChange={(v) => {
-                      const nextMax = Math.max(100, v)
-                      updateMutation.mutate({
-                        summaryCompact: {
-                          maxCharacters: nextMax,
-                          targetCharacters: Math.min(summaryCompact.targetCharacters, nextMax),
-                        },
-                      })
-                    }}
-                    disabled={updateMutation.isPending}
-                    className="w-20"
-                  />
-                </div>
-
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-[0.6875rem] text-muted-foreground">Target characters</span>
-                  <NumberField
-                    value={summaryCompact.targetCharacters}
-                    min={100}
-                    max={summaryCompact.maxCharacters}
-                    onChange={(v) => {
-                      updateMutation.mutate({
-                        summaryCompact: {
-                          maxCharacters: summaryCompact.maxCharacters,
-                          targetCharacters: Math.min(Math.max(100, v), summaryCompact.maxCharacters),
-                        },
-                      })
-                    }}
-                    disabled={updateMutation.isPending}
-                    className="w-20"
-                  />
-                </div>
-              </div>
-            </div>
-            <SettingRow
-              label="Hierarchical summaries"
-              description="Include chapter marker summaries with rolling story summary"
-              helpTopic="generation#hierarchical-summaries"
-            >
-              <Toggle
-                checked={story.settings.enableHierarchicalSummary ?? false}
-                onChange={(next) => updateMutation.mutate({ enableHierarchicalSummary: next })}
-                disabled={updateMutation.isPending}
-                label="Toggle hierarchical summaries"
-              />
-            </SettingRow>
-          </SettingsGroup>
-
           <SettingsGroup title="Librarian" description="What happens after prose is generated and the librarian follows up.">
             <SettingRow label="Disable auto analysis" description="Do not run the librarian automatically after prose generation">
               <Toggle
@@ -856,12 +785,12 @@ export function SettingsPanel({
                 label="Toggle auto-apply suggestions"
               />
             </SettingRow>
-            <SettingRow label="Disable directions" description="Skip guided story direction suggestions">
+            <SettingRow label="Disable automatic directions" description="Skip directions during automatic Librarian analysis; manual suggestions remain available">
               <Toggle
                 checked={story.settings.disableLibrarianDirections ?? false}
                 onChange={(next) => updateMutation.mutate({ disableLibrarianDirections: next })}
                 disabled={updateMutation.isPending}
-                label="Toggle disable directions"
+                label="Toggle automatic directions"
               />
             </SettingRow>
             <SettingRow label="Disable suggestions" description="Skip fragment corrections and new-record suggestions during analysis">

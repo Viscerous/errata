@@ -14,7 +14,6 @@ function makeStory(): StoryMeta {
     name: 'Host Story',
     description: 'Story that receives an installed pack',
     coverImage: null,
-    summary: '',
     createdAt: now,
     updatedAt: now,
     settings: makeTestSettings(),

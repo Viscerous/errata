@@ -76,7 +76,6 @@ describe('librarian API routes', () => {
       name: 'Librarian API Test',
       description: 'Testing librarian routes',
       coverImage: null,
-      summary: '',
       createdAt: '2025-01-01T00:00:00.000Z',
       updatedAt: '2025-01-01T00:00:00.000Z',
       settings: makeTestSettings({ librarianProviderId: null, librarianModelId: null }),
@@ -109,7 +108,6 @@ describe('librarian API routes', () => {
     it('returns saved state', async () => {
       const state: LibrarianState = {
         lastAnalyzedFragmentId: 'pr-0001',
-        summarizedUpTo: null,
         recentMentions: { 'ch-0001': ['pr-0001'] },
         timeline: [{ event: 'Battle', fragmentId: 'pr-0001' }],
       }
@@ -254,19 +252,13 @@ describe('librarian API routes', () => {
         createdAt: '2025-01-01T00:00:00.000Z',
         updatedAt: '2025-01-01T00:00:00.000Z',
         order: 0,
-        meta: {
-          _librarian: {
-            summary: 'Something happened.',
-            analysisId: 'analysis-edit',
-          },
-        },
+        meta: {},
       })
 
       await saveAnalysis(dataDir, storyId, makeAnalysis({
         id: 'analysis-edit',
         fragmentId: 'pr-0001',
         summaryUpdate: 'Something happened.',
-        summaryFragmentId: 'sm-0001',
       }))
 
       await createFragment(dataDir, storyId, {
@@ -304,13 +296,10 @@ describe('librarian API routes', () => {
       expect(updatedAnalysisJson.summaryUpdate).toBe('Something more precise happened.')
 
       const updatedFragment = await getFragment(dataDir, storyId, 'pr-0001')
-      expect(updatedFragment?.meta?._librarian).toEqual({
-        summary: 'Something more precise happened.',
-        analysisId: 'analysis-edit',
-      })
+      expect(updatedFragment?.meta?._librarian).toBeUndefined()
 
       const updatedSummary = await getFragment(dataDir, storyId, 'sm-0001')
-      expect(updatedSummary?.content).toBe('Earlier events. Something more precise happened. Later events.')
+      expect(updatedSummary?.content).toBe('Earlier events. Something happened. Later events.')
     })
   })
 

@@ -167,6 +167,10 @@ async function runAnalysis(
     runningFragmentId: null,
     lastError,
   })
+  // Roll-up demand is marked while contexts are projected, but model work is
+  // released only after the foreground Analyze queue is fully idle.
+  const { queueSummaryRollupMaintenance } = await import('./summary-rollups')
+  queueSummaryRollupMaintenance(dataDir, storyId, branchId)
 }
 
 /**

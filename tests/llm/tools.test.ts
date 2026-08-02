@@ -20,7 +20,6 @@ function makeStory(): StoryMeta {
     name: 'Test Story',
     description: 'A test story',
     coverImage: null,
-    summary: '',
     createdAt: now,
     updatedAt: now,
     settings: makeTestSettings(),
@@ -423,13 +422,15 @@ describe('LLM tools', () => {
       name: 'Opening summary',
       content: 'The fragment summary is canonical.',
       placement: 'system',
-      meta: { chapterId: null, isEraSummary: false },
+      meta: {},
     }))
 
     const tools = createFragmentTools(dataDir, storyId)
     const result = await execTool(tools.readStorySummary, {})
 
-    expect(result.summary).toBe('The fragment summary is canonical.')
+    expect(result.summary).toContain('### Authored Story Memory')
+    expect(result.summary).toContain('The fragment summary is canonical.')
+    expect(result.summary).toContain('## End of Story Summary')
     expect(result.fragments[0]).toMatchObject({ id: 'sm-test01', type: 'summary' })
   })
 

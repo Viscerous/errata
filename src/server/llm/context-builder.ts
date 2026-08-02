@@ -1,7 +1,7 @@
-import { getStory, listFragments, getFragment, migrateStoryToSummaryFragments } from '../fragments/storage'
+import { getStory, listFragments, getFragment } from '../fragments/storage'
 import { instructionRegistry } from '../instructions'
 import { createLogger } from '../logging'
-import { getActiveProseIds, findSectionIndex, getProseChain } from '../fragments/prose-chain'
+import { getActiveProseIds, findSectionIndex } from '../fragments/prose-chain'
 import { type Fragment, type StoryMeta } from '../fragments/schema'
 import {
   buildFragmentContextLanes,
@@ -23,6 +23,12 @@ import {
 import { collectRecentContextSignals } from './context-selection'
 import { fragmentTagPattern } from './fragment-tag'
 import { buildContinuityView, renderContinuity, type ContinuityView } from '../librarian/continuity-view'
+import {
+  buildSummaryProjection,
+  renderSummaryProjection,
+  type SummaryProjection,
+} from '../librarian/summary-projection'
+import { getAnalysisIndex } from '../librarian/storage'
 import type { ModelMessage } from 'ai'
 
 export {
@@ -78,18 +84,14 @@ export interface ContextBuildState {
   characterCatalog: Fragment[]
   // Catalog candidates for broad-context agents, mirroring knowledge/character catalog rows.
   customFragmentCatalogs?: CustomFragmentGroup[]
-  // Writer-specific; other agents (which extend this via AgentBlockContext) omit them.
-  chapterSummaries?: Array<{
-    markerId: string
-    name: string
-    summary: string
-  }>
   recentCharacters?: Fragment[]
   recentKnowledge?: Fragment[]
   // Recently mentioned custom fragments can be injected like recent characters/knowledge.
   recentCustomFragments?: CustomFragmentGroup[]
   /** Source-linked observations older than the raw prose window. */
   continuityView?: ContinuityView
+  /** Source-current chronological memory older than the raw prose window. */
+  summaryProjection?: SummaryProjection
   authorInput?: string
   modelId?: string
   /**
@@ -165,8 +167,6 @@ export interface BuildContextOptions {
   excludeFragmentId?: string
   /** Only include prose that comes before this fragment in the active prose chain */
   proseBeforeFragmentId?: string
-  /** Build summary only from librarian updates before this fragment */
-  summaryBeforeFragmentId?: string
   /** Exclude story summary from context */
   excludeStorySummary?: boolean
 }
@@ -207,63 +207,6 @@ function applyProseLimit(
   }
 }
 
-/**
- * Load and concatenate all active summary fragments (non-archived).
- * Era summaries come first (oldest coverage), then active chapter summaries.
- * Users who have placed or sticky-pinned summary fragments still see them
- * here — placement overrides only affect context position, not inclusion.
- */
-export async function loadSummaryContent(
-  dataDir: string,
-  storyId: string,
-): Promise<string> {
-  const summaries = await listFragments(dataDir, storyId, 'summary')
-  return summaryContent(summaries)
-}
-
-function summaryContent(summaries: Fragment[]): string {
-  if (summaries.length === 0) return ''
-  return [...summaries].sort((a, b) => {
-    const aEra = a.meta?.isEraSummary ? 0 : 1
-    const bEra = b.meta?.isEraSummary ? 0 : 1
-    if (aEra !== bEra) return aEra - bEra
-    return a.createdAt.localeCompare(b.createdAt)
-  }).map(f => f.content.trim()).filter(Boolean).join('\n\n')
-}
-
-/**
- * Load summary content for prose that appears in `proseIdsInWindow` — the
- * already-trimmed list of prose IDs that come before the regeneration
- * target. A summary fragment is relevant if its `meta.coverageEnd` falls
- * inside that window.
- */
-export async function loadSummaryContentBefore(
-  dataDir: string,
-  storyId: string,
-  proseIdsInWindow: string[],
-): Promise<string> {
-  const summaries = await listFragments(dataDir, storyId, 'summary')
-  return summaryContentBefore(summaries, proseIdsInWindow)
-}
-
-function summaryContentBefore(summaries: Fragment[], proseIdsInWindow: string[]): string {
-  if (summaries.length === 0) return ''
-
-  const windowIds = new Set(proseIdsInWindow)
-  const relevant = summaries.filter(f => {
-    if (f.meta?.isEraSummary) return true
-    const cov = f.meta?.coverageEnd as string | undefined
-    if (!cov) return false
-    return windowIds.has(cov)
-  })
-  return relevant.sort((a, b) => {
-    const aEra = a.meta?.isEraSummary ? 0 : 1
-    const bEra = b.meta?.isEraSummary ? 0 : 1
-    if (aEra !== bEra) return aEra - bEra
-    return a.createdAt.localeCompare(b.createdAt)
-  }).map(f => f.content.trim()).filter(Boolean).join('\n\n')
-}
-
 async function resolveBeforeSectionIndex(
   dataDir: string,
   storyId: string,
@@ -292,15 +235,10 @@ export async function buildContextState(
     contextCompact: optsContextCompact,
     excludeFragmentId,
     proseBeforeFragmentId,
-    summaryBeforeFragmentId,
     excludeStorySummary,
   } = opts
   const requestLogger = logger.child({ storyId })
   requestLogger.info('Building context state...')
-
-  // One-shot migration of legacy story.summary → summary fragment. Idempotent.
-  // Runs before we read the story so the post-migration state is picked up.
-  await migrateStoryToSummaryFragments(dataDir, storyId)
 
   const story = await getStory(dataDir, storyId)
   if (!story) {
@@ -330,6 +268,7 @@ export async function buildContextState(
   // If no chain exists (empty array), fall back to listing all prose fragments
   let activeProseIds = await getActiveProseIds(dataDir, storyId)
   let proseFragments: Fragment[] = []
+  const proseSegmentById = new Map<string, string>()
 
   if (activeProseIds.length === 0) {
     requestLogger.debug('No prose chain found, falling back to listing all prose')
@@ -365,15 +304,21 @@ export async function buildContextState(
     }
 
     // Load the actual prose fragments from chain, excluding the specified fragment
+    let segment = 0
     for (const proseId of activeProseIds) {
+      const fragment = fragmentById.get(proseId)
+      if (fragment?.type === 'marker') {
+        segment += 1
+        continue
+      }
       // Skip the excluded fragment
       if (excludeFragmentId && proseId === excludeFragmentId) {
         requestLogger.debug('Excluding fragment from context', { excludedId: excludeFragmentId })
         continue
       }
-      const fragment = fragmentById.get(proseId)
-      if (fragment && !fragment.archived && fragment.type !== 'marker') {
+      if (fragment && !fragment.archived) {
         proseFragments.push(fragment)
+        proseSegmentById.set(fragment.id, String(segment))
       } else if (!fragment) {
         requestLogger.warn('Prose fragment not found in chain', { proseId })
       }
@@ -404,68 +349,30 @@ export async function buildContextState(
   // Apply the prose limit
   const recentProse = applyProseLimit(sortedProse, effectiveCompact)
 
-  const continuityView = await buildContinuityView({
-    dataDir,
-    storyId,
-    activeProseFragments: sortedProse,
-  })
-
-  let chapterSummaries: Array<{ markerId: string; name: string; summary: string }> = []
-  if (story.settings.enableHierarchicalSummary && activeProseIds.length > 0 && recentProse.length > 0) {
-    const chain = await getProseChain(dataDir, storyId)
-    if (chain) {
-      const sectionByFragmentId = new Map(activeProseIds.map((id, idx) => [id, idx]))
-      const recentSectionIndexes = recentProse
-        .map((p) => sectionByFragmentId.get(p.id))
-        .filter((idx): idx is number => idx !== undefined)
-
-      if (recentSectionIndexes.length > 0) {
-        const start = Math.min(...recentSectionIndexes)
-        const end = Math.max(...recentSectionIndexes)
-        const markerIndexes: number[] = []
-
-        for (let i = 0; i < chain.entries.length; i++) {
-          const entry = chain.entries[i]
-          const activeId = entry.active
-          const fragment = fragmentById.get(activeId)
-          if (fragment?.type === 'marker') {
-            markerIndexes.push(i)
-          }
-        }
-
-        for (let i = 0; i < markerIndexes.length; i++) {
-          const markerIndex = markerIndexes[i]
-          const nextMarkerIndex = markerIndexes[i + 1] ?? chain.entries.length
-          const chapterStart = markerIndex + 1
-          const chapterEnd = nextMarkerIndex - 1
-
-          if (chapterEnd < chapterStart) continue
-          if (chapterEnd < start || chapterStart > end) continue
-
-          const markerId = chain.entries[markerIndex].active
-          const marker = fragmentById.get(markerId)
-          if (!marker || marker.type !== 'marker') continue
-          const summary = marker.content.trim()
-          if (!summary) continue
-
-          chapterSummaries.push({
-            markerId: marker.id,
-            name: marker.name,
-            summary,
-          })
-        }
-      }
-    }
-  }
-
-  let effectiveSummary: string
-  if (excludeStorySummary) {
-    effectiveSummary = ''
-  } else if (summaryBeforeFragmentId && activeProseIds.length > 0) {
-    effectiveSummary = summaryContentBefore(fragmentsOfType('summary'), activeProseIds)
-  } else {
-    effectiveSummary = summaryContent(fragmentsOfType('summary'))
-  }
+  // Both derived views consume the same analysis index. Read it once so a cold
+  // context build does not perform duplicate filesystem work before rendering.
+  const analysisIndex = await getAnalysisIndex(dataDir, storyId)
+  const [continuityView, summaryProjection] = await Promise.all([
+    buildContinuityView({
+      dataDir,
+      storyId,
+      activeProseFragments: sortedProse,
+      analysisIndex,
+    }),
+    excludeStorySummary
+      ? Promise.resolve(undefined)
+      : buildSummaryProjection({
+          dataDir,
+          storyId,
+          activeProseFragments: sortedProse,
+          recentProseFragments: recentProse,
+          summaryFragments: fragmentsOfType('summary'),
+          targetRelative: Boolean(proseBeforeFragmentId),
+          analysisIndex,
+          activeProseSegmentKeys: sortedProse.map((fragment) => proseSegmentById.get(fragment.id) ?? '0'),
+        }),
+  ])
+  const effectiveSummary = renderSummaryProjection(summaryProjection, 'generation.writer') ?? ''
 
   // Split guidelines, knowledge, and characters into sticky full context vs catalog rows.
   const sortByOrder = (a: Fragment, b: Fragment) => a.order - b.order || a.createdAt.localeCompare(b.createdAt)
@@ -503,7 +410,6 @@ export async function buildContextState(
     story: { ...story, summary: effectiveSummary },
     allFragments,
     proseFragments: recentProse,
-    chapterSummaries,
     stickyGuidelines,
     stickyKnowledge,
     stickyCharacters,
@@ -512,6 +418,7 @@ export async function buildContextState(
     recentKnowledge,
     recentCustomFragments,
     continuityView,
+    summaryProjection,
     guidelineCatalog: nonStickyGuidelines,
     knowledgeCatalog,
     characterCatalog,
@@ -609,7 +516,6 @@ export function createDefaultBlocks(state: ContextBuildState): ContextBlock[] {
   const {
     story,
     proseFragments,
-    chapterSummaries = [],
     authorInput = '',
   } = state
 
@@ -672,20 +578,11 @@ export function createDefaultBlocks(state: ContextBuildState): ContextBlock[] {
   })
 
   {
-    const summary = storySummaryBlock(story.summary, { order: 400 })
+    const summary = storySummaryBlock(
+      renderSummaryProjection(state.summaryProjection, 'generation.writer') ?? undefined,
+      { order: 400 },
+    )
     if (summary) blocks.push(summary)
-  }
-
-  if (chapterSummaries.length > 0) {
-    blocks.push({
-      id: 'chapter-summaries',
-      role: 'user',
-      content: markdownSection(2, 'Chapter/Arc Summaries',
-        chapterSummaries.map((c) => markdownSection(3, c.name, c.summary))
-      ),
-      order: 410,
-      source: 'builtin',
-    })
   }
 
   const continuity = renderContinuity(state, 'generation.writer')

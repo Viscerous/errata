@@ -24,20 +24,11 @@ export interface StoryMeta {
   name: string
   description: string
   coverImage: string | null
-  /**
-   * @deprecated DEPRECATED (summary-fragments migration). Rolling summaries
-   * now live in fragments of type 'summary'. This field is cleared by
-   * the server-side migration on first load and is no longer written
-   * anywhere. Kept so existing payloads parse. Safe to drop once the
-   * server-side schema removes it.
-   */
-  summary: string
   createdAt: string
   updatedAt: string
   settings: {
     outputFormat: 'plaintext' | 'markdown'
     enabledPlugins: string[]
-    summarizationThreshold?: number
     maxSteps?: number
     modelOverrides?: Record<string, { providerId?: string | null; modelId?: string | null; temperature?: number | null }>
     // Legacy fields (backward compat)
@@ -56,13 +47,6 @@ export interface StoryMeta {
     fragmentOrder?: string[]
     customFragmentTypes?: CustomFragmentType[]
     contextCompact?: { type: 'proseLimit' | 'maxTokens' | 'maxCharacters'; value: number }
-    /**
-     * @deprecated DEPRECATED (summary-fragments migration). Drove the old
-     * LLM-backed story.summary compactor. Per-fragment overflow now uses
-     * a constant threshold in the librarian. Setting is ignored.
-     */
-    summaryCompact?: { maxCharacters: number; targetCharacters: number }
-    enableHierarchicalSummary?: boolean
     guidedContinuePrompt?: string
     guidedSceneSettingPrompt?: string
     guidedSuggestPrompt?: string
@@ -274,6 +258,7 @@ export interface LibrarianAnalysis {
     updatedAt: string
   }
   summaryUpdate: string
+  summaryContractVersion?: number
   structuredSummary?: {
     events: string[]
     stateChanges: string[]
@@ -336,6 +321,20 @@ export interface LibrarianAnalysis {
     position: 'before' | 'during' | 'after'
   }>
   directions?: SuggestionDirection[]
+  analyzeLanes?: {
+    observation: {
+      requirement: 'required'
+      completion: 'complete' | 'incomplete'
+    }
+    recordMaintenance: {
+      requirement: 'conditional' | 'disabled'
+      completion: 'complete' | 'not-needed' | 'incomplete' | 'disabled'
+    }
+    directions: {
+      requirement: 'required' | 'disabled'
+      completion: 'complete' | 'incomplete' | 'disabled'
+    }
+  }
   passes?: Array<{
     name: string
     status: 'complete' | 'skipped' | 'failed'

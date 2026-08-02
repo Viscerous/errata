@@ -1,5 +1,6 @@
 import { tool, type ToolSet } from 'ai'
 import { z } from 'zod/v4'
+import { suggestionDirectionSchema, type SuggestionDirection } from '../directions/schema'
 import { getFragment, updateFragment } from '../fragments/storage'
 import { FragmentIdSchema, type Fragment } from '../fragments/schema'
 import { renderSegments, resolveSegments, segmentText, stripSegmentMarker, type TextSegment } from '../llm/segments'
@@ -96,7 +97,7 @@ export interface AnalysisCollector {
   fragmentChangeProposals: LibrarianFragmentChangeProposal[]
   timelineEvents: Array<{ event: string; position: 'before' | 'during' | 'after' }>
   continuityProjection: ContinuityProjection
-  directions: Array<{ title: string; description: string; instruction: string }>
+  directions: SuggestionDirection[]
 }
 
 export function createEmptyCollector(): AnalysisCollector {
@@ -203,8 +204,8 @@ export const MAX_CITED_SEGMENTS = 8
 const proseCitationSchema = z.array(z.number().int().positive()).default([])
   .describe(`Sentence numbers from the New Prose Fragment that show this. Cite the fewest that carry it; only the first ${MAX_CITED_SEGMENTS} are kept.`)
 
-/** The optional lanes, which finishAnalysis lets the analyst abandon by name. */
-const skippedToolNameSchema = z.enum(['proposeRecordCorrections', 'proposeNewRecords', 'proposeDirections'])
+/** Conditional maintenance lanes may be abandoned after a failed attempt. */
+const skippedToolNameSchema = z.enum(['proposeRecordCorrections', 'proposeNewRecords'])
 
 const temporalFrameSchema = z.object({
   relation: z.enum(['forward', 'flashback', 'flash-forward', 'concurrent', 'uncertain']).default('uncertain')
@@ -293,7 +294,7 @@ function knowledgeOperationSchemaFor(registry: ContinuityKeyRegistry) {
 
 export function buildReportAnalysisInputSchema(registry: ContinuityKeyRegistry = {}) {
   return z.object({
-    summary: z.string().max(2400).default('').describe('A concise summary of what happened in the new prose fragment — a paragraph or two'),
+    summary: z.string().max(2400).default('').describe('A concise retrospective record of what had happened in the new prose fragment, written as past history rather than a scene to continue — a paragraph or two'),
     events: coercedStringArray
       .describe('Bullet-like event statements from the prose fragment — the few that matter, at most 8 are kept'),
     stateChanges: coercedStringArray
@@ -1413,12 +1414,12 @@ export function createAnalysisTools(
 
   if (!opts?.disableDirections) {
     tools.proposeDirections = tool({
-      description: 'Suggest 3-5 possible directions the story could go next, informed by the records reportAnalysis returned.',
+      description: 'Required when available: suggest 3-5 possible directions the story could go next, informed by the records reportAnalysis returned.',
       inputSchema: z.object({
-        directions: z.array(z.object({
-          title: z.string().describe('Short title for the direction (3-6 words)'),
-          description: z.string().describe('One sentence describing what would happen'),
-          instruction: z.string().describe('Instruction for the writer agent to follow this direction'),
+        directions: z.array(suggestionDirectionSchema.extend({
+          title: z.string().trim().min(1).describe('Short title for the direction (3-6 words)'),
+          description: z.string().trim().min(1).describe('One sentence describing what would happen'),
+          instruction: z.string().trim().min(1).describe('Instruction for the writer agent to follow this direction'),
         })).min(3).max(5),
       }),
       execute: async ({ directions }) => {
@@ -1459,11 +1460,9 @@ export function createAnalysisTools(
           const declared = abandoned.find((entry) => entry.toolName === proposalToolName)
           if (!declared?.reason) unexplained.push(proposalToolName)
         }
-        if (
-          tools.proposeDirections
-          && !successfulToolNames.has('proposeDirections')
-          && !skippedNames.has('proposeDirections')
-        ) missingRequired.push('proposeDirections')
+        if (tools.proposeDirections && !successfulToolNames.has('proposeDirections')) {
+          missingRequired.push('proposeDirections')
+        }
 
         if (falseCompleted.length > 0 || missingRequired.length > 0 || unexplained.length > 0) {
           return {

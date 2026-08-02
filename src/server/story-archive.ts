@@ -3,7 +3,7 @@ import { join, dirname } from 'node:path'
 import { existsSync } from 'node:fs'
 import { zipSync, unzipSync } from 'fflate'
 import { generateFragmentId } from '@/lib/fragment-ids'
-import { createStory, deleteStory } from './fragments/storage'
+import { createStory, deleteStory, normalizeStoryMeta } from './fragments/storage'
 import { saveProseChain } from './fragments/prose-chain'
 import { saveAssociations } from './fragments/associations'
 import { getBranchesIndex, getContentRoot } from './fragments/branches'
@@ -112,7 +112,7 @@ export async function importStoryFromZip(
   )
 
   // Build new story meta
-  const newMeta: StoryMeta = {
+  const newMeta = normalizeStoryMeta({
     ...originalMeta,
     id: newStoryId,
     name: originalMeta.name + ' (imported)',
@@ -123,7 +123,7 @@ export async function importStoryFromZip(
       providerId: null,
       modelId: null,
     },
-  }
+  })
 
   // Create story (sets up branches/main/ + branches.json)
   await createStory(dataDir, newMeta)

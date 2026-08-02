@@ -18,6 +18,7 @@ import {
 } from '../llm/fragment-context-blocks'
 import { instructionRegistry } from '../instructions'
 import { fragmentBaseHash } from '../fragments/change-operations'
+import { renderSummaryProjection, type SummaryReader } from '../librarian/summary-projection'
 
 // ─── Block helpers ───
 
@@ -46,11 +47,12 @@ export function systemFragmentsBlock(ctx: AgentBlockContext): ContextBlock | nul
   }
 }
 
-/** Story name, description, and summary. */
-export function storyInfoBlock(ctx: AgentBlockContext): ContextBlock {
+/** Story identity plus the reader-specific memory projection. */
+export function storyInfoBlock(ctx: AgentBlockContext, reader: SummaryReader = 'editing'): ContextBlock {
   const parts = [storyHeaderContent(ctx.story)]
-  if (ctx.story.summary) {
-    parts.push(markdownSection(2, STORY_SUMMARY_HEADING, ctx.story.summary))
+  const summary = renderSummaryProjection(ctx.summaryProjection, reader)
+  if (summary) {
+    parts.push(markdownSection(2, STORY_SUMMARY_HEADING, summary))
   }
   return {
     id: 'story-info',
@@ -73,15 +75,12 @@ export function recentProseBlock(ctx: AgentBlockContext): ContextBlock | null {
   }
 }
 
-/** Render prose summaries with librarian-summary fallback to string. */
+/** Render compact prose previews for chat-style contexts. */
 export function renderProseSummariesText(proseFragments: Fragment[], header: string): string {
   if (proseFragments.length === 0) return ''
   const rows: string[] = []
   for (const p of proseFragments) {
-    const summary = (p.meta._librarian as { summary?: string } | undefined)?.summary
-    if (summary) {
-      rows.push(`- ${p.id}: ${summary}`)
-    } else if (p.content.length < 600) {
+    if (p.content.length < 600) {
       rows.push(`- ${p.id}: \n${p.content}`)
     } else {
       rows.push(`- ${p.id}: ${p.content.slice(0, 500).replace(/\n/g, ' ')}... [truncated]`)

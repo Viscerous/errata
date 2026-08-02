@@ -273,7 +273,7 @@ All endpoints are prefixed with `/api`. Request/response bodies are JSON.
 | `POST` | `/stories` | `{ name, description, coverImage? }` | `StoryMeta` |
 | `GET` | `/stories` | — | `StoryMeta[]` |
 | `GET` | `/stories/:storyId` | — | `StoryMeta` |
-| `PUT` | `/stories/:storyId` | `{ name, description, summary?, coverImage? }` | `StoryMeta` |
+| `PUT` | `/stories/:storyId` | `{ name, description, coverImage? }` | `StoryMeta` |
 | `DELETE` | `/stories/:storyId` | — | `{ ok: true }` |
 | `PATCH` | `/stories/:storyId/settings` | Partial settings object | `StoryMeta` |
 
@@ -283,9 +283,6 @@ Important story settings for prose generation and memory include:
 - `maxSteps`
 - `disableThinking`
 - `contextCompact: { type: 'proseLimit' | 'maxTokens' | 'maxCharacters', value }`
-- `summarizationThreshold`
-- `summaryCompact: { maxCharacters, targetCharacters }`
-- `enableHierarchicalSummary`
 - `disableLibrarianAutoAnalysis`
 - `autoApplyLibrarianSuggestions`
 - `disableLibrarianDirections`

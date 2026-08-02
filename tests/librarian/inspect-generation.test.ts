@@ -9,7 +9,7 @@ const storyId = 'story-inspect'
 const now = '2025-01-01T00:00:00.000Z'
 
 function makeStory(): StoryMeta {
-  return { id: storyId, name: 'S', description: '', coverImage: null, summary: '', createdAt: now, updatedAt: now, settings: makeTestSettings() }
+  return { id: storyId, name: 'S', description: '', coverImage: null, createdAt: now, updatedAt: now, settings: makeTestSettings() }
 }
 
 function makeFragment(id: string): Fragment {

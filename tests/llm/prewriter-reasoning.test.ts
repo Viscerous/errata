@@ -29,7 +29,6 @@ function makeStory(overrides?: Partial<StoryMeta['settings']>): StoryMeta {
     name: 'Test Story',
     description: 'A test story',
     coverImage: null,
-    summary: 'A summary.',
     createdAt: now,
     updatedAt: now,
     settings: makeTestSettings(overrides),
@@ -70,7 +69,7 @@ describe('prewriter reasoning length', () => {
 
   it('defaults to normal', () => {
     const parsed = StoryMetaSchema.parse({
-      id: 's', name: 'n', description: '', coverImage: null, summary: '',
+      id: 's', name: 'n', description: '', coverImage: null,
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
     })
     expect(parsed.settings.prewriterReasoning).toBe('normal')

@@ -33,7 +33,6 @@ function makeStory(id: string = TEST_STORY_ID): StoryMeta {
     name: 'Test Story',
     description: 'A test story',
     coverImage: null,
-    summary: '',
     createdAt: now,
     updatedAt: now,
     settings: makeTestSettings(),
@@ -423,7 +422,6 @@ describe('branches', () => {
       // Save librarian state on main
       const state: LibrarianState = {
         lastAnalyzedFragmentId: 'pr-bakite',
-        summarizedUpTo: 'pr-bakite',
         recentMentions: { 'ch-alice': ['pr-bakite'] },
         timeline: [{ event: 'Alice arrives', fragmentId: 'pr-bakite' }],
       }
@@ -553,7 +551,6 @@ describe('branches', () => {
       // Save initial librarian state on main
       await saveState(dataDir, TEST_STORY_ID, {
         lastAnalyzedFragmentId: 'pr-bakite',
-        summarizedUpTo: null,
         recentMentions: {},
         timeline: [{ event: 'Start', fragmentId: 'pr-bakite' }],
       })
@@ -564,7 +561,6 @@ describe('branches', () => {
       // Modify librarian state in the branch
       await saveState(dataDir, TEST_STORY_ID, {
         lastAnalyzedFragmentId: 'pr-bakite',
-        summarizedUpTo: 'pr-bakite',
         recentMentions: { 'ch-bob': ['pr-bakite'] },
         timeline: [
           { event: 'Start', fragmentId: 'pr-bakite' },

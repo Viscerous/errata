@@ -299,7 +299,7 @@ export function storyHeaderContent(story: StoryMeta): string {
   ])
 }
 
-/** Canonical heading for the rolling summary — one phrasing across every agent. */
+/** Canonical heading for the reader-specific story-memory projection. */
 export const STORY_SUMMARY_HEADING = 'Story Summary So Far'
 
 export function storySummaryBlock(

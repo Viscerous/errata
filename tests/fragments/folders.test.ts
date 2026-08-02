@@ -32,7 +32,6 @@ const makeStory = (overrides: Partial<StoryMeta> = {}): StoryMeta => ({
   name: 'Test Story',
   description: 'A test story',
   coverImage: null,
-  summary: '',
   createdAt: '2026-01-01T00:00:00.000Z',
   updatedAt: '2026-01-01T00:00:00.000Z',
   settings: makeTestSettings(),

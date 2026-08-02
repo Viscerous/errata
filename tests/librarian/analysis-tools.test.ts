@@ -20,7 +20,6 @@ vi.mock('@/server/fragments/storage', () => ({
   createFragment: vi.fn(),
   updateFragment: vi.fn(),
   updateFragmentVersioned: vi.fn().mockResolvedValue(null),
-  migrateStoryToSummaryFragments: vi.fn().mockResolvedValue({ migrated: false }),
 }))
 
 function mockFragment(overrides: Record<string, unknown> = {}) {
@@ -118,26 +117,34 @@ describe('analysis-tools', () => {
     expect(tools).not.toHaveProperty('proposeDirections')
   })
 
-  it('finishAnalysis returns a terminal success marker without mutating analysis data', async () => {
+  it('finishAnalysis requires directions whenever the automatic direction tool is available', async () => {
     const collector = createEmptyCollector()
     const tools = createAnalysisTools(collector)
 
     await tools.reportAnalysis.execute!({ summary: 'A quiet passage.' }, {
       toolCallId: 'report', messages: [], abortSignal: undefined as unknown as AbortSignal,
     })
-    const beforeFinish = structuredClone(collector)
-
-    const result = await tools.finishAnalysis.execute!({
+    const skipped = await tools.finishAnalysis.execute!({
       completed: ['reportAnalysis'],
       skipped: [{ toolName: 'proposeDirections', reason: 'No useful branches yet.' }],
     }, { toolCallId: 'finish', messages: [], abortSignal: undefined as unknown as AbortSignal })
 
-    expect(result).toEqual({
-      ok: true,
-      completed: ['reportAnalysis'],
-      skipped: [{ toolName: 'proposeDirections', reason: 'No useful branches yet.' }],
+    expect(skipped).toMatchObject({
+      ok: false,
+      missingRequired: ['proposeDirections'],
     })
-    expect(collector).toEqual(beforeFinish)
+
+    await tools.proposeDirections.execute!({
+      directions: [
+        { title: 'Wait', description: 'The pause lengthens.', instruction: 'Continue the tense pause.' },
+        { title: 'Enter', description: 'A visitor arrives.', instruction: 'Introduce the unexpected visitor.' },
+        { title: 'Leave', description: 'Someone walks away.', instruction: 'Follow the abrupt departure.' },
+      ],
+    }, { toolCallId: 'directions', messages: [], abortSignal: undefined as unknown as AbortSignal })
+    const completed = await tools.finishAnalysis.execute!({
+      completed: ['reportAnalysis', 'proposeDirections'],
+    }, { toolCallId: 'finish-complete', messages: [], abortSignal: undefined as unknown as AbortSignal })
+    expect(completed).toMatchObject({ ok: true })
   })
 
   it('finishAnalysis rejects a failed proposal falsely claimed as completed', async () => {

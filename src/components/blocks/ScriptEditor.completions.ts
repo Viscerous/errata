@@ -39,7 +39,7 @@ const CTX_MEMBERS: Completion[] = [
   },
 
   // Common fields on every agent context
-  { label: 'story', type: 'property', detail: 'StoryMeta', info: 'The current story — name, description, summary, settings.' },
+  { label: 'story', type: 'property', detail: 'StoryMeta', info: 'The current story — name, description, cover image, and settings.' },
   { label: 'proseFragments', type: 'property', detail: 'Fragment[]', info: 'Recent prose fragments already included in the prompt.' },
   { label: 'stickyCharacters', type: 'property', detail: 'Fragment[]', info: 'Characters pinned to the prompt.' },
   { label: 'stickyGuidelines', type: 'property', detail: 'Fragment[]', info: 'Guideline fragments pinned to the prompt.' },
@@ -92,7 +92,6 @@ const STORY_MEMBERS: Completion[] = [
   { label: 'id', type: 'property', detail: 'string' },
   { label: 'name', type: 'property', detail: 'string' },
   { label: 'description', type: 'property', detail: 'string' },
-  { label: 'summary', type: 'property', detail: 'string', info: 'Rolling summary maintained by the librarian.' },
   { label: 'settings', type: 'property', detail: 'StorySettings' },
   { label: 'createdAt', type: 'property', detail: 'string' },
   { label: 'updatedAt', type: 'property', detail: 'string' },

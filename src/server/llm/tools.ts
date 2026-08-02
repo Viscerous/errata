@@ -4,7 +4,6 @@ import {
   getFragment,
   getStory,
   listFragments,
-  migrateStoryToSummaryFragments,
 } from '../fragments/storage'
 import { getActiveProseIds } from '../fragments/prose-chain'
 import { registry } from '../fragments/registry'
@@ -28,7 +27,8 @@ import {
   truncateText,
 } from '../fragments/change-operations'
 import { applyOperationsWithSnapshot, type AppliedChange } from '../fragments/change-apply'
-import { loadSummaryContent, STORY_SUMMARY_PLACEHOLDER } from './context-builder'
+import { buildContextState, STORY_SUMMARY_PLACEHOLDER } from './context-builder'
+import { renderSummaryProjection } from '../librarian/summary-projection'
 
 export {
   BASE_HASH_DESCRIPTION,
@@ -347,8 +347,8 @@ export function createFragmentTools(
     execute: withToolLogging('readStorySummary', storyId, async () => {
       const story = await getStory(dataDir, storyId)
       if (!story) return { error: 'Story not found' }
-      await migrateStoryToSummaryFragments(dataDir, storyId)
-      const summary = await loadSummaryContent(dataDir, storyId)
+      const context = await buildContextState(dataDir, storyId, '')
+      const summary = renderSummaryProjection(context.summaryProjection, 'editing') ?? ''
       const summaryFragments = await listFragments(dataDir, storyId, 'summary')
       return {
         summary: summary || STORY_SUMMARY_PLACEHOLDER,

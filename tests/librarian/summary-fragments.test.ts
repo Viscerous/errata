@@ -1,349 +1,183 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { createTempDir, seedTestProvider, makeTestSettings } from '../setup'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { createStory } from '@/server/fragments/storage'
+import type { Fragment, StoryMeta } from '@/server/fragments/schema'
+import { analysisSourceRevision } from '@/server/librarian/continuity-source'
 import {
-  createStory,
-  createFragment,
-  updateFragment,
-  listFragments,
-  migrateStoryToSummaryFragments,
-} from '@/server/fragments/storage'
-import { getAnalysis, listAnalyses } from '@/server/librarian/storage'
-import { initProseChain, addProseSection } from '@/server/fragments/prose-chain'
-import type { StoryMeta, Fragment } from '@/server/fragments/schema'
+  buildSummaryProjection,
+  renderSummaryProjection,
+  SUMMARY_CONTRACT_VERSION,
+} from '@/server/librarian/summary-projection'
+import { saveAnalysis, type LibrarianAnalysis } from '@/server/librarian/storage'
+import { createTempDir, makeTestSettings } from '../setup'
 
-const { mockAgentStream } = vi.hoisted(() => ({
-  mockAgentStream: vi.fn(),
-}))
-
-vi.mock('ai', async () => {
-  const actual = await vi.importActual('ai')
-  return {
-    ...actual,
-    ToolLoopAgent: class {
-      tools: Record<string, { execute: (args: unknown) => Promise<unknown> }>
-      constructor(opts: { tools?: Record<string, unknown> } = {}) {
-        this.tools = (opts.tools ?? {}) as Record<string, { execute: (args: unknown) => Promise<unknown> }>
-      }
-      async stream(args: unknown) {
-        return mockAgentStream(args, this.tools)
-      }
-    },
-  }
-})
-
-import { runLibrarian } from '@/server/librarian/agent'
-import { ensureCoreAgentsRegistered } from '@/server/agents'
-
-function makeStory(
-  overrides: Omit<Partial<StoryMeta>, 'settings'> & { settings?: Partial<StoryMeta['settings']> } = {},
-): StoryMeta {
+function story(): StoryMeta {
   const now = new Date().toISOString()
-  const defaultSettings: StoryMeta['settings'] = makeTestSettings({
-    summarizationThreshold: 0,
-    disableLibrarianDirections: true,
-  })
-  const base: StoryMeta = {
+  return {
     id: 'story-test',
     name: 'Test Story',
     description: 'A test story',
     coverImage: null,
-    summary: '',
     createdAt: now,
     updatedAt: now,
-    settings: defaultSettings,
-  }
-  return {
-    ...base,
-    ...overrides,
-    settings: { ...defaultSettings, ...(overrides.settings ?? {}) },
+    settings: makeTestSettings(),
   }
 }
 
-function makeFragment(overrides: Partial<Fragment>): Fragment {
+function prose(position: number, content = `Passage ${position}`): Fragment {
   const now = new Date().toISOString()
   return {
-    id: 'pr-0001',
+    id: `pr-${String(position).padStart(4, '0')}`,
     type: 'prose',
-    name: 'Prose',
+    name: `Passage ${position}`,
     description: '',
-    content: 'Some prose content.',
+    content,
     tags: [],
     refs: [],
     sticky: false,
-    placement: 'user' as const,
+    placement: 'user',
     createdAt: now,
     updatedAt: now,
-    order: 0,
+    order: position,
     meta: {},
-    ...overrides,
   }
 }
 
-function mockSummary(summary: string) {
-  mockAgentStream.mockImplementation(async (
-    _args: unknown,
-    tools: Record<string, { execute: (args: unknown) => Promise<unknown> }>,
-  ) => ({
-    fullStream: (async function* () {
-      yield { type: 'tool-call' as const, toolCallId: 'call-0', toolName: 'reportAnalysis', input: { summary } }
-      const output = await tools.reportAnalysis.execute({ summary })
-      yield { type: 'tool-result' as const, toolCallId: 'call-0', toolName: 'reportAnalysis', output }
-      yield { type: 'finish' as const, finishReason: 'stop' }
-    })(),
-  }))
-}
-
-async function setupChain(dataDir: string, storyId: string, ids: string[]) {
-  if (ids.length === 0) return
-  await initProseChain(dataDir, storyId, ids[0])
-  for (let i = 1; i < ids.length; i++) {
-    await addProseSection(dataDir, storyId, ids[i])
+function analysis(fragment: Fragment, text: string, id = `la-${fragment.id}`): LibrarianAnalysis {
+  return {
+    id,
+    createdAt: new Date().toISOString(),
+    fragmentId: fragment.id,
+    sourceRevision: analysisSourceRevision(fragment),
+    summaryUpdate: text,
+    summaryContractVersion: SUMMARY_CONTRACT_VERSION,
+    mentions: [],
+    contradictions: [],
+    fragmentChangeProposals: [],
+    timelineEvents: [],
   }
 }
 
-describe('summary fragments', () => {
+describe('summary projection', () => {
   let dataDir: string
   let cleanup: () => Promise<void>
-  const storyId = 'story-test'
 
   beforeEach(async () => {
-    ensureCoreAgentsRegistered()
-    const tmp = await createTempDir()
-    dataDir = tmp.path
-    cleanup = tmp.cleanup
-    await seedTestProvider(dataDir)
-    vi.clearAllMocks()
+    const temp = await createTempDir()
+    dataDir = temp.path
+    cleanup = temp.cleanup
+    await createStory(dataDir, story())
   })
 
-  afterEach(async () => {
-    await cleanup()
-  })
+  afterEach(async () => cleanup())
 
-  // ── Append behavior ──────────────────────────────────────────
+  it('folds only source-current analyses before the recent prose window', async () => {
+    const passages = [1, 2, 3, 4].map((position) => prose(position))
+    await saveAnalysis(dataDir, 'story-test', analysis(passages[0], 'By then, the gate had opened.'))
+    await saveAnalysis(dataDir, 'story-test', analysis(passages[1], 'This summary becomes stale.'))
+    passages[1] = { ...passages[1], content: 'The edited second passage.' }
 
-  it('appends two same-chapter analyses into a single summary fragment', async () => {
-    await createStory(dataDir, makeStory())
-    await createFragment(dataDir, storyId, makeFragment({ id: 'pr-0001' }))
-    await createFragment(dataDir, storyId, makeFragment({ id: 'pr-0002' }))
-    await setupChain(dataDir, storyId, ['pr-0001', 'pr-0002'])
-
-    mockSummary('First event.')
-    await runLibrarian(dataDir, storyId, 'pr-0001')
-
-    mockSummary('Second event.')
-    await runLibrarian(dataDir, storyId, 'pr-0002')
-
-    const summaries = await listFragments(dataDir, storyId, 'summary')
-    expect(summaries).toHaveLength(1)
-    expect(summaries[0].content).toContain('First event.')
-    expect(summaries[0].content).toContain('Second event.')
-    expect(summaries[0].meta?.chapterId ?? null).toBeNull()
-  })
-
-  it('groups analyses under distinct chapter markers', async () => {
-    await createStory(dataDir, makeStory())
-    await createFragment(dataDir, storyId, makeFragment({ id: 'mk-001', type: 'marker', name: 'Chapter One' }))
-    await createFragment(dataDir, storyId, makeFragment({ id: 'pr-0001' }))
-    await createFragment(dataDir, storyId, makeFragment({ id: 'mk-002', type: 'marker', name: 'Chapter Two' }))
-    await createFragment(dataDir, storyId, makeFragment({ id: 'pr-0002' }))
-    await setupChain(dataDir, storyId, ['mk-001', 'pr-0001', 'mk-002', 'pr-0002'])
-
-    mockSummary('Events from chapter one.')
-    await runLibrarian(dataDir, storyId, 'pr-0001')
-
-    mockSummary('Events from chapter two.')
-    await runLibrarian(dataDir, storyId, 'pr-0002')
-
-    const summaries = await listFragments(dataDir, storyId, 'summary')
-    expect(summaries).toHaveLength(2)
-    const byChapter = new Map(summaries.map(s => [s.meta?.chapterId, s]))
-    expect(byChapter.get('mk-001')?.content).toContain('Events from chapter one.')
-    expect(byChapter.get('mk-002')?.content).toContain('Events from chapter two.')
-    expect(byChapter.get('mk-001')?.name).toContain('Chapter One')
-    expect(byChapter.get('mk-002')?.name).toContain('Chapter Two')
-  })
-
-  it('routes prose before the first marker into the Opening chapter (chapterId = null)', async () => {
-    await createStory(dataDir, makeStory())
-    await createFragment(dataDir, storyId, makeFragment({ id: 'pr-0001' }))
-    await createFragment(dataDir, storyId, makeFragment({ id: 'mk-001', type: 'marker', name: 'Chapter One' }))
-    await createFragment(dataDir, storyId, makeFragment({ id: 'pr-0002' }))
-    await setupChain(dataDir, storyId, ['pr-0001', 'mk-001', 'pr-0002'])
-
-    mockSummary('Pre-chapter event.')
-    await runLibrarian(dataDir, storyId, 'pr-0001')
-
-    mockSummary('Chapter one event.')
-    await runLibrarian(dataDir, storyId, 'pr-0002')
-
-    const summaries = await listFragments(dataDir, storyId, 'summary')
-    const byChapter = new Map(summaries.map(s => [s.meta?.chapterId ?? null, s]))
-    expect(byChapter.get(null)?.content).toContain('Pre-chapter event.')
-    expect(byChapter.get('mk-001')?.content).toContain('Chapter one event.')
-  })
-
-  // ── Analysis linkage ─────────────────────────────────────────
-
-  it('sets analysis.summaryFragmentId to the fragment that received the update', async () => {
-    await createStory(dataDir, makeStory())
-    await createFragment(dataDir, storyId, makeFragment({ id: 'pr-0001' }))
-    await setupChain(dataDir, storyId, ['pr-0001'])
-
-    mockSummary('Single event.')
-    const analysis = await runLibrarian(dataDir, storyId, 'pr-0001')
-
-    const summaries = await listFragments(dataDir, storyId, 'summary')
-    expect(summaries).toHaveLength(1)
-    const refetched = await getAnalysis(dataDir, storyId, analysis.id)
-    expect(refetched?.summaryFragmentId).toBe(summaries[0].id)
-  })
-
-  // ── Overflow split ───────────────────────────────────────────
-
-  it('after an overflow split, the new analyses point at the fresh chapter summary', async () => {
-    await createStory(dataDir, makeStory())
-    await createFragment(dataDir, storyId, makeFragment({ id: 'pr-0001' }))
-    await setupChain(dataDir, storyId, ['pr-0001'])
-
-    const big = 'Lorem ipsum dolor sit amet. '.repeat(50)
-    mockSummary(big + 'A')
-    await runLibrarian(dataDir, storyId, 'pr-0001')
-
-    await createFragment(dataDir, storyId, makeFragment({ id: 'pr-0002' }))
-    await setupChain(dataDir, storyId, ['pr-0001', 'pr-0002'])
-
-    mockSummary(big + 'B')
-    const analysisAfter = await runLibrarian(dataDir, storyId, 'pr-0002')
-
-    const active = await listFragments(dataDir, storyId, 'summary')
-    const fresh = active.find(f => !f.meta?.isEraSummary && !f.archived)
-    const era = active.find(f => f.meta?.isEraSummary)
-    expect(fresh).toBeTruthy()
-    expect(era).toBeTruthy()
-
-    const refetched = await getAnalysis(dataDir, storyId, analysisAfter.id)
-    expect(refetched?.summaryFragmentId).toBe(fresh!.id)
-  })
-
-  it('preserves user edits when the next librarian run appends', async () => {
-    await createStory(dataDir, makeStory())
-    await createFragment(dataDir, storyId, makeFragment({ id: 'pr-0001' }))
-    await setupChain(dataDir, storyId, ['pr-0001'])
-
-    mockSummary('Librarian wrote this.')
-    await runLibrarian(dataDir, storyId, 'pr-0001')
-
-    // User edits the content.
-    const [fragment] = await listFragments(dataDir, storyId, 'summary')
-    const edited = 'Writer rewrote this in their own voice.'
-    await updateFragment(dataDir, storyId, {
-      ...fragment,
-      content: edited,
-      updatedAt: new Date().toISOString(),
+    const projection = await buildSummaryProjection({
+      dataDir,
+      storyId: 'story-test',
+      activeProseFragments: passages,
+      recentProseFragments: passages.slice(2),
     })
 
-    // Next librarian run on a new prose section.
-    await createFragment(dataDir, storyId, makeFragment({ id: 'pr-0002' }))
-    await setupChain(dataDir, storyId, ['pr-0001', 'pr-0002'])
-
-    mockSummary('And then more happened.')
-    await runLibrarian(dataDir, storyId, 'pr-0002')
-
-    const [after] = await listFragments(dataDir, storyId, 'summary')
-    expect(after.content).toContain(edited)
-    expect(after.content).toContain('And then more happened.')
-    expect(after.content).not.toContain('Librarian wrote this.')
+    expect(projection.items).toHaveLength(2)
+    expect(projection.items[0]).toMatchObject({ kind: 'contribution', position: 1 })
+    expect(projection.items[1]).toMatchObject({ kind: 'gap', position: 2, gapReason: 'stale-source' })
+    expect(projection.firstRecentPosition).toBe(3)
   })
 
-  // ── Archive semantics ────────────────────────────────────────
+  it('never includes material at or beyond a target-relative prose boundary', async () => {
+    const passages = [1, 2, 3, 4, 5, 6].map((position) => prose(position))
+    for (const passage of passages) {
+      await saveAnalysis(dataDir, 'story-test', analysis(passage, `By Passage ${passage.order}, events had advanced.`))
+    }
 
-  it('excludes archived summaries from the default list', async () => {
-    await createStory(dataDir, makeStory())
-    await createFragment(dataDir, storyId, makeFragment({ id: 'pr-0001' }))
-    await setupChain(dataDir, storyId, ['pr-0001'])
-
-    mockSummary('Summary to be archived.')
-    await runLibrarian(dataDir, storyId, 'pr-0001')
-
-    const [fragment] = await listFragments(dataDir, storyId, 'summary')
-    await updateFragment(dataDir, storyId, {
-      ...fragment,
-      archived: true,
-      updatedAt: new Date().toISOString(),
+    const projection = await buildSummaryProjection({
+      dataDir,
+      storyId: 'story-test',
+      activeProseFragments: passages.slice(0, 4),
+      recentProseFragments: passages.slice(2, 4),
+      targetRelative: true,
     })
 
-    const active = await listFragments(dataDir, storyId, 'summary')
-    expect(active).toHaveLength(0)
-
-    const everything = await listFragments(dataDir, storyId, 'summary', { includeArchived: true })
-    expect(everything).toHaveLength(1)
-    expect(everything[0].archived).toBe(true)
+    expect(projection.items.map((item) => item.position)).toEqual([1, 2])
+    const rendered = renderSummaryProjection(projection, 'generation.writer')!
+    expect(rendered).not.toContain('Passage 5, events')
+    expect(rendered).not.toContain('Passage 6, events')
   })
 
-  // ── Migration ────────────────────────────────────────────────
+  it('excludes unscoped authored memory from target-relative prompts', async () => {
+    const passages = [prose(1), prose(2), prose(3)]
+    const authored: Fragment = {
+      ...prose(99, 'Late authored memory'),
+      id: 'sm-authored',
+      type: 'summary',
+      name: 'Author overview',
+      meta: {},
+    }
+    const scoped: Fragment = {
+      ...authored,
+      id: 'sm-scoped',
+      name: 'Scoped overview',
+      content: 'Safe early memory.',
+      meta: { validThrough: passages[0].id },
+    }
+    const scopedThroughRecent: Fragment = {
+      ...authored,
+      id: 'sm-scoped-recent',
+      name: 'Scoped through recent prose',
+      content: 'Still safe before the regeneration target.',
+      meta: { validThrough: passages[2].id },
+    }
 
-  it('migrates legacy story.summary to an era fragment and clears the field', async () => {
-    await createStory(dataDir, makeStory({
-      summary: 'Existing rolling summary from before the migration.',
-    }))
-
-    const result = await migrateStoryToSummaryFragments(dataDir, storyId)
-
-    expect(result.migrated).toBe(true)
-    const fragments = await listFragments(dataDir, storyId, 'summary')
-    expect(fragments).toHaveLength(1)
-    expect(fragments[0].content).toBe('Existing rolling summary from before the migration.')
-    expect(fragments[0].meta?.isEraSummary).toBe(true)
-
-    // Re-run is a no-op (idempotent).
-    const second = await migrateStoryToSummaryFragments(dataDir, storyId)
-    expect(second.migrated).toBe(false)
-    const stillOne = await listFragments(dataDir, storyId, 'summary')
-    expect(stillOne).toHaveLength(1)
-  })
-
-  it('does not migrate when summary fragments already exist, but still clears legacy field', async () => {
-    await createStory(dataDir, makeStory())
-    await createFragment(dataDir, storyId, makeFragment({ id: 'pr-0001' }))
-    await setupChain(dataDir, storyId, ['pr-0001'])
-
-    mockSummary('Fragment-based summary.')
-    await runLibrarian(dataDir, storyId, 'pr-0001')
-
-    // Simulate legacy drift: re-set story.summary after fragments exist.
-    const { getStory, updateStory } = await import('@/server/fragments/storage')
-    const story = await getStory(dataDir, storyId)
-    await updateStory(dataDir, {
-      ...story!,
-      summary: 'This should not become a second summary fragment.',
-      updatedAt: new Date().toISOString(),
+    const projection = await buildSummaryProjection({
+      dataDir,
+      storyId: 'story-test',
+      activeProseFragments: passages,
+      recentProseFragments: passages.slice(1),
+      summaryFragments: [authored, scoped, scopedThroughRecent],
+      targetRelative: true,
     })
 
-    const result = await migrateStoryToSummaryFragments(dataDir, storyId)
-    expect(result.migrated).toBe(false)
-
-    const after = await getStory(dataDir, storyId)
-    expect(after!.summary).toBe('') // Legacy field cleared.
-
-    const fragments = await listFragments(dataDir, storyId, 'summary')
-    expect(fragments).toHaveLength(1)
-    expect(fragments[0].content).not.toContain('This should not become a second')
+    expect(projection.authored.map((record) => record.id)).toEqual(['sm-scoped', 'sm-scoped-recent'])
   })
 
-  // ── Sanity: analysis record still carries intent ─────────────
+  it('renders reader guidance, exact gaps, the prose seam, and a closing fence', async () => {
+    const passages = [prose(1), prose(2)]
+    const projection = await buildSummaryProjection({
+      dataDir,
+      storyId: 'story-test',
+      activeProseFragments: passages,
+      recentProseFragments: passages.slice(1),
+    })
 
-  it('keeps summaryUpdate on the analysis alongside the fragment artifact', async () => {
-    await createStory(dataDir, makeStory())
-    await createFragment(dataDir, storyId, makeFragment({ id: 'pr-0001' }))
-    await setupChain(dataDir, storyId, ['pr-0001'])
+    const rendered = renderSummaryProjection(projection, 'librarian.analyze')!
+    expect(rendered).toContain('avoid reporting material that was already recorded')
+    expect(rendered).toContain('Passage 1')
+    expect(rendered).toContain('Coverage gap')
+    expect(rendered).toContain('recent prose begins at Passage 2')
+    expect(rendered).toContain('## End of Story Summary')
+  })
 
-    mockSummary('Librarian intent.')
-    await runLibrarian(dataDir, storyId, 'pr-0001')
+  it('always retains the six contributions nearest the prose seam', async () => {
+    const passages = Array.from({ length: 10 }, (_, index) => prose(index + 1))
+    for (const passage of passages) {
+      await saveAnalysis(dataDir, 'story-test', analysis(passage, 'A long record. '.repeat(30)))
+    }
 
-    const analyses = await listAnalyses(dataDir, storyId)
-    expect(analyses).toHaveLength(1)
-    const full = await getAnalysis(dataDir, storyId, analyses[0].id)
-    expect(full?.summaryUpdate).toBe('Librarian intent.')
-    expect(full?.summaryFragmentId).toBeDefined()
+    const projection = await buildSummaryProjection({
+      dataDir,
+      storyId: 'story-test',
+      activeProseFragments: passages,
+      recentProseFragments: [],
+      tokenBudget: 1,
+    })
+
+    expect(projection.items).toHaveLength(6)
+    expect(projection.items[0].position).toBe(5)
+    expect(projection.omittedBefore).toEqual({ start: 1, end: 4 })
   })
 })

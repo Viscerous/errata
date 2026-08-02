@@ -37,7 +37,6 @@ function makeStory(overrides: Partial<StoryMeta> = {}): StoryMeta {
     name: 'Test Story',
     description: 'A test story',
     coverImage: null,
-    summary: 'A hero enters a forest.',
     createdAt: now,
     updatedAt: now,
     settings: makeTestSettings(),
@@ -465,8 +464,15 @@ describe('librarian chat endpoint', () => {
   })
 
   it('includes story context in messages', async () => {
-    const story = makeStory({ summary: 'Epic fantasy tale' })
+    const story = makeStory()
     await createStory(dataDir, story)
+
+    await createFragment(dataDir, story.id, makeFragment({
+      type: 'summary',
+      id: 'sm-authored',
+      name: 'Author overview',
+      content: 'Epic fantasy tale',
+    }))
 
     const fragment = makeFragment({ type: 'prose', id: 'pr-0001', name: 'Opening' })
     await createFragment(dataDir, story.id, fragment)

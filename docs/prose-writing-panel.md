@@ -88,7 +88,7 @@ The status bar shows real-time statistics for the current passage:
 
 ## Dialogue Formatting
 
-Prose blocks automatically italicize quoted dialogue for visual distinction. This uses `formatDialogue` from `src/lib/character-mentions.ts`, composed with mention highlighting via `composeTextTransforms`. The formatting is display-only — the underlying fragment content is unchanged.
+Prose blocks automatically italicize quoted dialogue for visual distinction. This uses `formatDialogue` from `src/lib/fragment-mentions.ts`, composed with mention highlighting via `composeTextTransforms`. The formatting is display-only — the underlying fragment content is unchanged.
 
 ## Generation Abort
 
@@ -157,8 +157,3 @@ The prose outline panel mirrors the current chain and can enter a reorder mode. 
 - `src/routes/story.$storyId.tsx` (overlay mount)
 - `src/lib/api/librarian.ts` (client API)
 - `src/server/librarian/prose-transform.ts` (agent implementation)
-
-## Tests
-
-- `tests/api/prose-edit-reanalysis.test.ts`
-- `tests/librarian/refine.test.ts`

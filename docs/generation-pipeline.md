@@ -108,7 +108,7 @@ Additionally, these blocks are carried over from the standard context:
 | Characters | Full character sheets | Distilled in brief |
 | Guidelines | Sticky full + catalog rows | Sticky carried over; rest distilled in brief |
 | Knowledge | Sticky/recent full + catalog rows | Distilled in brief |
-| Summary | Rolling summary block | Distilled in brief |
+| Story memory | Source-linked bounded projection | Distilled in brief |
 | Prose | Full chain (within limits) | Recent prose only |
 | Author input | Direct | Embedded in brief's planning request |
 | Tools | Full access | Full access (can still look up fragments) |
@@ -190,7 +190,7 @@ Create an alternative version of an existing passage. Requires `fragmentId`. The
 
 Edit an existing passage based on instructions. Requires `fragmentId`. The existing content is included in the prompt with the refinement request. Like regenerate, the result is saved as a variation.
 
-For regenerate and refine, the context builder receives `excludeFragmentId`, `proseBeforeFragmentId`, and `summaryBeforeFragmentId` to ensure the model sees context as it was *before* the target fragment.
+For regenerate and refine, the context builder receives `excludeFragmentId` and `proseBeforeFragmentId` to ensure prose and derived memory both stop before the target fragment.
 
 ## File Reference
 

@@ -154,5 +154,3 @@ Character portraits are shown in the chat UI when the character fragment has an 
 - `src/server/agents/create-streaming-runner.ts` — shared streaming-agent pipeline factory
 - `src/server/agents/create-event-stream.ts` — shared NDJSON stream builder
 - `src/server/agents/compile-agent-context.ts` — block-based context compiler
-- `tests/character-chat/chat.test.ts`
-- `tests/character-chat/storage.test.ts`

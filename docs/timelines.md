@@ -175,4 +175,3 @@ A sidebar panel with a full list of timelines, showing parentage info ("from Mai
 | `src/components/sidebar/TimelineManagerPanel.tsx` | Sidebar management panel |
 | `src/components/prose/ProseBlock.tsx` | "Split from here" action on prose sections |
 | `src/routes/story.$storyId.tsx` | Route integration, query hooks, visibility state |
-| `tests/fragments/branches.test.ts` | Branch CRUD and isolation tests |

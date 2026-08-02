@@ -22,7 +22,6 @@ function makeStory(): StoryMeta {
     name: 'Test Story',
     description: 'A test story',
     coverImage: null,
-    summary: 'The hero began the journey.',
     createdAt: now,
     updatedAt: now,
     settings: makeTestSettings(),
@@ -59,7 +58,7 @@ function makeSummaryFragment(overrides: Partial<Fragment> = {}): Fragment {
     createdAt: now,
     updatedAt: now,
     order: 0,
-    meta: { chapterId: null, isEraSummary: false },
+    meta: {},
     archived: false,
     ...overrides,
   }

@@ -26,9 +26,6 @@ const OUTPUT_PATH = path.join('docs', 'commit-doc-sync.md')
 const DOC_INCLUDE = [
   'docs/',
   'README.md',
-  'PLAN.md',
-  'BACKEND-STRESSTEST.md',
-  'FRONTEND-STRESSTEST.md',
   'plugins/',
 ]
 

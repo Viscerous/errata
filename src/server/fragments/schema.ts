@@ -79,24 +79,12 @@ export const StoryMetaSchema = z.object({
   name: z.string(),
   description: z.string(),
   coverImage: z.string().nullable().default(null),
-  /**
-   * @deprecated DEPRECATED (summary-fragments migration). The rolling
-   * story summary now lives in `summary` fragments (type: 'summary').
-   * This field is no longer read by the context builder and no longer
-   * written by the librarian. It is kept only so existing stories parse
-   * without loss during the transition — migrateStoryToSummaryFragments
-   * converts any non-empty value to an era summary fragment on first
-   * load, then clears it. Safe to remove from the schema (and drop the
-   * migration helper) once all live stories have been migrated.
-   */
-  summary: z.string().default(''),
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
   settings: z
     .object({
       outputFormat: z.enum(['plaintext', 'markdown']).default('markdown'),
       enabledPlugins: z.array(z.string()).default([]),
-      summarizationThreshold: z.int().min(0).default(4),
       maxSteps: z.int().min(1).max(50).default(10),
       // Per-generation safety limits for the agent LLM calls. Optional; code
       // applies a sensible default cap (see resolveGenerationGuards) when unset.
@@ -145,19 +133,6 @@ export const StoryMetaSchema = z.object({
         type: z.enum(['proseLimit', 'maxTokens', 'maxCharacters']),
         value: z.number().int().min(1),
       }).default({ type: 'proseLimit', value: 10 }),
-      /**
-       * @deprecated DEPRECATED (summary-fragments migration). Drove the old
-       * LLM-backed story.summary compactor. With per-chapter summary
-       * fragments, overflow is handled by a per-fragment threshold
-       * (SUMMARY_OVERFLOW_THRESHOLD in librarian/agent.ts). This setting
-       * is no longer read anywhere. Safe to remove from the schema when
-       * the legacy story.summary field is dropped.
-       */
-      summaryCompact: z.object({
-        maxCharacters: z.number().int().min(100),
-        targetCharacters: z.number().int().min(100),
-      }).default({ maxCharacters: 12000, targetCharacters: 9000 }),
-      enableHierarchicalSummary: z.boolean().default(false),
       guidedContinuePrompt: z.string().optional(),
       guidedSceneSettingPrompt: z.string().optional(),
       guidedSuggestPrompt: z.string().optional(),
@@ -196,7 +171,7 @@ export const StoryMetaSchema = z.object({
         })
         .optional(),
     })
-    .default({ outputFormat: 'markdown', enabledPlugins: [], summarizationThreshold: 4, maxSteps: 10, modelOverrides: {}, generationMode: 'standard', clarifyBeforeGenerate: false, prewriterReasoning: 'normal', disableLibrarianAutoAnalysis: false, autoApplyLibrarianSuggestions: false, disableLibrarianDirections: false, disableLibrarianSuggestions: false, contextOrderMode: 'simple', fragmentOrder: [], customFragmentTypes: [], enabledBuiltinTools: [], contextCompact: { type: 'proseLimit', value: 10 }, summaryCompact: { maxCharacters: 12000, targetCharacters: 9000 }, enableHierarchicalSummary: false, disableThinking: false, expandThoughtsByDefault: false }),
+    .default({ outputFormat: 'markdown', enabledPlugins: [], maxSteps: 10, modelOverrides: {}, generationMode: 'standard', clarifyBeforeGenerate: false, prewriterReasoning: 'normal', disableLibrarianAutoAnalysis: false, autoApplyLibrarianSuggestions: false, disableLibrarianDirections: false, disableLibrarianSuggestions: false, contextOrderMode: 'simple', fragmentOrder: [], customFragmentTypes: [], enabledBuiltinTools: [], contextCompact: { type: 'proseLimit', value: 10 }, disableThinking: false, expandThoughtsByDefault: false }),
 })
 
 export type StoryMeta = z.infer<typeof StoryMetaSchema>
