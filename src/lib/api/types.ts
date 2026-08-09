@@ -3,6 +3,7 @@ import type {
   AgentBlockConfig,
   BlockConfig,
 } from '@/contracts/block-config'
+import type { Fragment as StoryFragment } from '@/contracts/story'
 export type {
   AgentBlockConfig,
   BlockConfig,
@@ -10,87 +11,17 @@ export type {
   CustomBlockDefinition,
   ImportConfigsPayload,
 } from '@/contracts/block-config'
+export type {
+  BranchesIndex,
+  BranchMeta,
+  CustomFragmentType,
+  FragmentVersion,
+  StoryMeta,
+} from '@/contracts/story'
 
-export interface CustomFragmentType {
-  type: string
-  name: string
-  description: string
-  icon: string
-  showInSidebar: boolean
-}
-
-export interface StoryMeta {
-  id: string
-  name: string
-  description: string
-  coverImage: string | null
-  createdAt: string
-  updatedAt: string
-  settings: {
-    outputFormat: 'plaintext' | 'markdown'
-    enabledPlugins: string[]
-    maxSteps?: number
-    modelOverrides?: Record<string, { providerId?: string | null; modelId?: string | null; temperature?: number | null }>
-    // Legacy fields (backward compat)
-    providerId?: string | null
-    modelId?: string | null
-    generationMode?: 'standard' | 'prewriter'
-    /** Prewriter asks clarifying questions before writing. Only active in prewriter mode. */
-    clarifyBeforeGenerate?: boolean
-    /** How much the prewriter deliberates. Only active in prewriter mode. */
-    prewriterReasoning?: 'short' | 'normal' | 'extensive'
-    disableLibrarianAutoAnalysis?: boolean
-    autoApplyLibrarianSuggestions?: boolean
-    disableLibrarianDirections?: boolean
-    disableLibrarianSuggestions?: boolean
-    contextOrderMode?: 'simple' | 'advanced'
-    fragmentOrder?: string[]
-    customFragmentTypes?: CustomFragmentType[]
-    contextCompact?: { type: 'proseLimit' | 'maxTokens' | 'maxCharacters'; value: number }
-    guidedContinuePrompt?: string
-    guidedSceneSettingPrompt?: string
-    guidedSuggestPrompt?: string
-    disableThinking?: boolean
-    expandThoughtsByDefault?: boolean
-    /** erratanet provenance: installed-from pack and/or where this story is published. */
-    erratanet?: {
-      pack?: string
-      version?: string
-      publishedAs?: { pack: string; version: string }
-      /** Fragment packs published from this story (e.g. a reusable "starter"). */
-      fragmentPacks?: { pack: string; version: string; fragmentIds: string[] }[]
-      /** Agent-config packs shared from this story, re-syncable as new versions. */
-      agentConfigs?: { pack: string; version: string; includes: string[] }[]
-    }
-  }
-}
-
-export interface Fragment {
-  id: string
-  type: string
-  name: string
-  description: string
-  content: string
-  tags: string[]
-  refs: string[]
-  sticky: boolean
-  placement: 'system' | 'user'
-  createdAt: string
-  updatedAt: string
-  order: number
-  meta: Record<string, unknown>
+/** API and local draft fragments always carry archive state. */
+export type Fragment = Omit<StoryFragment, 'archived'> & {
   archived: boolean
-  version?: number
-  versions?: FragmentVersion[]
-}
-
-export interface FragmentVersion {
-  version: number
-  name: string
-  description: string
-  content: string
-  createdAt: string
-  reason?: string
 }
 
 export interface FrozenSection {
@@ -552,22 +483,6 @@ export interface ExportedAgentConfig {
 export interface ExportedConfigs {
   blockConfig?: BlockConfig
   agentBlockConfigs?: Record<string, AgentBlockConfig>
-}
-
-// Branch types
-export interface BranchMeta {
-  id: string
-  name: string
-  order: number
-  parentBranchId?: string
-  forkAfterIndex?: number
-  createdAt: string
-}
-
-export interface BranchesIndex {
-  branches: BranchMeta[]
-  activeBranchId: string
-  rootBranchId: string
 }
 
 export interface SuggestionDirection {

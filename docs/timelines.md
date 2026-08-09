@@ -167,9 +167,9 @@ A sidebar panel with a full list of timelines, showing parentage info ("from Mai
 | File | Purpose |
 |---|---|
 | `src/server/fragments/branches.ts` | Core branching logic: migration, CRUD, content root resolution. Uses `withBranch()` for branch-aware storage in agent and generation code. |
-| `src/server/fragments/schema.ts` | `BranchMetaSchema`, `BranchesIndexSchema` |
+| `src/contracts/story.ts` | Canonical `BranchMetaSchema` and `BranchesIndexSchema` contracts |
 | `src/lib/api/branches.ts` | Frontend API client |
-| `src/lib/api/types.ts` | `BranchMeta`, `BranchesIndex` TypeScript types |
+| `src/lib/api/types.ts` | Compatibility re-exports for the shared branch types |
 | `src/lib/fragment-ids.ts` | `generateBranchId()` |
 | `src/components/prose/TimelineTabs.tsx` | Top bar tab component |
 | `src/components/sidebar/TimelineManagerPanel.tsx` | Sidebar management panel |

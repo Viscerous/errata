@@ -6,7 +6,7 @@ This document covers the full data model and API surface you need to write an im
 
 ## Fragment Schema
 
-Every fragment is a JSON object conforming to this schema. Source: `src/server/fragments/schema.ts`.
+Every fragment is a JSON object conforming to this schema. The canonical shared contract is `src/contracts/story.ts`; `src/server/fragments/schema.ts` remains as a compatibility façade for existing server imports.
 
 | Field | Type | Default | Constraints | Description |
 |---|---|---|---|---|
@@ -105,7 +105,7 @@ When writing an importer, you can generate IDs yourself as long as they match th
 
 ## Prose Chain
 
-The prose chain is the ordered sequence of prose sections that make up the story. Source: `src/server/fragments/prose-chain.ts`, schema in `src/server/fragments/schema.ts`.
+The prose chain is the ordered sequence of prose sections that make up the story. Source: `src/server/fragments/prose-chain.ts`, schema in `src/contracts/story.ts`.
 
 ### Schema
 
@@ -775,7 +775,8 @@ async function importChat(storyName: string, messages: Array<{ role: string; con
 
 | File | Purpose |
 |---|---|
-| `src/server/fragments/schema.ts` | Zod schemas for Fragment, ProseChain, StoryMeta, Branches |
+| `src/contracts/story.ts` | Canonical shared Zod schemas and types for Fragment, ProseChain, StoryMeta, and Branches |
+| `src/server/fragments/schema.ts` | Compatibility re-export for the original server-local contract path |
 | `src/server/fragments/storage.ts` | Filesystem CRUD for stories and fragments |
 | `src/server/fragments/prose-chain.ts` | Prose chain read/write operations |
 | `src/server/fragments/registry.ts` | Fragment type registry (built-in types + plugin types) |
