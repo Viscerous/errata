@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo, memo } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { api, type Fragment, type ProseChainEntry } from '@/lib/api'
+import { api, type Fragment, type ProseChainResponseEntry } from '@/lib/api'
 import { copyText } from '@/lib/clipboard'
 import { invalidateStoryContent } from '@/lib/branch-cache'
 import { Button } from '@/components/ui/button'
@@ -21,7 +21,7 @@ interface ProseBlockProps {
   fragment: Fragment
   displayIndex: number
   sectionIndex: number
-  chainEntry: ProseChainEntry | null
+  chainEntry: ProseChainResponseEntry | null
   isLast: boolean
   isFirst?: boolean
   onSelect: (fragment: Fragment) => void

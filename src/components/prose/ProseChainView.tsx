@@ -1,7 +1,7 @@
 import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo, useSyncExternalStore, memo } from 'react'
 import { useQuery, useMutation, useQueries, useQueryClient } from '@tanstack/react-query'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { api, type Fragment, type ProseChainEntry } from '@/lib/api'
+import { api, type Fragment, type ProseChainResponseEntry } from '@/lib/api'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { StreamMarkdown } from '@/components/ui/stream-markdown'
 import { Wand2, Bookmark, List } from 'lucide-react'
@@ -367,7 +367,7 @@ export function ProseChainView({
   }, [proseChain])
 
   const chainEntryMap = useMemo(() => {
-    const map = new Map<string, ProseChainEntry>()
+    const map = new Map<string, ProseChainResponseEntry>()
     if (!proseChain) return map
     for (const entry of proseChain.entries) {
       for (const f of entry.proseFragments) {

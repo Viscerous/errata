@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import type { ProseChain } from './schema'
+import type { StoredProseChain } from './schema'
 import { getContentRoot } from './branches'
 import { writeJsonAtomic } from '../fs-utils'
 import { withKeyLock } from '../async-lock'
@@ -25,13 +25,13 @@ async function proseChainPath(dataDir: string, storyId: string): Promise<string>
 export async function getProseChain(
   dataDir: string,
   storyId: string,
-): Promise<ProseChain | null> {
+): Promise<StoredProseChain | null> {
   const path = await proseChainPath(dataDir, storyId)
   if (!existsSync(path)) {
     return null
   }
   const raw = await readFile(path, 'utf-8')
-  return JSON.parse(raw) as ProseChain
+  return JSON.parse(raw) as StoredProseChain
 }
 
 /**
@@ -40,7 +40,7 @@ export async function getProseChain(
 export async function saveProseChain(
   dataDir: string,
   storyId: string,
-  chain: ProseChain,
+  chain: StoredProseChain,
 ): Promise<void> {
   const path = await proseChainPath(dataDir, storyId)
   await writeJsonAtomic(path, chain)
@@ -54,7 +54,7 @@ export async function initProseChain(
   storyId: string,
   fragmentId: string,
 ): Promise<void> {
-  const chain: ProseChain = {
+  const chain: StoredProseChain = {
     entries: [{
       proseFragments: [fragmentId],
       active: fragmentId,

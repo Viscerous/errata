@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import type { Fragment, PersonaMode, ProseChain } from '@/lib/api/types'
+import type { Fragment, PersonaMode, ProseChainResponse } from '@/lib/api/types'
 import { resolveFragmentVisual } from '@/lib/fragment-visuals'
 import { Button } from '@/components/ui/button'
 import {
@@ -25,7 +25,7 @@ interface ChatConfigProps {
   onCharacterChange: (id: string) => void
   persona: PersonaMode
   onPersonaChange: (persona: PersonaMode) => void
-  proseChain: ProseChain | null
+  proseChain: ProseChainResponse | null
   proseFragments: Fragment[]
   storyPointId: string | null
   onStoryPointChange: (id: string | null) => void

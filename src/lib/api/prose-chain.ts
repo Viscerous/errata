@@ -1,11 +1,11 @@
 import { apiFetch } from './client'
-import type { ProseChain } from './types'
+import type { ProseChainResponse } from './types'
 
 export const proseChain = {
   // `branchId` addresses a specific timeline; pass the same branchId the query is
   // keyed under so the cache entry holds that branch's chain (see `qk`).
   get: (storyId: string, branchId?: string) =>
-    apiFetch<ProseChain>(`/stories/${storyId}/prose-chain${branchId ? `?branch=${encodeURIComponent(branchId)}` : ''}`),
+    apiFetch<ProseChainResponse>(`/stories/${storyId}/prose-chain${branchId ? `?branch=${encodeURIComponent(branchId)}` : ''}`),
   addSection: (storyId: string, fragmentId: string) =>
     apiFetch<{ ok: boolean }>(`/stories/${storyId}/prose-chain`, {
       method: 'POST',

@@ -2,7 +2,7 @@ import { mkdir, readFile, cp, rm, rename } from 'node:fs/promises'
 import { join } from 'node:path'
 import { existsSync } from 'node:fs'
 import { AsyncLocalStorage } from 'node:async_hooks'
-import type { BranchesIndex, BranchMeta, ProseChain } from './schema'
+import type { BranchesIndex, BranchMeta, StoredProseChain } from './schema'
 import { generateBranchId } from '@/lib/fragment-ids'
 import { writeJsonAtomic, withStorageLock } from '../fs-utils'
 
@@ -286,7 +286,7 @@ export async function createBranch(
     if (forkAfterIndex !== undefined) {
       const chainPath = join(destDir, 'prose-chain.json')
       if (existsSync(chainPath)) {
-        const chain = JSON.parse(await readFile(chainPath, 'utf-8')) as ProseChain
+        const chain = JSON.parse(await readFile(chainPath, 'utf-8')) as StoredProseChain
         chain.entries = chain.entries.slice(0, forkAfterIndex + 1)
         await writeJson(chainPath, chain)
       }

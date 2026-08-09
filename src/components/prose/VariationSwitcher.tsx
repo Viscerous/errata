@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { api, type ProseChainEntry } from '@/lib/api'
+import { api, type ProseChainResponseEntry } from '@/lib/api'
 import { invalidateStoryContent } from '@/lib/branch-cache'
 import { Button } from '@/components/ui/button'
 import {
@@ -16,7 +16,7 @@ import { Caption } from '@/components/ui/prose-text'
 interface VariationSwitcherProps {
   storyId: string
   sectionIndex: number
-  entry: ProseChainEntry
+  entry: ProseChainResponseEntry
 }
 
 export function VariationSwitcher({ storyId, sectionIndex, entry }: VariationSwitcherProps) {

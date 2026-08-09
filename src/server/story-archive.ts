@@ -7,7 +7,7 @@ import { createStory, deleteStory, normalizeStoryMeta } from './fragments/storag
 import { saveProseChain } from './fragments/prose-chain'
 import { saveAssociations } from './fragments/associations'
 import { getBranchesIndex, getContentRoot } from './fragments/branches'
-import type { StoryMeta, Fragment, Associations, ProseChain, BranchesIndex } from './fragments/schema'
+import type { StoryMeta, Fragment, Associations, StoredProseChain, BranchesIndex } from './fragments/schema'
 
 export interface ExportResult {
   buffer: Uint8Array
@@ -249,8 +249,8 @@ async function importLegacyFormat(
   // Prose chain
   const proseChainKey = paths.find((p) => p.endsWith('prose-chain.json') && !p.includes('fragments/') && !p.includes('branches/'))
   if (proseChainKey) {
-    const proseChain = JSON.parse(decoder.decode(extracted[proseChainKey])) as ProseChain
-    const remappedProseChain: ProseChain = {
+    const proseChain = JSON.parse(decoder.decode(extracted[proseChainKey])) as StoredProseChain
+    const remappedProseChain: StoredProseChain = {
       entries: proseChain.entries.map((entry) => ({
         proseFragments: entry.proseFragments.map((id) => idMap.get(id) ?? id),
         active: idMap.get(entry.active) ?? entry.active,
@@ -350,8 +350,8 @@ async function writeBranchProseChain(
   const key = `${branchPrefix}/prose-chain.json`
   if (!extracted[key]) return
   handled.add(key)
-  const chain = JSON.parse(decoder.decode(extracted[key])) as ProseChain
-  const remapped: ProseChain = {
+  const chain = JSON.parse(decoder.decode(extracted[key])) as StoredProseChain
+  const remapped: StoredProseChain = {
     entries: chain.entries.map((entry) => ({
       proseFragments: entry.proseFragments.map((id) => idMap.get(id) ?? id),
       active: idMap.get(entry.active) ?? entry.active,

@@ -169,20 +169,44 @@ export const AssociationsSchema = z.object({
 
 export type Associations = z.infer<typeof AssociationsSchema>
 
-// Prose chain entry represents a section with variations
-export const ProseChainEntrySchema = z.object({
+// Stored prose chains contain only fragment IDs; the HTTP projection below
+// expands those IDs into summaries for the UI.
+export const StoredProseChainEntrySchema = z.object({
   proseFragments: z.array(FragmentIdSchema), // All variations/rewrites of this section
   active: FragmentIdSchema, // Currently active variation
 })
 
-export type ProseChainEntry = z.infer<typeof ProseChainEntrySchema>
+export type StoredProseChainEntry = z.infer<typeof StoredProseChainEntrySchema>
 
-// Prose chain represents the story's prose sections with versioning
-export const ProseChainSchema = z.object({
-  entries: z.array(ProseChainEntrySchema),
+export const StoredProseChainSchema = z.object({
+  entries: z.array(StoredProseChainEntrySchema),
 })
 
-export type ProseChain = z.infer<typeof ProseChainSchema>
+export type StoredProseChain = z.infer<typeof StoredProseChainSchema>
+
+export const ProseVariationSummarySchema = z.object({
+  id: FragmentIdSchema,
+  type: FragmentTypeSchema,
+  name: z.string().max(100),
+  description: z.string().max(250),
+  createdAt: z.iso.datetime(),
+  generationMode: z.string().optional(),
+})
+
+export type ProseVariationSummary = z.infer<typeof ProseVariationSummarySchema>
+
+export const ProseChainResponseEntrySchema = z.object({
+  proseFragments: z.array(ProseVariationSummarySchema),
+  active: FragmentIdSchema,
+})
+
+export type ProseChainResponseEntry = z.infer<typeof ProseChainResponseEntrySchema>
+
+export const ProseChainResponseSchema = z.object({
+  entries: z.array(ProseChainResponseEntrySchema),
+})
+
+export type ProseChainResponse = z.infer<typeof ProseChainResponseSchema>
 
 // --- Branch schemas ---
 

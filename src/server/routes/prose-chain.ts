@@ -16,6 +16,23 @@ import {
 import { generateFragmentId } from '@/lib/fragment-ids'
 import { withBranch } from '../fragments/branches'
 import { invokeAgent } from '../agents'
+import type {
+  Fragment,
+  ProseChainResponse,
+  ProseVariationSummary,
+} from '../fragments/schema'
+
+function toProseVariationSummary(fragment: Fragment): ProseVariationSummary {
+  const generationMode = fragment.meta.generationMode
+  return {
+    id: fragment.id,
+    type: fragment.type,
+    name: fragment.name,
+    description: fragment.description,
+    createdAt: fragment.createdAt,
+    ...(typeof generationMode === 'string' ? { generationMode } : {}),
+  }
+}
 
 export function proseChainRoutes(dataDir: string) {
   return new Elysia({ detail: { tags: ['Prose Chain'] } })
@@ -31,7 +48,7 @@ export function proseChainRoutes(dataDir: string) {
       return withBranch(dataDir, params.storyId, async () => {
         const chain = await getProseChain(dataDir, params.storyId)
         if (!chain) {
-          return { entries: [] }
+          return { entries: [] } satisfies ProseChainResponse
         }
 
         // Load the actual fragments for each variation
@@ -40,24 +57,19 @@ export function proseChainRoutes(dataDir: string) {
             const fragments = await Promise.all(
               entry.proseFragments.map(async (id) => {
                 const fragment = await getFragment(dataDir, params.storyId, id)
-                return fragment ? {
-                  id: fragment.id,
-                  type: fragment.type,
-                  name: fragment.name,
-                  description: fragment.description,
-                  createdAt: fragment.createdAt,
-                  generationMode: fragment.meta?.generationMode,
-                } : null
+                return fragment ? toProseVariationSummary(fragment) : null
               })
             )
             return {
-              proseFragments: fragments.filter(Boolean),
+              proseFragments: fragments.filter(
+                (fragment): fragment is ProseVariationSummary => fragment !== null,
+              ),
               active: entry.active,
             }
           })
         )
 
-        return { entries: entriesWithFragments }
+        return { entries: entriesWithFragments } satisfies ProseChainResponse
       }, query.branch)
     }, {
       query: t.Object({ branch: t.Optional(t.String()) }),

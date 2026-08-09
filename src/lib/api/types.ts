@@ -16,6 +16,9 @@ export type {
   BranchMeta,
   CustomFragmentType,
   FragmentVersion,
+  ProseChainResponse,
+  ProseChainResponseEntry,
+  ProseVariationSummary,
   StoryMeta,
 } from '@/contracts/story'
 
@@ -371,22 +374,6 @@ export interface ProviderConfigSafe {
 export interface GlobalConfigSafe {
   providers: ProviderConfigSafe[]
   defaultProviderId: string | null
-}
-
-export interface ProseChainEntry {
-  proseFragments: Array<{
-    id: string
-    type: string
-    name: string
-    description: string
-    createdAt: string
-    generationMode?: string
-  }>
-  active: string
-}
-
-export interface ProseChain {
-  entries: ProseChainEntry[]
 }
 
 export interface GenerationLog {

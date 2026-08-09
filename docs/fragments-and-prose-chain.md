@@ -105,7 +105,7 @@ When writing an importer, you can generate IDs yourself as long as they match th
 
 ## Prose Chain
 
-The prose chain is the ordered sequence of prose sections that make up the story. Source: `src/server/fragments/prose-chain.ts`, schema in `src/contracts/story.ts`.
+The prose chain is the ordered sequence of prose sections that make up the story. Source: `src/server/fragments/prose-chain.ts`, with separate `StoredProseChain` and expanded `ProseChainResponse` contracts in `src/contracts/story.ts`.
 
 ### Schema
 
@@ -775,7 +775,7 @@ async function importChat(storyName: string, messages: Array<{ role: string; con
 
 | File | Purpose |
 |---|---|
-| `src/contracts/story.ts` | Canonical shared Zod schemas and types for Fragment, ProseChain, StoryMeta, and Branches |
+| `src/contracts/story.ts` | Canonical shared Zod schemas and types for Fragment, stored/API prose chains, StoryMeta, and Branches |
 | `src/server/fragments/schema.ts` | Compatibility re-export for the original server-local contract path |
 | `src/server/fragments/storage.ts` | Filesystem CRUD for stories and fragments |
 | `src/server/fragments/prose-chain.ts` | Prose chain read/write operations |
