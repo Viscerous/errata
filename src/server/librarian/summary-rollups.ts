@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { mkdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { ToolLoopAgent, stepCountIs } from 'ai'
+import { ToolLoopAgent, stepCountIs, tool } from 'ai'
 import { z } from 'zod/v4'
 import { getContentRoot, getScopedBranchId, withBranch } from '../fragments/branches'
 import { getFragment, getStory } from '../fragments/storage'
@@ -11,16 +11,25 @@ import { writeJsonAtomic } from '../fs-utils'
 import { withKeyLock } from '../async-lock'
 import { createLogger } from '../logging'
 import { drainAgentStream } from '../agents/drain-agent-stream'
-import { resolveAgentRuntime } from '../llm/client'
-import { resolveAndReportUsage } from '../llm/usage-normalizer'
+import { buildProviderOptions, resolveAgentRuntime } from '../llm/client'
+import { resolveAndReportServedUsage } from '../llm/usage-normalizer'
+import { getObservedServedModelId } from '../llm/served-models'
 import { proseContentHash } from './continuity-source'
 import { getAnalysis, getAnalysisIndex } from './storage'
 import { SUMMARY_CONTRACT_VERSION } from './summary-projection'
-import { DEFAULT_TOOL_LOOP_IDLE_TIMEOUT_MS } from './tool-runner'
+import { DEFAULT_TOOL_LOOP_IDLE_TIMEOUT_MS, terminalToolSucceeded } from './tool-runner'
 
-export const SUMMARY_ROLLUP_CONTRACT_VERSION = 1
+export const SUMMARY_ROLLUP_CONTRACT_VERSION = 2
 export const SUMMARY_ROLLUP_FANOUT = 6
 export const SUMMARY_ROLLUP_MAX_TEXT_CHARS = 2400
+
+/**
+ * Room for the record (~700 tokens at the character cap) plus its title and
+ * tool-call envelope, with headroom so an overshoot still closes the call rather
+ * than truncating mid-argument. The previous 1024 sat *below* the character cap,
+ * putting the schema limit out of reach.
+ */
+const SUMMARY_ROLLUP_MAX_OUTPUT_TOKENS = 1536
 
 export interface SummaryRollupLeaf {
   id: string
@@ -63,9 +72,22 @@ interface NodeLocation {
 }
 
 const logger = createLogger('summary-rollups')
-const rollupResponseSchema = z.object({
-  title: z.string().trim().min(1).max(120),
-  text: z.string().trim().min(1).max(SUMMARY_ROLLUP_MAX_TEXT_CHARS),
+
+const ROLLUP_TOOL_NAME = 'recordRollup'
+const UNOBSERVED_MODEL_ID = '__unobserved_in_this_process__'
+
+/**
+ * Reported through a tool rather than parsed out of free text, so the shape
+ * reaches the model as a schema it is decoded against — grammar-constrained on
+ * llama.cpp, structured output elsewhere. A malformed record stops being
+ * something the call can produce, and an over-long one comes back as a tool
+ * error the model can correct.
+ */
+const rollupInputSchema = z.object({
+  title: z.string().trim().min(1).max(120)
+    .describe('A short retrospective label for the whole interval, such as "The dike held through the flood".'),
+  text: z.string().trim().min(1).max(SUMMARY_ROLLUP_MAX_TEXT_CHARS)
+    .describe(`The compressed record, at most ${SUMMARY_ROLLUP_MAX_TEXT_CHARS} characters.`),
 })
 
 function hash(value: string): string {
@@ -335,21 +357,49 @@ function nodeIdentity(level: number, children: RollupInput[], modelConfigKey: st
   return `sr-${hash(stableJson({ level, childKeys, contractVersion: SUMMARY_ROLLUP_CONTRACT_VERSION, modelConfigKey }))}`
 }
 
-function parseRollupResponse(text: string): { title: string; text: string } {
-  const json = text.trim().replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '')
-  return rollupResponseSchema.parse(JSON.parse(json))
+function rollupModelConfigKey(runtime: {
+  providerId: string | null
+  temperature?: number
+}, modelId: string): string {
+  return hash(stableJson({
+    providerId: runtime.providerId,
+    modelId,
+    temperature: runtime.temperature ?? null,
+  }))
 }
 
+const ROLLUP_INSTRUCTIONS = `Compress the ordered child story-memory records into one retrospective record, then report it by calling ${ROLLUP_TOOL_NAME}.
+
+- Write in perfect-aspect historical register ("the gate had opened"), never present tense.
+- Preserve causality, the named participants, and every thread still unresolved at the end of the interval.
+- Deduplicate only within these children. Do not add facts and do not speculate about what follows.
+- The record must be shorter than the children it replaces, and at most ${SUMMARY_ROLLUP_MAX_TEXT_CHARS} characters.
+- The title labels the interval in retrospect; it is not a chapter heading.`
+
 export async function runSummaryRollupMaintenance(dataDir: string, storyId: string): Promise<SummaryRollupNode | null> {
+  return runSummaryRollupMaintenanceInner(dataDir, storyId, true)
+}
+
+async function runSummaryRollupMaintenanceInner(
+  dataDir: string,
+  storyId: string,
+  allowIdentityRetry: boolean,
+): Promise<SummaryRollupNode | null> {
   const story = await getStory(dataDir, storyId)
   if (!story || story.settings.disableLibrarianAutoAnalysis === true) return null
   const runtime = await resolveAgentRuntime(dataDir, storyId, 'librarian', story)
-  const modelConfigKey = hash(stableJson({
-    providerId: runtime.providerId,
-    modelId: runtime.modelId,
-    temperature: runtime.temperature ?? null,
-    disableThinking: story.settings.disableThinking ?? false,
-  }))
+  // Keyed on what was last served, not what the story asked for: this key has to
+  // identify the weights, and a configured id does not. The thinking toggle is
+  // deliberately absent — roll-ups always run with reasoning off (see below), so
+  // keying on it would evict every node whenever the story toggles it.
+  const observedModelId = getObservedServedModelId(runtime.providerId, runtime.modelId)
+  // A process restart is also a possible local-model swap. Until one response
+  // identifies what is currently behind the endpoint, plan from leaves under a
+  // sentinel that can never be persisted or collide with an older model's tree.
+  const planningModelConfigKey = rollupModelConfigKey(
+    runtime,
+    observedModelId ?? UNOBSERVED_MODEL_ID,
+  )
   const segments = await currentLeafSegments(dataDir, storyId)
   let nodes = await listSummaryRollupNodes(dataDir, storyId)
   const currentLocations = currentNodeLocations(segments, nodes)
@@ -357,11 +407,11 @@ export async function runSummaryRollupMaintenance(dataDir: string, storyId: stri
     nodes = nodes.filter((node) => currentLocations.has(node.id))
     await replaceSummaryRollupNodes(dataDir, storyId, nodes)
   }
-  const plan = planRollup(segments, nodes, modelConfigKey)
+  const plan = planRollup(segments, nodes, planningModelConfigKey)
   if (!plan) return null
 
-  const id = nodeIdentity(plan.level, plan.children, modelConfigKey)
-  const existing = nodes.find((node) => node.id === id)
+  const plannedId = nodeIdentity(plan.level, plan.children, planningModelConfigKey)
+  const existing = nodes.find((node) => node.id === plannedId)
   if (existing) return existing
   const childPayload = plan.children.map((child, index) => ({
     order: index + 1,
@@ -371,13 +421,24 @@ export async function runSummaryRollupMaintenance(dataDir: string, storyId: stri
   const prompt = JSON.stringify({ children: childPayload })
   const agent = new ToolLoopAgent({
     model: runtime.model,
-    instructions: `Compress the ordered child story-memory records into one retrospective record. Use perfect-aspect historical register, preserve causality and unresolved threads, and deduplicate only within these children. Return only JSON with exactly {"title": string, "text": string}. Do not add facts.`,
-    tools: {},
-    toolChoice: 'none' as const,
-    stopWhen: stepCountIs(1),
+    instructions: ROLLUP_INSTRUCTIONS,
+    tools: {
+      [ROLLUP_TOOL_NAME]: tool({
+        description: 'Report the single compressed record covering all of the child records.',
+        inputSchema: rollupInputSchema,
+        execute: async () => ({ ok: true }),
+      }),
+    },
+    toolChoice: 'required' as const,
+    // One repair round, which is what the analysis lane shows a rejected tool
+    // call reliably needs.
+    stopWhen: [terminalToolSucceeded(ROLLUP_TOOL_NAME), stepCountIs(2)],
     temperature: runtime.temperature,
-    providerOptions: runtime.providerOptions,
-    maxOutputTokens: Math.min(runtime.guards.maxOutputTokens, 1024),
+    // Compression, not deliberation. Reasoning stays off whatever the story
+    // setting says: with it on, the output budget is spent before the record is
+    // reached, which is how this tier produced nothing at all.
+    providerOptions: buildProviderOptions(true),
+    maxOutputTokens: Math.min(runtime.guards.maxOutputTokens, SUMMARY_ROLLUP_MAX_OUTPUT_TOKENS),
   })
   const controller = new AbortController()
   const result = await agent.stream({ prompt, abortSignal: controller.signal })
@@ -386,8 +447,35 @@ export async function runSummaryRollupMaintenance(dataDir: string, storyId: stri
     idleTimeoutMs: DEFAULT_TOOL_LOOP_IDLE_TIMEOUT_MS,
     onIdleTimeout: () => controller.abort(),
   })
-  await resolveAndReportUsage(dataDir, storyId, 'librarian.rollup', result.totalUsage, runtime.modelId)
-  const output = parseRollupResponse(drained.fullText)
+  const { modelId: servedModelId } = await resolveAndReportServedUsage(
+    dataDir,
+    storyId,
+    'librarian.rollup',
+    result.totalUsage,
+    {
+      providerId: runtime.providerId,
+      configuredModelId: runtime.modelId,
+      servedModelId: drained.servedModelId,
+    },
+  )
+  const reported = drained.toolCalls.filter((call) => call.toolName === ROLLUP_TOOL_NAME).at(-1)
+  if (!reported) {
+    const detail = drained.toolErrors.map((error) => error.error).join('; ')
+    throw new Error(`Summary roll-up reported no record (finish: ${drained.finishReason}${detail ? `; ${detail}` : ''})`)
+  }
+  const output = rollupInputSchema.parse(reported.args)
+  const modelConfigKey = rollupModelConfigKey(runtime, servedModelId)
+  // The model changed after a previously observed identity was used to select
+  // child nodes. Re-plan once under the newly observed tree rather than saving a
+  // node whose children belong to another model; alternating identities fail
+  // explicitly instead of recursing forever.
+  if (observedModelId && modelConfigKey !== planningModelConfigKey) {
+    if (allowIdentityRetry) return runSummaryRollupMaintenanceInner(dataDir, storyId, false)
+    throw new Error('Summary roll-up served model changed twice while rebuilding its cache identity')
+  }
+  const id = nodeIdentity(plan.level, plan.children, modelConfigKey)
+  const existingForServedModel = nodes.find((node) => node.id === id)
+  if (existingForServedModel) return existingForServedModel
   const leafIds = plan.children.flatMap((child) => 'leafIds' in child ? child.leafIds : [child.id])
   const coverageStart = 'coverageStart' in plan.children[0] ? plan.children[0].coverageStart : plan.children[0].proseId
   const lastChild = plan.children.at(-1)!
@@ -415,7 +503,16 @@ export async function runSummaryRollupMaintenance(dataDir: string, storyId: stri
 
 const queued = new Set<string>()
 const dirty = new Set<string>()
-const failedAt = new Map<string, number>()
+const failures = new Map<string, { at: number; count: number }>()
+
+/**
+ * One minute, doubling to half an hour. Demand is re-marked on every
+ * budget-truncated projection, so a flat interval means a broken roll-up spends
+ * tokens once a minute for as long as the story stays open.
+ */
+function retryDelayMs(consecutiveFailures: number): number {
+  return Math.min(60_000 * 2 ** (consecutiveFailures - 1), 30 * 60_000)
+}
 
 function maintenanceKey(dataDir: string, storyId: string, branchId: string): string {
   return `${dataDir}\u0000${storyId}\u0000${branchId}`
@@ -433,16 +530,19 @@ export function queueSummaryRollupMaintenance(dataDir: string, storyId: string, 
   if (!branchId) return
   const key = maintenanceKey(dataDir, storyId, branchId)
   if (!dirty.has(key) || queued.has(key)) return
-  if (Date.now() - (failedAt.get(key) ?? 0) < 60_000) return
+  const failure = failures.get(key)
+  if (failure && Date.now() - failure.at < retryDelayMs(failure.count)) return
   dirty.delete(key)
   queued.add(key)
   queueMicrotask(() => {
     void withBranch(dataDir, storyId, () => runSummaryRollupMaintenance(dataDir, storyId), branchId)
-      .then(() => failedAt.delete(key))
+      .then(() => failures.delete(key))
       .catch((error) => {
         dirty.add(key)
-        failedAt.set(key, Date.now())
+        const count = (failures.get(key)?.count ?? 0) + 1
+        failures.set(key, { at: Date.now(), count })
         logger.child({ storyId }).warn('Summary roll-up maintenance failed', {
+          consecutiveFailures: count,
           error: error instanceof Error ? error.message : String(error),
         })
       })

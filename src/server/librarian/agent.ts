@@ -24,7 +24,7 @@ import {
 } from './suggestions'
 import { createLogger } from '../logging'
 import { toMentionAnnotations } from './analysis-tools'
-import { getActivityBuffer, pushActivityEvent, type ActivityStreamEvent } from '../agents/activity-stream'
+import { appendToStoredTrace, getActivityBuffer, pushActivityEvent, type ActivityStreamEvent } from '../agents/activity-stream'
 import { runLibrarianPipeline } from './pipeline'
 
 const logger = createLogger('librarian-agent')
@@ -99,7 +99,7 @@ async function runLibrarianInner(
   const liveBuffer = getActivityBuffer(storyId, 'librarian.analyze')
   const traceEvents: ActivityStreamEvent[] = []
   const emit = (event: ActivityStreamEvent) => {
-    traceEvents.push(event)
+    appendToStoredTrace(traceEvents, event)
     if (liveBuffer) pushActivityEvent(liveBuffer, event)
   }
 

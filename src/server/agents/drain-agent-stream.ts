@@ -1,4 +1,5 @@
 import type { AgentStreamEvent } from './stream-types'
+import { servedModelIdFromResponse } from '../llm/served-models'
 
 export interface DrainedAgentStream {
   fullText: string
@@ -7,6 +8,12 @@ export interface DrainedAgentStream {
   toolErrors: Array<{ toolName: string; error: string }>
   stepCount: number
   finishReason: string
+  /**
+   * The model the provider says answered, which is not always the one asked for:
+   * behind a local endpoint the configured id is a label on a port. Undefined
+   * when the provider sends no response metadata.
+   */
+  servedModelId?: string
 }
 
 export interface DrainAgentStreamOptions {
@@ -122,6 +129,7 @@ export async function drainAgentStream(
   const toolCallArgsById = new Map<string, Record<string, unknown>>()
   let stepCount = 0
   let finishReason = 'unknown'
+  let servedModelId: string | undefined
   const iterator = fullStream[Symbol.asyncIterator]()
   let completed = false
 
@@ -174,9 +182,11 @@ export async function drainAgentStream(
           throw new Error(readableStreamError(p.error))
         // `finish-step` fires once per LLM step; `finish` fires once for the
         // whole generation. Count steps, capture the final reason.
-        case 'finish-step':
+        case 'finish-step': {
           stepCount++
+          servedModelId = servedModelIdFromResponse(p.response) ?? servedModelId
           break
+        }
         case 'finish':
           finishReason = (p.finishReason as string) ?? 'unknown'
           break
@@ -191,5 +201,5 @@ export async function drainAgentStream(
     }
   }
 
-  return { fullText, fullReasoning, toolCalls, toolErrors, stepCount, finishReason }
+  return { fullText, fullReasoning, toolCalls, toolErrors, stepCount, finishReason, servedModelId }
 }

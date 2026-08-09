@@ -1,4 +1,4 @@
-import { appendFile, mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
+import { appendFile, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { existsSync } from 'node:fs'
 import type { LogEntry, LogSummary } from './types'
@@ -11,8 +11,39 @@ function logsDir(dataDir: string): string {
   return join(dataDir, 'logs')
 }
 
+/** `app-0` is always the file being written; higher indexes are progressively older. */
 function logFilePath(dataDir: string, index: number): string {
   return join(logsDir(dataDir), `app-${index}.jsonl`)
+}
+
+function logLockKey(dataDir: string): string {
+  return `application-logs:${dataDir}`
+}
+
+async function readLines(path: string): Promise<string[]> {
+  if (!existsSync(path)) return []
+  return (await readFile(path, 'utf-8')).split('\n').filter((line) => line.trim())
+}
+
+/**
+ * Lines already in `app-0`, per data dir. Counted from disk once per process and
+ * tracked in memory after: deciding where to append by re-reading the logs made
+ * every line written cost a full pass over all of them.
+ */
+const activeLineCount = new Map<string, number>()
+
+/**
+ * Drop the oldest file and shift the rest down by one. The previous copy-based
+ * shift rewrote every retained file and never truncated the one it then wrote
+ * to, so once the logs filled, every further line rotated again — five
+ * near-identical copies of a log nothing was bounding.
+ */
+async function rotate(dataDir: string): Promise<void> {
+  await rm(logFilePath(dataDir, MAX_LOG_FILES - 1), { force: true })
+  for (let index = MAX_LOG_FILES - 2; index >= 0; index -= 1) {
+    const from = logFilePath(dataDir, index)
+    if (existsSync(from)) await rename(from, logFilePath(dataDir, index + 1))
+  }
 }
 
 /**
@@ -20,43 +51,19 @@ function logFilePath(dataDir: string, index: number): string {
  * Uses rotating log files to prevent unbounded growth.
  */
 export async function saveLogEntry(dataDir: string, entry: LogEntry): Promise<void> {
-  return withKeyLock(`application-logs:${dataDir}`, async () => {
+  return withKeyLock(logLockKey(dataDir), async () => {
     const dir = logsDir(dataDir)
     await mkdir(dir, { recursive: true })
 
-    // Find the current log file
-    let currentIndex = 0
-    for (let i = 0; i < MAX_LOG_FILES; i++) {
-      const path = logFilePath(dataDir, i)
-      if (!existsSync(path)) {
-        currentIndex = i
-        break
-      }
-      const stats = await readFile(path, 'utf-8')
-      const lines = stats.split('\n').filter(line => line.trim())
-      if (lines.length < MAX_LOGS_PER_FILE) {
-        currentIndex = i
-        break
-      }
-      currentIndex = i + 1
+    const path = logFilePath(dataDir, 0)
+    let count = activeLineCount.get(dataDir) ?? (await readLines(path)).length
+    if (count >= MAX_LOGS_PER_FILE) {
+      await rotate(dataDir)
+      count = 0
     }
 
-    // Rotate if needed
-    if (currentIndex >= MAX_LOG_FILES) {
-      // Remove oldest file and shift others
-      for (let i = 0; i < MAX_LOG_FILES - 1; i++) {
-        const oldPath = logFilePath(dataDir, i + 1)
-        const newPath = logFilePath(dataDir, i)
-        if (existsSync(oldPath)) {
-          const content = await readFile(oldPath, 'utf-8')
-          await writeFile(newPath, content, 'utf-8')
-        }
-      }
-      currentIndex = MAX_LOG_FILES - 1
-    }
-
-    const path = logFilePath(dataDir, currentIndex)
     await appendFile(path, `${JSON.stringify(entry)}\n`, 'utf-8')
+    activeLineCount.set(dataDir, count + 1)
   })
 }
 
@@ -75,15 +82,9 @@ export async function listLogs(
   const { level, component, storyId, limit = 100 } = options
   const entries: LogSummary[] = []
 
-  // Read from all log files, newest first
+  // Every retained file; the timestamp sort below decides the order.
   for (let i = MAX_LOG_FILES - 1; i >= 0; i--) {
-    const path = logFilePath(dataDir, i)
-    if (!existsSync(path)) continue
-
-    const content = await readFile(path, 'utf-8')
-    const lines = content.split('\n').filter(line => line.trim())
-
-    for (const line of lines) {
+    for (const line of await readLines(logFilePath(dataDir, i))) {
       try {
         const entry = JSON.parse(line) as LogEntry
         if (level && entry.level !== level) continue
@@ -114,13 +115,7 @@ export async function listLogs(
  */
 export async function getLogEntry(dataDir: string, logId: string): Promise<LogEntry | null> {
   for (let i = 0; i < MAX_LOG_FILES; i++) {
-    const path = logFilePath(dataDir, i)
-    if (!existsSync(path)) continue
-
-    const content = await readFile(path, 'utf-8')
-    const lines = content.split('\n').filter(line => line.trim())
-
-    for (const line of lines) {
+    for (const line of await readLines(logFilePath(dataDir, i))) {
       try {
         const entry = JSON.parse(line) as LogEntry
         if (entry.id === logId) return entry
@@ -136,13 +131,16 @@ export async function getLogEntry(dataDir: string, logId: string): Promise<LogEn
  * Clear all application logs.
  */
 export async function clearLogs(dataDir: string): Promise<void> {
-  const dir = logsDir(dataDir)
-  if (!existsSync(dir)) return
+  return withKeyLock(logLockKey(dataDir), async () => {
+    const dir = logsDir(dataDir)
+    activeLineCount.delete(dataDir)
+    if (!existsSync(dir)) return
 
-  const entries = await readdir(dir)
-  for (const entry of entries) {
-    if (entry.startsWith('app-') && entry.endsWith('.jsonl')) {
-      await writeFile(join(dir, entry), '', 'utf-8')
+    const entries = await readdir(dir)
+    for (const entry of entries) {
+      if (entry.startsWith('app-') && entry.endsWith('.jsonl')) {
+        await writeFile(join(dir, entry), '', 'utf-8')
+      }
     }
-  }
+  })
 }

@@ -43,6 +43,7 @@ export function createEventStream(
           toolErrors: drained.toolErrors,
           stepCount: drained.stepCount,
           finishReason: drained.finishReason,
+          servedModelId: drained.servedModelId,
         })
       } catch (err) {
         controller.error(err)

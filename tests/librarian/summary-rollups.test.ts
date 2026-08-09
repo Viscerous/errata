@@ -9,15 +9,20 @@ import {
   SUMMARY_CONTRACT_VERSION,
 } from '@/server/librarian/summary-projection'
 import type { Fragment, StoryMeta } from '@/server/fragments/schema'
+import { clearServedModelObservations } from '@/server/llm/served-models'
 import { createTempDir, makeTestSettings, seedTestProvider } from '../setup'
 
-const { streamMock } = vi.hoisted(() => ({ streamMock: vi.fn() }))
+const { streamMock, agentMock } = vi.hoisted(() => ({ streamMock: vi.fn(), agentMock: vi.fn() }))
 
 vi.mock('ai', async () => {
   const actual = await vi.importActual('ai')
   return {
     ...actual,
     ToolLoopAgent: class {
+      constructor(settings: unknown) {
+        agentMock(settings)
+      }
+
       async stream(args: unknown) {
         return streamMock(args)
       }
@@ -29,6 +34,7 @@ import {
   listSummaryRollupNodes,
   runSummaryRollupMaintenance,
   selectSummaryRollupFrontier,
+  SUMMARY_ROLLUP_MAX_TEXT_CHARS,
 } from '@/server/librarian/summary-rollups'
 
 function makeStory(settings: Partial<StoryMeta['settings']> = {}): StoryMeta {
@@ -95,16 +101,26 @@ describe('summary roll-up maintenance', () => {
     cleanup = temp.cleanup
     await seedTestProvider(dataDir)
     streamMock.mockReset()
+    agentMock.mockReset()
+    clearServedModelObservations()
     streamMock.mockImplementation(async () => ({
       fullStream: (async function* () {
         yield {
-          type: 'text-delta' as const,
-          text: JSON.stringify({
+          type: 'tool-call' as const,
+          toolCallId: 'call-1',
+          toolName: 'recordRollup',
+          input: {
             title: 'The Gate Opened',
             text: 'By the end of the interval, the gate had opened and the travelers had entered.',
-          }),
+          },
         }
-        yield { type: 'finish' as const, finishReason: 'stop' }
+        yield {
+          type: 'tool-result' as const,
+          toolCallId: 'call-1',
+          toolName: 'recordRollup',
+          output: { ok: true },
+        }
+        yield { type: 'finish' as const, finishReason: 'tool-calls' }
       })(),
       totalUsage: Promise.resolve({ inputTokens: 10, outputTokens: 10 }),
     }))
@@ -125,6 +141,10 @@ describe('summary roll-up maintenance', () => {
     expect(request.prompt).toContain('By Passage 1')
     expect(request.prompt).not.toContain('Roll-up Test')
     expect(request.prompt).not.toContain('source text')
+
+    const settings = agentMock.mock.calls[0][0] as { tools: Record<string, unknown>; toolChoice: string }
+    expect(Object.keys(settings.tools)).toEqual(['recordRollup'])
+    expect(settings.toolChoice).toBe('required')
 
     const projection = await buildSummaryProjection({
       dataDir,
@@ -174,6 +194,87 @@ describe('summary roll-up maintenance', () => {
     expect(selectSummaryRollupFrontier(levelTwo!.leafIds, nodes, 36)).toEqual([
       { node: levelTwo, startIndex: 0, endIndex: 35 },
     ])
+  })
+
+  it('runs with reasoning off and an output budget above the record cap', async () => {
+    await createStory(dataDir, makeStory({ disableThinking: false }))
+    await seedPassages(dataDir, 6)
+
+    await runSummaryRollupMaintenance(dataDir, 'story-test')
+
+    const settings = agentMock.mock.calls[0][0] as { providerOptions?: unknown; maxOutputTokens: number }
+    expect(settings.providerOptions).toEqual({ openaiCompatible: { reasoningEffort: 'none' } })
+    expect(settings.maxOutputTokens).toBeGreaterThan(SUMMARY_ROLLUP_MAX_TEXT_CHARS / 4)
+  })
+
+  it('continues after a rejected record call and stops only after a successful result', async () => {
+    await createStory(dataDir, makeStory())
+    await seedPassages(dataDir, 6)
+
+    await runSummaryRollupMaintenance(dataDir, 'story-test')
+
+    const settings = agentMock.mock.calls[0][0] as {
+      stopWhen: Array<(args: { steps: Array<{ toolCalls?: unknown[]; toolResults?: Array<{ toolName: string; output: unknown }> }> }) => boolean>
+    }
+    const terminal = settings.stopWhen[0]
+    expect(terminal({
+      steps: [{ toolCalls: [{ toolName: 'recordRollup' }], toolResults: [] }],
+    })).toBe(false)
+    expect(terminal({
+      steps: [{ toolResults: [{ toolName: 'recordRollup', output: { ok: true } }] }],
+    })).toBe(true)
+  })
+
+  it('does not reuse a persistent roll-up until the served model is observed after restart', async () => {
+    await createStory(dataDir, makeStory())
+    await seedPassages(dataDir, 6)
+    const servedModels = ['qwen3-30b', 'gemma-31b']
+    streamMock.mockImplementation(async () => {
+      const servedModelId = servedModels.shift()!
+      return {
+        fullStream: (async function* () {
+          yield {
+            type: 'tool-call' as const,
+            toolCallId: 'call-1',
+            toolName: 'recordRollup',
+            input: { title: 'The Gate Opened', text: 'The gate had opened.' },
+          }
+          yield {
+            type: 'tool-result' as const,
+            toolCallId: 'call-1',
+            toolName: 'recordRollup',
+            output: { ok: true },
+          }
+          yield { type: 'finish-step' as const, response: { modelId: servedModelId } }
+          yield { type: 'finish' as const, finishReason: 'tool-calls' }
+        })(),
+        totalUsage: Promise.resolve({ inputTokens: 10, outputTokens: 10 }),
+      }
+    })
+
+    await runSummaryRollupMaintenance(dataDir, 'story-test')
+    clearServedModelObservations() // a new process cannot trust the old endpoint identity
+    await runSummaryRollupMaintenance(dataDir, 'story-test')
+
+    expect(streamMock).toHaveBeenCalledTimes(2)
+    const nodes = await listSummaryRollupNodes(dataDir, 'story-test')
+    expect(nodes).toHaveLength(2)
+    expect(new Set(nodes.map((node) => node.modelConfigKey)).size).toBe(2)
+  })
+
+  it('fails the derivation rather than caching a node when no record is reported', async () => {
+    await createStory(dataDir, makeStory())
+    await seedPassages(dataDir, 6)
+    streamMock.mockImplementation(async () => ({
+      fullStream: (async function* () {
+        yield { type: 'text-delta' as const, text: '{"title": "Truncated' }
+        yield { type: 'finish' as const, finishReason: 'length' }
+      })(),
+      totalUsage: Promise.resolve({ inputTokens: 10, outputTokens: 10 }),
+    }))
+
+    await expect(runSummaryRollupMaintenance(dataDir, 'story-test')).rejects.toThrow('reported no record')
+    expect(await listSummaryRollupNodes(dataDir, 'story-test')).toEqual([])
   })
 
   it('does not derive nodes when automatic librarian work is disabled', async () => {

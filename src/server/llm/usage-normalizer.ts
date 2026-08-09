@@ -1,4 +1,5 @@
 import type { TokenUsage } from './generation-logs'
+import { recordServedModel } from './served-models'
 import { reportUsage } from './token-tracker'
 
 function toNumber(value: unknown): number | undefined {
@@ -68,4 +69,29 @@ export async function resolveAndReportUsage(
   } catch {
     return undefined
   }
+}
+
+/**
+ * Attribute a completed response to the model the provider says served it, then
+ * report its usage under that same identity. Keeping those operations together
+ * prevents logs and token totals from disagreeing about which model answered.
+ */
+export async function resolveAndReportServedUsage(
+  dataDir: string,
+  storyId: string,
+  source: string,
+  totalUsage: PromiseLike<unknown>,
+  attribution: {
+    providerId: string | null
+    configuredModelId: string
+    servedModelId?: string
+  },
+): Promise<{ modelId: string; usage: TokenUsage | undefined }> {
+  const modelId = recordServedModel(
+    attribution.providerId,
+    attribution.configuredModelId,
+    attribution.servedModelId,
+  )
+  const usage = await resolveAndReportUsage(dataDir, storyId, source, totalUsage, modelId)
+  return { modelId, usage }
 }

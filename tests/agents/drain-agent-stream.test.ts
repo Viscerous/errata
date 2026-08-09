@@ -124,6 +124,20 @@ describe('drainAgentStream', () => {
     await expect(drained).rejects.toThrow('Agent stream aborted')
   })
 
+  it('reports the model the provider says answered, and leaves it undefined when it says nothing', async () => {
+    const served = await drainAgentStream(fullStreamOf([
+      { type: 'finish-step', response: { modelId: 'qwen3-30b' } },
+      { type: 'finish', finishReason: 'stop' },
+    ]))
+    expect(served.servedModelId).toBe('qwen3-30b')
+
+    const silent = await drainAgentStream(fullStreamOf([
+      { type: 'finish-step' },
+      { type: 'finish', finishReason: 'stop' },
+    ]))
+    expect(silent.servedModelId).toBeUndefined()
+  })
+
   it('rejects fatal SDK error parts instead of silently completing', async () => {
     await expect(drainAgentStream(fullStreamOf([
       { type: 'text-delta', text: 'partial' },

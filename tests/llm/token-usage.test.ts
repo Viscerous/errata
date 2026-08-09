@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { normalizeTokenUsage, resolveAndReportUsage } from '@/server/llm/usage-normalizer'
+import { normalizeTokenUsage, resolveAndReportServedUsage, resolveAndReportUsage } from '@/server/llm/usage-normalizer'
+import { clearServedModelObservations, getObservedServedModelId } from '@/server/llm/served-models'
 import { flushAllPendingTokenUsage, getSessionUsage, reportUsage } from '@/server/llm/token-tracker'
 import { createTempDir } from '../setup'
 
@@ -36,6 +37,7 @@ describe('usage reporting', () => {
   let cleanup: () => Promise<void>
 
   beforeEach(async () => {
+    clearServedModelObservations()
     const tmp = await createTempDir()
     dataDir = tmp.path
     cleanup = tmp.cleanup
@@ -120,6 +122,32 @@ describe('usage reporting', () => {
 
       expect(usage).toBeUndefined()
       expect(getSessionUsage(storyId).total.calls).toBe(0)
+    })
+  })
+
+  describe('resolveAndReportServedUsage', () => {
+    it('uses one served identity for the observation, result, and usage totals', async () => {
+      const storyId = `story-served-usage-${Date.now()}`
+
+      const result = await resolveAndReportServedUsage(
+        dataDir,
+        storyId,
+        'test.served-source',
+        Promise.resolve({ inputTokens: 12, outputTokens: 3 }),
+        {
+          providerId: 'local-provider',
+          configuredModelId: 'configured-gemma',
+          servedModelId: 'qwen3-30b',
+        },
+      )
+
+      expect(result).toEqual({ modelId: 'qwen3-30b', usage: { inputTokens: 12, outputTokens: 3 } })
+      expect(getObservedServedModelId('local-provider', 'configured-gemma')).toBe('qwen3-30b')
+      expect(getSessionUsage(storyId).byModel['qwen3-30b']).toEqual({
+        inputTokens: 12,
+        outputTokens: 3,
+        calls: 1,
+      })
     })
   })
 })

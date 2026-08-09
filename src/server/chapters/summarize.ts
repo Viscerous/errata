@@ -5,7 +5,7 @@ import { getProseChain } from '../fragments/prose-chain'
 import { instructionRegistry } from '../instructions'
 import { createLogger } from '../logging'
 import { drainAgentStream } from '../agents/drain-agent-stream'
-import { resolveAndReportUsage } from '../llm/usage-normalizer'
+import { resolveAndReportServedUsage } from '../llm/usage-normalizer'
 
 const logger = createLogger('chapter-summarize')
 
@@ -74,7 +74,7 @@ export async function summarizeChapter(
   const story = await getStory(dataDir, storyId)
   if (!story) throw new Error(`Story ${storyId} not found`)
 
-  const { model, modelId, temperature, providerOptions, guards } = await resolveAgentRuntime(dataDir, storyId, 'librarian', story)
+  const { model, modelId, providerId, temperature, providerOptions, guards } = await resolveAgentRuntime(dataDir, storyId, 'librarian', story)
   requestLogger.info('Resolved model', { modelId })
 
   const agent = new ToolLoopAgent({
@@ -106,8 +106,14 @@ export async function summarizeChapter(
   trace.push({ type: 'finish', finishReason: lastFinishReason, stepCount })
 
   // Source is the agent's own name for per-agent attribution; 'librarian' is
-  // only its model-resolution role.
-  await resolveAndReportUsage(dataDir, storyId, 'chapters.summarize', result.totalUsage, modelId)
+  // only its model-resolution role. The model id is the one that answered.
+  const { modelId: servedModelId } = await resolveAndReportServedUsage(
+    dataDir,
+    storyId,
+    'chapters.summarize',
+    result.totalUsage,
+    { providerId, configuredModelId: modelId, servedModelId: drained.servedModelId },
+  )
 
   const durationMs = Date.now() - startTime
   const summary = fullText.trim()
@@ -115,7 +121,7 @@ export async function summarizeChapter(
   requestLogger.info('Summary generated', {
     summaryLength: summary.length,
     reasoningLength: fullReasoning.length,
-    modelId,
+    modelId: servedModelId,
     durationMs,
     stepCount,
     finishReason: lastFinishReason,
@@ -127,7 +133,7 @@ export async function summarizeChapter(
     return {
       summary,
       reasoning: fullReasoning,
-      modelId,
+      modelId: servedModelId,
       durationMs,
       trace,
     }
@@ -147,7 +153,7 @@ export async function summarizeChapter(
   return {
     summary,
     reasoning: fullReasoning,
-    modelId,
+    modelId: servedModelId,
     durationMs,
     trace,
   }

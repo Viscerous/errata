@@ -1180,6 +1180,68 @@ describe('librarian agent', () => {
     expect(updated?.refs).toContain('pr-0001')
   })
 
+  it('holds a cross-character correction for review instead of auto-applying it', async () => {
+    await createStory(dataDir, makeStory({
+      settings: { autoApplyLibrarianSuggestions: true },
+    }))
+    const victoriaContent = 'Victoria was born on the Frisian dwelling mound. She rules Principia.'
+    await createFragment(dataDir, storyId, makeFragment({
+      id: 'ch-0001',
+      type: 'character',
+      name: 'Victoria',
+      description: 'Sovereign of Principia',
+      content: victoriaContent,
+    }))
+    await createFragment(dataDir, storyId, makeFragment({
+      id: 'ch-0002',
+      type: 'character',
+      name: 'Marcus Thorne',
+      description: 'Diplomat',
+      content: 'Marcus Thorne is a disciplined diplomat.',
+    }))
+    await createFragment(dataDir, storyId, makeFragment({
+      id: 'pr-0001',
+      content: 'Victoria watches Thorne. He is shaking with a fine tremor.',
+    }))
+    await setupProseChain(dataDir, storyId, ['pr-0001'])
+
+    mockStreamWithToolCalls([
+      {
+        toolName: 'reportAnalysis',
+        args: {
+          summary: 'Marcus Thorne began shaking.',
+          mentions: [
+            { fragmentId: 'ch-0001', text: 'Victoria' },
+            { fragmentId: 'ch-0002', text: 'Thorne' },
+          ],
+        },
+      },
+      {
+        toolName: 'proposeRecordCorrections',
+        args: {
+          title: 'Update Thorne Physiological State',
+          evidenceSegments: [2],
+          rationale: 'Marcus Thorne is now visibly shaking.',
+          corrections: [{
+            fragmentId: 'ch-0001',
+            field: 'content',
+            segment: 1,
+            newText: 'He is shaking with a fine tremor.',
+            reason: 'Update Thorne physiological state.',
+          }],
+        },
+      },
+    ])
+
+    const analysis = await runLibrarian(dataDir, storyId, 'pr-0001')
+
+    expect(analysis.fragmentChangeProposals).toHaveLength(1)
+    expect(analysis.fragmentChangeProposals[0].autoApplySafe).toBe(true)
+    expect(analysis.fragmentChangeProposals[0].autoApplied).not.toBe(true)
+    expect(analysis.fragmentChangeProposals[0].accepted).not.toBe(true)
+    expect((await getFragment(dataDir, storyId, 'ch-0001'))?.content).toBe(victoriaContent)
+  })
+
   /**
    * A description is capped at 250 characters and is usually one sentence, so
    * every correction to one replaces the whole field. Refusing that when the

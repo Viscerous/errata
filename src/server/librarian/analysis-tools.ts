@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { tool, type ToolSet } from 'ai'
 import { z } from 'zod/v4'
 import { suggestionDirectionSchema, type SuggestionDirection } from '../directions/schema'
@@ -5,7 +6,7 @@ import { getFragment, updateFragment } from '../fragments/storage'
 import { FragmentIdSchema, type Fragment } from '../fragments/schema'
 import { renderSegments, resolveSegments, segmentText, stripSegmentMarker, type TextSegment } from '../llm/segments'
 import type { LibrarianFragmentChangeProposal, LibrarianMention } from './storage'
-import type { ContinuityProjection, KnowledgeOperation, StateOperation, ThreadOperation } from './continuity-types'
+import type { ContinuityProjection, KnowledgeOperation, StateOperation, ThreadFocus, ThreadOperation } from './continuity-types'
 import { normalizeContinuityKey } from '@/lib/continuity-keys'
 import {
   correctionShapeError,
@@ -28,6 +29,26 @@ const mentionTextSchema = z.string().trim().min(1).describe('The exact name, tit
 
 // Wrapping quotes and edge punctuation a model habitually adds around a term.
 const MENTION_EDGE_TRIM_RE = /^["'‚„“”«»`‘’]+|["'‚„“”«»`‘’.,!?;:]+$/g
+const INLINE_MARKDOWN_RE = /[*_~`]+/g
+
+/**
+ * A rendered phrase may be split by inline Markdown in source: the model sees
+ * `*Medicine* file` as “Medicine file”, and the highlighter later receives the
+ * rendered text in separate nodes. Once removing markup proves the whole phrase
+ * is exact, retain the longest source-present word span that can actually bind.
+ */
+function markdownAnchoredMention(text: string, proseLower: string): string | null {
+  if (!proseLower.replace(INLINE_MARKDOWN_RE, '').includes(text.toLowerCase())) return null
+  const words = text.split(/\s+/).filter(Boolean)
+  for (let length = words.length; length > 0; length -= 1) {
+    const candidates = Array.from({ length: words.length - length + 1 }, (_, index) => (
+      words.slice(index, index + length).join(' ')
+    )).sort((a, b) => b.length - a.length)
+    const match = candidates.find((candidate) => proseLower.includes(candidate.toLowerCase()))
+    if (match) return match
+  }
+  return null
+}
 
 /**
  * Anchor a reported mention to the prose it annotates: the highlight regex can
@@ -40,6 +61,7 @@ export function anchorMentionText(text: string, proseLower: string): string | nu
   if (raw && proseLower.includes(raw.toLowerCase())) return raw
   const stripped = raw.replace(MENTION_EDGE_TRIM_RE, '').trim()
   if (stripped && proseLower.includes(stripped.toLowerCase())) return stripped
+  if (stripped) return markdownAnchoredMention(stripped, proseLower)
   return null
 }
 
@@ -217,10 +239,18 @@ const temporalFrameSchema = z.object({
 }).default({ relation: 'uncertain', evidenceSegments: [] })
 
 /** The live registry, so an operation can pick an identity rather than spell one. */
+export interface ContinuityKeyReference {
+  key: string
+  /** Human-readable identity already stored under the key. */
+  label?: string
+  /** Character id for knowledge, whose keys are scoped per character. */
+  scope?: string
+}
+
 export interface ContinuityKeyRegistry {
-  state?: string[]
-  thread?: string[]
-  knowledge?: string[]
+  state?: Array<string | ContinuityKeyReference>
+  thread?: Array<string | ContinuityKeyReference>
+  knowledge?: Array<string | ContinuityKeyReference>
 }
 
 /**
@@ -239,23 +269,38 @@ export interface ContinuityKeyRegistry {
  */
 const MAX_STEERED_REGISTRY_KEYS = 24
 
-function continuityKeyFields(existing: string[] | undefined, noun: string, example: string) {
+/** Bound on any continuity key, whether the model spelled it or it was derived. */
+const MAX_CONTINUITY_KEY_CHARS = 100
+const MAX_DERIVED_KEY_CHARS = 64
+
+function registryKey(reference: string | ContinuityKeyReference): string {
+  return typeof reference === 'string' ? reference : reference.key
+}
+
+function continuityKeyFields(
+  existing: Array<string | ContinuityKeyReference> | undefined,
+  noun: string,
+  example: string,
+  creationAction: 'set' | 'open' | 'learn',
+) {
   // Sorted so the description is byte-identical whenever the key set is
   // unchanged. Registry order follows recency of update, which would otherwise
   // rewrite the tool block on every analysis and cost the prompt cache.
-  const unique = [...new Set((existing ?? []).map(normalizeContinuityKey))].filter(Boolean).sort()
+  const unique = [...new Set((existing ?? []).map((reference) => (
+    normalizeContinuityKey(registryKey(reference))
+  )))].filter(Boolean).sort()
   const reuse = unique.length > 0
     ? ` Reuse one of these exactly when the passage changes something already tracked: ${unique.slice(0, MAX_STEERED_REGISTRY_KEYS).join(', ')}.`
     : ''
   return {
-    key: z.string().trim().min(1).max(100).nullish()
-      .describe(`The ${noun}.${reuse} Otherwise coin one: snake_case naming the thing itself, such as ${example}. Never include a character or fragment ID.`),
+    key: z.string().trim().max(MAX_CONTINUITY_KEY_CHARS).nullish()
+      .describe(`The ${noun}.${reuse} For a genuinely new identity introduced by a ${creationAction} operation, you may omit this and the engine will derive it. Every other action must name the existing key. If you coin one, use snake_case naming the thing itself, such as ${example}; never include a character or fragment ID.`),
   }
 }
 
 function stateOperationSchemaFor(registry: ContinuityKeyRegistry) {
   return z.object({
-    ...continuityKeyFields(registry.state, 'state identity', 'captivity_status'),
+    ...continuityKeyFields(registry.state, 'state identity', 'captivity_status', 'set'),
     action: z.enum(['set', 'clear']),
     subject: z.string().trim().min(1).max(160),
     value: z.string().trim().max(300).optional(),
@@ -265,7 +310,7 @@ function stateOperationSchemaFor(registry: ContinuityKeyRegistry) {
 
 function threadOperationSchemaFor(registry: ContinuityKeyRegistry) {
   return z.object({
-    ...continuityKeyFields(registry.thread, 'unresolved question', 'who_betrayed_the_house'),
+    ...continuityKeyFields(registry.thread, 'unresolved question', 'who_betrayed_the_house', 'open'),
     action: z.enum(['open', 'advance', 'resolve', 'abandon']),
     label: z.string().trim().max(240).optional()
       .describe('Optional plain-language phrasing of the question. Omit it and the key is used.'),
@@ -275,16 +320,17 @@ function threadOperationSchemaFor(registry: ContinuityKeyRegistry) {
   })
 }
 
-// Focus may name a thread opened in this same call, so it stays open-ended.
+// Focus may name a thread opened in this call or inherit an aligned operation,
+// so its key remains open-ended and optional at the schema boundary.
 const threadFocusSchema = z.object({
-  threadKey: z.string().trim().min(1).max(100),
+  threadKey: z.string().trim().max(MAX_CONTINUITY_KEY_CHARS).nullish(),
   visibility: z.enum(['foreground', 'background']),
 })
 
 function knowledgeOperationSchemaFor(registry: ContinuityKeyRegistry) {
   return z.object({
     characterId: FragmentIdSchema,
-    ...continuityKeyFields(registry.knowledge, 'fact identity', 'queen_identity'),
+    ...continuityKeyFields(registry.knowledge, 'fact identity', 'queen_identity', 'learn'),
     action: z.enum(['learn', 'correct', 'forget']),
     fact: z.string().trim().max(400).optional(),
     acquisition: z.enum(['witnessed', 'told', 'inferred', 'other']).default('other'),
@@ -329,7 +375,7 @@ export function buildReportAnalysisInputSchema(registry: ContinuityKeyRegistry =
     threadOperations: z.array(threadOperationSchemaFor(registry)).max(80).default([])
       .describe('Explicit lifecycle changes for unresolved narrative questions. Resolve completed questions, never repurpose a key, and remember that omission only makes a thread dormant.'),
     threadFocus: z.array(threadFocusSchema).max(80).default([])
-      .describe('Snapshot of still-open threads relevant after this passage. Omitted live threads become dormant, not resolved.'),
+      .describe('Snapshot of still-open threads relevant after this passage. Omitted live threads become dormant, not resolved. When this array aligns one-for-one with threadOperations, an omitted key inherits the key of the operation in the same position.'),
     knowledgeOperations: z.array(knowledgeOperationSchemaFor(registry)).max(120).default([])
       .describe('Only facts a specific character explicitly learns, corrects, or forgets and could later act upon. Do not store their desires, feelings, opinions, or facts merely visible to the reader.'),
   })
@@ -375,16 +421,31 @@ function citedEvidence(
   }
 }
 
+/** Canonicalize a descriptive field into a key, cut on a word boundary. */
+function derivedContinuityKey(source: string | undefined): string {
+  const normalized = normalizeContinuityKey(source ?? '')
+  if (normalized.length <= MAX_DERIVED_KEY_CHARS) return normalized
+  const digest = createHash('sha256').update(normalized).digest('hex').slice(0, 8)
+  const prefixLimit = MAX_DERIVED_KEY_CHARS - digest.length - 1
+  const clipped = normalized.slice(0, prefixLimit)
+  const lastBreak = clipped.lastIndexOf('_')
+  const prefix = lastBreak > 0 ? clipped.slice(0, lastBreak) : clipped
+  return `${prefix}_${digest}`
+}
+
 /**
  * Canonicalizing is what makes reuse happen: a key that differs from a live one
  * only by case, separator, or a prefixed fragment id lands on the live spelling
- * by construction, so the model does not have to declare which it meant. A key
- * carrying no identity at all resolves to null and its operation is skipped with
- * a reason rather than entering the registry.
+ * by construction, so the model does not have to declare which it meant.
+ *
+ * For creation operations, an omitted key can be matched exactly to a live
+ * label or derived from the operation's descriptive field. Mutations remain
+ * stricter: without an explicit, retry-inherited, or exact live identity they
+ * are skipped rather than allowed to create a second thing accidentally.
  */
-function chosenKey(operation: { key?: unknown }): string | null {
-  if (typeof operation.key !== 'string') return null
-  return normalizeContinuityKey(operation.key) || null
+function chosenKey(operation: { key?: unknown }, derivedFrom?: string): string | null {
+  const declared = typeof operation.key === 'string' ? normalizeContinuityKey(operation.key) : ''
+  return declared || derivedContinuityKey(derivedFrom) || null
 }
 
 function citationProblem(
@@ -406,6 +467,88 @@ function citationProblem(
  */
 type Skipped<T> = T & { reason: string }
 
+/**
+ * How much of each lane one passage's projection retains. Applied both when a
+ * report is normalized and when a retry is folded onto it, so the two cannot
+ * drift into disagreeing about how much a passage may hold.
+ */
+const PROJECTION_CAPS = { state: 12, thread: 12, focus: 16, knowledge: 24 } as const
+
+const stateKeyOf = (operation: StateOperation) => operation.stateKey
+const threadKeyOf = (operation: ThreadOperation) => operation.threadKey
+const threadFocusKeyOf = (focus: ThreadFocus) => focus.threadKey
+const knowledgeKeyOf = (operation: KnowledgeOperation) => `${operation.characterId}\u0000${operation.knowledgeKey}`
+
+/**
+ * Sentence citations are the stable part of a retry when a small model drops or
+ * corrects its key. Use them to recognize the same operation without guessing
+ * from mutable prose labels. Empty citations are never identities, and an
+ * ambiguous signature deliberately matches nothing.
+ */
+function evidenceSignature(operation: { action: string; evidenceSegments: number[] }, scope = ''): string {
+  if (operation.evidenceSegments.length === 0) return ''
+  const evidence = [...new Set(operation.evidenceSegments)].sort((a, b) => a - b).join(',')
+  return `${scope}\u0000${operation.action}\u0000${evidence}`
+}
+
+const stateSignatureOf = (operation: Pick<StateOperation, 'action' | 'evidenceSegments'>) =>
+  evidenceSignature(operation)
+const threadSignatureOf = (operation: Pick<ThreadOperation, 'action' | 'evidenceSegments'>) =>
+  evidenceSignature(operation)
+const knowledgeSignatureOf = (operation: Pick<KnowledgeOperation, 'characterId' | 'action' | 'evidenceSegments'>) =>
+  evidenceSignature(operation, operation.characterId)
+
+function uniquelyMatchingKey<T>(
+  previous: T[],
+  signature: string,
+  signatureOf: (item: T) => string,
+  keyOf: (item: T) => string,
+): string | undefined {
+  if (!signature) return undefined
+  const matches = previous.filter((item) => signatureOf(item) === signature)
+  return matches.length === 1 ? keyOf(matches[0]) : undefined
+}
+
+function uniquelyMatchingRegistryKey(
+  references: Array<string | ContinuityKeyReference> | undefined,
+  source: string | undefined,
+  scope?: string,
+): string | undefined {
+  const identity = normalizeContinuityKey(source ?? '')
+  if (!identity) return undefined
+  const matches = new Set<string>()
+  for (const reference of references ?? []) {
+    if (typeof reference !== 'string' && reference.scope && reference.scope !== scope) continue
+    const key = normalizeContinuityKey(registryKey(reference))
+    const label = typeof reference === 'string' ? '' : normalizeContinuityKey(reference.label ?? '')
+    if (identity === key || identity === label) matches.add(key)
+  }
+  return matches.size === 1 ? [...matches][0] : undefined
+}
+
+function retryAwareKey<T>(
+  operation: { key?: unknown },
+  derivedFrom: string | undefined,
+  options: {
+    allowDerived: boolean
+    previous: T[]
+    registry: Array<string | ContinuityKeyReference> | undefined
+    scope?: string
+    signature: string
+    signatureOf: (item: T) => string
+    keyOf: (item: T) => string
+  },
+): string | null {
+  return chosenKey(operation)
+    || uniquelyMatchingKey(options.previous, options.signature, options.signatureOf, options.keyOf)
+    || uniquelyMatchingRegistryKey(options.registry, derivedFrom, options.scope)
+    || (options.allowDerived ? chosenKey(operation, derivedFrom) : null)
+}
+
+function missingExistingKeyReason(lane: 'state' | 'thread' | 'knowledge', action: string): string {
+  return `A ${lane} ${action} operation must name the existing key; no unambiguous retry or live-registry match was found.`
+}
+
 function normalizeContinuityProjection(
   input: Pick<ReportAnalysisInput,
     | 'temporalFrame'
@@ -414,6 +557,8 @@ function normalizeContinuityProjection(
     | 'threadFocus'
     | 'knowledgeOperations'>,
   segments: TextSegment[],
+  previous?: ContinuityProjection,
+  registry: ContinuityKeyRegistry = {},
 ): { projection: ContinuityProjection; skipped: Array<Skipped<{ kind: string; key: string }>> } {
   const skipped: Array<Skipped<{ kind: string; key: string }>> = []
   let temporalFrame = input.temporalFrame
@@ -430,9 +575,26 @@ function normalizeContinuityProjection(
 
   const stateOperations: StateOperation[] = []
   for (const operation of input.stateOperations) {
-    const stateKey = chosenKey(operation)
+    const stateKey = retryAwareKey(
+      operation,
+      operation.subject,
+      {
+        allowDerived: operation.action === 'set',
+        previous: previous?.stateOperations ?? [],
+        registry: registry.state,
+        signature: stateSignatureOf(operation),
+        signatureOf: stateSignatureOf,
+        keyOf: stateKeyOf,
+      },
+    )
     if (!stateKey) {
-      skipped.push({ kind: 'state', key: operation.subject, reason: 'A state operation needs a key naming what is tracked, in snake_case.' })
+      skipped.push({
+        kind: 'state',
+        key: operation.subject,
+        reason: operation.action === 'set'
+          ? 'A state operation needs enough identity to derive a key.'
+          : missingExistingKeyReason('state', operation.action),
+      })
       continue
     }
     const resolved = citedEvidence(segments, operation.evidenceSegments)
@@ -449,10 +611,28 @@ function normalizeContinuityProjection(
   }
 
   const threadOperations: ThreadOperation[] = []
-  for (const operation of input.threadOperations) {
-    const threadKey = chosenKey(operation)
+  const threadKeysByInputIndex: Array<string | undefined> = []
+  for (const [inputIndex, operation] of input.threadOperations.entries()) {
+    const threadKey = retryAwareKey(
+      operation,
+      operation.label || operation.note,
+      {
+        allowDerived: operation.action === 'open',
+        previous: previous?.threadOperations ?? [],
+        registry: registry.thread,
+        signature: threadSignatureOf(operation),
+        signatureOf: threadSignatureOf,
+        keyOf: threadKeyOf,
+      },
+    )
     if (!threadKey) {
-      skipped.push({ kind: 'thread', key: operation.label ?? '', reason: 'A thread operation needs a key naming the unresolved question, in snake_case.' })
+      skipped.push({
+        kind: 'thread',
+        key: operation.label ?? '',
+        reason: operation.action === 'open'
+          ? 'A thread operation needs enough identity to derive a key.'
+          : missingExistingKeyReason('thread', operation.action),
+      })
       continue
     }
     const resolved = citedEvidence(segments, operation.evidenceSegments)
@@ -461,6 +641,7 @@ function normalizeContinuityProjection(
       skipped.push({ kind: 'thread', key: threadKey, reason: problem })
       continue
     }
+    threadKeysByInputIndex[inputIndex] = threadKey
     threadOperations.push({
       ...operation,
       ...resolved,
@@ -471,9 +652,27 @@ function normalizeContinuityProjection(
 
   const knowledgeOperations: KnowledgeOperation[] = []
   for (const operation of input.knowledgeOperations) {
-    const knowledgeKey = chosenKey(operation)
+    const knowledgeKey = retryAwareKey(
+      operation,
+      operation.fact,
+      {
+        allowDerived: operation.action === 'learn',
+        previous: previous?.knowledgeOperations ?? [],
+        registry: registry.knowledge,
+        scope: operation.characterId,
+        signature: knowledgeSignatureOf(operation),
+        signatureOf: knowledgeSignatureOf,
+        keyOf: (item) => item.knowledgeKey,
+      },
+    )
     if (!knowledgeKey) {
-      skipped.push({ kind: 'knowledge', key: operation.characterId, reason: 'A knowledge operation needs a key naming the fact, in snake_case.' })
+      skipped.push({
+        kind: 'knowledge',
+        key: operation.characterId,
+        reason: operation.action === 'learn'
+          ? 'A knowledge operation needs enough identity to derive a key.'
+          : missingExistingKeyReason('knowledge', operation.action),
+      })
       continue
     }
     const label = `${operation.characterId}:${knowledgeKey}`
@@ -490,24 +689,111 @@ function normalizeContinuityProjection(
     knowledgeOperations.push({ ...operation, ...resolved, knowledgeKey })
   }
 
+  const threadFocus: ThreadFocus[] = []
+  const positionallyAlignedFocus = input.threadFocus.length === input.threadOperations.length
+  for (const [inputIndex, focus] of input.threadFocus.entries()) {
+    const explicitKey = normalizeContinuityKey(focus.threadKey ?? '')
+    const threadKey = explicitKey || (positionallyAlignedFocus ? threadKeysByInputIndex[inputIndex] : undefined)
+    if (!threadKey) {
+      skipped.push({
+        kind: 'thread-focus',
+        key: '',
+        reason: 'A thread focus entry must name its thread key or align with a successfully recorded thread operation.',
+      })
+      continue
+    }
+    threadFocus.push({ ...focus, threadKey })
+  }
+
   return {
     projection: {
       version: 1,
       temporalFrame,
-      stateOperations: keepLastByKey(stateOperations, (operation) => operation.stateKey, 12),
-      threadOperations: threadOperations.slice(0, 12),
-      threadFocus: keepLastByKey(
-        input.threadFocus.map((focus) => ({ ...focus, threadKey: normalizeContinuityKey(focus.threadKey) })),
-        (focus) => focus.threadKey,
-        16,
-      ),
-      knowledgeOperations: keepLastByKey(
-        knowledgeOperations,
-        (operation) => `${operation.characterId}\u0000${operation.knowledgeKey}`,
-        24,
-      ),
+      stateOperations: keepLastByKey(stateOperations, stateKeyOf, PROJECTION_CAPS.state),
+      threadOperations: threadOperations.slice(0, PROJECTION_CAPS.thread),
+      threadFocus: keepLastByKey(threadFocus, threadFocusKeyOf, PROJECTION_CAPS.focus),
+      knowledgeOperations: keepLastByKey(knowledgeOperations, knowledgeKeyOf, PROJECTION_CAPS.knowledge),
     },
     skipped,
+  }
+}
+
+/** `previous` entries `next` said nothing about, followed by everything `next` reported. */
+function uniqueSignatures<T>(items: T[], signatureOf: (item: T) => string): Set<string> {
+  const counts = new Map<string, number>()
+  for (const item of items) {
+    const signature = signatureOf(item)
+    if (signature) counts.set(signature, (counts.get(signature) ?? 0) + 1)
+  }
+  return new Set([...counts].filter(([, count]) => count === 1).map(([signature]) => signature))
+}
+
+function superseded<T>(
+  previous: T[],
+  next: T[],
+  keyOf: (item: T) => string,
+  signatureOf?: (item: T) => string,
+): T[] {
+  const restated = new Set(next.map(keyOf))
+  const aliasedSignatures = new Set<string>()
+  if (signatureOf) {
+    const previousUnique = uniqueSignatures(previous, signatureOf)
+    for (const signature of uniqueSignatures(next, signatureOf)) {
+      if (previousUnique.has(signature)) aliasedSignatures.add(signature)
+    }
+  }
+  return [
+    ...previous.filter((item) => {
+      if (restated.has(keyOf(item))) return false
+      return !signatureOf || !aliasedSignatures.has(signatureOf(item))
+    }),
+    ...next,
+  ]
+}
+
+/**
+ * Fold a re-reported projection onto the one already collected. `reportAnalysis`
+ * is retried — after a rejected proposal lane, a bad citation, or a model simply
+ * calling it again — and the second call is rarely a superset of the first, so
+ * plain assignment made every retry a truncation: one passage reported two valid
+ * thread operations and then seven empty sets, and only the empty set survived.
+ *
+ * The new call has full authority over the keys it names and none over the keys
+ * it does not — the discipline `hasSummarySignal` already applies to the summary,
+ * per key rather than all-or-nothing, since a partial re-report is normal here.
+ */
+function mergeContinuityProjection(
+  previous: ContinuityProjection,
+  next: ContinuityProjection,
+): ContinuityProjection {
+  return {
+    ...next,
+    // A bare `uncertain` is the schema default, so it carries no claim and must
+    // not overwrite a frame an earlier call actually determined.
+    temporalFrame: next.temporalFrame.relation === 'uncertain' ? previous.temporalFrame : next.temporalFrame,
+    stateOperations: keepLastByKey(
+      superseded(previous.stateOperations, next.stateOperations, stateKeyOf, stateSignatureOf),
+      stateKeyOf,
+      PROJECTION_CAPS.state,
+    ),
+    // Not collapsed by key: one call may legitimately open and then advance the
+    // same thread.
+    threadOperations: superseded(
+      previous.threadOperations,
+      next.threadOperations,
+      threadKeyOf,
+      threadSignatureOf,
+    ).slice(-PROJECTION_CAPS.thread),
+    threadFocus: keepLastByKey(
+      [...previous.threadFocus, ...next.threadFocus],
+      threadFocusKeyOf,
+      PROJECTION_CAPS.focus,
+    ),
+    knowledgeOperations: keepLastByKey(
+      superseded(previous.knowledgeOperations, next.knowledgeOperations, knowledgeKeyOf, knowledgeSignatureOf),
+      knowledgeKeyOf,
+      PROJECTION_CAPS.knowledge,
+    ),
   }
 }
 
@@ -745,14 +1031,18 @@ export function createAnalysisTools(
     includeReadTools?: boolean;
     includeReportTool?: boolean;
     includeFinishTool?: boolean;
-    presentedFullFragmentIds?: string[];
+    presentedFullFragmentIds?: Set<string> | readonly string[];
     continuityKeys?: ContinuityKeyRegistry;
     customFragmentTypes?: Array<{ type: string; name: string }>;
   },
 ) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const tools: Record<string, any> = {}
-  const presentedFullFragmentIds = new Set(opts?.presentedFullFragmentIds ?? [])
+  // Pipeline compilation can populate this Set after tools are constructed,
+  // once user block overrides reveal what will actually be shown in full.
+  const presentedFullFragmentIds = opts?.presentedFullFragmentIds instanceof Set
+    ? opts.presentedFullFragmentIds
+    : new Set(opts?.presentedFullFragmentIds ?? [])
   const successfulToolNames = new Set<string>()
   /**
    * Proposal lanes whose most recent call failed. Record maintenance is
@@ -764,7 +1054,7 @@ export function createAnalysisTools(
   const continuityKeyOwners = new Map<string, 'state' | 'thread' | 'knowledge'>()
   for (const lane of ['state', 'thread', 'knowledge'] as const) {
     for (const key of opts?.continuityKeys?.[lane] ?? []) {
-      const normalized = normalizeContinuityKey(key)
+      const normalized = normalizeContinuityKey(registryKey(key))
       if (normalized) continuityKeyOwners.set(normalized, lane)
     }
   }
@@ -773,7 +1063,7 @@ export function createAnalysisTools(
 
   if (opts?.includeReportTool !== false) {
     tools.reportAnalysis = tool({
-      description: 'Report the prose analysis in one batch: summary, mentions, temporal frame, keyed state changes, thread lifecycle/focus, explicit character knowledge changes, contradictions, and timeline events. Call once with everything you found. If a later step proves the report wrong or incomplete, call it again with the complete corrected set: the newest call replaces the summary and the continuity operations, and mentions, candidates, contradictions, and timeline events merge.',
+      description: 'Report the prose analysis in one batch: summary, mentions, temporal frame, keyed state changes, thread lifecycle/focus, explicit character knowledge changes, contradictions, and timeline events. Call once with everything you found. If a later step proves the report wrong or incomplete, call it again with the corrected set: the newest summary replaces the prior one, continuity entries it restates supersede their prior versions, and omitted continuity entries plus mentions, candidates, contradictions, and timeline events are retained.',
       inputSchema: buildReportAnalysisInputSchema(opts?.continuityKeys ?? {}),
       execute: async ({
         summary = '',
@@ -862,8 +1152,11 @@ export function createAnalysisTools(
           threadOperations,
           threadFocus,
           knowledgeOperations,
-        }, proseSegments)
-        collector.continuityProjection = normalizedProjection.projection
+        }, proseSegments, collector.continuityProjection, opts?.continuityKeys ?? {})
+        collector.continuityProjection = mergeContinuityProjection(
+          collector.continuityProjection,
+          normalizedProjection.projection,
+        )
 
         const trimmedSummary = summary.trim().slice(0, 1200)
         const hasSummarySignal =
@@ -1497,7 +1790,7 @@ export function createLibrarianOnlineTools(
     proseFragmentId?: string
     disableDirections?: boolean
     disableSuggestions?: boolean
-    presentedFullFragmentIds?: string[]
+    presentedFullFragmentIds?: Set<string> | readonly string[]
     continuityKeys?: ContinuityKeyRegistry
     customFragmentTypes?: Array<{ type: string; name: string }>
   },

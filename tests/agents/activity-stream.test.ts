@@ -6,6 +6,7 @@ import {
   finishActivityBuffer,
   clearActivityBuffer,
   createActivitySSE,
+  appendToStoredTrace,
   type ActivityStreamEvent,
 } from '@/server/agents/activity-stream'
 
@@ -137,6 +138,37 @@ describe('activity-stream', () => {
 
       expect((await reader.read()).done).toBe(false)
       expect((await reader.read()).done).toBe(true)
+    })
+  })
+
+  describe('appendToStoredTrace', () => {
+    it('merges consecutive streamed text without changing what the trace says', () => {
+      const trace: ActivityStreamEvent[] = []
+      for (const event of [
+        { type: 'reasoning', text: 'Let' },
+        { type: 'reasoning', text: ' me' },
+        { type: 'reasoning', text: ' think' },
+        { type: 'tool-call', id: 'c1', toolName: 'reportAnalysis', args: {} },
+        { type: 'text', text: 'Done' },
+        { type: 'text', text: '.' },
+      ] as ActivityStreamEvent[]) appendToStoredTrace(trace, event)
+
+      expect(trace).toEqual([
+        { type: 'reasoning', text: 'Let me think' },
+        { type: 'tool-call', id: 'c1', toolName: 'reportAnalysis', args: {} },
+        { type: 'text', text: 'Done.' },
+      ])
+    })
+
+    it('does not merge across a change of kind', () => {
+      const trace: ActivityStreamEvent[] = []
+      appendToStoredTrace(trace, { type: 'reasoning', text: 'thinking' })
+      appendToStoredTrace(trace, { type: 'text', text: 'writing' })
+
+      expect(trace).toEqual([
+        { type: 'reasoning', text: 'thinking' },
+        { type: 'text', text: 'writing' },
+      ])
     })
   })
 })

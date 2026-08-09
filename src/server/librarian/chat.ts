@@ -1,7 +1,7 @@
 import { tool, ToolLoopAgent, stepCountIs, type ToolSet } from 'ai'
 import { z } from 'zod/v4'
 import { resolveAgentRuntime } from '../llm/client'
-import { resolveAndReportUsage } from '../llm/usage-normalizer'
+import { resolveAndReportServedUsage } from '../llm/usage-normalizer'
 import { MISSING_SYSTEM_PROMPT_FALLBACK } from '../instructions'
 import { getFragment, getStory } from '../fragments/storage'
 import { buildContextState } from '../llm/context-builder'
@@ -150,7 +150,7 @@ async function librarianChatInner(
   const systemPromptFragments = await loadSystemPromptFragments(dataDir, storyId, getFragmentsByTag, getFragment)
 
   // Resolve model early so modelId is available for instruction resolution
-  const { model, modelId, temperature, providerOptions, guards } = await resolveAgentRuntime(dataDir, storyId, 'librarian.chat', story)
+  const { model, modelId, providerId, temperature, providerOptions, guards } = await resolveAgentRuntime(dataDir, storyId, 'librarian.chat', story)
   requestLogger.info('Resolved model', { modelId })
 
   // Create write-enabled fragment tools + enabled plugin tools
@@ -226,7 +226,11 @@ async function librarianChatInner(
   const stream = createEventStream(result.fullStream)
   void stream.completion.then(releaseAnalysis, releaseAnalysis)
   stream.completion
-    .then(() => resolveAndReportUsage(dataDir, storyId, 'librarian.chat', result.totalUsage, modelId))
+    .then((completion) => resolveAndReportServedUsage(dataDir, storyId, 'librarian.chat', result.totalUsage, {
+      providerId,
+      configuredModelId: modelId,
+      servedModelId: completion.servedModelId,
+    }))
     .catch(() => {
       // Stream errored — skip usage tracking
     })

@@ -40,13 +40,16 @@ interface BranchTally {
   segmentRuns: number
   losses: number
   lossyRuns: number
+  toolErrors: number
+  recoveredToolErrors: number
 }
 
 const branchTallies: BranchTally[] = []
 /** Reason text with ids and numbers masked, so near-identical losses group. */
-const byReason = new Map<string, { count: number; sample: string; where: string }>()
+const byReason = new Map<string, { count: number; analyses: Set<string>; sample: string; where: string }>()
 /** finishAnalysis.skipped is the model declaring intent, not the engine refusing. */
 const declaredSkips = new Map<string, number>()
+const toolErrorsByTool = new Map<string, { count: number; recovered: number; sample: string; where: string }>()
 
 function record(where: string, toolName: string, result: unknown): number {
   const outcome = toolResultOutcome(result)
@@ -61,8 +64,12 @@ function record(where: string, toolName: string, result: unknown): number {
   }
   const note = (key: string, sample: string) => {
     const entry = byReason.get(key)
-    if (entry) entry.count++
-    else byReason.set(key, { count: 1, sample, where: `${where} ${toolName}` })
+    if (entry) {
+      entry.count++
+      entry.analyses.add(where)
+    } else {
+      byReason.set(key, { count: 1, analyses: new Set([where]), sample, where: `${where} ${toolName}` })
+    }
   }
 
   for (const reason of outcome.reasons) {
@@ -81,6 +88,33 @@ function record(where: string, toolName: string, result: unknown): number {
   return outcome.dropped
 }
 
+function recordToolError(
+  where: string,
+  trace: NonNullable<LibrarianAnalysis['trace']>,
+  index: number,
+  event: { toolName?: string; error?: string },
+): boolean {
+  const toolName = event.toolName ?? '?'
+  const recovered = trace.slice(index + 1).some((later) =>
+    later.type === 'tool-result'
+    && (later as { toolName?: string }).toolName === toolName
+    && toolResultOutcome((later as { result?: unknown }).result).ok,
+  )
+  const entry = toolErrorsByTool.get(toolName)
+  if (entry) {
+    entry.count++
+    if (recovered) entry.recovered++
+  } else {
+    toolErrorsByTool.set(toolName, {
+      count: 1,
+      recovered: recovered ? 1 : 0,
+      sample: event.error ?? 'Tool call failed without an error message.',
+      where,
+    })
+  }
+  return recovered
+}
+
 async function auditStory(storyId: string): Promise<void> {
   const index = await getBranchesIndex(dataDir, storyId)
   for (const branch of index.branches) {
@@ -96,6 +130,8 @@ async function auditStory(storyId: string): Promise<void> {
       segmentRuns: 0,
       losses: 0,
       lossyRuns: 0,
+      toolErrors: 0,
+      recoveredToolErrors: 0,
     }
 
     for (const file of await readdir(dir)) {
@@ -112,7 +148,17 @@ async function auditStory(storyId: string): Promise<void> {
       tally.runs++
       if (isSegmentEra(analysis)) tally.segmentRuns++
       let lost = 0
-      for (const event of analysis.trace) {
+      for (const [eventIndex, event] of analysis.trace.entries()) {
+        if (event.type === 'tool-error') {
+          tally.toolErrors++
+          if (recordToolError(
+            `${branch.id}/${analysis.id}`,
+            analysis.trace,
+            eventIndex,
+            event as { toolName?: string; error?: string },
+          )) tally.recoveredToolErrors++
+          continue
+        }
         if (event.type !== 'tool-result') continue
         const { toolName, result } = event as { toolName?: string; result?: unknown }
         lost += record(`${branch.id}/${analysis.id}`, toolName ?? '?', result)
@@ -150,11 +196,11 @@ if (branchTallies.length === 0) {
 
 const pad = (value: string | number, width: number) => String(value).padStart(width)
 
-console.info('\nPer branch — a "loss" is work the engine refused or could not ground.\n')
-console.info('  branch       runs  segment-era  lossy runs  losses   name')
+console.info('\nPer branch — loss attempts are refused/ungrounded operations, including repeated retries.\n')
+console.info('  branch       runs  segment-era  lossy runs  loss attempts  tool errors  recovered   name')
 for (const t of branchTallies.sort((a, b) => a.branch.localeCompare(b.branch))) {
   console.info(
-    `  ${t.branch.padEnd(11)} ${pad(t.runs, 4)}  ${pad(t.segmentRuns, 11)}  ${pad(t.lossyRuns, 10)}  ${pad(t.losses, 6)}   ${t.branchName}`,
+    `  ${t.branch.padEnd(11)} ${pad(t.runs, 4)}  ${pad(t.segmentRuns, 11)}  ${pad(t.lossyRuns, 10)}  ${pad(t.losses, 13)}  ${pad(t.toolErrors, 11)}  ${pad(t.recoveredToolErrors, 9)}   ${t.branchName}`,
   )
 }
 
@@ -168,14 +214,24 @@ const era = (pick: (t: BranchTally) => boolean) => {
 const segment = era((t) => t.segmentRuns > t.runs / 2)
 const quote = era((t) => t.segmentRuns <= t.runs / 2)
 
-console.info('\n  evidence contract      runs  losses  per run')
+console.info('\n  evidence contract      runs  loss attempts  per run')
 console.info(`  retyped quotes    ${pad(quote.runs, 10)}  ${pad(quote.losses, 6)}  ${pad(quote.per, 7)}`)
 console.info(`  cited sentences   ${pad(segment.runs, 10)}  ${pad(segment.losses, 6)}  ${pad(segment.per, 7)}`)
 
-console.info('\nLosses by reason:\n')
+console.info('\nLoss attempts by reason (attempts may repeat within one analysis):\n')
 for (const [, entry] of [...byReason].sort((a, b) => b[1].count - a[1].count)) {
-  console.info(`  ${pad(entry.count, 4)}  ${entry.sample.slice(0, 100)}`)
+  const analysisLabel = entry.analyses.size === 1 ? 'analysis' : 'analyses'
+  console.info(`  ${pad(entry.count, 4)} attempts in ${pad(entry.analyses.size, 3)} ${analysisLabel}  ${entry.sample.slice(0, 100)}`)
   console.info(`        first seen in ${entry.where}`)
+}
+
+if (toolErrorsByTool.size > 0) {
+  console.info('\nTool-call errors (reported separately from rejected operation attempts):\n')
+  for (const [toolName, entry] of [...toolErrorsByTool].sort((a, b) => b[1].count - a[1].count)) {
+    console.info(`  ${pad(entry.count, 4)}  ${pad(entry.recovered, 4)} recovered  ${toolName}`)
+    console.info(`        ${entry.sample.replace(/\s+/g, ' ').slice(0, 100)}`)
+    console.info(`        first seen in ${entry.where}`)
+  }
 }
 
 if (declaredSkips.size > 0) {

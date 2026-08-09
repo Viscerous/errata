@@ -14,6 +14,8 @@ export interface AgentStreamCompletion {
   toolErrors: Array<{ toolName: string; error: string }>
   stepCount: number
   finishReason: string
+  /** The model the provider reports answered; see `DrainedAgentStream`. */
+  servedModelId?: string
 }
 
 export interface AgentStreamResult {

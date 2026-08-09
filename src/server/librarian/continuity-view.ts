@@ -531,7 +531,7 @@ export function renderContinuity(source: ContinuitySource, reader: ContinuityRea
   }
   if (!view) return null
   if (presentation === 'registry') {
-    return renderContinuityRegistry(view, charactersInScope(source, policy.characterScope))
+    return renderContinuityRegistry(source, view, charactersInScope(source, policy.characterScope))
   }
   return renderAuthorialContinuity(
     source,
@@ -617,7 +617,7 @@ function renderSelfAwareness(view: ContinuityView | undefined, characterId: stri
 }
 
 /** Full keyed registry for the Librarian, including dormant unresolved threads. */
-function renderContinuityRegistry(view: ContinuityView, characterIds: Set<string>): string {
+function renderContinuityRegistry(source: ContinuitySource, view: ContinuityView, characterIds: Set<string>): string {
   const parts = [
     '## Continuity Registry Before This Passage',
     'Reuse the exact keys below. Thread omission means dormancy, never resolution; resolve or abandon only with explicit source evidence.',
@@ -640,7 +640,12 @@ function renderContinuityRegistry(view: ContinuityView, characterIds: Set<string
   if (knowledge.length > 0) {
     parts.push([
       '### Character knowledge keys',
-      ...knowledge.map((entry) => `- ${entry.characterId} | ${entry.knowledgeKey} | ${entry.fact}`),
+      'The character is the knower, not necessarily the person or thing described by the fact.',
+      ...knowledge.map((entry) => {
+        const name = characterName(source, entry.characterId)
+        const knower = name ? `${name} (${entry.characterId})` : entry.characterId
+        return `- Knower: ${knower} | ${entry.knowledgeKey} | ${entry.fact}`
+      }),
     ].join('\n'))
   }
   return parts.join('\n\n')

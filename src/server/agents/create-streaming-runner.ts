@@ -15,7 +15,7 @@ import { MISSING_SYSTEM_PROMPT_FALLBACK } from '../instructions'
 import { getStory } from '../fragments/storage'
 import { buildContextState } from '../llm/context-builder'
 import { createFragmentTools } from '../llm/tools'
-import { resolveAndReportUsage } from '../llm/usage-normalizer'
+import { resolveAndReportServedUsage } from '../llm/usage-normalizer'
 import { createLogger } from '../logging'
 import { createEventStream } from './create-event-stream'
 import { holdLibrarianAnalysis } from '../librarian/scheduler'
@@ -130,7 +130,7 @@ export function createStreamingRunner<TOpts extends object, TValidated = Record<
         : ({} as TValidated)
 
       // 3. Resolve model early (modelId needed for instruction resolution)
-      const { model, modelId, temperature, providerOptions, guards } = await resolveAgentRuntime(dataDir, storyId, role, story)
+      const { model, modelId, providerId, temperature, providerOptions, guards } = await resolveAgentRuntime(dataDir, storyId, role, story)
       requestLogger.info('Resolved model', { modelId })
 
       // 4. Build story context (optional)
@@ -208,7 +208,11 @@ export function createStreamingRunner<TOpts extends object, TValidated = Record<
 
       // 12. Track token usage after stream completes
       streamResult.completion
-        .then(() => resolveAndReportUsage(dataDir, storyId, config.name, result.totalUsage, modelId))
+        .then((completion) => resolveAndReportServedUsage(dataDir, storyId, config.name, result.totalUsage, {
+          providerId,
+          configuredModelId: modelId,
+          servedModelId: completion.servedModelId,
+        }))
         .catch(() => {
           // Stream errored — skip usage tracking
         })

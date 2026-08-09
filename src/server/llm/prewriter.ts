@@ -10,7 +10,8 @@ import { type AgentBlockContext, baseBlockContext } from '../agents/agent-block-
 import { renderContinuity } from '../librarian/continuity-view'
 import type { Fragment, StoryMeta } from '../fragments/schema'
 import type { TokenUsage, ToolCallLog } from './generation-logs'
-import { resolveAndReportUsage } from './usage-normalizer'
+import { resolveAndReportServedUsage } from './usage-normalizer'
+import { servedModelIdFromResponse } from './served-models'
 import { createLogger } from '../logging'
 
 const logger = createLogger('prewriter')
@@ -203,7 +204,7 @@ export async function runPrewriter(args: RunPrewriterArgs): Promise<PrewriterRes
   const canAskQuestions = clarifyEnabled && round < MAX_CLARIFY_ROUNDS
 
   const startTime = Date.now()
-  const { model, modelId, temperature, providerOptions, guards } = await resolveAgentRuntime(dataDir, storyId, 'generation.prewriter', story)
+  const { model, modelId, providerId, temperature, providerOptions, guards } = await resolveAgentRuntime(dataDir, storyId, 'generation.prewriter', story)
   requestLogger.info('Prewriter model resolved', { modelId })
 
   // Build the prewriter prompt from blocks (allows user customization via block editor).
@@ -357,6 +358,7 @@ export async function runPrewriter(args: RunPrewriterArgs): Promise<PrewriterRes
   let currentStepText = ''
   let fullReasoning = ''
   let stepCount = 0
+  let servedModelId: string | undefined
   let terminalToolReturned = false
   const toolCallArgsById = new Map<string, Record<string, unknown>>()
   const toolCalls: ToolCallLog[] = []
@@ -418,6 +420,7 @@ export async function runPrewriter(args: RunPrewriterArgs): Promise<PrewriterRes
       // One step per LLM round-trip. `finish` (singular) fires once for the
       // whole run, so counting it would always yield 1.
       stepCount++
+      servedModelId = servedModelIdFromResponse(p.response) ?? servedModelId
       captureStepBrief()
     }
   }
@@ -427,7 +430,13 @@ export async function runPrewriter(args: RunPrewriterArgs): Promise<PrewriterRes
 
   const durationMs = Date.now() - startTime
 
-  const usage = await resolveAndReportUsage(dataDir, storyId, 'generation.prewriter', result.totalUsage, modelId)
+  const { usage } = await resolveAndReportServedUsage(
+    dataDir,
+    storyId,
+    'generation.prewriter',
+    result.totalUsage,
+    { providerId, configuredModelId: modelId, servedModelId },
+  )
 
   requestLogger.info('Prewriter completed', { durationMs, briefLength: briefText.length })
 

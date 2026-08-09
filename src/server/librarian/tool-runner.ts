@@ -27,6 +27,7 @@ export interface ToolLoopPassResult {
   toolCalls: Array<{ toolName: string; args: Record<string, unknown>; result: unknown }>
   stepCount: number
   finishReason: string
+  servedModelId?: string
   totalUsage: PromiseLike<unknown>
 }
 
@@ -36,7 +37,8 @@ function toolOutputOk(output: unknown): boolean {
   return value !== false
 }
 
-function terminalToolSucceeded(toolName: string, requiresToolName?: string) {
+/** Stop only after the terminal tool executed successfully, not merely after it was called. */
+export function terminalToolSucceeded(toolName: string, requiresToolName?: string) {
   return ({ steps }: { steps: Array<{ toolResults?: Array<{ toolName: string; output: unknown }> }> }): boolean => {
     const lastStep = steps[steps.length - 1]
     const terminalSucceeded = lastStep?.toolResults?.some((result) =>
@@ -98,6 +100,7 @@ export async function runToolLoopPass(args: ToolLoopPassArgs): Promise<ToolLoopP
       toolCalls: drained.toolCalls,
       stepCount: drained.stepCount,
       finishReason: drained.finishReason,
+      servedModelId: drained.servedModelId,
       totalUsage: result.totalUsage,
     }
   } catch (error) {

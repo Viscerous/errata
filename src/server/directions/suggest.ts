@@ -5,7 +5,7 @@ import { getStory } from '../fragments/storage'
 import { buildContextState } from '../llm/context-builder'
 import { compileAgentContext } from '../agents/compile-agent-context'
 import { instructionRegistry } from '../instructions'
-import { resolveAndReportUsage } from '../llm/usage-normalizer'
+import { resolveAndReportServedUsage } from '../llm/usage-normalizer'
 import { createLogger } from '../logging'
 import { type AgentBlockContext, baseBlockContext } from '../agents/agent-block-context'
 import { drainAgentStream } from '../agents/drain-agent-stream'
@@ -64,7 +64,7 @@ export async function proposeDirections(
   // Load story to get custom prompt if configured
   const story = await getStory(dataDir, storyId)
   if (!story) throw new Error(`Story not found: ${storyId}`)
-  const { model, modelId, temperature, providerOptions, guards } = await resolveAgentRuntime(dataDir, storyId, 'directions.suggest', story)
+  const { model, modelId, providerId, temperature, providerOptions, guards } = await resolveAgentRuntime(dataDir, storyId, 'directions.suggest', story)
 
   const resolvedTemplate = instructionRegistry.resolve('directions.suggest-template', modelId)
   const promptTemplate = story.settings.guidedSuggestPrompt || resolvedTemplate
@@ -105,10 +105,16 @@ export async function proposeDirections(
     ],
   })
 
-  const { fullText, stepCount, finishReason } = await drainAgentStream(result.fullStream)
+  const { fullText, stepCount, finishReason, servedModelId } = await drainAgentStream(result.fullStream)
 
-  // Track token usage
-  await resolveAndReportUsage(dataDir, storyId, 'directions.suggest', result.totalUsage, modelId)
+  // Track token usage against the model that answered, not the configured name.
+  const { modelId: servedModel } = await resolveAndReportServedUsage(
+    dataDir,
+    storyId,
+    'directions.suggest',
+    result.totalUsage,
+    { providerId, configuredModelId: modelId, servedModelId },
+  )
 
   const durationMs = Date.now() - startTime
 
@@ -117,5 +123,5 @@ export async function proposeDirections(
 
   requestLogger.info('Suggestions generated', { count: suggestions.length, durationMs })
 
-  return { suggestions, modelId, durationMs, stepCount, finishReason }
+  return { suggestions, modelId: servedModel, durationMs, stepCount, finishReason }
 }

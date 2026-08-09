@@ -7,6 +7,7 @@ import {
   librarianFinishAnalysisInputSchema,
   librarianRecordCorrectionsInputSchema,
   listLibrarianAnalyzeToolNames,
+  anchorMentionText,
   mentionInputSchema,
   reportAnalysisInputSchema,
 } from '@/server/librarian/analysis-tools'
@@ -726,6 +727,11 @@ describe('analysis-tools', () => {
     })
   })
 
+  it('anchors exact rendered phrases split by inline Markdown without accepting paraphrases', () => {
+    expect(anchorMentionText('Medicine file', 'the *medicine* file remained sealed.')).toBe('Medicine')
+    expect(anchorMentionText('seaward dike', 'the dike remained sealed.')).toBeNull()
+  })
+
   it('reportAnalysis clips verbose payloads in execute instead of failing the call', async () => {
     const collector = createEmptyCollector()
     const tools = createAnalysisTools(collector)
@@ -1210,6 +1216,32 @@ describe('analysis-tools', () => {
 
     expect(report).not.toHaveProperty('resolvedFragments')
   })
+
+  it('tracks full presentation populated after tool construction', async () => {
+    const prose = mockFragment({ id: 'pr-0001', type: 'prose', content: 'Alice entered the forest.' })
+    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => {
+      if (id === 'pr-0001') return prose
+      if (id === 'ch-0001') return mockFragment({ id, content: 'Alice avoids the northern road.' })
+      return null
+    })
+    const presentedFullFragmentIds = new Set<string>()
+    const collector = createEmptyCollector()
+    const tools = createAnalysisTools(collector, {
+      dataDir: '/tmp',
+      storyId: 'story-test',
+      proseFragmentId: 'pr-0001',
+      presentedFullFragmentIds,
+    })
+    // compileAgentContext determines this only after the tools and blocks exist.
+    presentedFullFragmentIds.add('ch-0001')
+
+    const report = await tools.reportAnalysis.execute!({
+      summary: 'Alice entered the forest.',
+      mentions: [{ fragmentId: 'ch-0001', text: 'Alice' }],
+    }, { toolCallId: 'report', messages: [], abortSignal: undefined as unknown as AbortSignal })
+
+    expect(report).not.toHaveProperty('resolvedFragments')
+  })
 })
 
 /**
@@ -1258,6 +1290,7 @@ describe('continuity keys steered by the live registry', () => {
     // The field the model is not using arrives as an explicit null often enough
     // that treating it as a rejection cost Timeline 11 three whole reports.
     expect(schema.safeParse(stateOperation(null)).success).toBe(true)
+    expect(schema.safeParse(stateOperation('')).success).toBe(true)
   })
 
   it('lands a legacy spelling on the live key by canonicalizing rather than by refusing it', async () => {
@@ -1292,8 +1325,158 @@ describe('continuity keys steered by the live registry', () => {
   })
 
   // Timeline 11 admitted a literal `_` as a thread key because the 12B put the
-  // real key in `label`. It must be skipped with a reason, not registered.
-  it('skips an operation whose key carries no identity instead of registering it', async () => {
+  // real key in `label`, and a later run omitted `key` outright for eight calls
+  // running. Both carry the identity in the sibling field, so it is recovered
+  // from there rather than costing the operation.
+  it('derives the key from the operation description when the key carries no identity', async () => {
+    const collector = createEmptyCollector()
+    const prose = mockFragment({ id: 'pr-0001', type: 'prose', content: 'He claims her line. She accepts.' })
+    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => id === 'pr-0001' ? prose : null)
+    const tools = createAnalysisTools(collector, {
+      dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001',
+    })
+
+    await tools.reportAnalysis.execute!(await reportAnalysisInputSchema.parseAsync({
+      summary: 'He claims her line.',
+      threadOperations: [{
+        key: '_',
+        action: 'open',
+        label: 'mpamba_dynastic_intent',
+        relatedFragmentIds: [],
+        evidenceSegments: [1],
+      }],
+      stateOperations: [{
+        action: 'set',
+        subject: 'Eastern dike',
+        value: 'holding',
+        evidenceSegments: [1],
+      }],
+    }), { toolCallId: 'report', messages: [], abortSignal: undefined as unknown as AbortSignal })
+
+    expect(collector.continuityProjection.threadOperations[0].threadKey).toBe('mpamba_dynastic_intent')
+    expect(collector.continuityProjection.stateOperations[0].stateKey).toBe('eastern_dike')
+  })
+
+  it('reuses a unique live identity by its human label and aligns keyless focus by position', async () => {
+    const collector = createEmptyCollector()
+    const prose = mockFragment({
+      id: 'pr-0001',
+      type: 'prose',
+      content: 'The clinical board remained active. Dutch coordination advanced. Alice corrected what she knew.',
+    })
+    const character = mockFragment({ id: 'ch-0001', type: 'character' })
+    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => {
+      if (id === 'pr-0001') return prose
+      if (id === 'ch-0001') return character
+      return null
+    })
+    const continuityKeys = {
+      state: [{ key: 'medicine_track_activation_status', label: 'Medicine track clinical board' }],
+      thread: [{ key: 'dutch_coordination_framework_negotiation', label: 'Dutch coordination framework negotiation' }],
+      knowledge: [
+        { key: 'alice_corrected_fact', label: 'The board remained active.', scope: 'ch-0001' },
+        { key: 'someone_else_corrected_fact', label: 'The board remained active.', scope: 'ch-0002' },
+      ],
+    }
+    const tools = createAnalysisTools(collector, {
+      dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001', continuityKeys,
+    })
+
+    const result = await tools.reportAnalysis.execute!(
+      await buildReportAnalysisInputSchema(continuityKeys).parseAsync({
+        summary: 'The board stayed active and coordination advanced.',
+        stateOperations: [{
+          action: 'set', subject: 'Medicine track clinical board', value: 'active', evidenceSegments: [1],
+        }],
+        threadOperations: [{
+          action: 'advance', label: 'Dutch coordination framework negotiation', relatedFragmentIds: [], evidenceSegments: [2],
+        }],
+        threadFocus: [{ visibility: 'foreground' }],
+        knowledgeOperations: [{
+          characterId: 'ch-0001', action: 'correct', fact: 'The board remained active.', evidenceSegments: [3],
+        }],
+      }),
+      { toolCallId: 'report', messages: [], abortSignal: undefined as unknown as AbortSignal },
+    )
+
+    expect(result).not.toHaveProperty('skippedContinuity')
+    expect(collector.continuityProjection.stateOperations[0].stateKey)
+      .toBe('medicine_track_activation_status')
+    expect(collector.continuityProjection.threadOperations[0].threadKey)
+      .toBe('dutch_coordination_framework_negotiation')
+    expect(collector.continuityProjection.threadFocus[0]).toEqual({
+      threadKey: 'dutch_coordination_framework_negotiation',
+      visibility: 'foreground',
+    })
+    expect(collector.continuityProjection.knowledgeOperations[0].knowledgeKey)
+      .toBe('alice_corrected_fact')
+  })
+
+  it('bounds a derived identity while keeping a stable hash suffix', async () => {
+    const collector = createEmptyCollector()
+    const prose = mockFragment({ id: 'pr-0001', type: 'prose', content: 'Alice learned the whole arrangement.' })
+    const character = mockFragment({ id: 'ch-0001', type: 'character' })
+    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => {
+      if (id === 'pr-0001') return prose
+      if (id === 'ch-0001') return character
+      return null
+    })
+    const tools = createAnalysisTools(collector, {
+      dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001',
+    })
+    const fact = 'The complete multilateral diplomatic coordination arrangement remained active across every delegation'
+
+    await tools.reportAnalysis.execute!(await reportAnalysisInputSchema.parseAsync({
+      summary: 'Alice learned the arrangement.',
+      knowledgeOperations: [{
+        characterId: 'ch-0001', action: 'learn', fact, evidenceSegments: [1],
+      }],
+    }), { toolCallId: 'report', messages: [], abortSignal: undefined as unknown as AbortSignal })
+
+    const key = collector.continuityProjection.knowledgeOperations[0].knowledgeKey
+    expect(key.length).toBeLessThanOrEqual(64)
+    expect(key).toMatch(/^the_complete_multilateral_diplomatic_coordination_[a-f0-9]{8}$/)
+  })
+
+  it('does not invent a fresh identity for an operation that must target existing memory', async () => {
+    const collector = createEmptyCollector()
+    const prose = mockFragment({ id: 'pr-0001', type: 'prose', content: 'The dike question ended. She forgot the answer.' })
+    const character = mockFragment({ id: 'ch-0001', type: 'character' })
+    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => {
+      if (id === 'pr-0001') return prose
+      if (id === 'ch-0001') return character
+      return null
+    })
+    const tools = createAnalysisTools(collector, {
+      dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001',
+    })
+
+    const result = await tools.reportAnalysis.execute!(await reportAnalysisInputSchema.parseAsync({
+      summary: 'The old question had ended.',
+      stateOperations: [{ action: 'clear', subject: 'Eastern dike status', evidenceSegments: [1] }],
+      threadOperations: [{
+        action: 'resolve', label: 'Who damaged the dike?', relatedFragmentIds: [], evidenceSegments: [1],
+      }],
+      knowledgeOperations: [{
+        characterId: 'ch-0001', action: 'forget', fact: 'Who damaged the dike.', evidenceSegments: [2],
+      }],
+      threadFocus: [{ threadKey: '', visibility: 'foreground' }],
+    }), { toolCallId: 'report', messages: [], abortSignal: undefined as unknown as AbortSignal })
+
+    expect(collector.continuityProjection.stateOperations).toEqual([])
+    expect(collector.continuityProjection.threadOperations).toEqual([])
+    expect(collector.continuityProjection.knowledgeOperations).toEqual([])
+    expect(collector.continuityProjection.threadFocus).toEqual([])
+    expect((result as { skippedContinuity: Array<{ reason: string }> }).skippedContinuity.map((item) => item.reason))
+      .toEqual([
+        'A state clear operation must name the existing key; no unambiguous retry or live-registry match was found.',
+        'A thread resolve operation must name the existing key; no unambiguous retry or live-registry match was found.',
+        'A knowledge forget operation must name the existing key; no unambiguous retry or live-registry match was found.',
+        'A thread focus entry must name its thread key or align with a successfully recorded thread operation.',
+      ])
+  })
+
+  it('still skips an operation that carries no identity anywhere', async () => {
     const collector = createEmptyCollector()
     const prose = mockFragment({ id: 'pr-0001', type: 'prose', content: 'He claims her line. She accepts.' })
     vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => id === 'pr-0001' ? prose : null)
@@ -1306,7 +1489,6 @@ describe('continuity keys steered by the live registry', () => {
       threadOperations: [{
         key: '_',
         action: 'advance',
-        label: 'mpamba_dynastic_intent',
         relatedFragmentIds: [],
         evidenceSegments: [1],
       }],
@@ -1314,6 +1496,235 @@ describe('continuity keys steered by the live registry', () => {
 
     expect(collector.continuityProjection.threadOperations).toEqual([])
     expect((result as { skippedContinuity: Array<{ reason: string }> }).skippedContinuity[0].reason)
-      .toContain('needs a key naming the unresolved question')
+      .toContain('must name the existing key')
+  })
+
+  // A retry is normally a partial re-report, so assignment made it a truncation:
+  // one Qwen passage reported two valid thread operations and then seven empty
+  // sets, and only the empty set survived.
+  it('keeps operations an earlier call reported when a retry does not restate them', async () => {
+    const collector = createEmptyCollector()
+    const prose = mockFragment({ id: 'pr-0001', type: 'prose', content: 'He claims her line. She accepts.' })
+    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => id === 'pr-0001' ? prose : null)
+    const tools = createAnalysisTools(collector, {
+      dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001',
+    })
+    const call = async (input: Record<string, unknown>) => tools.reportAnalysis.execute!(
+      await reportAnalysisInputSchema.parseAsync(input),
+      { toolCallId: 'report', messages: [], abortSignal: undefined as unknown as AbortSignal },
+    )
+
+    await call({
+      summary: 'He claims her line.',
+      stateOperations: [
+        { key: 'eastern_dike_status', action: 'set', subject: 'Eastern dike', value: 'holding', evidenceSegments: [1] },
+        { key: 'succession_claim', action: 'set', subject: 'Succession', value: 'contested', evidenceSegments: [1] },
+      ],
+    })
+    await call({
+      summary: 'He claims her line.',
+      stateOperations: [
+        { key: 'eastern_dike_status', action: 'set', subject: 'Eastern dike', value: 'breached', evidenceSegments: [2] },
+      ],
+    })
+
+    const byKey = new Map(collector.continuityProjection.stateOperations.map((operation) => [operation.stateKey, operation]))
+    expect(byKey.get('eastern_dike_status')?.value).toBe('breached')
+    expect(byKey.get('succession_claim')?.value).toBe('contested')
+  })
+
+  it('does not let an empty retry erase the whole continuity projection', async () => {
+    const collector = createEmptyCollector()
+    const prose = mockFragment({ id: 'pr-0001', type: 'prose', content: 'He claims her line. She accepts.' })
+    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => id === 'pr-0001' ? prose : null)
+    const tools = createAnalysisTools(collector, {
+      dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001',
+    })
+    const call = async (input: Record<string, unknown>) => tools.reportAnalysis.execute!(
+      await reportAnalysisInputSchema.parseAsync(input),
+      { toolCallId: 'report', messages: [], abortSignal: undefined as unknown as AbortSignal },
+    )
+
+    await call({
+      summary: 'He claims her line.',
+      threadOperations: [{
+        key: 'mpamba_dynastic_intent', action: 'open', relatedFragmentIds: [], evidenceSegments: [1],
+      }],
+    })
+    await call({ summary: 'He claims her line.' })
+
+    expect(collector.continuityProjection.threadOperations).toHaveLength(1)
+    expect(collector.continuityProjection.threadOperations[0].threadKey).toBe('mpamba_dynastic_intent')
+  })
+
+  // Qwen first omitted every state key, then supplied deliberate keys while
+  // keeping the same citations. The correction must rename those identities,
+  // not leave the derived drafts beside them as duplicate state.
+  it('lets explicit retry keys supersede earlier derived identities', async () => {
+    const collector = createEmptyCollector()
+    const prose = mockFragment({ id: 'pr-0001', type: 'prose', content: 'The dike held. The hall accepted the proof.' })
+    const character = mockFragment({ id: 'ch-0001', type: 'character' })
+    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => {
+      if (id === 'pr-0001') return prose
+      if (id === 'ch-0001') return character
+      return null
+    })
+    const tools = createAnalysisTools(collector, {
+      dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001',
+    })
+    const call = async (input: Record<string, unknown>) => tools.reportAnalysis.execute!(
+      await reportAnalysisInputSchema.parseAsync(input),
+      { toolCallId: 'report', messages: [], abortSignal: undefined as unknown as AbortSignal },
+    )
+
+    await call({
+      summary: 'The dike held.',
+      stateOperations: [
+        { action: 'set', subject: 'Eastern Works seaward dike', value: 'holding', evidenceSegments: [1] },
+        { action: 'set', subject: "Principia's diplomatic posture", value: 'engaging', evidenceSegments: [2] },
+      ],
+      knowledgeOperations: [{
+        characterId: 'ch-0001', action: 'learn', fact: 'The hall accepted the proof.', evidenceSegments: [2],
+      }],
+    })
+    await call({
+      summary: 'The dike held.',
+      stateOperations: [
+        { key: 'eastern_channel_closure', action: 'set', subject: 'eastern channel', value: 'holding', evidenceSegments: [1] },
+        { key: 'principia_diplomatic_stance', action: 'set', subject: 'Principia', value: 'engaging', evidenceSegments: [2] },
+      ],
+      knowledgeOperations: [{
+        characterId: 'ch-0001', key: 'hall_acceptance', action: 'learn', fact: 'The hall accepted the proof.', evidenceSegments: [2],
+      }],
+    })
+
+    expect(collector.continuityProjection.stateOperations.map((operation) => operation.stateKey)).toEqual([
+      'eastern_channel_closure',
+      'principia_diplomatic_stance',
+    ])
+    expect(collector.continuityProjection.knowledgeOperations.map((operation) => operation.knowledgeKey))
+      .toEqual(['hall_acceptance'])
+  })
+
+  // The eight-call Qwen loop retained the right keys only on its first call;
+  // later calls repeated the same cited operations with the key and sometimes
+  // the note missing. The citation lets the retry inherit the established key.
+  it('inherits a prior thread key when a retry drops its descriptive fields', async () => {
+    const collector = createEmptyCollector()
+    const prose = mockFragment({ id: 'pr-0001', type: 'prose', content: 'The dike held. The room accepted the proof.' })
+    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => id === 'pr-0001' ? prose : null)
+    const tools = createAnalysisTools(collector, {
+      dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001',
+    })
+    const call = async (threadOperations: Array<Record<string, unknown>>) => tools.reportAnalysis.execute!(
+      await reportAnalysisInputSchema.parseAsync({ summary: 'The room accepted the proof.', threadOperations }),
+      { toolCallId: 'report', messages: [], abortSignal: undefined as unknown as AbortSignal },
+    )
+
+    await call([
+      { key: 'eastern_works_aftermath', action: 'advance', note: 'Political fallout remains.', relatedFragmentIds: [], evidenceSegments: [1] },
+      { key: 'why_doesnt_she_intervene', action: 'advance', note: 'Capacity was demonstrated.', relatedFragmentIds: [], evidenceSegments: [2] },
+    ])
+    await call([
+      { action: 'advance', relatedFragmentIds: [], evidenceSegments: [1] },
+      { action: 'advance', relatedFragmentIds: [], evidenceSegments: [2] },
+    ])
+    await call([
+      { action: 'advance', note: 'The dike shifted attention to political fallout.', relatedFragmentIds: [], evidenceSegments: [1] },
+      { action: 'advance', note: 'The demonstration shifted the room.', relatedFragmentIds: [], evidenceSegments: [2] },
+    ])
+
+    expect(collector.continuityProjection.threadOperations.map((operation) => operation.threadKey)).toEqual([
+      'eastern_works_aftermath',
+      'why_doesnt_she_intervene',
+    ])
+  })
+
+  it('preserves the Qwen retry shape while deriving only newly created identities', async () => {
+    const collector = createEmptyCollector()
+    const prose = mockFragment({
+      id: 'pr-0001',
+      type: 'prose',
+      content: Array.from({ length: 43 }, (_, index) => `Passage sentence ${index + 1}.`).join(' '),
+    })
+    const character = mockFragment({ id: 'ch-0001', type: 'character' })
+    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => {
+      if (id === 'pr-0001') return prose
+      if (id === 'ch-0001') return character
+      return null
+    })
+    const tools = createAnalysisTools(collector, {
+      dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001',
+    })
+    const call = async (input: Record<string, unknown>) => tools.reportAnalysis.execute!(
+      await reportAnalysisInputSchema.parseAsync({ summary: 'The examination continued.', ...input }),
+      { toolCallId: 'report', messages: [], abortSignal: undefined as unknown as AbortSignal },
+    )
+    const keylessCreations = {
+      stateOperations: [
+        { action: 'set', subject: 'Eastern Works seaward dike', value: 'closed', evidenceSegments: [4] },
+        { action: 'set', subject: "Clinical director's examination", value: 'complete', evidenceSegments: [29, 30, 31, 32, 33, 34] },
+      ],
+      knowledgeOperations: [{
+        characterId: 'ch-0001',
+        action: 'learn',
+        fact: "The director's pulse remained steady and professional.",
+        acquisition: 'witnessed',
+        evidenceSegments: [21, 22, 23],
+      }],
+    }
+
+    await call({
+      ...keylessCreations,
+      threadOperations: [
+        { key: 'eastern_works_aftermath', action: 'advance', relatedFragmentIds: [], evidenceSegments: [4, 43] },
+        { key: 'why_doesnt_she_intervene', action: 'advance', relatedFragmentIds: [], evidenceSegments: [1, 38] },
+      ],
+    })
+    await call({
+      ...keylessCreations,
+      threadOperations: [
+        { action: 'advance', relatedFragmentIds: [], evidenceSegments: [4, 43] },
+        { action: 'advance', relatedFragmentIds: [], evidenceSegments: [1, 38] },
+      ],
+    })
+
+    expect(collector.continuityProjection.stateOperations.map((operation) => operation.stateKey)).toEqual([
+      'eastern_works_seaward_dike',
+      'clinical_director_s_examination',
+    ])
+    expect(collector.continuityProjection.threadOperations.map((operation) => operation.threadKey)).toEqual([
+      'eastern_works_aftermath',
+      'why_doesnt_she_intervene',
+    ])
+    expect(collector.continuityProjection.knowledgeOperations.map((operation) => operation.knowledgeKey)).toEqual([
+      'the_director_s_pulse_remained_steady_and_professional',
+    ])
+  })
+
+  it('keeps newly reported threads when the merged projection reaches its cap', async () => {
+    const collector = createEmptyCollector()
+    const sentences = Array.from({ length: 13 }, (_, index) => `Event ${index + 1}.`).join(' ')
+    const prose = mockFragment({ id: 'pr-0001', type: 'prose', content: sentences })
+    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => id === 'pr-0001' ? prose : null)
+    const tools = createAnalysisTools(collector, {
+      dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001',
+    })
+    const execute = async (threadOperations: Array<Record<string, unknown>>) => tools.reportAnalysis.execute!(
+      await reportAnalysisInputSchema.parseAsync({ summary: 'Events accumulated.', threadOperations }),
+      { toolCallId: 'report', messages: [], abortSignal: undefined as unknown as AbortSignal },
+    )
+
+    await execute(Array.from({ length: 12 }, (_, index) => ({
+      key: `old_thread_${index + 1}`, action: 'open', relatedFragmentIds: [], evidenceSegments: [index + 1],
+    })))
+    await execute([{
+      key: 'new_thread', action: 'open', relatedFragmentIds: [], evidenceSegments: [13],
+    }])
+
+    const keys = collector.continuityProjection.threadOperations.map((operation) => operation.threadKey)
+    expect(keys).toHaveLength(12)
+    expect(keys).toContain('new_thread')
+    expect(keys).not.toContain('old_thread_1')
   })
 })

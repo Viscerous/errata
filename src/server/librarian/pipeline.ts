@@ -5,7 +5,7 @@ import { compileAgentContext } from '../agents/compile-agent-context'
 import type { ActivityStreamEvent } from '../agents/activity-stream'
 import type { ContextMessage } from '../llm/context-builder'
 import type { resolveAgentRuntime } from '../llm/client'
-import { resolveAndReportUsage } from '../llm/usage-normalizer'
+import { resolveAndReportServedUsage } from '../llm/usage-normalizer'
 import type { ContextSelectionSource, FragmentSignal } from '../llm/context-selection'
 import { buildAnalyzeContext } from './blocks'
 import {
@@ -86,6 +86,7 @@ async function runCompiledToolPass(args: RunCompiledPassArgs): Promise<{
   toolCalls: Array<{ toolName: string; args: Record<string, unknown>; result: unknown }>
   stepCount: number
   finishReason: string
+  servedModelId?: string
   totalUsage: PromiseLike<unknown>
 }> {
   const systemMessage = args.compiled.messages.find(m => m.role === 'system')
@@ -244,23 +245,29 @@ async function runOnlineAnalyzePass(
     context.attentionCandidateIds = fragmentCandidateIds(initialCandidates)
     context.attentionCandidateSignals = candidateSignals(initialCandidates)
 
-    const presentedFullFragmentIds = [...new Set([
-      ...context.attentionCandidateIds,
-      ...(context.stickyCharacters ?? []).map((fragment) => fragment.id),
-      ...(context.stickyKnowledge ?? []).map((fragment) => fragment.id),
-      ...(context.recentCharacters ?? []).map((fragment) => fragment.id),
-      ...(context.recentKnowledge ?? []).map((fragment) => fragment.id),
-      ...(context.recentCustomFragments ?? []).flatMap((group) => group.fragments.map((fragment) => fragment.id)),
-    ])]
+    // Filled from the compiled blocks below. Keeping the Set by reference lets
+    // reportAnalysis distinguish actual full presentation from fragments a
+    // default block would have shown before user overrides were applied.
+    const presentedFullFragmentIds = new Set<string>()
 
-    // The live registry becomes a closed choice in the operation schemas, so
-    // reusing an established identity is the structural default rather than an
-    // instruction the model has to remember and retype.
+    // The live registry is repeated beside each key field. It steers reuse
+    // without making the registry a closed enum, which smaller models handled
+    // poorly and which rejected the whole batched report on a wrong choice.
     const continuityKeys = {
-      state: (context.continuityView?.currentState ?? []).map((entry) => entry.stateKey),
-      thread: (context.continuityView?.liveThreads ?? []).map((entry) => entry.threadKey),
+      state: (context.continuityView?.currentState ?? []).map((entry) => ({
+        key: entry.stateKey,
+        label: entry.subject,
+      })),
+      thread: (context.continuityView?.liveThreads ?? []).map((entry) => ({
+        key: entry.threadKey,
+        label: entry.label,
+      })),
       knowledge: (context.continuityView?.characterKnowledge ?? [])
-        .map((entry) => entry.knowledgeKey),
+        .map((entry) => ({
+          key: entry.knowledgeKey,
+          label: entry.fact,
+          scope: entry.characterId,
+        })),
     }
 
     const tools = createLibrarianOnlineTools(collector, {
@@ -274,6 +281,12 @@ async function runOnlineAnalyzePass(
       customFragmentTypes: story.settings.customFragmentTypes,
     })
     const compiled = await compileAgentContext(dataDir, storyId, 'librarian.analyze', context, tools)
+    for (const block of compiled.blocks) {
+      if (block.fragmentContext?.mode !== 'full') continue
+      for (const fragmentId of block.fragmentContext.fragmentIds ?? []) {
+        presentedFullFragmentIds.add(fragmentId)
+      }
+    }
     requestLogger.info('Calling LLM for online analysis...', {
       attentionCandidates: context.attentionCandidateIds.length,
       toolNames: Object.keys(compiled.tools),
@@ -292,12 +305,21 @@ async function runOnlineAnalyzePass(
       abortSignal,
       idleTimeoutMs,
     })
-    await resolveAndReportUsage(dataDir, storyId, 'librarian.analyze', result.totalUsage, modelId)
+    // Attribute the work to the model that answered, not the one configured —
+    // behind a local endpoint those differ silently, and every analysis in a
+    // whole Qwen branch recorded itself as the Gemma the config still named.
+    const { modelId: servedModelId } = await resolveAndReportServedUsage(
+      dataDir,
+      storyId,
+      'librarian.analyze',
+      result.totalUsage,
+      { providerId, configuredModelId: modelId, servedModelId: result.servedModelId },
+    )
 
     requestLogger.info('LLM online analysis completed', {
       durationMs: Date.now() - analyzeStartTime,
       providerId,
-      modelId,
+      modelId: servedModelId,
       providerName: config.providerName,
       baseURL: config.baseURL,
       headers: Object.keys(requestHeaders),
@@ -321,7 +343,7 @@ async function runOnlineAnalyzePass(
         status: 'complete',
         startedAt: analyzeStartedAt,
         durationMs: Date.now() - analyzeStartTime,
-        modelId,
+        modelId: servedModelId,
         stepCount: result.stepCount,
         finishReason: result.finishReason,
         diagnostics: {

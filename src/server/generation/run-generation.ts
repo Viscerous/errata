@@ -38,6 +38,7 @@ import { beginAgentRun } from '../agents/agent-run'
 import type { ActivityStreamEvent } from '../agents/activity-stream'
 import { resolveAndReportUsage } from '../llm/usage-normalizer'
 import { drainAgentStream } from '../agents/drain-agent-stream'
+import { recordServedModel } from '../llm/served-models'
 import { createLogger } from '../logging'
 import type { Fragment } from '../fragments/schema'
 import { getBranchesIndex, isBranchDeleting, withBranch } from '../fragments/branches'
@@ -177,7 +178,10 @@ export async function runGeneration(
   requestLogger.info('BeforeContext hooks completed')
 
   // Resolve model early so modelId is available for instruction resolution
-  const { model, modelId: resolvedModelId, temperature, providerOptions, guards } = await resolveAgentRuntime(dataDir, storyId, 'generation.writer', story)
+  const { model, modelId: resolvedModelId, providerId, temperature, providerOptions, guards } = await resolveAgentRuntime(dataDir, storyId, 'generation.writer', story)
+  // What the provider reports it answered with, once it has answered. Until then
+  // the configured id is the best available name for it.
+  let servedModelId = resolvedModelId
   abortController.signal.throwIfAborted()
   requestLogger.info('Resolved model', { resolvedModelId })
   ctxState.modelId = resolvedModelId
@@ -437,6 +441,7 @@ export async function runGeneration(
         toolCalls.push(...drained.toolCalls)
         stepCount = drained.stepCount
         lastFinishReason = drained.finishReason
+        servedModelId = recordServedModel(providerId, resolvedModelId, drained.servedModelId)
 
         // Emit a final finish event
         const finishEvent = { type: 'finish' as const, finishReason: lastFinishReason, stepCount }
@@ -485,7 +490,7 @@ export async function runGeneration(
           const stepsExceeded = stepCount >= configuredMaxStepsForLog && lastFinishReason !== 'stop'
           const totalUsage = await resolveAndReportUsage(
             dataDir, storyId, 'generation.writer',
-            totalUsagePromise ?? Promise.resolve(undefined), resolvedModelId,
+            totalUsagePromise ?? Promise.resolve(undefined), servedModelId,
           )
           const logId = `gen-${Date.now().toString(36)}`
           const log: GenerationLog = {
@@ -499,7 +504,7 @@ export async function runGeneration(
             toolCalls,
             generatedText: fullText,
             fragmentId: null,
-            model: resolvedModelId,
+            model: servedModelId,
             durationMs,
             stepCount,
             finishReason: lastFinishReason,
@@ -639,7 +644,7 @@ export async function runGeneration(
           const stepsExceeded = stepCount >= configuredMaxStepsForLog && finishReason !== 'stop'
           const totalUsage = await resolveAndReportUsage(
             dataDir, storyId, 'generation.writer',
-            totalUsagePromise ?? Promise.resolve(undefined), resolvedModelId,
+            totalUsagePromise ?? Promise.resolve(undefined), servedModelId,
           )
 
           // Persist generation log
@@ -655,7 +660,7 @@ export async function runGeneration(
             toolCalls,
             generatedText: genResult.text,
             fragmentId: savedFragmentId,
-            model: resolvedModelId,
+            model: servedModelId,
             durationMs,
             stepCount,
             finishReason: String(finishReason),
