@@ -3,7 +3,6 @@ import type {
   AgentBlockConfig,
   BlockConfig,
 } from '@/contracts/block-config'
-import type { LibrarianAnalysis as SharedLibrarianAnalysis } from '@/contracts/librarian'
 import type { Fragment as StoryFragment } from '@/contracts/story'
 export type {
   AgentBlockConfig,
@@ -23,6 +22,8 @@ export type {
   StoryMeta,
 } from '@/contracts/story'
 export type {
+  LibrarianAcceptChangeProposalResponse,
+  LibrarianAnalysis,
   LibrarianAnalysisSummary,
   LibrarianAnalyzeLaneCompletion,
   LibrarianAnalyzeLaneRequirement,
@@ -31,13 +32,26 @@ export type {
   LibrarianCandidateSource,
   LibrarianContradiction,
   LibrarianDirection,
+  LibrarianFragmentChangeProposal,
   LibrarianMention,
   LibrarianPassRecord,
   LibrarianRuntimeStatus,
   LibrarianRunStatus,
+  LibrarianRevertChangeProposalResponse,
   LibrarianStatusResponse,
   StoredLibrarianState,
 } from '@/contracts/librarian'
+export type {
+  AppliedChange as LibrarianAppliedProposalChange,
+  AppliedFieldChange as LibrarianAppliedFieldChange,
+  DiffPreview as FragmentDiffPreview,
+  EditableField as FragmentEditableField,
+  FragmentChangeAction,
+  FragmentChangeOperation,
+  OperationError as FragmentOperationError,
+  OperationValidation as FragmentOperationValidation,
+  RevertResult as LibrarianProposalRevertResult,
+} from '@/contracts/fragment-changes'
 export type {
   AnalysisSourceRevision,
   CitedEvidence,
@@ -98,106 +112,6 @@ export interface GenerationLogSummary {
   stepsExceeded: boolean
 }
 
-export type FragmentChangeAction =
-  | 'create_fragment'
-  | 'replace_text'
-  | 'append_paragraph'
-  | 'set_fields'
-  | 'archive_fragment'
-
-export type FragmentEditableField = 'name' | 'description' | 'content'
-
-export interface FragmentOperationError {
-  code: string
-  message: string
-  nextAction?: 'readFragments' | 'listFragments' | 'editProse'
-}
-
-export interface FragmentDiffPreview {
-  field: FragmentEditableField
-  before: string
-  after: string
-}
-
-export interface FragmentOperationValidation {
-  operationId: string
-  action: FragmentChangeAction
-  status: 'valid' | 'invalid' | 'applied' | 'skipped'
-  target?: { fragmentId: string; field?: FragmentEditableField }
-  errors?: FragmentOperationError[]
-  warnings?: string[]
-  diffs?: FragmentDiffPreview[]
-  createdFragmentId?: string
-}
-
-export interface LibrarianAppliedFieldChange {
-  before: string
-  after: string
-}
-
-export type LibrarianAppliedProposalChange =
-  | {
-      kind: 'create'
-      fragmentId: string
-      afterHash: string
-      fields: Partial<Record<FragmentEditableField, LibrarianAppliedFieldChange>>
-    }
-  | {
-      kind: 'update'
-      fragmentId: string
-      beforeHash: string
-      afterHash: string
-      fields: Partial<Record<FragmentEditableField, LibrarianAppliedFieldChange>>
-      addedRefs?: string[]
-      previousLastLibrarianChangeProposal?: unknown
-    }
-  | {
-      kind: 'archive'
-      fragmentId: string
-      beforeHash: string
-      afterHash: string
-    }
-
-export interface LibrarianProposalRevertResult {
-  kind: LibrarianAppliedProposalChange['kind']
-  fragmentId: string
-  status: 'reverted' | 'skipped'
-  message?: string
-}
-
-export type FragmentChangeOperation = {
-  operationId?: string
-  action: FragmentChangeAction
-  reason?: string
-  [key: string]: unknown
-}
-
-export interface LibrarianFragmentChangeProposal {
-  title?: string
-  rationale?: string
-  proposalKind?: 'correction' | 'new-fragment'
-  evidenceSegments?: number[]
-  evidenceText?: string
-  eligibilityReason?: string
-  autoApplySafe?: boolean
-  operations: FragmentChangeOperation[]
-  validation: FragmentOperationValidation[]
-  sourceFragmentId?: string
-  accepted?: boolean
-  autoApplied?: boolean
-  dismissed?: boolean
-  /** Pre-apply validation failed against current state; renders as dismissed but revives if a revert makes it valid again. */
-  stale?: boolean
-  staleReason?: string
-  appliedResults?: FragmentOperationValidation[]
-  appliedChanges?: LibrarianAppliedProposalChange[]
-  reverted?: boolean
-  revertedAt?: string
-  revertResults?: LibrarianProposalRevertResult[]
-}
-
-export type LibrarianAnalysis = SharedLibrarianAnalysis<LibrarianFragmentChangeProposal>
-
 export interface AgentTraceEntry {
   runId: string
   parentRunId: string | null
@@ -224,24 +138,6 @@ export interface AgentRunTraceRecord {
   input?: Record<string, unknown>
   output?: Record<string, unknown>
   trace: AgentTraceEntry[]
-}
-
-export interface LibrarianAcceptChangeProposalResponse {
-  analysis: LibrarianAnalysis
-  appliedResults: FragmentOperationValidation[]
-  appliedChanges: LibrarianAppliedProposalChange[]
-  createdFragmentIds: string[]
-  updatedFragmentIds: string[]
-  archivedFragmentIds: string[]
-  readFragmentIds: string[]
-}
-
-export interface LibrarianRevertChangeProposalResponse {
-  analysis: LibrarianAnalysis
-  revertResults: LibrarianProposalRevertResult[]
-  updatedFragmentIds: string[]
-  archivedFragmentIds: string[]
-  restoredFragmentIds: string[]
 }
 
 export interface ChatHistory {

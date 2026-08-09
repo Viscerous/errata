@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type {
   LibrarianAnalysis as SharedLibrarianAnalysis,
+  LibrarianFragmentChangeProposal as SharedProposal,
   LibrarianStatusResponse,
   StoredLibrarianState,
 } from '@/contracts/librarian'
@@ -18,26 +19,23 @@ import type {
 type Equal<Left, Right> =
   (<T>() => T extends Left ? 1 : 2) extends
   (<T>() => T extends Right ? 1 : 2) ? true : false
-type Assignable<Target, Source extends Target> = [Source] extends [Target] ? true : never
-
 describe('shared librarian contracts', () => {
-  it('shares the complete analysis envelope while preserving proposal precision', () => {
+  it('shares the complete analysis and proposal contracts', () => {
     const clientUsesSharedEnvelope: Equal<
       ClientLibrarianAnalysis,
-      SharedLibrarianAnalysis<ClientProposal>
+      SharedLibrarianAnalysis
     > = true
     const serverUsesSharedEnvelope: Equal<
       ServerLibrarianAnalysis,
-      SharedLibrarianAnalysis<ServerProposal>
+      SharedLibrarianAnalysis
     > = true
-    const serverResponseFitsClient: Assignable<
-      ClientLibrarianAnalysis,
-      ServerLibrarianAnalysis
-    > = true
+    const clientUsesSharedProposal: Equal<ClientProposal, SharedProposal> = true
+    const serverUsesSharedProposal: Equal<ServerProposal, SharedProposal> = true
 
     expect(clientUsesSharedEnvelope).toBe(true)
     expect(serverUsesSharedEnvelope).toBe(true)
-    expect(serverResponseFitsClient).toBe(true)
+    expect(clientUsesSharedProposal).toBe(true)
+    expect(serverUsesSharedProposal).toBe(true)
   })
 
   it('distinguishes stored state from the complete status response', () => {

@@ -5,14 +5,27 @@ import {
   updateFragmentVersioned,
 } from './storage'
 import type { Fragment } from './schema'
+import type {
+  AppliedChange,
+  AppliedFieldChange,
+  EditableField,
+  FragmentChangeOperation,
+  OperationValidation,
+  RevertBatchResult,
+  RevertResult,
+} from '@/contracts/fragment-changes'
 import {
   applyOperations,
   fragmentBaseHash,
   type ApplyOperationsOptions,
-  type EditableField,
-  type FragmentChangeOperation,
-  type OperationValidation,
 } from './change-operations'
+
+export type {
+  AppliedChange,
+  AppliedFieldChange,
+  RevertBatchResult,
+  RevertResult,
+} from '@/contracts/fragment-changes'
 
 /**
  * Storage-agnostic apply + revert core shared by every path that commits a batch
@@ -22,50 +35,6 @@ import {
  * time and reverse it through {@link revertAppliedChanges}, so the two surfaces
  * share one hash-guarded, conflict-aware revert instead of drifting copies.
  */
-
-export interface AppliedFieldChange {
-  before: string
-  after: string
-}
-
-export type AppliedChange =
-  | {
-      kind: 'create'
-      fragmentId: string
-      afterHash: string
-      fields: Partial<Record<EditableField, AppliedFieldChange>>
-    }
-  | {
-      kind: 'update'
-      fragmentId: string
-      beforeHash: string
-      afterHash: string
-      fields: Partial<Record<EditableField, AppliedFieldChange>>
-      addedRefs?: string[]
-      /** Analysis-specific: the proposal marker present before this change, so a
-       * revert can restore it. Opaque to the core; only the analysis hook reads it. */
-      previousLastLibrarianChangeProposal?: unknown
-    }
-  | {
-      kind: 'archive'
-      fragmentId: string
-      beforeHash: string
-      afterHash: string
-    }
-
-export interface RevertResult {
-  kind: AppliedChange['kind']
-  fragmentId: string
-  status: 'reverted' | 'skipped'
-  message?: string
-}
-
-export interface RevertBatchResult {
-  revertResults: RevertResult[]
-  updatedFragmentIds: string[]
-  archivedFragmentIds: string[]
-  restoredFragmentIds: string[]
-}
 
 /**
  * Thrown when a revert cannot proceed because a fragment changed since the batch

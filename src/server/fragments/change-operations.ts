@@ -1,5 +1,12 @@
 import { createHash } from 'node:crypto'
-import { z } from 'zod/v4'
+import { sanitizeTextForToolEcho } from '@/contracts/fragment-changes'
+import type {
+  DiffPreview,
+  EditableField,
+  FragmentChangeOperation,
+  OperationError,
+  OperationValidation,
+} from '@/contracts/fragment-changes'
 import { PREFIXES } from '@/lib/fragment-ids'
 import type { Fragment } from './schema'
 import {
@@ -13,52 +20,37 @@ import {
 import { registry } from './registry'
 import { checkFragmentWrite, isFragmentLocked } from './protection'
 
-export const MAX_BATCH_OPERATIONS = 25
-
-export const FRAGMENT_NAME_DESCRIPTION = 'Plain human-readable fragment name, e.g. "Elias Thorne".'
-export const FRAGMENT_DESCRIPTION_DESCRIPTION = 'Short fragment description for lists and context. Maximum 250 characters.'
-export const FRAGMENT_CONTENT_DESCRIPTION = 'Complete fragment content, written in full.'
-export const BASE_HASH_DESCRIPTION = '`baseHash` returned by `readFragments`; required for whole-field rewrites.'
-export const SET_FIELDS_DESCRIPTION = 'Whole replacement values for editable fields. Use complete final field text.'
-
-/**
- * Canonical description of the fragment-change operations. Every tool description
- * and agent prompt that teaches these verbs interpolates this one string so the
- * model never sees two subtly different explanations. Do not paraphrase per call
- * site — edit here.
- */
-export const OPERATION_GUIDANCE =
-  'Use `set_fields` only for whole-field rewrites (requires `baseHash`); use `append_paragraph` for a new topic at the end; use `replace_text` for localized edits to existing text; use `archive_fragment` only to retire. For `replace_text`, `oldText` is the exact existing text to find and replace, and `newText` is the complete replacement for that text. The tool preserves the text before and after `oldText`, so include only the text that should replace `oldText`. To insert detail inside a sentence or paragraph, use that sentence or paragraph as `oldText` and the revised version as `newText`. Group related facts in cohesive paragraphs.'
-
-/** Tool description for `proposeFragmentChanges`, shared by the chat and analysis tools. */
-export const PROPOSE_FRAGMENT_CHANGES_DESCRIPTION =
-  `Propose fragment changes via \`operations\`. ${OPERATION_GUIDANCE} Does not apply changes.`
-
-export type EditableField = 'name' | 'description' | 'content'
-export type OperationStatus = 'valid' | 'invalid' | 'applied' | 'skipped'
-
-export interface OperationError {
-  code: string
-  message: string
-  nextAction?: 'readFragments' | 'listFragments' | 'editProse'
-}
-
-export interface DiffPreview {
-  field: EditableField
-  before: string
-  after: string
-}
-
-export interface OperationValidation {
-  operationId: string
-  action: FragmentChangeOperation['action']
-  status: OperationStatus
-  target?: { fragmentId: string; field?: EditableField }
-  errors?: OperationError[]
-  warnings?: string[]
-  diffs?: DiffPreview[]
-  createdFragmentId?: string
-}
+export {
+  BASE_HASH_DESCRIPTION,
+  FRAGMENT_CONTENT_DESCRIPTION,
+  FRAGMENT_DESCRIPTION_DESCRIPTION,
+  FRAGMENT_NAME_DESCRIPTION,
+  MAX_BATCH_OPERATIONS,
+  OPERATION_GUIDANCE,
+  PROPOSE_FRAGMENT_CHANGES_DESCRIPTION,
+  SET_FIELDS_DESCRIPTION,
+  createFragmentOperationSchema,
+  editableFieldSchema,
+  fragmentChangeOperationSchema,
+  llmDescriptionSchema,
+  llmInsertTextSchema,
+  llmNameSchema,
+  llmRawTextSchema,
+  llmTextSchema,
+  operationsInputSchema,
+  proposeFragmentChangesSchema,
+  replaceTextOperationSchema,
+  sanitizeTextForToolEcho,
+} from '@/contracts/fragment-changes'
+export type {
+  DiffPreview,
+  EditableField,
+  FragmentChangeAction,
+  FragmentChangeOperation,
+  OperationError,
+  OperationStatus,
+  OperationValidation,
+} from '@/contracts/fragment-changes'
 
 export interface ValidationOptions {
   allowProseEdits?: boolean
@@ -101,156 +93,6 @@ export function fragmentNameError(type: string, name: string): string | null {
 
   return null
 }
-
-export const editableFieldSchema = z.enum(['name', 'description', 'content'])
-
-const operationIdSchema = z.string().min(1).max(80).optional()
-const REASONING_ARTIFACT_TAGS = ['think', 'thinking', 'reasoning']
-
-/**
- * Remove reasoning-tag artifacts (`<think>…`) that small models sometimes leak
- * into generated text. `truncateUnclosed` is for the write path, where content
- * is being created fresh and a runaway, never-closed reasoning dump should be
- * cut off entirely. Echoes back to the model (see {@link sanitizeTextForToolEcho})
- * leave it off so a stray `<think` inside legitimate stored content can't silently
- * truncate everything after it.
- */
-function stripReasoningArtifacts(val: string, { truncateUnclosed = true } = {}): string {
-  let next = val
-  for (const tag of REASONING_ARTIFACT_TAGS) {
-    next = next.replace(new RegExp(`<${tag}\\b[^>]*>[\\s\\S]*?<\\/${tag}>`, 'gi'), '')
-    if (truncateUnclosed) {
-      next = next
-        .replace(new RegExp(`<${tag}\\b[^>]*>[\\s\\S]*$`, 'gi'), '')
-        .replace(new RegExp(`<\\/${tag}>`, 'gi'), '')
-    }
-  }
-  return next
-}
-
-export function sanitizeTextForToolEcho(text: string): string {
-  return stripReasoningArtifacts(text, { truncateUnclosed: false })
-}
-
-function normalizeLlmEscapedText(val: string): string {
-  const unescaped = val
-    .replace(/(?:\\r)?\\n/g, '\n')
-    .replace(/\\"/g, '"')
-    .replace(/\\'/g, "'")
-  return stripReasoningArtifacts(unescaped)
-}
-
-/** Sanitizes literal escaped newline strings (like \n or \r\n) generated by LLMs into actual newlines. */
-export const llmRawTextSchema = z.string().transform((val) =>
-  normalizeLlmEscapedText(val)
-)
-
-/** A sanitized string schema for LLM-generated text fields that must be non-empty (1+ chars). */
-export const llmInsertTextSchema = llmRawTextSchema.refine((val) => val.length >= 1, {
-  message: 'String must contain at least 1 character.',
-})
-
-const exactAnchorTextSchema = z.string().refine((val) => val.trim().length >= 1, {
-  message: 'oldText must contain the exact existing text to find and replace.',
-})
-
-/** A sanitized string schema for LLM-generated paragraphs, stripping leading/trailing literal and actual newlines. */
-export const llmTextSchema = z.string().transform((val) =>
-  normalizeLlmEscapedText(val).trim()
-).refine((val) => val.length >= 1, { message: 'String must contain at least 1 character.' })
-
-/** A sanitized string schema for fragment names (max 100 after trimming). */
-export const llmNameSchema = z.string().transform((val) =>
-  stripReasoningArtifacts(val)
-    .replace(/\\"/g, '"')
-    .replace(/\\'/g, "'")
-    .trim()
-).pipe(z.string().min(1).max(100))
-
-/** A sanitized string schema for fragment descriptions (max 250 after trimming). */
-export const llmDescriptionSchema = z.string().transform((val) =>
-  normalizeLlmEscapedText(val).trim()
-).pipe(z.string().max(250))
-
-const fieldUpdatesSchema = z.object({
-  name: llmNameSchema.describe(FRAGMENT_NAME_DESCRIPTION).optional(),
-  description: llmDescriptionSchema.describe(FRAGMENT_DESCRIPTION_DESCRIPTION).optional(),
-  content: llmInsertTextSchema.describe('Complete final content when set; not a partial edit.').optional(),
-}).refine(
-  (value) => value.name !== undefined || value.description !== undefined || value.content !== undefined,
-  { message: 'Provide at least one field to set.' },
-)
-
-export const createFragmentOperationSchema = z.object({
-  operationId: operationIdSchema,
-  action: z.literal('create_fragment'),
-  type: z.string().min(1).describe('Registered fragment type, such as character, guideline, knowledge, summary, or a story custom type.'),
-  name: llmNameSchema.describe(FRAGMENT_NAME_DESCRIPTION),
-  description: llmDescriptionSchema.describe(FRAGMENT_DESCRIPTION_DESCRIPTION),
-  content: llmInsertTextSchema.describe(FRAGMENT_CONTENT_DESCRIPTION),
-  reason: z.string().max(500).optional(),
-})
-
-export const replaceTextOperationSchema = z.object({
-  operationId: operationIdSchema,
-  action: z.literal('replace_text'),
-  fragmentId: z.string().min(1).describe('Target fragment ID.'),
-  field: editableFieldSchema.describe('Editable field to change. Defaults to content.').default('content'),
-  oldText: exactAnchorTextSchema.describe('Required exact existing text to find and replace. Copy it from the stored fragment text literally (whitespace included); do not escape newlines or quotes — anchors are matched byte-for-byte.'),
-  newText: llmRawTextSchema.describe('Required complete replacement for oldText. The tool preserves surrounding text, so include only the text that should replace oldText. To insert detail inside a sentence or paragraph, use the revised sentence or paragraph. Use an empty string only to delete oldText.'),
-  occurrence: z.number().int().positive().optional().describe('1-based occurrence to replace when `oldText` appears multiple times. Omit only when unique or when `replaceAll` is true.'),
-  replaceAll: z.boolean().default(false).describe('Replace every occurrence of `oldText` in the field. Defaults to false for fragment memory edits; use carefully.'),
-  reason: z.string().max(500).optional(),
-})
-
-const appendParagraphOperationSchema = z.object({
-  operationId: operationIdSchema,
-  action: z.literal('append_paragraph'),
-  fragmentId: z.string().min(1).describe('Target fragment ID.'),
-  field: editableFieldSchema.describe('Editable field to change. Defaults to content.').default('content'),
-  text: llmTextSchema.describe('Required paragraph text to append. The tool adds paragraph spacing.'),
-  reason: z.string().max(500).optional(),
-})
-
-const setFieldsOperationSchema = z.object({
-  operationId: operationIdSchema,
-  action: z.literal('set_fields'),
-  fragmentId: z.string().min(1).describe('Target fragment ID.'),
-  baseHash: z.string().min(8).optional().describe(BASE_HASH_DESCRIPTION),
-  fields: fieldUpdatesSchema.describe(SET_FIELDS_DESCRIPTION),
-  reason: z.string().max(500).optional(),
-})
-
-const archiveFragmentOperationSchema = z.object({
-  operationId: operationIdSchema,
-  action: z.literal('archive_fragment'),
-  fragmentId: z.string().min(1),
-  reason: z.string().max(500).optional(),
-})
-
-export const fragmentChangeOperationSchema = z.discriminatedUnion('action', [
-  createFragmentOperationSchema,
-  replaceTextOperationSchema,
-  appendParagraphOperationSchema,
-  setFieldsOperationSchema,
-  archiveFragmentOperationSchema,
-])
-
-export type FragmentChangeOperation = z.infer<typeof fragmentChangeOperationSchema>
-
-export const proposeFragmentChangesSchema = z.object({
-  title: z.string().max(100).optional(),
-  rationale: z.string().max(1200).optional(),
-  operations: z.array(fragmentChangeOperationSchema).min(1).max(MAX_BATCH_OPERATIONS),
-})
-
-export const operationsInputSchema = z.object({
-  proposalId: z.string().optional().describe('`proposalId` returned by a propose tool. Preferred over restating operations.'),
-  operations: z.array(fragmentChangeOperationSchema).min(1).max(MAX_BATCH_OPERATIONS).optional().describe('Inline operations, used only when no proposalId exists.'),
-}).refine(
-  (value) => Boolean(value.proposalId) || Boolean(value.operations?.length),
-  { message: 'Provide either proposalId or operations.' },
-)
 
 function editableSnapshot(fragment: Fragment) {
   return {

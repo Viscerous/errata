@@ -7,20 +7,20 @@ import { proseContentHash } from './continuity-source'
 import { generateConversationId } from '@/lib/fragment-ids'
 import { writeJsonAtomic } from '../fs-utils'
 import { withKeyLock } from '../async-lock'
-import type { FragmentChangeOperation, OperationValidation } from '../fragments/change-operations'
-import type { AppliedChange, AppliedFieldChange, RevertResult } from '../fragments/change-apply'
 import type {
-  LibrarianAnalysis as SharedLibrarianAnalysis,
+  LibrarianAnalysis,
   LibrarianAnalysisSummary,
   LibrarianPassRecord,
   StoredLibrarianState,
 } from '@/contracts/librarian'
 
 export type {
+  LibrarianAnalysis,
   LibrarianAnalysisSummary,
   LibrarianAnalyzeLaneCompletion,
   LibrarianAnalyzeLaneRequirement,
   LibrarianAnalyzeLaneStatus,
+  LibrarianFragmentChangeProposal,
   LibrarianMention,
   LibrarianPassRecord,
 } from '@/contracts/librarian'
@@ -30,50 +30,16 @@ export type {
  * Aliased here so existing references (and the client type mirror) keep their
  * librarian-flavoured names while the shape lives in one place.
  */
-export type LibrarianAppliedFieldChange = AppliedFieldChange
-export type LibrarianAppliedProposalChange = AppliedChange
-export type LibrarianProposalRevertResult = RevertResult
+export type {
+  AppliedChange as LibrarianAppliedProposalChange,
+  AppliedFieldChange as LibrarianAppliedFieldChange,
+  RevertResult as LibrarianProposalRevertResult,
+} from '@/contracts/fragment-changes'
 
 /** Serializes read-modify-write of a story's analysis index against concurrent saves. */
 function withIndexLock<T>(storyId: string, fn: () => Promise<T>): Promise<T> {
   return withKeyLock(`librarian-index:${storyId}`, fn)
 }
-
-// --- Types ---
-
-export interface LibrarianFragmentChangeProposal {
-  title?: string
-  rationale?: string
-  /** Which online maintenance lane queued this proposal. */
-  proposalKind?: 'correction' | 'new-fragment'
-  /** Sentence numbers the analyst cited in the accepted prose. */
-  evidenceSegments?: number[]
-  /** Those sentences resolved to exact text, for review and unattended re-checking. */
-  evidenceText?: string
-  /** Positive eligibility argument supplied by the analyst. */
-  eligibilityReason?: string
-  /**
-   * Set only after the online-analysis contract passes its structural safety
-   * gates. Required for unattended application.
-   */
-  autoApplySafe?: boolean
-  operations: FragmentChangeOperation[]
-  validation: OperationValidation[]
-  sourceFragmentId?: string
-  accepted?: boolean
-  autoApplied?: boolean
-  dismissed?: boolean
-  /** Pre-apply validation failed against current state; renders as dismissed but revives if a revert makes it valid again. */
-  stale?: boolean
-  staleReason?: string
-  appliedResults?: OperationValidation[]
-  appliedChanges?: LibrarianAppliedProposalChange[]
-  reverted?: boolean
-  revertedAt?: string
-  revertResults?: LibrarianProposalRevertResult[]
-}
-
-export type LibrarianAnalysis = SharedLibrarianAnalysis<LibrarianFragmentChangeProposal>
 
 export function passRecord(params: {
   name: LibrarianPassRecord['name']

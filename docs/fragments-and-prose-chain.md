@@ -8,6 +8,8 @@ This document covers the full data model and API surface you need to write an im
 
 Every fragment is a JSON object conforming to this schema. The canonical shared contract is `src/contracts/story.ts`; `src/server/fragments/schema.ts` remains as a compatibility façade for existing server imports.
 
+Fragment mutation operations and their validation/apply/revert result shapes live in `src/contracts/fragment-changes.ts`. The server's `change-operations.ts` and `change-apply.ts` modules add storage behavior while retaining compatibility exports for existing imports.
+
 | Field | Type | Default | Constraints | Description |
 |---|---|---|---|---|
 | `id` | `string` | — | `/^[a-z]{2,4}-[a-z0-9]{4,12}$/` | Unique ID with type prefix. See [Fragment IDs](#fragment-ids). |

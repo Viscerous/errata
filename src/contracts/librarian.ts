@@ -1,4 +1,10 @@
 import type { AnalysisSourceRevision, ContinuityProjection } from './continuity'
+import type {
+  AppliedChange,
+  FragmentChangeOperation,
+  OperationValidation,
+  RevertResult,
+} from './fragment-changes'
 
 export type LibrarianCandidateSource = 'current-observation' | 'writer-context'
 
@@ -62,7 +68,36 @@ export interface LibrarianDirection {
   instruction: string
 }
 
-export interface LibrarianAnalysis<TFragmentChangeProposal> {
+export interface LibrarianFragmentChangeProposal {
+  title?: string
+  rationale?: string
+  /** Which online maintenance lane queued this proposal. */
+  proposalKind?: 'correction' | 'new-fragment'
+  /** Sentence numbers the analyst cited in the accepted prose. */
+  evidenceSegments?: number[]
+  /** Those sentences resolved to exact text, for review and unattended re-checking. */
+  evidenceText?: string
+  /** Positive eligibility argument supplied by the analyst. */
+  eligibilityReason?: string
+  /** Set only after the online-analysis contract passes its structural safety gates. */
+  autoApplySafe?: boolean
+  operations: FragmentChangeOperation[]
+  validation: OperationValidation[]
+  sourceFragmentId?: string
+  accepted?: boolean
+  autoApplied?: boolean
+  dismissed?: boolean
+  /** Pre-apply validation failed against current state; revives if a revert makes it valid again. */
+  stale?: boolean
+  staleReason?: string
+  appliedResults?: OperationValidation[]
+  appliedChanges?: AppliedChange[]
+  reverted?: boolean
+  revertedAt?: string
+  revertResults?: RevertResult[]
+}
+
+export interface LibrarianAnalysis {
   id: string
   createdAt: string
   fragmentId: string
@@ -81,7 +116,7 @@ export interface LibrarianAnalysis<TFragmentChangeProposal> {
   candidateFragmentIds?: string[]
   candidateFragments?: LibrarianCandidateFragment[]
   contradictions: LibrarianContradiction[]
-  fragmentChangeProposals: TFragmentChangeProposal[]
+  fragmentChangeProposals: LibrarianFragmentChangeProposal[]
   timelineEvents: Array<{
     event: string
     position: 'before' | 'during' | 'after'
@@ -126,3 +161,21 @@ export interface LibrarianRuntimeStatus {
 }
 
 export type LibrarianStatusResponse = StoredLibrarianState & LibrarianRuntimeStatus
+
+export interface LibrarianAcceptChangeProposalResponse {
+  analysis: LibrarianAnalysis
+  appliedResults: OperationValidation[]
+  appliedChanges: AppliedChange[]
+  createdFragmentIds: string[]
+  updatedFragmentIds: string[]
+  archivedFragmentIds: string[]
+  readFragmentIds: string[]
+}
+
+export interface LibrarianRevertChangeProposalResponse {
+  analysis: LibrarianAnalysis
+  revertResults: RevertResult[]
+  updatedFragmentIds: string[]
+  archivedFragmentIds: string[]
+  restoredFragmentIds: string[]
+}
