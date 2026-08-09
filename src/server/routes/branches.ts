@@ -10,6 +10,7 @@ import {
 } from '../fragments/branches'
 import { cancelActiveAgentsForBranch } from '../agents/active-registry'
 import { cancelPendingLibrarianForBranch } from '../librarian/scheduler'
+import { cancelSummaryRollupMaintenance } from '../librarian/summary-rollup-maintenance'
 
 export function branchRoutes(dataDir: string) {
   return new Elysia({ detail: { tags: ['Branches'] } })
@@ -84,9 +85,11 @@ export function branchRoutes(dataDir: string) {
         }
         releaseDeletion = markBranchDeleting(params.storyId, params.branchId)
         cancelPendingLibrarianForBranch(params.storyId, params.branchId)
+        await cancelSummaryRollupMaintenance(dataDir, params.storyId, params.branchId)
         await cancelActiveAgentsForBranch(params.storyId, params.branchId)
         // A running agent can schedule analysis while it is settling.
         cancelPendingLibrarianForBranch(params.storyId, params.branchId)
+        await cancelSummaryRollupMaintenance(dataDir, params.storyId, params.branchId)
         const index = await deleteBranch(dataDir, params.storyId, params.branchId)
         return { ok: true, activeBranchId: index.activeBranchId }
       } catch (err) {

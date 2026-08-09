@@ -5,8 +5,8 @@ labelled story-memory projection and its bounded context presentation.
 
 The runtime now folds source-current level-0 contributions with explicit gaps,
 bounded reader-specific rendering, and target-relative authored records.
-Content-addressed background roll-ups are demand-triggered when the deterministic
-projection would otherwise omit older coverage. Generation never waits for
+Content-addressed background roll-ups are maintained proactively after Analyze;
+a budget-truncated projection can also request them. Generation never waits for
 them.
 
 ## Principle
@@ -264,7 +264,7 @@ Coverage should preserve the following behaviors:
 | Node re-roll | cascades upward via child artifact hash |
 | Roll-up fails, or exceeds the size cap | nothing cached, span renders one level down, failure recorded |
 | Auto-analysis disabled | gap renders with manual affordance; nothing queued |
-| Any generation path | roll-up is never invoked |
+| Any generation path | roll-up is never awaited or executed inline |
 
 ## Limits
 

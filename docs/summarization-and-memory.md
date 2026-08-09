@@ -22,6 +22,8 @@ a second model call.
    contract version.
 6. The projection is rendered with reader-specific guidance, exact passage
    positions, explicit gaps, a recent-prose seam statement, and a closing fence.
+7. After Analyze becomes idle, a separate Memory activity recursively maintains
+   any newly eligible roll-up levels without blocking the reader.
 
 This makes deletion, variation switching, branching, and source edits affect
 memory by selection rather than by mutating another document.
@@ -31,6 +33,10 @@ Key files:
 - `src/server/librarian/summary-projection.ts` — source selection, validation,
   budgeting, caching, and presentation
 - `src/server/librarian/agent.ts` — writes level-0 analysis contributions
+- `src/server/librarian/summary-rollups.ts` — plans and caches recursive memory
+  nodes
+- `src/server/librarian/summary-rollup-maintenance.ts` — schedules background
+  memory maintenance
 - `src/server/llm/context-builder.ts` — constructs the projection once per
   context and shares the analysis index with continuity
 - `src/server/librarian/blocks.ts`, `src/server/directions/blocks.ts`, and
@@ -108,13 +114,18 @@ lane from Analyze but does not prevent a manual direction request. Disabling
 librarian auto-analysis prevents new memory contributions but does not change
 projection behavior for existing ones.
 
-When older source-current L0 records still overflow the summary budget, the
-projection marks one branch-scoped background roll-up as needed. The scheduler
-releases it only after foreground analysis is idle. The request receives
-only six exact ordered children, returns only a title and retrospective text,
-and writes an immutable content-addressed cache node. Analyze and Writer never
-await this maintenance; until it finishes, the lower-level frontier or explicit
-budget omission continues to render.
+Story-memory maintenance is proactive after Analyze reaches idle, rather than
+waiting for the first budget omission. It is a separate `librarian.rollup`
+activity (shown as **Memory** in the UI), not an extension of Analyze's model
+contract. An idle Context Preview can also release demand if it discovers an
+omitted prefix. The maintenance pass repeatedly folds every currently eligible
+six-child interval, including newly eligible parent levels, before yielding.
+
+Each request receives only six exact ordered children, returns only a title and
+retrospective text, and writes an immutable content-addressed cache node.
+Analyze, Writer, and Context Preview never await this maintenance. If foreground
+work begins, maintenance yields and resumes later; until it finishes or while it
+is failing, the lower-level frontier or explicit budget omission still renders.
 
 ## Editing and reanalysis
 
@@ -134,6 +145,7 @@ The analysis-index endpoint continues to power the prose view's analyzed state:
 ## Performance properties
 
 - No foreground roll-up model call.
+- Recursive levels drain in one low-priority Memory activity.
 - No foreground summary writes.
 - One shared analysis-index read for summary and continuity.
 - In-flight and warm analysis reads are cached by branch-specific file path.

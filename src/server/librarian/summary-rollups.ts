@@ -4,19 +4,20 @@ import { mkdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { ToolLoopAgent, stepCountIs, tool } from 'ai'
 import { z } from 'zod/v4'
-import { getContentRoot, getScopedBranchId, withBranch } from '../fragments/branches'
+import { getContentRoot } from '../fragments/branches'
 import { getFragment, getStory } from '../fragments/storage'
 import { getActiveProseIds } from '../fragments/prose-chain'
 import { writeJsonAtomic } from '../fs-utils'
 import { withKeyLock } from '../async-lock'
 import { createLogger } from '../logging'
 import { drainAgentStream } from '../agents/drain-agent-stream'
+import type { AgentStreamEvent } from '../agents/stream-types'
 import { buildProviderOptions, resolveAgentRuntime } from '../llm/client'
 import { resolveAndReportServedUsage } from '../llm/usage-normalizer'
 import { getObservedServedModelId } from '../llm/served-models'
 import { proseContentHash } from './continuity-source'
 import { getAnalysis, getAnalysisIndex } from './storage'
-import { SUMMARY_CONTRACT_VERSION } from './summary-projection'
+import { SUMMARY_CONTRACT_VERSION } from './summary-contract'
 import { DEFAULT_TOOL_LOOP_IDLE_TIMEOUT_MS, terminalToolSucceeded } from './tool-runner'
 
 export const SUMMARY_ROLLUP_CONTRACT_VERSION = 2
@@ -376,14 +377,25 @@ const ROLLUP_INSTRUCTIONS = `Compress the ordered child story-memory records int
 - The record must be shorter than the children it replaces, and at most ${SUMMARY_ROLLUP_MAX_TEXT_CHARS} characters.
 - The title labels the interval in retrospect; it is not a chapter heading.`
 
-export async function runSummaryRollupMaintenance(dataDir: string, storyId: string): Promise<SummaryRollupNode | null> {
-  return runSummaryRollupMaintenanceInner(dataDir, storyId, true)
+export interface SummaryRollupDerivationOptions {
+  abortSignal?: AbortSignal
+  onModelStart?: () => void
+  onEvent?: (event: AgentStreamEvent) => void
 }
 
-async function runSummaryRollupMaintenanceInner(
+export async function deriveNextSummaryRollupNode(
+  dataDir: string,
+  storyId: string,
+  options: SummaryRollupDerivationOptions = {},
+): Promise<SummaryRollupNode | null> {
+  return deriveNextSummaryRollupNodeInner(dataDir, storyId, true, options)
+}
+
+async function deriveNextSummaryRollupNodeInner(
   dataDir: string,
   storyId: string,
   allowIdentityRetry: boolean,
+  options: SummaryRollupDerivationOptions,
 ): Promise<SummaryRollupNode | null> {
   const story = await getStory(dataDir, storyId)
   if (!story || story.settings.disableLibrarianAutoAnalysis === true) return null
@@ -441,12 +453,22 @@ async function runSummaryRollupMaintenanceInner(
     maxOutputTokens: Math.min(runtime.guards.maxOutputTokens, SUMMARY_ROLLUP_MAX_OUTPUT_TOKENS),
   })
   const controller = new AbortController()
-  const result = await agent.stream({ prompt, abortSignal: controller.signal })
-  const drained = await drainAgentStream(result.fullStream, undefined, {
-    abortSignal: controller.signal,
-    idleTimeoutMs: DEFAULT_TOOL_LOOP_IDLE_TIMEOUT_MS,
-    onIdleTimeout: () => controller.abort(),
-  })
+  const abort = () => controller.abort()
+  if (options.abortSignal?.aborted) abort()
+  else options.abortSignal?.addEventListener('abort', abort, { once: true })
+  let result: Awaited<ReturnType<typeof agent.stream>>
+  let drained: Awaited<ReturnType<typeof drainAgentStream>>
+  try {
+    options.onModelStart?.()
+    result = await agent.stream({ prompt, abortSignal: controller.signal })
+    drained = await drainAgentStream(result.fullStream, options.onEvent, {
+      abortSignal: controller.signal,
+      idleTimeoutMs: DEFAULT_TOOL_LOOP_IDLE_TIMEOUT_MS,
+      onIdleTimeout: abort,
+    })
+  } finally {
+    options.abortSignal?.removeEventListener('abort', abort)
+  }
   const { modelId: servedModelId } = await resolveAndReportServedUsage(
     dataDir,
     storyId,
@@ -470,7 +492,7 @@ async function runSummaryRollupMaintenanceInner(
   // node whose children belong to another model; alternating identities fail
   // explicitly instead of recursing forever.
   if (observedModelId && modelConfigKey !== planningModelConfigKey) {
-    if (allowIdentityRetry) return runSummaryRollupMaintenanceInner(dataDir, storyId, false)
+    if (allowIdentityRetry) return deriveNextSummaryRollupNodeInner(dataDir, storyId, false, options)
     throw new Error('Summary roll-up served model changed twice while rebuilding its cache identity')
   }
   const id = nodeIdentity(plan.level, plan.children, modelConfigKey)
@@ -499,55 +521,6 @@ async function runSummaryRollupMaintenanceInner(
   await saveSummaryRollupNode(dataDir, storyId, node)
   logger.child({ storyId }).info('Summary roll-up cached', { nodeId: node.id, level: node.level, childCount: node.childIds.length })
   return node
-}
-
-const queued = new Set<string>()
-const dirty = new Set<string>()
-const failures = new Map<string, { at: number; count: number }>()
-
-/**
- * One minute, doubling to half an hour. Demand is re-marked on every
- * budget-truncated projection, so a flat interval means a broken roll-up spends
- * tokens once a minute for as long as the story stays open.
- */
-function retryDelayMs(consecutiveFailures: number): number {
-  return Math.min(60_000 * 2 ** (consecutiveFailures - 1), 30 * 60_000)
-}
-
-function maintenanceKey(dataDir: string, storyId: string, branchId: string): string {
-  return `${dataDir}\u0000${storyId}\u0000${branchId}`
-}
-
-/** Mark demand during projection without starting model work on the read path. */
-export function markSummaryRollupNeeded(dataDir: string, storyId: string): void {
-  const branchId = getScopedBranchId(storyId)
-  if (branchId) dirty.add(maintenanceKey(dataDir, storyId, branchId))
-}
-
-/** Queue one low-priority derivation. It never enters the caller's hot path. */
-export function queueSummaryRollupMaintenance(dataDir: string, storyId: string, requestedBranchId?: string): void {
-  const branchId = requestedBranchId ?? getScopedBranchId(storyId)
-  if (!branchId) return
-  const key = maintenanceKey(dataDir, storyId, branchId)
-  if (!dirty.has(key) || queued.has(key)) return
-  const failure = failures.get(key)
-  if (failure && Date.now() - failure.at < retryDelayMs(failure.count)) return
-  dirty.delete(key)
-  queued.add(key)
-  queueMicrotask(() => {
-    void withBranch(dataDir, storyId, () => runSummaryRollupMaintenance(dataDir, storyId), branchId)
-      .then(() => failures.delete(key))
-      .catch((error) => {
-        dirty.add(key)
-        const count = (failures.get(key)?.count ?? 0) + 1
-        failures.set(key, { at: Date.now(), count })
-        logger.child({ storyId }).warn('Summary roll-up maintenance failed', {
-          consecutiveFailures: count,
-          error: error instanceof Error ? error.message : String(error),
-        })
-      })
-      .finally(() => queued.delete(key))
-  })
 }
 
 export function selectSummaryRollupFrontier(

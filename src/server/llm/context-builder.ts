@@ -29,6 +29,7 @@ import {
   type SummaryProjection,
 } from '../librarian/summary-projection'
 import { getAnalysisIndex } from '../librarian/storage'
+import { queueSummaryRollupMaintenance } from '../librarian/summary-rollup-maintenance'
 import type { ModelMessage } from 'ai'
 
 export {
@@ -372,6 +373,11 @@ export async function buildContextState(
           activeProseSegmentKeys: sortedProse.map((fragment) => proseSegmentById.get(fragment.id) ?? '0'),
         }),
   ])
+  if (summaryProjection?.omittedBefore) {
+    // Projection marks the branch-scoped demand; releasing it here also covers
+    // an idle Context Preview, where no later Analyze transition would do so.
+    queueSummaryRollupMaintenance(dataDir, storyId)
+  }
   const effectiveSummary = renderSummaryProjection(summaryProjection, 'generation.writer') ?? ''
 
   // Split guidelines, knowledge, and characters into sticky full context vs catalog rows.

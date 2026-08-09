@@ -1,5 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
+const { requestSummaryRollupMaintenance } = vi.hoisted(() => ({
+  requestSummaryRollupMaintenance: vi.fn(),
+}))
+
 // Mock the agent runner so scheduler doesn't execute real agents
 vi.mock('@/server/agents', () => ({
   invokeAgent: vi.fn(),
@@ -38,6 +42,9 @@ vi.mock('@/server/agents/agent-block-storage', () => ({
 vi.mock('../../src/server/agents/agent-block-storage', () => ({
   getAgentBlockConfig: async () => ({ disableAutoAnalysis: false }),
 }))
+
+vi.mock('@/server/librarian/summary-rollup-maintenance', () => ({ requestSummaryRollupMaintenance }))
+vi.mock('../../src/server/librarian/summary-rollup-maintenance', () => ({ requestSummaryRollupMaintenance }))
 
 // Import mocked modules AFTER vi.mock (vitest hoists mocks to top)
 import { invokeAgent } from '@/server/agents'
@@ -114,6 +121,7 @@ describe('librarian scheduler', () => {
       input: { fragmentId: 'pr-0001' },
     })
     await vi.waitFor(() => expect(getLibrarianRuntimeStatus('story-1').runStatus).toBe('idle'))
+    expect(requestSummaryRollupMaintenance.mock.calls[0]?.slice(0, 2)).toEqual(['/data', 'story-1'])
     expect(getPendingCount()).toBe(0)
   })
 

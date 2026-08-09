@@ -13,7 +13,7 @@ import {
   type LibrarianAnalysis,
 } from './storage'
 import { analysisSourceRevision } from './continuity-source'
-import { SUMMARY_CONTRACT_VERSION } from './summary-projection'
+import { SUMMARY_CONTRACT_VERSION } from './summary-contract'
 import {
   applyFragmentChangeProposal,
   markFragmentChangeProposalApplied,

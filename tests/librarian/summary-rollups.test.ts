@@ -10,6 +10,9 @@ import {
 } from '@/server/librarian/summary-projection'
 import type { Fragment, StoryMeta } from '@/server/fragments/schema'
 import { clearServedModelObservations } from '@/server/llm/served-models'
+import { listActiveAgents } from '@/server/agents/active-registry'
+import { clearAgentRuns, listAgentRuns } from '@/server/agents/traces'
+import { withBranch } from '@/server/fragments/branches'
 import { createTempDir, makeTestSettings, seedTestProvider } from '../setup'
 
 const { streamMock, agentMock } = vi.hoisted(() => ({ streamMock: vi.fn(), agentMock: vi.fn() }))
@@ -32,10 +35,15 @@ vi.mock('ai', async () => {
 
 import {
   listSummaryRollupNodes,
-  runSummaryRollupMaintenance,
+  deriveNextSummaryRollupNode,
   selectSummaryRollupFrontier,
   SUMMARY_ROLLUP_MAX_TEXT_CHARS,
 } from '@/server/librarian/summary-rollups'
+import {
+  cancelSummaryRollupMaintenance,
+  queueSummaryRollupMaintenance,
+  requestSummaryRollupMaintenance,
+} from '@/server/librarian/summary-rollup-maintenance'
 
 function makeStory(settings: Partial<StoryMeta['settings']> = {}): StoryMeta {
   const now = new Date().toISOString()
@@ -103,6 +111,7 @@ describe('summary roll-up maintenance', () => {
     streamMock.mockReset()
     agentMock.mockReset()
     clearServedModelObservations()
+    clearAgentRuns('story-test')
     streamMock.mockImplementation(async () => ({
       fullStream: (async function* () {
         yield {
@@ -126,13 +135,16 @@ describe('summary roll-up maintenance', () => {
     }))
   })
 
-  afterEach(async () => cleanup())
+  afterEach(async () => {
+    clearAgentRuns('story-test')
+    await cleanup()
+  })
 
   it('caches one pure six-child L1 node without story context in the model request', async () => {
     await createStory(dataDir, makeStory())
     const passages = await seedPassages(dataDir, 12)
 
-    const node = await runSummaryRollupMaintenance(dataDir, 'story-test')
+    const node = await deriveNextSummaryRollupNode(dataDir, 'story-test')
 
     expect(node).toMatchObject({ level: 1, coverageStart: 'pr-0001', coverageEnd: 'pr-0006' })
     expect(node?.childIds).toHaveLength(6)
@@ -181,7 +193,7 @@ describe('summary roll-up maintenance', () => {
     await seedPassages(dataDir, 36)
 
     for (let index = 0; index < 7; index += 1) {
-      await runSummaryRollupMaintenance(dataDir, 'story-test')
+      await deriveNextSummaryRollupNode(dataDir, 'story-test')
     }
 
     const nodes = await listSummaryRollupNodes(dataDir, 'story-test')
@@ -196,11 +208,66 @@ describe('summary roll-up maintenance', () => {
     ])
   })
 
+  it('drains every currently eligible level as one visible maintenance pass', async () => {
+    await createStory(dataDir, makeStory())
+    await seedPassages(dataDir, 36)
+
+    requestSummaryRollupMaintenance(dataDir, 'story-test', 'main')
+
+    await vi.waitFor(async () => {
+      expect(await listSummaryRollupNodes(dataDir, 'story-test')).toHaveLength(7)
+    }, { timeout: 5_000 })
+    await vi.waitFor(() => expect(listActiveAgents('story-test')).toHaveLength(0))
+    expect(streamMock).toHaveBeenCalledTimes(7)
+    expect((await listSummaryRollupNodes(dataDir, 'story-test')).filter((node) => node.level === 2)).toHaveLength(1)
+    expect(listAgentRuns('story-test')).toEqual([
+      expect.objectContaining({
+        agentName: 'librarian.rollup',
+        status: 'success',
+        output: expect.objectContaining({ nodesCreated: 7, highestLevel: 2 }),
+      }),
+    ])
+  })
+
+  it('releases demand discovered by an idle context projection', async () => {
+    await createStory(dataDir, makeStory())
+    const passages = await seedPassages(dataDir, 12)
+
+    await withBranch(dataDir, 'story-test', async () => {
+      const projection = await buildSummaryProjection({
+        dataDir,
+        storyId: 'story-test',
+        activeProseFragments: passages,
+        recentProseFragments: [],
+        tokenBudget: 1,
+      })
+      expect(projection.omittedBefore).toEqual({ start: 1, end: 6 })
+      queueSummaryRollupMaintenance(dataDir, 'story-test')
+    }, 'main')
+
+    await vi.waitFor(async () => {
+      expect(await listSummaryRollupNodes(dataDir, 'story-test')).toHaveLength(2)
+    })
+    await vi.waitFor(() => expect(listActiveAgents('story-test')).toHaveLength(0))
+  })
+
+  it('cancels queued maintenance when its timeline is deleted', async () => {
+    await createStory(dataDir, makeStory())
+    await seedPassages(dataDir, 6)
+
+    requestSummaryRollupMaintenance(dataDir, 'story-test', 'main')
+    await cancelSummaryRollupMaintenance(dataDir, 'story-test', 'main')
+    await new Promise((resolve) => setTimeout(resolve, 10))
+
+    expect(streamMock).not.toHaveBeenCalled()
+    expect(await listSummaryRollupNodes(dataDir, 'story-test')).toEqual([])
+  })
+
   it('runs with reasoning off and an output budget above the record cap', async () => {
     await createStory(dataDir, makeStory({ disableThinking: false }))
     await seedPassages(dataDir, 6)
 
-    await runSummaryRollupMaintenance(dataDir, 'story-test')
+    await deriveNextSummaryRollupNode(dataDir, 'story-test')
 
     const settings = agentMock.mock.calls[0][0] as { providerOptions?: unknown; maxOutputTokens: number }
     expect(settings.providerOptions).toEqual({ openaiCompatible: { reasoningEffort: 'none' } })
@@ -211,7 +278,7 @@ describe('summary roll-up maintenance', () => {
     await createStory(dataDir, makeStory())
     await seedPassages(dataDir, 6)
 
-    await runSummaryRollupMaintenance(dataDir, 'story-test')
+    await deriveNextSummaryRollupNode(dataDir, 'story-test')
 
     const settings = agentMock.mock.calls[0][0] as {
       stopWhen: Array<(args: { steps: Array<{ toolCalls?: unknown[]; toolResults?: Array<{ toolName: string; output: unknown }> }> }) => boolean>
@@ -252,9 +319,9 @@ describe('summary roll-up maintenance', () => {
       }
     })
 
-    await runSummaryRollupMaintenance(dataDir, 'story-test')
+    await deriveNextSummaryRollupNode(dataDir, 'story-test')
     clearServedModelObservations() // a new process cannot trust the old endpoint identity
-    await runSummaryRollupMaintenance(dataDir, 'story-test')
+    await deriveNextSummaryRollupNode(dataDir, 'story-test')
 
     expect(streamMock).toHaveBeenCalledTimes(2)
     const nodes = await listSummaryRollupNodes(dataDir, 'story-test')
@@ -273,13 +340,13 @@ describe('summary roll-up maintenance', () => {
       totalUsage: Promise.resolve({ inputTokens: 10, outputTokens: 10 }),
     }))
 
-    await expect(runSummaryRollupMaintenance(dataDir, 'story-test')).rejects.toThrow('reported no record')
+    await expect(deriveNextSummaryRollupNode(dataDir, 'story-test')).rejects.toThrow('reported no record')
     expect(await listSummaryRollupNodes(dataDir, 'story-test')).toEqual([])
   })
 
   it('does not derive nodes when automatic librarian work is disabled', async () => {
     await createStory(dataDir, makeStory({ disableLibrarianAutoAnalysis: true }))
-    expect(await runSummaryRollupMaintenance(dataDir, 'story-test')).toBeNull()
+    expect(await deriveNextSummaryRollupNode(dataDir, 'story-test')).toBeNull()
     expect(streamMock).not.toHaveBeenCalled()
   })
 })

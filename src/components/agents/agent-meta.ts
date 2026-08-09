@@ -1,4 +1,4 @@
-import { BookOpen, MessageSquare, Sparkles, Compass, Wand2, Bot } from 'lucide-react'
+import { BookOpen, MessageSquare, Sparkles, Compass, Wand2, Bot, Layers3 } from 'lucide-react'
 
 // Shared display metadata for agents, used by both the floating activity wisp and
 // the activity panel's status strip so they describe agents the same way.
@@ -22,6 +22,14 @@ export const AGENT_META: Record<string, AgentMeta> = {
     color: 'oklch(0.78 0.15 70)',
     glow: 'oklch(0.78 0.15 70 / 35%)',
     icon: BookOpen,
+  },
+  'librarian.rollup': {
+    label: 'Memory',
+    status: 'Consolidating',
+    actions: ['Consolidating memory', 'Folding older passages', 'Building the story record'],
+    color: 'oklch(0.72 0.12 215)',
+    glow: 'oklch(0.72 0.12 215 / 35%)',
+    icon: Layers3,
   },
   'librarian.refine': {
     label: 'Librarian',

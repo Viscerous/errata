@@ -7,12 +7,13 @@ import {
 import { proseContentHash } from './continuity-source'
 import {
   listSummaryRollupNodes,
-  markSummaryRollupNeeded,
   selectSummaryRollupFrontier,
   summaryRollupLeafId,
 } from './summary-rollups'
+import { markSummaryRollupNeeded } from './summary-rollup-maintenance'
+import { SUMMARY_CONTRACT_VERSION } from './summary-contract'
 
-export const SUMMARY_CONTRACT_VERSION = 1
+export { SUMMARY_CONTRACT_VERSION } from './summary-contract'
 export const SUMMARY_TOKEN_BUDGET = 3000
 export const SUMMARY_RECENT_L0_COUNT = 6
 

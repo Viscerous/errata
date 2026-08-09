@@ -382,6 +382,7 @@ const SOURCE_LABELS: Record<string, string> = {
   'generation.writer': 'Writer',
   'generation.prewriter': 'Prewriter',
   'librarian.analyze': 'Librarian',
+  'librarian.rollup': 'Memory roll-up',
   'librarian.chat': 'Librarian chat',
   'librarian.refine': 'Librarian refine',
   'librarian.prose-transform': 'Prose transform',

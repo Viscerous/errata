@@ -167,10 +167,11 @@ async function runAnalysis(
     runningFragmentId: null,
     lastError,
   })
-  // Roll-up demand is marked while contexts are projected, but model work is
-  // released only after the foreground Analyze queue is fully idle.
-  const { queueSummaryRollupMaintenance } = await import('./summary-rollups')
-  queueSummaryRollupMaintenance(dataDir, storyId, branchId)
+  // Maintain story memory only after the foreground Analyze queue is fully
+  // idle. This is a separate visible activity and never extends Analyze's
+  // model-facing contract.
+  const { requestSummaryRollupMaintenance } = await import('./summary-rollup-maintenance')
+  requestSummaryRollupMaintenance(dataDir, storyId, branchId)
 }
 
 /**
@@ -280,4 +281,10 @@ export function getPendingCount(): number {
 
 export function getLibrarianRuntimeStatus(storyId: string): LibrarianRuntimeStatus {
   return runtimeStatus.get(storyId) ?? makeDefaultStatus()
+}
+
+/** Whether background memory work may proceed without competing with Analyze. */
+export function isLibrarianAnalysisIdle(storyId: string): boolean {
+  const state = scheduler.get(storyId)
+  return !state?.running && !state?.queued && (holds.get(storyId) ?? 0) === 0
 }
