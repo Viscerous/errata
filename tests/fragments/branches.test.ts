@@ -18,7 +18,8 @@ import {
 import { createStory, createFragment, getFragment, listFragments } from '../../src/server/fragments/storage'
 import { getProseChain, addProseSection } from '../../src/server/fragments/prose-chain'
 import { saveState, getState, saveAnalysis, getAnalysis, saveChatHistory, getChatHistory } from '../../src/server/librarian/storage'
-import type { LibrarianAnalysis, LibrarianState } from '../../src/server/librarian/storage'
+import type { LibrarianAnalysis } from '../../src/server/librarian/storage'
+import type { StoredLibrarianState } from '@/contracts/librarian'
 import type { StoryMeta, Fragment } from '../../src/server/fragments/schema'
 
 let dataDir: string
@@ -420,7 +421,7 @@ describe('branches', () => {
       await addProseSection(dataDir, TEST_STORY_ID, 'pr-bakite')
 
       // Save librarian state on main
-      const state: LibrarianState = {
+      const state: StoredLibrarianState = {
         lastAnalyzedFragmentId: 'pr-bakite',
         recentMentions: { 'ch-alice': ['pr-bakite'] },
         timeline: [{ event: 'Alice arrives', fragmentId: 'pr-bakite' }],

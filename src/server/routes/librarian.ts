@@ -34,6 +34,7 @@ import {
 } from '../librarian/suggestions'
 import { createLogger } from '../logging'
 import { encodeStream } from './encode-stream'
+import type { LibrarianStatusResponse } from '@/contracts/librarian'
 
 export function librarianRoutes(dataDir: string) {
   const logger = createLogger('api:librarian', { dataDir })
@@ -60,7 +61,7 @@ export function librarianRoutes(dataDir: string) {
       return {
         ...state,
         ...runtime,
-      }
+      } satisfies LibrarianStatusResponse
     }, { detail: { summary: 'Get librarian status' } })
 
     .get('/stories/:storyId/librarian/analysis-index', async ({ params }) => {

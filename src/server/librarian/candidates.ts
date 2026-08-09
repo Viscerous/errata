@@ -3,10 +3,14 @@ import { listFragments } from '../fragments/storage'
 import { customContextFragmentTypes } from '../llm/fragment-context-blocks'
 import type { ContextSelectionSource } from '../llm/context-selection'
 import { contextReceiptProvenanceIds } from '../llm/context-receipt'
+import type {
+  LibrarianCandidateFragment,
+  LibrarianCandidateSource,
+} from '@/contracts/librarian'
 
 export type FragmentCandidateSource = Extract<
   ContextSelectionSource,
-  'current-observation' | 'writer-context'
+  LibrarianCandidateSource
 >
 
 export interface FragmentCandidate {
@@ -16,12 +20,7 @@ export interface FragmentCandidate {
   score?: number
 }
 
-export interface MergedFragmentCandidate {
-  fragmentId: string
-  sources: FragmentCandidateSource[]
-  reasons?: string[]
-  score?: number
-}
+export type MergedFragmentCandidate = LibrarianCandidateFragment
 
 const ROUTABLE_BUILTIN_TYPES = new Set(['character', 'knowledge'])
 function routableTypes(story: StoryMeta): Set<string> {

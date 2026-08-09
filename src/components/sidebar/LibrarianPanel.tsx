@@ -8,7 +8,7 @@ import {
   type Fragment,
   type LibrarianAnalysis,
   type LibrarianAnalysisSummary,
-  type LibrarianState,
+  type LibrarianStatusResponse,
 } from '@/lib/api'
 import { qk, q, useActiveBranchId } from '@/lib/query-keys'
 import { cn } from '@/lib/utils'
@@ -389,7 +389,7 @@ function OperationDiffPreview({ items }: { items: ProposalDiffItem[] }) {
 
 // ─── Story Tab ─────────────────────────────────────────────
 
-function StoryContent({ storyId, status, onOpenChat }: LibrarianPanelProps & { status: LibrarianState | undefined; onOpenChat?: (message: string) => void }) {
+function StoryContent({ storyId, status, onOpenChat }: LibrarianPanelProps & { status: LibrarianStatusResponse | undefined; onOpenChat?: (message: string) => void }) {
   const [refineTarget, setRefineTarget] = useState<{ fragmentId: string; fragmentName: string; instructions?: string } | null>(null)
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [showAllAnalyses, setShowAllAnalyses] = useState(false)

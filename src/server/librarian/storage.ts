@@ -9,8 +9,21 @@ import { writeJsonAtomic } from '../fs-utils'
 import { withKeyLock } from '../async-lock'
 import type { FragmentChangeOperation, OperationValidation } from '../fragments/change-operations'
 import type { AppliedChange, AppliedFieldChange, RevertResult } from '../fragments/change-apply'
-import type { MergedFragmentCandidate } from './candidates'
-import type { AnalysisSourceRevision, ContinuityProjection } from './continuity-types'
+import type {
+  LibrarianAnalysis as SharedLibrarianAnalysis,
+  LibrarianAnalysisSummary,
+  LibrarianPassRecord,
+  StoredLibrarianState,
+} from '@/contracts/librarian'
+
+export type {
+  LibrarianAnalysisSummary,
+  LibrarianAnalyzeLaneCompletion,
+  LibrarianAnalyzeLaneRequirement,
+  LibrarianAnalyzeLaneStatus,
+  LibrarianMention,
+  LibrarianPassRecord,
+} from '@/contracts/librarian'
 
 /**
  * The librarian analysis proposals reuse the shared apply/revert snapshot types.
@@ -60,86 +73,7 @@ export interface LibrarianFragmentChangeProposal {
   revertResults?: LibrarianProposalRevertResult[]
 }
 
-export interface LibrarianAnalysis {
-  id: string
-  createdAt: string
-  fragmentId: string
-  /** Material source fingerprint used to reject stale derived continuity. */
-  sourceRevision?: AnalysisSourceRevision
-  /** The summary text the librarian intended to record (intent). */
-  summaryUpdate: string
-  /** Prompt contract used to write summaryUpdate. */
-  summaryContractVersion?: number
-  structuredSummary?: {
-    events: string[]
-    stateChanges: string[]
-    openThreads: string[]
-  }
-  continuityProjection?: ContinuityProjection
-  mentions: LibrarianMention[]
-  candidateFragmentIds?: string[]
-  candidateFragments?: MergedFragmentCandidate[]
-  contradictions: Array<{
-    description: string
-    fragmentIds: string[]
-    /** User-reviewed findings remain in the historical analysis but no longer count as active. */
-    dismissed?: boolean
-    dismissedAt?: string
-    /** Exact source-linked evidence used by newer, high-precision analyses. */
-    sourceEvidenceText?: string
-    conflictingEvidence?: Array<{ fragmentId: string; segments?: number[]; evidenceText: string }>
-  }>
-  fragmentChangeProposals: LibrarianFragmentChangeProposal[]
-  timelineEvents: Array<{
-    event: string
-    position: 'before' | 'during' | 'after'
-  }>
-  directions?: Array<{
-    title: string
-    description: string
-    instruction: string
-  }>
-  /** Logical completion state for the lanes sharing the fused Analyze model session. */
-  analyzeLanes?: LibrarianAnalyzeLaneStatus
-  passes?: LibrarianPassRecord[]
-  trace?: Array<{
-    type: string
-    [key: string]: unknown
-  }>
-}
-
-export type LibrarianAnalyzeLaneRequirement = 'required' | 'conditional' | 'disabled'
-export type LibrarianAnalyzeLaneCompletion = 'complete' | 'not-needed' | 'incomplete' | 'disabled'
-
-export interface LibrarianAnalyzeLaneStatus {
-  observation: {
-    requirement: 'required'
-    completion: Exclude<LibrarianAnalyzeLaneCompletion, 'not-needed' | 'disabled'>
-  }
-  recordMaintenance: {
-    requirement: 'conditional' | 'disabled'
-    completion: LibrarianAnalyzeLaneCompletion
-  }
-  directions: {
-    requirement: 'required' | 'disabled'
-    completion: Exclude<LibrarianAnalyzeLaneCompletion, 'not-needed'>
-  }
-}
-
-export type LibrarianMention = { fragmentId: string; text: string }
-
-export interface LibrarianPassRecord {
-  name: 'observe' | 'proposal' | 'directions' | 'audit' | string
-  status: 'complete' | 'skipped' | 'failed'
-  startedAt: string
-  durationMs?: number
-  modelId?: string
-  stepCount?: number
-  finishReason?: string
-  reason?: string
-  error?: string
-  diagnostics?: Record<string, unknown>
-}
+export type LibrarianAnalysis = SharedLibrarianAnalysis<LibrarianFragmentChangeProposal>
 
 export function passRecord(params: {
   name: LibrarianPassRecord['name']
@@ -190,29 +124,8 @@ export function selectLatestAnalysesByFragment(
   return latest
 }
 
-export interface LibrarianAnalysisSummary {
-  id: string
-  createdAt: string
-  fragmentId: string
-  contradictionCount: number
-  suggestionCount: number
-  pendingSuggestionCount: number
-  timelineEventCount: number
-  directionsCount: number
-  hasTrace?: boolean
-  /**
-   * The source prose changed after this analysis ran, so its continuity
-   * projection is rejected by the derived fold. Without surfacing this, an edit
-   * silently drops that passage's state and knowledge from Writer context.
-   */
-  continuityStale?: boolean
-}
-
-export interface LibrarianState {
-  lastAnalyzedFragmentId: string | null
-  recentMentions: Record<string, string[]>
-  timeline: Array<{ event: string; fragmentId: string }>
-}
+/** Compatibility name for the on-disk state shape. */
+export type LibrarianState = StoredLibrarianState
 
 export interface LibrarianAnalysisIndexEntry {
   analysisId: string
@@ -582,7 +495,7 @@ export async function listAnalyses(
 export async function getState(
   dataDir: string,
   storyId: string,
-): Promise<LibrarianState> {
+): Promise<StoredLibrarianState> {
   const path = await statePath(dataDir, storyId)
   if (!existsSync(path)) {
     return {
@@ -592,13 +505,13 @@ export async function getState(
     }
   }
   const raw = await readFile(path, 'utf-8')
-  return JSON.parse(raw) as LibrarianState
+  return JSON.parse(raw) as StoredLibrarianState
 }
 
 export async function saveState(
   dataDir: string,
   storyId: string,
-  state: LibrarianState,
+  state: StoredLibrarianState,
 ): Promise<void> {
   const dir = await librarianDir(dataDir, storyId)
   await mkdir(dir, { recursive: true })

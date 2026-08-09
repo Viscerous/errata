@@ -11,8 +11,8 @@ import {
   getLatestAnalysisIdsByFragment,
   rebuildAnalysisIndex,
   type LibrarianAnalysis,
-  type LibrarianState,
 } from '@/server/librarian/storage'
+import type { StoredLibrarianState } from '@/contracts/librarian'
 
 function makeAnalysis(overrides: Partial<LibrarianAnalysis> = {}): LibrarianAnalysis {
   return {
@@ -249,7 +249,7 @@ describe('librarian storage', () => {
     })
 
     it('saves and loads state', async () => {
-      const state: LibrarianState = {
+      const state: StoredLibrarianState = {
         lastAnalyzedFragmentId: 'pr-0001',
         recentMentions: {
           'ch-0001': ['pr-0001', 'pr-0002'],

@@ -4,6 +4,12 @@ import { getActiveBranchId, getScopedBranchId, isBranchDeleting, withBranch } fr
 import { getStory } from '../fragments/storage'
 import { getAgentBlockConfig } from '../agents/agent-block-storage'
 import { clearAnalysisIndexEntry } from './storage'
+import type { LibrarianRuntimeStatus } from '@/contracts/librarian'
+
+export type {
+  LibrarianRunStatus,
+  LibrarianRuntimeStatus,
+} from '@/contracts/librarian'
 
 interface QueuedRun {
   dataDir: string
@@ -22,16 +28,6 @@ const runtimeStatus = new Map<string, LibrarianRuntimeStatus>()
 /** Per-story count of active agent runs that defer analysis until they finish. */
 const holds = new Map<string, number>()
 const logger = createLogger('librarian')
-
-export type LibrarianRunStatus = 'idle' | 'scheduled' | 'running' | 'error'
-
-export interface LibrarianRuntimeStatus {
-  runStatus: LibrarianRunStatus
-  pendingFragmentId: string | null
-  runningFragmentId: string | null
-  lastError: string | null
-  updatedAt: string
-}
 
 function makeDefaultStatus(): LibrarianRuntimeStatus {
   return {

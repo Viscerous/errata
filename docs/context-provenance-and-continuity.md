@@ -5,6 +5,11 @@ accepted, asynchronous Analyze work derives source-linked summaries and
 continuity state. Authored fragments and accepted prose remain authoritative;
 derived projections are disposable and rebuildable.
 
+The shared analysis envelope and status shapes live in
+`src/contracts/librarian.ts`; continuity projection types live in
+`src/contracts/continuity.ts`. Server-local modules retain compatibility
+re-exports but do not define separate client-facing mirrors.
+
 ## Authority boundaries
 
 | Surface | Authority | Writer use |

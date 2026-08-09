@@ -14,8 +14,8 @@ import {
   saveAnalysis,
   saveState,
   type LibrarianAnalysis,
-  type LibrarianState,
 } from '@/server/librarian/storage'
+import type { StoredLibrarianState } from '@/contracts/librarian'
 import { fragmentBaseHash } from '@/server/fragments/change-operations'
 
 // Mock the AI SDK to prevent real LLM calls
@@ -106,7 +106,7 @@ describe('librarian API routes', () => {
     })
 
     it('returns saved state', async () => {
-      const state: LibrarianState = {
+      const state: StoredLibrarianState = {
         lastAnalyzedFragmentId: 'pr-0001',
         recentMentions: { 'ch-0001': ['pr-0001'] },
         timeline: [{ event: 'Battle', fragmentId: 'pr-0001' }],

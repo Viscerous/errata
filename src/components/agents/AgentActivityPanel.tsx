@@ -4,7 +4,7 @@ import {
   api,
   type AgentRunTraceRecord,
   type ChatEvent,
-  type LibrarianState,
+  type LibrarianStatusResponse,
 } from '@/lib/api'
 import type { ActiveAgent } from '@/lib/api/agents'
 import { qk, useActiveBranchId } from '@/lib/query-keys'
@@ -65,7 +65,7 @@ export function AgentActivityPanel({ storyId }: AgentActivityPanelProps) {
 // ─── Status Strip ──────────────────────────────────────────
 
 interface StatusStripProps {
-  status: LibrarianState | undefined
+  status: LibrarianStatusResponse | undefined
   runStatus: string
   active: ActiveAgent[]
 }

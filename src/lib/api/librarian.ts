@@ -1,6 +1,6 @@
 import { apiFetch, fetchEventStream } from './client'
 import type {
-  LibrarianState,
+  LibrarianStatusResponse,
   LibrarianAnalysisSummary,
   LibrarianAnalysis,
   LibrarianAcceptChangeProposalResponse,
@@ -12,7 +12,7 @@ import type {
 
 export const librarian = {
   getStatus: (storyId: string) =>
-    apiFetch<LibrarianState>(`/stories/${storyId}/librarian/status`),
+    apiFetch<LibrarianStatusResponse>(`/stories/${storyId}/librarian/status`),
   getAnalysisIndex: (storyId: string) =>
     apiFetch<Record<string, string>>(`/stories/${storyId}/librarian/analysis-index`),
   analyze: (storyId: string, fragmentId: string) =>

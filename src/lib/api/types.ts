@@ -3,6 +3,7 @@ import type {
   AgentBlockConfig,
   BlockConfig,
 } from '@/contracts/block-config'
+import type { LibrarianAnalysis as SharedLibrarianAnalysis } from '@/contracts/librarian'
 import type { Fragment as StoryFragment } from '@/contracts/story'
 export type {
   AgentBlockConfig,
@@ -21,6 +22,33 @@ export type {
   ProseVariationSummary,
   StoryMeta,
 } from '@/contracts/story'
+export type {
+  LibrarianAnalysisSummary,
+  LibrarianAnalyzeLaneCompletion,
+  LibrarianAnalyzeLaneRequirement,
+  LibrarianAnalyzeLaneStatus,
+  LibrarianCandidateFragment,
+  LibrarianCandidateSource,
+  LibrarianContradiction,
+  LibrarianDirection,
+  LibrarianMention,
+  LibrarianPassRecord,
+  LibrarianRuntimeStatus,
+  LibrarianRunStatus,
+  LibrarianStatusResponse,
+  StoredLibrarianState,
+} from '@/contracts/librarian'
+export type {
+  AnalysisSourceRevision,
+  CitedEvidence,
+  ContinuityProjection,
+  KnowledgeOperation,
+  StateOperation,
+  TemporalFrame,
+  TemporalRelation,
+  ThreadFocus,
+  ThreadOperation,
+} from '@/contracts/continuity'
 
 /** API and local draft fragments always carry archive state. */
 export type Fragment = Omit<StoryFragment, 'archived'> & {
@@ -68,20 +96,6 @@ export interface GenerationLogSummary {
   toolCallCount: number
   stepCount: number
   stepsExceeded: boolean
-}
-
-export interface LibrarianAnalysisSummary {
-  id: string
-  createdAt: string
-  fragmentId: string
-  contradictionCount: number
-  suggestionCount: number
-  pendingSuggestionCount: number
-  timelineEventCount: number
-  directionsCount: number
-  hasTrace?: boolean
-  /** Source prose changed after this analysis, so its continuity is not folded. */
-  continuityStale?: boolean
 }
 
 export type FragmentChangeAction =
@@ -182,123 +196,7 @@ export interface LibrarianFragmentChangeProposal {
   revertResults?: LibrarianProposalRevertResult[]
 }
 
-export interface LibrarianAnalysis {
-  id: string
-  createdAt: string
-  fragmentId: string
-  sourceRevision?: {
-    contentHash: string
-    fragmentVersion?: number
-    updatedAt: string
-  }
-  summaryUpdate: string
-  summaryContractVersion?: number
-  structuredSummary?: {
-    events: string[]
-    stateChanges: string[]
-    openThreads: string[]
-  }
-  continuityProjection?: {
-    version: 1
-    temporalFrame: {
-      relation: 'forward' | 'flashback' | 'flash-forward' | 'concurrent' | 'uncertain'
-      anchor?: string
-      evidenceText?: string
-    }
-    stateOperations: Array<{
-      stateKey: string
-      action: 'set' | 'clear'
-      subject: string
-      value?: string
-      evidenceText: string
-    }>
-    threadOperations: Array<{
-      threadKey: string
-      action: 'open' | 'advance' | 'resolve' | 'abandon'
-      label?: string
-      note?: string
-      relatedFragmentIds: string[]
-      evidenceText: string
-    }>
-    threadFocus: Array<{
-      threadKey: string
-      visibility: 'foreground' | 'background'
-    }>
-    knowledgeOperations: Array<{
-      characterId: string
-      knowledgeKey: string
-      action: 'learn' | 'correct' | 'forget'
-      fact?: string
-      acquisition: 'witnessed' | 'told' | 'inferred' | 'other'
-      evidenceText: string
-    }>
-  }
-  mentions: LibrarianMention[]
-  candidateFragmentIds?: string[]
-  candidateFragments?: Array<{
-    fragmentId: string
-    sources: Array<'current-observation' | 'writer-context'>
-    reasons?: string[]
-    score?: number
-  }>
-  contradictions: Array<{
-    description: string
-    fragmentIds: string[]
-    dismissed?: boolean
-    dismissedAt?: string
-    sourceEvidenceText?: string
-    conflictingEvidence?: Array<{ fragmentId: string; segments?: number[]; evidenceText: string }>
-  }>
-  fragmentChangeProposals: LibrarianFragmentChangeProposal[]
-  timelineEvents: Array<{
-    event: string
-    position: 'before' | 'during' | 'after'
-  }>
-  directions?: SuggestionDirection[]
-  analyzeLanes?: {
-    observation: {
-      requirement: 'required'
-      completion: 'complete' | 'incomplete'
-    }
-    recordMaintenance: {
-      requirement: 'conditional' | 'disabled'
-      completion: 'complete' | 'not-needed' | 'incomplete' | 'disabled'
-    }
-    directions: {
-      requirement: 'required' | 'disabled'
-      completion: 'complete' | 'incomplete' | 'disabled'
-    }
-  }
-  passes?: Array<{
-    name: string
-    status: 'complete' | 'skipped' | 'failed'
-    startedAt: string
-    durationMs?: number
-    modelId?: string
-    stepCount?: number
-    finishReason?: string
-    reason?: string
-    error?: string
-    diagnostics?: Record<string, unknown>
-  }>
-  trace?: Array<{
-    type: string
-    [key: string]: unknown
-  }>
-}
-
-export type LibrarianMention = { fragmentId: string; text: string }
-
-export interface LibrarianState {
-  lastAnalyzedFragmentId: string | null
-  recentMentions: Record<string, string[]>
-  timeline: Array<{ event: string; fragmentId: string }>
-  runStatus?: 'idle' | 'scheduled' | 'running' | 'error'
-  pendingFragmentId?: string | null
-  runningFragmentId?: string | null
-  lastError?: string | null
-  updatedAt?: string
-}
+export type LibrarianAnalysis = SharedLibrarianAnalysis<LibrarianFragmentChangeProposal>
 
 export interface AgentTraceEntry {
   runId: string
