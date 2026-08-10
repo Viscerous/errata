@@ -27,6 +27,12 @@ jobs:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
 
+      # Trusted publishing needs npm >= 11.5.1. Node 24 does not always bundle a
+      # new enough npm, and the failure without this reads as an auth error
+      # rather than a version one.
+      - name: Ensure npm supports trusted publishing
+        run: npm install -g npm@latest
+
       - name: Verify SDK package version matches tag
         if: startsWith(github.ref, 'refs/tags/sdk-v')
         run: |
@@ -37,6 +43,10 @@ jobs:
             exit 1
           fi
 
+      # No token: the registry authenticates this job by its OIDC identity, which
+      # is why `id-token: write` above is load-bearing. Provenance attestations
+      # are generated automatically under trusted publishing, so `--provenance`
+      # is not passed.
       - name: Publish @viscerous/errata-plugin-sdk
         working-directory: packages/errata-plugin-sdk
-        run: npm publish --provenance --access public
+        run: npm publish --access public

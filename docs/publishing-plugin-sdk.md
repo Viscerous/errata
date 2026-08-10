@@ -4,17 +4,27 @@ This project includes a local SDK package at `packages/errata-plugin-sdk`.
 
 ## Manual Publish (npm)
 
-Run publish from the SDK package directory (not repo root):
+Authenticate interactively, then publish from the SDK package directory (not repo
+root):
 
 ```bash
-cd packages/errata-plugin-sdk
-NODE_AUTH_TOKEN="<your-npm-token>" npm publish
+npm login
 ```
+
+```bash
+cd packages/errata-plugin-sdk && npm publish --access public
+```
+
+`npm login` opens a browser and supports passkeys/security keys, so no token has
+to exist on disk or pass through shell history. Prefer it over
+`NODE_AUTH_TOKEN=...` for hand publishes.
 
 Notes:
 
 - Package is configured with `publishConfig.access = public`.
 - Publish target is npm registry (`https://registry.npmjs.org`).
+- A hand publish produces **no provenance attestation** — only CI can generate
+  one. Prefer the tag-triggered workflow for real releases.
 
 ## CI Publish (GitHub Actions)
 
@@ -32,24 +42,53 @@ Behavior:
 - Validates tag version matches `packages/errata-plugin-sdk/package.json` version.
 - Publishes from `packages/errata-plugin-sdk`.
 
-Required GitHub secret:
+### Authentication: trusted publishing (OIDC)
 
-- `NPM_TOKEN`
+There is **no npm token and no GitHub secret**. npm authenticates the workflow by
+its GitHub OIDC identity, which is what `permissions: id-token: write` in the
+workflow is for — remove it and publishing breaks.
+
+Configured once on npmjs.com, under the package's Settings → Trusted Publisher:
+
+| Field | Value |
+| --- | --- |
+| Organization or user | `Viscerous` |
+| Repository | `errata` |
+| Workflow filename | `publish-plugin-sdk.yml` (filename only, not a path) |
+| Environment | leave empty |
+| Allowed actions | `npm publish` |
+
+Two consequences worth knowing:
+
+- The workflow upgrades npm before publishing, because trusted publishing needs
+  npm >= 11.5.1 and Node 24 does not reliably bundle one that new. Without it the
+  failure looks like an auth error rather than a version mismatch.
+- Provenance attestations are generated automatically, so `--provenance` is not
+  passed. Adding it back is redundant.
 
 ## Common Errors + Fixes
 
-### `E403 ... Two-factor authentication ... bypass 2fa enabled is required`
+### CI publish fails with a 401/403, or "unable to authenticate"
+
+Under trusted publishing this is almost never a credential problem, because there
+is no credential. Check, in order:
+
+- the trusted publisher on npmjs.com names workflow **`publish-plugin-sdk.yml`**
+  — the filename alone, not `.github/workflows/publish-plugin-sdk.yml`
+- `permissions: id-token: write` is still present in the workflow
+- npm in the job is >= 11.5.1 (the upgrade step should guarantee this; an older
+  npm ignores OIDC entirely and reports it as an auth failure)
+- the tag was pushed to `Viscerous/errata`, not a different remote
+
+### `E403` on a hand publish
 
 Cause:
 
-- token does not satisfy org/npm 2FA publish policy
-- or token is expired/revoked
+- the logged-in account does not own `@viscerous`, or the session expired
 
 Fix:
 
-- create a new npm automation/granular token that can publish `@viscerous/errata-plugin-sdk`
-- ensure it is valid for your org's 2FA policy
-- retry publish and update GitHub `NPM_TOKEN`
+- `npm whoami` to confirm the account, `npm login` to re-authenticate
 
 ### `Cannot read properties of null (reading 'prerelease')`
 
