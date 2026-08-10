@@ -106,156 +106,167 @@ export function ChatConfig({
 
   return (
     <div className="flex items-center gap-1.5 px-3 py-2 border-b border-border/30 bg-card/30" data-component-id="character-chat-config">
-      {/* Character selector */}
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild disabled={disabled}>
-          <Button variant="ghost" size="sm" className="h-7 gap-1.5 text-xs font-medium max-w-[180px]">
-            {selectedCharacter && <CharacterThumb character={selectedCharacter} mediaById={mediaById} />}
-            <span className="font-display text-sm truncate">
-              {selectedCharacter?.name ?? 'Select character'}
-            </span>
-            <ChevronDown className="size-3 shrink-0 opacity-50" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="max-h-[300px] overflow-y-auto">
-          {characters.map((ch) => (
-            <DropdownMenuItem
-              key={ch.id}
-              onClick={() => onCharacterChange(ch.id)}
-              className="gap-2"
-            >
-              <CharacterThumb character={ch} mediaById={mediaById} />
-              <span className="font-display text-sm">{ch.name}</span>
-              <span className="text-[0.625rem] text-muted-foreground truncate ml-auto max-w-[120px]">
-                {ch.description}
+      {/* Selectors may contract on narrow screens; navigation stays pinned. */}
+      <div
+        className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden"
+        data-component-id="character-chat-config-selectors"
+      >
+        {/* Character selector */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild disabled={disabled}>
+            <Button variant="ghost" size="sm" className="h-7 min-w-0 max-w-[180px] shrink gap-1.5 text-xs font-medium">
+              {selectedCharacter && <CharacterThumb character={selectedCharacter} mediaById={mediaById} />}
+              <span className="min-w-0 truncate font-display text-sm">
+                {selectedCharacter?.name ?? 'Select character'}
               </span>
-            </DropdownMenuItem>
-          ))}
-          {characters.length === 0 && (
-            <DropdownMenuItem disabled className="text-muted-foreground italic text-xs">
-              No characters yet
-            </DropdownMenuItem>
-          )}
-        </DropdownMenuContent>
-      </DropdownMenu>
-
-      <span className="text-muted-foreground text-xs select-none">/</span>
-
-      {/* Persona selector */}
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild disabled={disabled}>
-          <Button variant="ghost" size="sm" className="h-7 gap-1.5 text-xs text-muted-foreground">
-            {persona.type === 'character' && <Users className="size-3" />}
-            {persona.type === 'stranger' && <User className="size-3" />}
-            {persona.type === 'custom' && <Sparkles className="size-3" />}
-            <span className="truncate max-w-[80px]">{personaLabel}</span>
-            <ChevronDown className="size-3 shrink-0 opacity-50" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start">
-          <DropdownMenuItem
-            onClick={() => onPersonaChange({ type: 'stranger' })}
-            className="gap-2"
-          >
-            <User className="size-3.5" />
-            <div>
-              <div className="text-xs">Stranger</div>
-              <div className="text-[0.625rem] text-muted-foreground">Someone they just met</div>
-            </div>
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          {characters
-            .filter((c) => c.id !== selectedCharacterId)
-            .map((ch) => (
+              <ChevronDown className="size-3 shrink-0 opacity-50" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="max-h-[300px] overflow-y-auto">
+            {characters.map((ch) => (
               <DropdownMenuItem
                 key={ch.id}
-                onClick={() => onPersonaChange({ type: 'character', characterId: ch.id })}
+                onClick={() => onCharacterChange(ch.id)}
                 className="gap-2"
               >
-                <Users className="size-3.5" />
-                <span className="text-xs">As {ch.name}</span>
+                <CharacterThumb character={ch} mediaById={mediaById} />
+                <span className="font-display text-sm">{ch.name}</span>
+                <span className="text-[0.625rem] text-muted-foreground truncate ml-auto max-w-[120px]">
+                  {ch.description}
+                </span>
               </DropdownMenuItem>
             ))}
-          {characters.filter((c) => c.id !== selectedCharacterId).length > 0 && (
-            <DropdownMenuSeparator />
-          )}
-          <DropdownMenuItem
-            onClick={() => {
-              const prompt = window.prompt('Describe your persona:')
-              if (prompt?.trim()) {
-                onPersonaChange({ type: 'custom', prompt: prompt.trim() })
-              }
-            }}
-            className="gap-2"
-          >
-            <Sparkles className="size-3.5" />
-            <div>
-              <div className="text-xs">Custom persona</div>
-              <div className="text-[0.625rem] text-muted-foreground">Define who you are</div>
-            </div>
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+            {characters.length === 0 && (
+              <DropdownMenuItem disabled className="text-muted-foreground italic text-xs">
+                No characters yet
+              </DropdownMenuItem>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
 
-      <span className="text-muted-foreground text-xs select-none">/</span>
+        <span className="hidden shrink-0 text-xs text-muted-foreground select-none sm:inline">/</span>
 
-      {/* Story point picker */}
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild disabled={disabled}>
-          <Button variant="ghost" size="sm" className="h-7 gap-1.5 text-xs text-muted-foreground">
-            <BookOpen className="size-3" />
-            <span className="truncate max-w-[80px]">{storyPointLabel}</span>
-            <ChevronDown className="size-3 shrink-0 opacity-50" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="max-h-[300px] overflow-y-auto">
-          <DropdownMenuItem
-            onClick={() => onStoryPointChange(null)}
-            className="gap-2"
-          >
-            <span className="text-xs font-medium">Latest</span>
-            <span className="text-[0.625rem] text-muted-foreground ml-auto">All events</span>
-          </DropdownMenuItem>
-          {proseEntries.length > 0 && <DropdownMenuSeparator />}
-          {proseEntries.map((entry) => (
+        {/* Persona selector */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild disabled={disabled}>
+            <Button variant="ghost" size="sm" className="h-7 min-w-0 shrink gap-1.5 text-xs text-muted-foreground">
+              {persona.type === 'character' && <Users className="size-3" />}
+              {persona.type === 'stranger' && <User className="size-3" />}
+              {persona.type === 'custom' && <Sparkles className="size-3" />}
+              <span className="min-w-0 max-w-[80px] truncate">{personaLabel}</span>
+              <ChevronDown className="size-3 shrink-0 opacity-50" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start">
             <DropdownMenuItem
-              key={entry.id}
-              onClick={() => onStoryPointChange(entry.id)}
+              onClick={() => onPersonaChange({ type: 'stranger' })}
               className="gap-2"
             >
-              <span className="text-[0.625rem] text-muted-foreground font-mono w-5 text-right shrink-0">
-                {entry.index}
-              </span>
-              <span className="text-xs truncate">{entry.name}</span>
+              <User className="size-3.5" />
+              <div>
+                <div className="text-xs">Stranger</div>
+                <div className="text-[0.625rem] text-muted-foreground">Someone they just met</div>
+              </div>
             </DropdownMenuItem>
-          ))}
-        </DropdownMenuContent>
-      </DropdownMenu>
+            <DropdownMenuSeparator />
+            {characters
+              .filter((c) => c.id !== selectedCharacterId)
+              .map((ch) => (
+                <DropdownMenuItem
+                  key={ch.id}
+                  onClick={() => onPersonaChange({ type: 'character', characterId: ch.id })}
+                  className="gap-2"
+                >
+                  <Users className="size-3.5" />
+                  <span className="text-xs">As {ch.name}</span>
+                </DropdownMenuItem>
+              ))}
+            {characters.filter((c) => c.id !== selectedCharacterId).length > 0 && (
+              <DropdownMenuSeparator />
+            )}
+            <DropdownMenuItem
+              onClick={() => {
+                const prompt = window.prompt('Describe your persona:')
+                if (prompt?.trim()) {
+                  onPersonaChange({ type: 'custom', prompt: prompt.trim() })
+                }
+              }}
+              className="gap-2"
+            >
+              <Sparkles className="size-3.5" />
+              <div>
+                <div className="text-xs">Custom persona</div>
+                <div className="text-[0.625rem] text-muted-foreground">Define who you are</div>
+              </div>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
 
-      {/* Spacer */}
-      <div className="flex-1" />
+        <span className="hidden shrink-0 text-xs text-muted-foreground select-none sm:inline">/</span>
 
-      {/* Conversations button */}
-      <Button
-        variant="ghost"
-        size="sm"
-        className="h-7 gap-1.5 text-xs text-muted-foreground"
-        onClick={onShowConversations}
-        disabled={disabled}
+        {/* Story point picker */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild disabled={disabled}>
+            <Button variant="ghost" size="sm" className="h-7 min-w-0 shrink gap-1.5 text-xs text-muted-foreground">
+              <BookOpen className="size-3" />
+              <span className="min-w-0 max-w-[80px] truncate">{storyPointLabel}</span>
+              <ChevronDown className="size-3 shrink-0 opacity-50" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="max-h-[300px] overflow-y-auto">
+            <DropdownMenuItem
+              onClick={() => onStoryPointChange(null)}
+              className="gap-2"
+            >
+              <span className="text-xs font-medium">Latest</span>
+              <span className="text-[0.625rem] text-muted-foreground ml-auto">All events</span>
+            </DropdownMenuItem>
+            {proseEntries.length > 0 && <DropdownMenuSeparator />}
+            {proseEntries.map((entry) => (
+              <DropdownMenuItem
+                key={entry.id}
+                onClick={() => onStoryPointChange(entry.id)}
+                className="gap-2"
+              >
+                <span className="text-[0.625rem] text-muted-foreground font-mono w-5 text-right shrink-0">
+                  {entry.index}
+                </span>
+                <span className="text-xs truncate">{entry.name}</span>
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+
+      <div
+        className="ml-auto flex shrink-0 items-center gap-1"
+        data-component-id="character-chat-config-actions"
       >
-        <History className="size-3" />
-        <span className="hidden sm:inline">History</span>
-      </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 gap-1.5 text-xs text-muted-foreground"
+          onClick={onShowConversations}
+          disabled={disabled}
+          aria-label="Previous conversations"
+        >
+          <History className="size-3" />
+          <span className="hidden sm:inline">History</span>
+        </Button>
 
-      {/* Close */}
-      <Button
-        variant="ghost"
-        size="icon"
-        className="size-7 text-muted-foreground hover:text-muted-foreground"
-        onClick={onClose}
-      >
-        <X className="size-3.5" />
-      </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-7 text-muted-foreground hover:text-foreground"
+          onClick={onClose}
+          title="Return to story"
+          aria-label="Return to story"
+          data-component-id="character-chat-return-to-story"
+        >
+          <BookOpen className="size-3.5 md:hidden" />
+          <X className="hidden size-3.5 md:block" />
+        </Button>
+      </div>
     </div>
   )
 }
