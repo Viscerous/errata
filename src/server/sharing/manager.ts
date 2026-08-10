@@ -7,6 +7,7 @@ import type { SharingConfig } from '../config/schema'
 import { checkBasicAuth } from './auth'
 import { appPort, getLanUrl } from './network'
 import { ensureCloudflared, parseTunnelUrl } from './cloudflared'
+import { proxyBlockReason } from './policy'
 import { createLogger } from '../logging'
 
 const logger = createLogger('sharing')
@@ -88,6 +89,15 @@ function handleProxyRequest(req: IncomingMessage, res: ServerResponse) {
     res.end('Authentication required.')
     return
   }
+  // Checked after auth: an authenticated remote client still does not get the
+  // credential endpoints, and an unauthenticated one learns nothing about them.
+  const blocked = proxyBlockReason(req.method ?? 'GET', req.url)
+  if (blocked) {
+    logger.warn('Proxy refused a local-only request', { method: req.method, url: req.url })
+    res.writeHead(403, { 'Content-Type': 'text/plain' })
+    res.end(blocked)
+    return
+  }
   const port = appPort()
   const headers = upstreamHeaders(req, port)
   const proxyReq = request(
@@ -125,6 +135,11 @@ function handleProxyUpgrade(req: IncomingMessage, clientSocket: Duplex, head: Bu
       + 'WWW-Authenticate: Basic realm="Errata", charset="UTF-8"\r\n'
       + 'Connection: close\r\n\r\n',
     )
+    return
+  }
+
+  if (proxyBlockReason(req.method ?? 'GET', req.url)) {
+    clientSocket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n')
     return
   }
 

@@ -4,6 +4,7 @@ import { clearRuntimePluginUi } from './plugins/runtime-ui'
 import { createApp } from './api'
 import { reconcileSharing } from './sharing/manager'
 import { ensureOpenRouterOAuthCallbackBridge } from './openrouter-oauth-callback'
+import { migrateLegacyPlaintextSecrets } from './config/storage'
 import type { WritingPlugin } from './plugins/types'
 import { mkdir, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -14,6 +15,21 @@ async function ensureStartupDirectories(dataDir: string, pluginDir?: string) {
 
   if (pluginDir) {
     await mkdir(pluginDir, { recursive: true })
+  }
+}
+
+/**
+ * Startup migration for installs written before secrets moved to their own file
+ * (see config/schema.ts for why they are separate). Must never block boot: the
+ * join still reads inline secrets, so an install that cannot migrate keeps
+ * working as it did before.
+ */
+async function migrateSecretsOutOfConfig(dataDir: string) {
+  try {
+    const { migrated, ...moved } = await migrateLegacyPlaintextSecrets(dataDir)
+    if (migrated) console.info('[config] Moved secrets out of config.json into secrets.json.', moved)
+  } catch (error) {
+    console.warn('[config] Could not move secrets out of config.json; leaving it as-is.', error)
   }
 }
 
@@ -63,6 +79,7 @@ async function initializeApp() {
 
   await ensureStartupDirectories(dataDir, externalPluginsDir)
   await warnAboutOrphanedInstructionSets(dataDir)
+  await migrateSecretsOutOfConfig(dataDir)
 
   if (externalPluginsDir) {
     try {

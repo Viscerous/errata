@@ -82,7 +82,7 @@ export function ProviderPanel({ onClose }: { onClose: () => void }) {
   const [fetchError, setFetchError] = useState<string | null>(null)
   const [useCustomModel, setUseCustomModel] = useState(false)
   const [testing, setTesting] = useState(false)
-  const [testResult, setTestResult] = useState<{ ok: boolean; reply?: string; error?: string } | null>(null)
+  const [testResult, setTestResult] = useState<{ ok: boolean; reply?: string; error?: string; scope?: 'stored' } | null>(null)
   const [oauthStatus, setOauthStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
   const [oauthStarting, setOauthStarting] = useState(false)
 
@@ -227,21 +227,27 @@ export function ProviderPanel({ onClose }: { onClose: () => void }) {
       setTestResult({ ok: false, error: 'Model is required to test' })
       return
     }
-    if (!editingId && (!form.baseURL || !form.apiKey)) {
+    // Editing a saved provider leaves the key field blank, so there is nothing on
+    // screen to test with. The stored key is pinned to its stored host and cannot
+    // be aimed at the edited settings, so that case tests what is saved — and the
+    // result says so, rather than reporting a pass for settings the user changed.
+    const useStored = !form.apiKey && !!editingId
+    if (!useStored && (!form.baseURL || !form.apiKey)) {
       setTestResult({ ok: false, error: 'Base URL and API Key are required' })
       return
     }
     setTesting(true)
     setTestResult(null)
     try {
-      const result = await api.config.testConnection({
-        providerId: editingId ?? undefined,
-        baseURL: form.baseURL || undefined,
-        apiKey: form.apiKey || undefined,
-        model: form.defaultModel,
-        preset: form.preset,
-        customHeaders: getFormHeaders(),
-      })
+      const result = useStored
+        ? { ...await api.config.testStoredProvider(editingId, { model: form.defaultModel }), scope: 'stored' as const }
+        : await api.config.testConnection({
+          baseURL: form.baseURL,
+          apiKey: form.apiKey,
+          model: form.defaultModel,
+          preset: form.preset,
+          customHeaders: getFormHeaders(),
+        })
       setTestResult(result)
     } catch (err) {
       setTestResult({ ok: false, error: err instanceof Error ? err.message : 'Test failed' })
@@ -579,6 +585,11 @@ export function ProviderPanel({ onClose }: { onClose: () => void }) {
                   <p><span className="font-medium">Success:</span> {testResult.reply}</p>
                 ) : (
                   <p><span className="font-medium">Error:</span> {testResult.error}</p>
+                )}
+                {testResult.scope === 'stored' && (
+                  <p className="mt-1 opacity-80">
+                    Tested this provider’s saved settings. Enter the API key above to test unsaved changes.
+                  </p>
                 )}
               </div>
             )}

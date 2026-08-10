@@ -21,7 +21,11 @@ export const config = {
     apiFetch<{ models: Array<{ id: string; owned_by?: string; isFree?: boolean }>; error?: string }>(`/config/providers/${providerId}/models`),
   testModels: (data: { baseURL: string; apiKey: string; preset?: string; customHeaders?: Record<string, string> }) =>
     apiFetch<{ models: Array<{ id: string; owned_by?: string; isFree?: boolean }>; error?: string }>('/config/test-models', { method: 'POST', body: JSON.stringify(data) }),
-  testConnection: (data: { providerId?: string; baseURL?: string; apiKey?: string; model: string; preset?: string; customHeaders?: Record<string, string> }) =>
+  /** Test a saved provider with its stored key. The destination is the stored one. */
+  testStoredProvider: (providerId: string, data: { model?: string } = {}) =>
+    apiFetch<{ ok: boolean; reply?: string; error?: string }>(`/config/providers/${providerId}/test-connection`, { method: 'POST', body: JSON.stringify(data) }),
+  /** Test credentials the caller already holds. Reads nothing from storage. */
+  testConnection: (data: { baseURL: string; apiKey: string; model: string; preset?: string; customHeaders?: Record<string, string> }) =>
     apiFetch<{ ok: boolean; reply?: string; error?: string }>('/config/test-connection', { method: 'POST', body: JSON.stringify(data) }),
   startOpenRouterOAuth: () =>
     apiFetch<{ authUrl: string; error?: string }>('/config/openrouter/oauth/start', { method: 'POST' }),

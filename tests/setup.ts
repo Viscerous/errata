@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile, mkdir } from 'node:fs/promises'
+import { mkdtemp, rm, mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach } from 'vitest'
@@ -110,10 +110,15 @@ export function makeTestGlobalConfig(
 /**
  * Writes a minimal provider config to the test data directory.
  * Required because getModel() throws when no provider is configured.
+ *
+ * Goes through saveGlobalConfig rather than writing config.json directly, so the
+ * fixture lands in the same two-file shape production uses — writing the file by
+ * hand would leave every suite exercising the legacy inline-secret fallback.
  */
 export async function seedTestProvider(dataDir: string): Promise<void> {
   await mkdir(dataDir, { recursive: true })
-  const config = makeTestGlobalConfig({
+  const { saveGlobalConfig } = await import('../src/server/config/storage')
+  await saveGlobalConfig(dataDir, makeTestGlobalConfig({
     providers: [{
       id: 'test-provider',
       name: 'Test',
@@ -126,8 +131,7 @@ export async function seedTestProvider(dataDir: string): Promise<void> {
       createdAt: new Date().toISOString(),
     }],
     defaultProviderId: 'test-provider',
-  })
-  await writeFile(join(dataDir, 'config.json'), JSON.stringify(config))
+  }))
 }
 
 afterEach(async () => {

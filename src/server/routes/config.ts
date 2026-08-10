@@ -119,6 +119,65 @@ function normalizeModels(
   return models
 }
 
+interface TestableProvider {
+  baseURL: string
+  apiKey: string
+  model: string
+  preset?: string
+  customHeaders?: Record<string, string>
+}
+
+/** Send a short chat completion so the user can see whether a provider answers. */
+async function testProviderConnection(
+  { baseURL, apiKey, model, preset, customHeaders = {} }: TestableProvider,
+): Promise<{ ok: boolean; reply?: string; error?: string }> {
+  try {
+    if (isGeminiProvider({ preset, baseURL })) {
+      const base = normalizeGeminiBaseURL(baseURL)
+      const res = await fetch(
+        `${base}/models/${encodeURIComponent(model.replace(/^models\//, ''))}:generateContent`,
+        {
+          method: 'POST',
+          headers: { 'x-goog-api-key': apiKey, 'Content-Type': 'application/json', ...customHeaders },
+          body: JSON.stringify({
+            contents: [{ role: 'user', parts: [{ text: 'Hello! (keep your response short)' }] }],
+            generationConfig: { maxOutputTokens: 64 },
+          }),
+        },
+      )
+      if (!res.ok) {
+        const text = await res.text().catch(() => res.statusText)
+        return { ok: false, error: `${res.status} ${text}` }
+      }
+      const json = await res.json() as {
+        candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>
+      }
+      const reply = json.candidates?.[0]?.content?.parts?.map(part => part.text ?? '').join('') ?? ''
+      return { ok: true, reply }
+    }
+
+    const base = baseURL.replace(/\/+$/, '')
+    const url = /\/v\d+$/.test(base) ? `${base}/chat/completions` : `${base}/v1/chat/completions`
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json', ...customHeaders },
+      body: JSON.stringify({
+        model,
+        messages: [{ role: 'user', content: 'Hello! (keep your response short)' }],
+        max_tokens: 64,
+      }),
+    })
+    if (!res.ok) {
+      const text = await res.text().catch(() => res.statusText)
+      return { ok: false, error: `${res.status} ${text}` }
+    }
+    const json = await res.json() as { choices?: Array<{ message?: { content?: string } }> }
+    return { ok: true, reply: json.choices?.[0]?.message?.content ?? '' }
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'Connection failed' }
+  }
+}
+
 export function configRoutes(dataDir: string) {
   return new Elysia({ detail: { tags: ['Config'] } })
     .get('/config/providers', async () => {
@@ -238,90 +297,33 @@ export function configRoutes(dataDir: string) {
       }),
     })
 
-    // Test a provider by sending a short chat completion
-    // Can use either providerId (reads stored credentials) or inline baseURL+apiKey
-    .post('/config/test-connection', async ({ body }) => {
-      let baseURL = body.baseURL
-      let apiKey = body.apiKey
-      let customHeaders = body.customHeaders ?? {}
-      let preset = body.preset
-
-      // If providerId is given, use stored credentials as fallback
-      if (body.providerId) {
-        const stored = await getProvider(dataDir, body.providerId)
-        if (stored) {
-          if (!baseURL) baseURL = stored.baseURL
-          if (!apiKey) apiKey = stored.apiKey
-          if (Object.keys(customHeaders).length === 0) customHeaders = stored.customHeaders ?? {}
-          if (!preset) preset = stored.preset
-        }
+    // Testing a saved provider and testing unsaved credentials are separate
+    // endpoints on purpose. A single one taking both a providerId and a baseURL
+    // could be asked to send a stored key to a host of the caller's choosing;
+    // split, the destination always comes from wherever the key came from.
+    .post('/config/providers/:providerId/test-connection', async ({ params, body, set }) => {
+      const stored = await getProvider(dataDir, params.providerId)
+      if (!stored) {
+        set.status = 404
+        return { ok: false, error: 'Provider not found' }
       }
-
-      if (!baseURL || !apiKey || !body.model) {
-        return { ok: false, error: 'Base URL, API key, and model are required' }
-      }
-
-      try {
-        if (isGeminiProvider({ preset, baseURL })) {
-          const base = normalizeGeminiBaseURL(baseURL)
-          const model = body.model.replace(/^models\//, '')
-          const res = await fetch(`${base}/models/${encodeURIComponent(model)}:generateContent`, {
-            method: 'POST',
-            headers: {
-              'x-goog-api-key': apiKey,
-              'Content-Type': 'application/json',
-              ...customHeaders,
-            },
-            body: JSON.stringify({
-              contents: [{ role: 'user', parts: [{ text: 'Hello! (keep your response short)' }] }],
-              generationConfig: { maxOutputTokens: 64 },
-            }),
-          })
-          if (!res.ok) {
-            const text = await res.text().catch(() => res.statusText)
-            return { ok: false, error: `${res.status} ${text}` }
-          }
-          const json = await res.json() as {
-            candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>
-          }
-          const reply = json.candidates?.[0]?.content?.parts
-            ?.map(part => part.text ?? '')
-            .join('') ?? ''
-          return { ok: true, reply }
-        }
-
-        const base = baseURL.replace(/\/+$/, '')
-
-        const url = /\/v\d+$/.test(base) ? `${base}/chat/completions` : `${base}/v1/chat/completions`
-        const res = await fetch(url, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${apiKey}`,
-            'Content-Type': 'application/json',
-            ...customHeaders,
-          },
-          body: JSON.stringify({
-            model: body.model,
-            messages: [{ role: 'user', content: 'Hello! (keep your response short)' }],
-            max_tokens: 64,
-          }),
-        })
-        if (!res.ok) {
-          const text = await res.text().catch(() => res.statusText)
-          return { ok: false, error: `${res.status} ${text}` }
-        }
-        const json = await res.json() as { choices?: Array<{ message?: { content?: string } }> }
-        const reply = json.choices?.[0]?.message?.content ?? ''
-        return { ok: true, reply }
-      } catch (err) {
-        return { ok: false, error: err instanceof Error ? err.message : 'Connection failed' }
-      }
+      return testProviderConnection({
+        baseURL: stored.baseURL,
+        apiKey: stored.apiKey,
+        model: body.model || stored.defaultModel,
+        preset: stored.preset,
+        customHeaders: stored.customHeaders,
+      })
     }, {
-      detail: { summary: 'Test provider connection' },
+      detail: { summary: 'Test a saved provider using its stored credentials' },
+      body: t.Object({ model: t.Optional(t.String()) }),
+    })
+
+    .post('/config/test-connection', async ({ body }) => testProviderConnection(body), {
+      detail: { summary: 'Test unsaved credentials' },
       body: t.Object({
-        providerId: t.Optional(t.String()),
-        baseURL: t.Optional(t.String()),
-        apiKey: t.Optional(t.String()),
+        baseURL: t.String(),
+        apiKey: t.String(),
         model: t.String(),
         preset: t.Optional(t.String()),
         customHeaders: t.Optional(t.Record(t.String(), t.String())),

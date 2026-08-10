@@ -2,9 +2,14 @@ import { writeFile, rename } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { withKeyLock } from './async-lock'
 
-export async function writeJsonAtomic(path: string, value: unknown): Promise<void> {
+/**
+ * `mode` sets POSIX permission bits on the temp file before the rename, so the
+ * contents are never briefly world-readable. Windows honours only the read-only
+ * bit, so there the file inherits the directory ACL and this does nothing.
+ */
+export async function writeJsonAtomic(path: string, value: unknown, mode?: number): Promise<void> {
   const tmpPath = `${path}.tmp-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
-  await writeFile(tmpPath, JSON.stringify(value, null, 2), 'utf-8')
+  await writeFile(tmpPath, JSON.stringify(value, null, 2), { encoding: 'utf-8', mode })
   await rename(tmpPath, path)
 }
 
