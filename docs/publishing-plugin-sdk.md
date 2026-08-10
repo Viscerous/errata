@@ -1,4 +1,4 @@
-# Publishing `@tealios/errata-plugin-sdk`
+# Publishing `@viscerous/errata-plugin-sdk`
 
 This project includes a local SDK package at `packages/errata-plugin-sdk`.
 
@@ -47,7 +47,7 @@ Cause:
 
 Fix:
 
-- create a new npm automation/granular token that can publish `@tealios/errata-plugin-sdk`
+- create a new npm automation/granular token that can publish `@viscerous/errata-plugin-sdk`
 - ensure it is valid for your org's 2FA policy
 - retry publish and update GitHub `NPM_TOKEN`
 

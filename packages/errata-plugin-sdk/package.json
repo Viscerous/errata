@@ -1,5 +1,5 @@
 {
-  "name": "@tealios/errata-plugin-sdk",
+  "name": "@viscerous/errata-plugin-sdk",
   "version": "0.2.0",
   "type": "module",
   "main": "./index.js",

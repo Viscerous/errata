@@ -116,7 +116,7 @@ relevance signals, and the current no-hard-cap testing stance.
 
 ## Block Manipulation
 
-Six utility functions are exported from `@tealios/errata-plugin-sdk`. All are pure and return new arrays:
+Six utility functions are exported from `@viscerous/errata-plugin-sdk`. All are pure and return new arrays:
 
 ```ts
 import {
@@ -126,7 +126,7 @@ import {
   insertBlockBefore,
   insertBlockAfter,
   reorderBlock,
-} from '@tealios/errata-plugin-sdk'
+} from '@viscerous/errata-plugin-sdk'
 
 findBlock(blocks, 'instructions')                        // ContextBlock | undefined
 replaceBlockContent(blocks, 'instructions', 'new text')  // ContextBlock[]
@@ -147,8 +147,8 @@ The hook receives a `ContextBlock[]` and must return a (possibly modified) `Cont
 ### Replace block content
 
 ```ts
-import { definePlugin, replaceBlockContent } from '@tealios/errata-plugin-sdk'
-import type { ContextBlock } from '@tealios/errata-plugin-sdk'
+import { definePlugin, replaceBlockContent } from '@viscerous/errata-plugin-sdk'
+import type { ContextBlock } from '@viscerous/errata-plugin-sdk'
 
 export default definePlugin({
   manifest: {
@@ -169,7 +169,7 @@ export default definePlugin({
 ### Remove a block and inject a new one
 
 ```ts
-import { removeBlock, insertBlockAfter } from '@tealios/errata-plugin-sdk'
+import { removeBlock, insertBlockAfter } from '@viscerous/errata-plugin-sdk'
 
 // in hooks:
 hooks: {

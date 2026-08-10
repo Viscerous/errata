@@ -36,11 +36,11 @@ my-plugin/
 Install the SDK in your plugin project:
 
 ```bash
-bun add @tealios/errata-plugin-sdk
+bun add @viscerous/errata-plugin-sdk
 ```
 
 ```ts
-import { definePlugin, type WritingPlugin } from '@tealios/errata-plugin-sdk'
+import { definePlugin, type WritingPlugin } from '@viscerous/errata-plugin-sdk'
 
 const plugin: WritingPlugin = definePlugin({
   manifest: {
@@ -59,7 +59,7 @@ const plugin: WritingPlugin = definePlugin({
 export default plugin
 ```
 
-### SDK Layer (`@tealios/errata-plugin-sdk`)
+### SDK Layer (`@viscerous/errata-plugin-sdk`)
 
 The SDK is the stable contract for plugin authors:
 
@@ -236,7 +236,7 @@ bun run dev
 
 ### IDE Import Guidance
 
-- Use SDK imports for plugin contracts (`@tealios/errata-plugin-sdk`).
+- Use SDK imports for plugin contracts (`@viscerous/errata-plugin-sdk`).
 - Only import Errata internals (`../../src/server/...`) for optional advanced recipes.
 - If you need those internal imports with full IDE resolution, develop the plugin inside this monorepo (or symlink into it) while iterating.
 

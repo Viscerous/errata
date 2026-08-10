@@ -1,7 +1,7 @@
 import { tool } from 'ai'
 import { z } from 'zod/v4'
 import { t } from 'elysia'
-import type { WritingPlugin } from '@tealios/errata-plugin-sdk'
+import type { WritingPlugin } from '@viscerous/errata-plugin-sdk'
 
 const NAMES: Record<string, Record<string, string[]>> = {
   fantasy: {

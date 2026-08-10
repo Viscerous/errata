@@ -1,5 +1,5 @@
 import { t } from 'elysia'
-import { definePlugin } from '@tealios/errata-plugin-sdk'
+import { definePlugin } from '@viscerous/errata-plugin-sdk'
 
 const plugin = definePlugin({
   manifest: {

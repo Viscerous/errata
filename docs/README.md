@@ -27,7 +27,7 @@
 - `docs/component-ids.md`
   - Frontend `data-component-id` contract for extensibility and automation.
 - `docs/publishing-plugin-sdk.md`
-  - How to publish `@tealios/errata-plugin-sdk` manually and via GitHub Actions.
+  - How to publish `@viscerous/errata-plugin-sdk` manually and via GitHub Actions.
 - `docs/instruction-registry.md`
   - Instruction registry: centralized built-in prompt defaults, registered keys, and the per-agent block customization path.
 - `docs/generation-pipeline.md`
@@ -44,7 +44,7 @@ Related:
 - `plugins/templates/README.md`
   - Plugin recipe template catalog.
 - `packages/errata-plugin-sdk/package.json`
-  - Local SDK package: `@tealios/errata-plugin-sdk`.
+  - Local SDK package: `@viscerous/errata-plugin-sdk`.
 
 Automation:
 

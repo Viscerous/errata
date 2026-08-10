@@ -1,4 +1,4 @@
-import type { WritingPlugin } from '@tealios/errata-plugin-sdk'
+import type { WritingPlugin } from '@viscerous/errata-plugin-sdk'
 
 const plugin: WritingPlugin = {
   manifest: {

@@ -37,6 +37,6 @@ jobs:
             exit 1
           fi
 
-      - name: Publish @tealios/errata-plugin-sdk
+      - name: Publish @viscerous/errata-plugin-sdk
         working-directory: packages/errata-plugin-sdk
         run: npm publish --provenance --access public

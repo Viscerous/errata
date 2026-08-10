@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
-import { definePlugin } from '@tealios/errata-plugin-sdk'
+import { definePlugin } from '@viscerous/errata-plugin-sdk'
 
 function logPath(dataDir, storyId) {
   return `${dataDir}/stories/${storyId}/hooks-plugin-log.json`

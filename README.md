@@ -118,7 +118,7 @@ src/                    App code (routes, server, components, lib)
   components/           React UI (prose, fragments, blocks, generation, sidebar)
   lib/api/              Typed frontend API client
 plugins/                Bundled plugins (diceroll, keybinds, names) + templates
-packages/               Plugin SDK (@tealios/errata-plugin-sdk)
+packages/               Plugin SDK (@viscerous/errata-plugin-sdk)
 tests/                  Vitest suites
 docs/                   Documentation
 ```
@@ -134,7 +134,7 @@ Plugins can register fragment types, LLM tools, API routes, and pipeline hooks. 
 - [Plugin authoring guide](docs/third-party-plugins.md)
 - [Runtime plugins + binary packaging](docs/runtime-plugins-and-binary-packaging.md)
 - [Plugin templates](plugins/templates/README.md)
-- SDK: `@tealios/errata-plugin-sdk`
+- SDK: `@viscerous/errata-plugin-sdk`
 
 ## Documentation
 
@@ -149,4 +149,12 @@ Plugins can register fragment types, LLM tools, API routes, and pipeline hooks. 
 
 ---
 
-Built by [nokusukun](https://github.com/nokusukun)
+## License and lineage
+
+Licensed under [GPL-2.0](LICENSE).
+
+Errata originated as a fork of [tealios/errata](https://github.com/tealios/errata), created by
+[nokusukun](https://github.com/nokusukun). This tree has since diverged substantially and is
+maintained independently — please raise issues here rather than upstream.
+
+Copyright © Tealios and Errata contributors.

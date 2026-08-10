@@ -1,7 +1,7 @@
 import { tool, generateText } from 'ai'
 import { z } from 'zod/v4'
 import { t } from 'elysia'
-import { definePlugin } from '@tealios/errata-plugin-sdk'
+import { definePlugin } from '@viscerous/errata-plugin-sdk'
 import { getModel } from '../../src/server/llm/client'
 
 const plugin = definePlugin({

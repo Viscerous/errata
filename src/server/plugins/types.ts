@@ -8,4 +8,4 @@ export type {
   PluginManifest,
   StoryMeta,
   WritingPlugin,
-} from '@tealios/errata-plugin-sdk'
+} from '@viscerous/errata-plugin-sdk'

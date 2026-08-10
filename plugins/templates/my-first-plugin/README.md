@@ -21,7 +21,7 @@ bun run new:plugin my-plugin
 If you publish this plugin as a standalone repo, add:
 
 ```bash
-bun add @tealios/errata-plugin-sdk
+bun add @viscerous/errata-plugin-sdk
 ```
 
 ## What This Template Includes

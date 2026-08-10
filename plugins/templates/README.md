@@ -45,4 +45,4 @@ Then update:
 
 All templates use the SDK package for plugin contracts:
 
-- `@tealios/errata-plugin-sdk`
+- `@viscerous/errata-plugin-sdk`
