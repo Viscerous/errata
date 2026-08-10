@@ -1,17 +1,53 @@
 /**
- * What the sharing proxy refuses to forward.
+ * What the sharing proxy forwards.
  *
- * The rule is that credential administration is local-only: once sharing is on,
- * everything the app exposes is reachable from the LAN or a tunnel behind one
- * password, and the endpoints that store, change, or spend credentials should
- * not be. Reads still pass — they are masked at the route layer, and the
- * settings UI needs them to render.
+ * Default-deny under /api: a route is unreachable over the proxy until it is
+ * listed here. The previous deny-list had the opposite failure mode — a new
+ * credential-bearing route was exposed the moment someone added it, and the
+ * list only caught what its author had thought of.
+ *
+ * Paths outside /api are the app shell and its assets, which carry nothing to
+ * protect and are served to anyone who already got past the proxy's password.
  */
+
+type Access =
+  /** Reachable in full. */
+  | 'shared'
+  /** GET/HEAD only — the settings panels need to render, not to be operable. */
+  | 'read-only'
+  /** Refused whatever the method. */
+  | 'local-only'
+
+/**
+ * First match wins, so a narrower path must precede the area containing it.
+ * Anything under /api that matches nothing is refused.
+ */
+const RULES: Array<readonly [prefix: string, access: Access]> = [
+  // Exchanges a username + password for a hub token.
+  ['/api/erratanet/login', 'local-only'],
+  // Writing this moves the hub token; reading it returns a redacted view.
+  ['/api/erratanet/config', 'read-only'],
+  // Provider CRUD, test-connection, test-models, the OpenRouter OAuth exchange.
+  ['/api/config', 'read-only'],
+  // Rotating the very password that gates this proxy, or tearing down the auth.
+  ['/api/sharing', 'read-only'],
+
+  ['/api/health', 'shared'],
+  ['/api/plugins', 'shared'],
+  ['/api/stories', 'shared'],
+  ['/api/agent-blocks', 'shared'],
+  ['/api/model-roles', 'shared'],
+  // Browsing and installing packs; the two credential paths are ruled on above.
+  ['/api/erratanet', 'shared'],
+]
+
+const LOCAL_ONLY = 'This can only be changed from the computer running Errata.'
+const NOT_SHARED = 'This part of Errata is not available over a shared connection.'
 
 /**
  * Dot segments are resolved twice: `URL` handles `..` but leaves `%2e%2e`
  * encoded, and the upstream decodes before routing — so a single pass would let
- * `/api/x/%2e%2e/config/test-connection` reach a blocked route unblocked.
+ * `/api/x/%2e%2e/config/test-connection` reach a ruled-on route unruled.
  */
 function normalizePathname(rawUrl: string): string {
   let pathname = '/'
@@ -33,26 +69,20 @@ function isUnder(path: string, prefix: string): boolean {
   return path === prefix || path.startsWith(`${prefix}/`)
 }
 
-const LOCAL_ONLY = 'This can only be changed from the computer running Errata.'
-
 /**
  * The reason this request is refused over the proxy, or null to forward it.
  * A reason rather than a boolean keeps the 403 body honest about why a remote
- * settings page stopped working.
+ * page stopped working — including when the cause is a route nobody listed.
  */
 export function proxyBlockReason(method: string, rawUrl: string | undefined): string | null {
   const path = normalizePathname(rawUrl ?? '/')
+  if (!isUnder(path, '/api')) return null
 
-  // Provider CRUD, the default-provider patch, test-connection, test-models,
-  // and the OpenRouter OAuth exchange.
-  if (isUnder(path, '/api/config') && !isRead(method)) return LOCAL_ONLY
+  const rule = RULES.find(([prefix]) => isUnder(path, prefix))
+  if (!rule) return NOT_SHARED
 
-  // Rotating the proxy's own password, or disabling the auth that gates it.
-  if (isUnder(path, '/api/sharing') && !isRead(method)) return LOCAL_ONLY
-
-  // Writing the hub token, or exchanging a password for a fresh one.
-  if (isUnder(path, '/api/erratanet/config') && !isRead(method)) return LOCAL_ONLY
-  if (isUnder(path, '/api/erratanet/login')) return LOCAL_ONLY
-
-  return null
+  const [, access] = rule
+  if (access === 'shared') return null
+  if (access === 'read-only' && isRead(method)) return null
+  return LOCAL_ONLY
 }
