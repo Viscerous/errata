@@ -1,5 +1,5 @@
 import { Elysia, t } from 'elysia'
-import { getErratanetConfig, updateErratanetConfig } from '../config/storage'
+import { getErratanetConfig, updateErratanetConfig, redactErratanetConfig } from '../config/storage'
 import {
   getAccount as hubGetAccount,
   search as hubSearch,
@@ -111,21 +111,10 @@ interface InstalledPack {
   version: string
 }
 
-/** Redacted view of the erratanet config. The token is never returned raw. */
-function redactConfig(config: ErratanetConfig) {
-  return {
-    hubUrl: config.hubUrl,
-    token: config.token ? '••••' : '',
-    handle: config.handle,
-    enabled: config.enabled,
-    introSeen: config.introSeen,
-  }
-}
-
 export function erratanetRoutes(dataDir: string) {
   return new Elysia({ detail: { tags: ['Erratanet'] } })
     // Current hub connection config, with the token redacted.
-    .get('/erratanet/config', async () => redactConfig(await getErratanetConfig(dataDir)), {
+    .get('/erratanet/config', async () => redactErratanetConfig(await getErratanetConfig(dataDir)), {
       detail: { summary: 'Current erratanet hub config (token redacted)' },
     })
 
@@ -143,7 +132,7 @@ export function erratanetRoutes(dataDir: string) {
       if (body.enabled !== undefined) patch.enabled = body.enabled
       if (body.introSeen !== undefined) patch.introSeen = body.introSeen
       const next = await updateErratanetConfig(dataDir, patch)
-      return redactConfig(next)
+      return redactErratanetConfig(next)
     }, {
       body: t.Object({
         hubUrl: t.Optional(t.String()),

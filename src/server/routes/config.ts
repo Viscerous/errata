@@ -7,9 +7,10 @@ import {
   duplicateProvider as duplicateProviderConfig,
   mutateGlobalConfig,
   getProvider,
-  maskApiKey,
+  maskProviders,
 } from '../config/storage'
 import { ProviderConfigSchema } from '../config/schema'
+import { isGeminiProvider, normalizeGeminiBaseURL } from '../config/provider-urls'
 import {
   createOpenRouterOAuthAuthorizationUrl,
   ensureOpenRouterOAuthCallbackBridge,
@@ -19,25 +20,11 @@ import {
 const OPENROUTER_FREE_MODEL_ID = 'openrouter/free'
 
 function maskConfigProviders<T extends { providers: Array<{ apiKey: string }> }>(config: T): T {
-  return {
-    ...config,
-    providers: config.providers.map((p) => ({
-      ...p,
-      apiKey: maskApiKey(p.apiKey),
-    })),
-  }
+  return { ...config, providers: maskProviders(config.providers) }
 }
 
 function isOpenRouterProvider(provider: { preset?: string; baseURL: string }) {
   return provider.preset === 'openrouter' || provider.baseURL.includes('openrouter.ai')
-}
-
-function isGeminiProvider(provider: { preset?: string; baseURL: string }) {
-  return provider.preset === 'gemini' || provider.baseURL.includes('generativelanguage.googleapis.com')
-}
-
-function normalizeGeminiBaseURL(baseURL: string) {
-  return baseURL.replace(/\/+$/, '').replace(/\/openai$/, '')
 }
 
 async function fetchProviderModels(provider: {

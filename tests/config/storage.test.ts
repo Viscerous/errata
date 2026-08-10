@@ -5,7 +5,9 @@ import {
   addProvider,
   deleteProvider,
   getGlobalConfig,
+  maskApiKey,
   migrateLegacyPlaintextSecrets,
+  redactErratanetConfig,
   updateErratanetConfig,
   updateSharingConfig,
 } from '@/server/config/storage'
@@ -123,6 +125,34 @@ describe('global configuration storage', () => {
 
       await expect(getGlobalConfig(dataDir)).rejects.toThrow('original file was left untouched')
       await expect(readFile(path, 'utf-8')).resolves.toBe('{broken')
+    })
+  })
+
+  describe('redaction', () => {
+    it('passes every non-secret field through, so a new one cannot silently vanish', () => {
+      const config = {
+        hubUrl: 'https://hub.example',
+        token: 'hub-token',
+        handle: 'me',
+        enabled: true,
+        introSeen: true,
+      }
+
+      const redacted = redactErratanetConfig(config)
+
+      // Rebuilt field-by-field, this is where a newly added field would be dropped.
+      expect(Object.keys(redacted).sort()).toEqual(Object.keys(config).sort())
+      expect(redacted).toMatchObject({ hubUrl: 'https://hub.example', handle: 'me', enabled: true, introSeen: true })
+      expect(redacted.token).not.toBe('hub-token')
+    })
+
+    it('reports an absent token as absent rather than masking nothing', () => {
+      expect(redactErratanetConfig({ hubUrl: '', token: '', enabled: false, introSeen: false }).token).toBe('')
+    })
+
+    it('leaves enough of an API key to recognise it', () => {
+      expect(maskApiKey('sk-abcdefgh1234')).toBe('••••1234')
+      expect(maskApiKey('abc')).toBe('••••')
     })
   })
 

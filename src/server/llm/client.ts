@@ -7,6 +7,7 @@ import { ensureCoreAgentsRegistered } from '../agents/register-core'
 import type { LanguageModel, ToolLoopAgentSettings } from 'ai'
 import { createLogger } from '../logging'
 import type { StoryMeta } from '../fragments/schema'
+import { isGeminiProvider, normalizeGeminiBaseURL } from '../config/provider-urls'
 
 // Normalize old camelCase modelOverrides keys to dot-separated agent names
 const OVERRIDE_KEY_ALIASES: Record<string, string> = {
@@ -46,14 +47,6 @@ const LEGACY_FIELD_MAP: Record<string, { providerId: string; modelId: string }> 
 // Provider cache: keyed by `id:baseURL:apiKey`
 const providerCache = new Map<string, ReturnType<typeof createOpenAICompatible>>()
 const googleProviderCache = new Map<string, ReturnType<typeof createGoogleGenerativeAI>>()
-
-function isGeminiProvider(provider: { preset?: string; baseURL: string }) {
-  return provider.preset === 'gemini' || provider.baseURL.includes('generativelanguage.googleapis.com')
-}
-
-function normalizeGeminiBaseURL(baseURL: string) {
-  return baseURL.replace(/\/+$/, '').replace(/\/openai$/, '')
-}
 
 function getCachedProvider(id: string, baseURL: string, apiKey: string, name: string, customHeaders?: Record<string, string>) {
   const headerStr = customHeaders ? JSON.stringify(customHeaders) : ''

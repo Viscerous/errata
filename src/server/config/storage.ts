@@ -10,8 +10,7 @@ import {
   type SharingConfig,
   type ErratanetConfig,
 } from './schema'
-import { writeJsonAtomic } from '../fs-utils'
-import { withStorageLock } from '../fs-utils'
+import { readJsonFile, writeJsonAtomic, withStorageLock } from '../fs-utils'
 
 function configPath(dataDir: string): string {
   return join(dataDir, 'config.json')
@@ -23,15 +22,6 @@ function secretsPath(dataDir: string): string {
 
 /** Owner-only where the OS enforces it; on Windows the separate file is the protection, not the bits. */
 const SECRETS_FILE_MODE = 0o600
-
-async function readJsonFile(path: string): Promise<unknown | undefined> {
-  try {
-    return JSON.parse(await fs.readFile(path, 'utf-8'))
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
-    throw new Error(`Unable to read configuration at ${path}; the original file was left untouched`, { cause: error })
-  }
-}
 
 async function readSecretsFile(dataDir: string): Promise<SecretsFile> {
   const raw = await readJsonFile(secretsPath(dataDir))
@@ -206,22 +196,37 @@ export async function duplicateProvider(dataDir: string, providerId: string): Pr
   })
 }
 
+/** Stand-in for a secret the client must never receive. */
+export const MASK = '••••'
+
 export function maskApiKey(key: string): string {
-  if (key.length <= 4) return '••••'
-  return '••••' + key.slice(-4)
+  if (key.length <= 4) return MASK
+  return MASK + key.slice(-4)
+}
+
+/** Present-or-not, without revealing the value. */
+function maskPresence(secret: string): string {
+  return secret ? MASK : ''
+}
+
+export function maskProviders<T extends { apiKey: string }>(providers: T[]): T[] {
+  return providers.map((p) => ({ ...p, apiKey: maskApiKey(p.apiKey) }))
+}
+
+/**
+ * Spread-and-override rather than rebuilt field by field, so a field added to
+ * the erratanet schema reaches clients instead of silently vanishing here.
+ */
+export function redactErratanetConfig(erratanet: ErratanetConfig): ErratanetConfig {
+  return { ...erratanet, token: maskPresence(erratanet.token) }
 }
 
 export async function getGlobalConfigSafe(dataDir: string): Promise<GlobalConfig> {
   const config = await getGlobalConfig(dataDir)
   return {
     ...config,
-    providers: config.providers.map((p) => ({
-      ...p,
-      apiKey: maskApiKey(p.apiKey),
-    })),
-    // Never expose the password hash to clients.
-    sharing: { ...config.sharing, passwordHash: config.sharing.passwordHash ? '••••' : '' },
-    // Never expose the hub token to clients.
-    erratanet: { ...config.erratanet, token: config.erratanet.token ? '••••' : '' },
+    providers: maskProviders(config.providers),
+    sharing: { ...config.sharing, passwordHash: maskPresence(config.sharing.passwordHash) },
+    erratanet: redactErratanetConfig(config.erratanet),
   }
 }

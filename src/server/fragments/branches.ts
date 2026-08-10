@@ -4,7 +4,7 @@ import { existsSync } from 'node:fs'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import type { BranchesIndex, BranchMeta, StoredProseChain } from './schema'
 import { generateBranchId } from '@/lib/fragment-ids'
-import { writeJsonAtomic, withStorageLock } from '../fs-utils'
+import { readJsonFile, writeJsonAtomic, withStorageLock } from '../fs-utils'
 
 // --- Branch scope (AsyncLocalStorage) ---
 
@@ -59,9 +59,7 @@ function branchDir(storyDir: string, branchId: string): string {
 // --- JSON helpers ---
 
 async function readJson<T>(path: string): Promise<T | null> {
-  if (!existsSync(path)) return null
-  const raw = await readFile(path, 'utf-8')
-  return JSON.parse(raw) as T
+  return (await readJsonFile<T>(path)) ?? null
 }
 
 async function writeJson(path: string, data: unknown): Promise<void> {

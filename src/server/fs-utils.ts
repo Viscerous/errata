@@ -1,6 +1,30 @@
-import { writeFile, rename } from 'node:fs/promises'
+import { writeFile, rename, readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { withKeyLock } from './async-lock'
+
+/**
+ * Read and parse a JSON file, treating "not there" as a value rather than an
+ * error. A file that exists but does not parse throws: it is the shape of a
+ * half-written or corrupted file, and reporting it as absent invites the caller
+ * to overwrite the only copy.
+ *
+ * Missing-ness is decided by the failed read, not a prior `existsSync` — the
+ * gap between the two checks is long enough for the file to go away.
+ */
+export async function readJsonFile<T = unknown>(path: string): Promise<T | undefined> {
+  let raw: string
+  try {
+    raw = await readFile(path, 'utf-8')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
+    throw new Error(`Unable to read ${path}; the original file was left untouched`, { cause: error })
+  }
+  try {
+    return JSON.parse(raw) as T
+  } catch (error) {
+    throw new Error(`Unable to read ${path}; the original file was left untouched`, { cause: error })
+  }
+}
 
 /**
  * `mode` sets POSIX permission bits on the temp file before the rename, so the

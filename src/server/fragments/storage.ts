@@ -1,10 +1,10 @@
-import { mkdir, readdir, readFile, rm } from 'node:fs/promises'
+import { mkdir, readdir, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { existsSync } from 'node:fs'
 import { StoryMetaSchema, type Fragment, type FragmentVersion, type StoryMeta } from './schema'
 import { getContentRoot, initBranches } from './branches'
 import { createLogger } from '../logging'
-import { writeJsonAtomic, withStorageLock } from '../fs-utils'
+import { readJsonFile, writeJsonAtomic, withStorageLock } from '../fs-utils'
 
 const requestLogger = createLogger('fragment-storage')
 
@@ -35,9 +35,7 @@ async function fragmentPath(dataDir: string, storyId: string, fragmentId: string
 // --- JSON read/write helpers ---
 
 async function readJson<T>(path: string): Promise<T | null> {
-  if (!existsSync(path)) return null
-  const raw = await readFile(path, 'utf-8')
-  return JSON.parse(raw) as T
+  return (await readJsonFile<T>(path)) ?? null
 }
 
 async function writeJson(path: string, data: unknown): Promise<void> {
