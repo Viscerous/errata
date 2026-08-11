@@ -8,6 +8,7 @@ import { instructionRegistry } from '../instructions'
 import { buildContextState } from './context-builder'
 import { type AgentBlockContext, baseBlockContext } from '../agents/agent-block-context'
 import { renderContinuity } from '../librarian/continuity-view'
+import { suggestionDirectionSchema } from '../directions/schema'
 import type { Fragment, StoryMeta } from '../fragments/schema'
 import type { TokenUsage, ToolCallLog } from './generation-logs'
 import { resolveAndReportServedUsage } from './usage-normalizer'
@@ -302,11 +303,10 @@ export async function runPrewriter(args: RunPrewriterArgs): Promise<PrewriterRes
   const directionsTool = tool({
     description: 'Suggest 3 pacing-aware directions for the next passage.',
     inputSchema: z.object({
-      directions: z.array(z.object({
+      // The same direction the librarian proposes, plus the pacing choice that
+      // is this tool's own: one name should not mean two shapes.
+      directions: z.array(suggestionDirectionSchema.extend({
         pacing: z.enum(['linger', 'continue', 'end']),
-        title: z.string().describe('Short evocative title (3-6 words)'),
-        description: z.string().describe('1-2 sentences previewing what happens'),
-        instruction: z.string().describe('Concrete writing prompt for the writer'),
       })).length(3),
     }),
     execute: async ({ directions }) => {

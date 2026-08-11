@@ -160,6 +160,15 @@ function sentenceJoin(values: string[]): string {
 /** Events kept per passage, across however many reports build the timeline. */
 const MAX_TIMELINE_EVENTS = 12
 
+/**
+ * Analyze is given the prose chain and the rolling summary in its context, so
+ * these two would offer it a second copy of what it is already looking at.
+ * Neither was called once across 25 recorded runs, and an unused tool is still
+ * schema the model reads past. listFragmentTypes stays: proposeNewRecords takes
+ * a free-string `type` and this is where the valid ones are named.
+ */
+const READ_TOOLS_ALREADY_IN_ANALYZE_CONTEXT = ['readProseChain', 'readStorySummary']
+
 /** Last resort when a report carried events but no summary prose. */
 function summaryFromEvents(events: string[]): string {
   return events.length > 0 ? sentenceJoin(events).trim() : ''
@@ -937,9 +946,10 @@ export const librarianNewRecordsInputSchema = z.object({
  * the gate nothing it went on to use.
  */
 export const librarianFinishAnalysisInputSchema = z.object({
-  completed: z.array(z.enum(['reportAnalysis', 'proposeRecordCorrections', 'proposeNewRecords', 'proposeDirections']))
-    .default([])
-    .describe('Tool names whose last call succeeded. Do not list a failed proposal call as completed.'),
+  // No `completed` list. The gate already knows which calls succeeded — it
+  // watched them — so asking the model to restate it added no information the
+  // gate went on to use and one more way to be wrong. Only what the engine
+  // cannot observe is worth a field, and that is the reason for an abandonment.
   skipped: z.array(z.union([
     skippedToolNameSchema,
     z.object({
@@ -1425,10 +1435,12 @@ export function createAnalysisTools(
   if (opts && opts.includeReadTools !== false) {
     // Sharing the ledger is what makes a read the way to earn a record's
     // numbers, rather than a second presentation that forgets to grant them.
-    Object.assign(tools, createFragmentTools(opts.dataDir, opts.storyId, {
+    const readTools = createFragmentTools(opts.dataDir, opts.storyId, {
       readOnly: true,
       numberedFragmentIds,
-    }))
+    })
+    for (const name of READ_TOOLS_ALREADY_IN_ANALYZE_CONTEXT) delete readTools[name]
+    Object.assign(tools, readTools)
   }
 
   if (!opts?.disableSuggestions && opts?.proseFragmentId) {
@@ -1800,11 +1812,7 @@ export function createAnalysisTools(
     tools.proposeDirections = tool({
       description: 'Required when available: suggest 3-5 possible directions the story could go next, informed by the records reportAnalysis returned.',
       inputSchema: z.object({
-        directions: z.array(suggestionDirectionSchema.extend({
-          title: z.string().trim().min(1).describe('Short title for the direction (3-6 words)'),
-          description: z.string().trim().min(1).describe('One sentence describing what would happen'),
-          instruction: z.string().trim().min(1).describe('Instruction for the writer agent to follow this direction'),
-        })).min(3).max(5),
+        directions: z.array(suggestionDirectionSchema).min(3).max(5),
       }),
       execute: async ({ directions }) => {
         collector.directions = directions
@@ -1818,12 +1826,11 @@ export function createAnalysisTools(
     tools.finishAnalysis = tool({
       description: 'Signal that the online analysis pass has completed all useful report, proposal, and direction tool calls. This does not record story data; it only ends the tool loop.',
       inputSchema: librarianFinishAnalysisInputSchema,
-      execute: async ({ completed = [], skipped = [] }) => {
+      execute: async ({ skipped = [] }) => {
         const abandoned = skipped.map((entry) => (
           typeof entry === 'string' ? { toolName: entry } : entry
         ))
         const skippedNames = new Set<string>(abandoned.map((entry) => entry.toolName))
-        const falseCompleted = completed.filter((toolName) => !successfulToolNames.has(toolName))
         const missingRequired: string[] = []
         if (tools.reportAnalysis && !successfulToolNames.has('reportAnalysis')) missingRequired.push('reportAnalysis')
         // Record maintenance is optional, so a lane that was never called needs
@@ -1847,16 +1854,15 @@ export function createAnalysisTools(
           missingRequired.push('proposeDirections')
         }
 
-        if (falseCompleted.length > 0 || missingRequired.length > 0 || unexplained.length > 0) {
+        if (missingRequired.length > 0 || unexplained.length > 0) {
           return {
             ok: false,
-            falseCompleted,
             missingRequired,
             ...(unexplained.length > 0 ? { unexplained } : {}),
             note: 'Finish only after required tools succeed. A proposal call that failed or was only partly queued must be retried, or listed under skipped as {toolName, reason} saying why the rest was abandoned; a lane you never needed requires nothing.',
           }
         }
-        return { ok: true, completed, skipped: abandoned }
+        return { ok: true, completed: [...successfulToolNames], skipped: abandoned }
       },
     })
   }

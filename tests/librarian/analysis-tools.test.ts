@@ -99,6 +99,13 @@ describe('analysis-tools', () => {
     expect(Object.keys(onlineTools)).toContain('proposeDirections')
     expect(Object.keys(onlineTools)).toContain('finishAnalysis')
 
+    // Analyze already has the prose chain and the rolling summary in context,
+    // so it is not also handed tools that fetch them.
+    expect(Object.keys(onlineTools)).not.toContain('readProseChain')
+    expect(Object.keys(onlineTools)).not.toContain('readStorySummary')
+    // listFragmentTypes stays: proposeNewRecords takes a free-string `type`.
+    expect(Object.keys(onlineTools)).toContain('listFragmentTypes')
+
     expect(listLibrarianAnalyzeToolNames()).toEqual(Object.keys(onlineTools))
   })
 
@@ -148,7 +155,7 @@ describe('analysis-tools', () => {
     expect(completed).toMatchObject({ ok: true })
   })
 
-  it('finishAnalysis rejects a failed proposal falsely claimed as completed', async () => {
+  it('finishAnalysis holds a failed proposal lane open no matter what the model claims', async () => {
     const prose = mockFragment({ id: 'pr-0001', type: 'prose', content: 'Alice waited.' })
     vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => id === 'pr-0001' ? prose : null)
     const collector = createEmptyCollector()
@@ -162,20 +169,25 @@ describe('analysis-tools', () => {
       evidenceSegments: [1], corrections: [],
     }, { toolCallId: 'proposal', messages: [], abortSignal: undefined as unknown as AbortSignal })
 
-    const falseFinish = await tools.finishAnalysis.execute!({
-      completed: ['reportAnalysis', 'proposeRecordCorrections'],
+    // The gate watched the call fail, so leaving the lane undeclared cannot
+    // pass — there is no claim the model could have made to talk it through.
+    const undeclaredFinish = await tools.finishAnalysis.execute!({
       skipped: [{ toolName: 'proposeNewRecords', reason: 'No new reusable record.' }],
-    }, { toolCallId: 'false-finish', messages: [], abortSignal: undefined as unknown as AbortSignal })
+    }, { toolCallId: 'undeclared-finish', messages: [], abortSignal: undefined as unknown as AbortSignal })
+    // Declared, but without saying why the known-wrong proposal was dropped.
+    const unexplainedFinish = await tools.finishAnalysis.execute!({
+      skipped: ['proposeRecordCorrections', { toolName: 'proposeNewRecords', reason: 'No new reusable record.' }],
+    }, { toolCallId: 'unexplained-finish', messages: [], abortSignal: undefined as unknown as AbortSignal })
     const honestFinish = await tools.finishAnalysis.execute!({
-      completed: ['reportAnalysis'],
       skipped: [
         { toolName: 'proposeRecordCorrections', reason: 'The attempted correction was invalid.' },
         { toolName: 'proposeNewRecords', reason: 'No new reusable record.' },
       ],
     }, { toolCallId: 'honest-finish', messages: [], abortSignal: undefined as unknown as AbortSignal })
 
-    expect(falseFinish).toMatchObject({ ok: false, falseCompleted: ['proposeRecordCorrections'] })
-    expect(honestFinish).toMatchObject({ ok: true })
+    expect(undeclaredFinish).toMatchObject({ ok: false, missingRequired: ['proposeRecordCorrections'] })
+    expect(unexplainedFinish).toMatchObject({ ok: false, unexplained: ['proposeRecordCorrections'] })
+    expect(honestFinish).toMatchObject({ ok: true, completed: ['reportAnalysis'] })
   })
 
   // Timeline 9 made 24 finishAnalysis calls for 16 analyses. Six were rejected
@@ -676,26 +688,23 @@ describe('analysis-tools', () => {
     const empty = await tools.reportAnalysis.execute!({ summary: '  ' }, {
       toolCallId: 'empty', messages: [], abortSignal: undefined as unknown as AbortSignal,
     })
-    const finishAfterEmpty = await tools.finishAnalysis.execute!({
-      completed: ['reportAnalysis'],
-    }, { toolCallId: 'finish-empty', messages: [], abortSignal: undefined as unknown as AbortSignal })
+    const finishAfterEmpty = await tools.finishAnalysis.execute!({}, {
+      toolCallId: 'finish-empty', messages: [], abortSignal: undefined as unknown as AbortSignal,
+    })
 
     expect(empty).toMatchObject({ ok: false })
-    // Not "you falsely completed a call that just told you it was fine".
-    expect(finishAfterEmpty).toMatchObject({
-      ok: false,
-      falseCompleted: ['reportAnalysis'],
-      missingRequired: ['reportAnalysis'],
-    })
+    // One reading of the same event, so the model is never told a call both
+    // succeeded and was falsely claimed.
+    expect(finishAfterEmpty).toMatchObject({ ok: false, missingRequired: ['reportAnalysis'] })
 
     await tools.reportAnalysis.execute!({ summary: 'Alice waited by the gate.' }, {
       toolCallId: 'retry', messages: [], abortSignal: undefined as unknown as AbortSignal,
     })
-    const finishAfterRetry = await tools.finishAnalysis.execute!({
-      completed: ['reportAnalysis'],
-    }, { toolCallId: 'finish-retry', messages: [], abortSignal: undefined as unknown as AbortSignal })
+    const finishAfterRetry = await tools.finishAnalysis.execute!({}, {
+      toolCallId: 'finish-retry', messages: [], abortSignal: undefined as unknown as AbortSignal,
+    })
 
-    expect(finishAfterRetry).toMatchObject({ ok: true })
+    expect(finishAfterRetry).toMatchObject({ ok: true, completed: ['reportAnalysis'] })
   })
 
   it('mention schema requires a valid fragment id and non-empty text', async () => {

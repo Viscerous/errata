@@ -181,6 +181,58 @@ describe('LLM tools', () => {
     expect(plain.matches[0]).not.toHaveProperty('segment')
   })
 
+  it('reports a search total across every fragment, not the count it returned', async () => {
+    for (let i = 1; i <= 5; i += 1) {
+      await createFragment(dataDir, storyId, makeFragment({
+        id: `kn-000${i}`,
+        type: 'knowledge',
+        content: 'Moon ritual requires river water.',
+      }))
+    }
+    const tools = createFragmentTools(dataDir, storyId)
+
+    const found = await execTool(tools.findFragments, { query: 'river', limit: 2 })
+    expect(found.matches).toHaveLength(2)
+    // A total equal to the returned count would tell the model its search was
+    // exhaustive at the exact moment it was cut short.
+    expect(found).toMatchObject({ total: 5, truncated: true })
+
+    const all = await execTool(tools.findFragments, { query: 'river' })
+    expect(all).toMatchObject({ total: 5, truncated: false })
+  })
+
+  it('truncates the prose chain from the front, keeping the passages continuity needs', async () => {
+    const ids = ['pr-0001', 'pr-0002', 'pr-0003', 'pr-0004']
+    for (const [position, id] of ids.entries()) {
+      await createFragment(dataDir, storyId, makeFragment({
+        id,
+        type: 'prose',
+        order: position + 1,
+        content: `Passage ${position + 1}.`,
+      }))
+    }
+    const tools = createFragmentTools(dataDir, storyId)
+
+    const recent = await execTool(tools.readProseChain, { limit: 2 })
+    expect(recent.fragments.map((f: { id: string }) => f.id)).toEqual(['pr-0003', 'pr-0004'])
+    // The index stays the position in the whole chain, not in the window.
+    expect(recent.fragments.map((f: { index: number }) => f.index)).toEqual([2, 3])
+    expect(recent).toMatchObject({ total: 4, truncated: true })
+
+    const whole = await execTool(tools.readProseChain, {})
+    expect(whole.fragments.map((f: { id: string }) => f.id)).toEqual(ids)
+    expect(whole).toMatchObject({ truncated: false })
+  })
+
+  it('reports an unmatched prose edit through the same envelope as a failed one', async () => {
+    await createFragment(dataDir, storyId, makeFragment({ id: 'pr-0001', type: 'prose', order: 1, content: 'Alice waited.' }))
+    const tools = createFragmentTools(dataDir, storyId, { readOnly: false })
+
+    const result = await execTool(tools.editProse, { edits: [{ oldText: 'Bob ran.', newText: 'Bob walked.' }] })
+    expect(result).toMatchObject({ ok: false, applied: 0, skipped: 0, readFragmentIds: [], operations: [] })
+    expect(result.unmatched[0]).toMatchObject({ oldText: 'Bob ran.' })
+  })
+
   it('finds and lists fragments without returning full content from listFragments', async () => {
     await createFragment(dataDir, storyId, makeFragment({ id: 'kn-0001', type: 'knowledge', name: 'Moon Ritual', description: 'Silver ash', content: 'Moon ritual requires river water.' }))
     const tools = createFragmentTools(dataDir, storyId)

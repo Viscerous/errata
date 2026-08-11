@@ -46,6 +46,11 @@ const logger = createLogger('llm-tools')
 const TOOL_LOG_MAX_CHARS = 1200
 const MAX_READ_FRAGMENTS = 30
 const MAX_LIST_LIMIT = 100
+/**
+ * One default for every listing tool. Each reports `total` and `truncated`, so
+ * asking for more is one call away and the cheap default costs nothing but that.
+ */
+const DEFAULT_LIST_LIMIT = 25
 
 function safeStringify(value: unknown): string {
   try {
@@ -241,7 +246,7 @@ export function createFragmentTools(
       types: z.array(z.string()).optional().describe('Optional fragment types to include. Omit to search all textual fragment types.'),
       fields: z.array(editableFieldSchema).optional().describe('Fields to search. Defaults to name, description, and content.'),
       includeArchived: z.boolean().default(false),
-      limit: z.number().int().min(1).max(MAX_LIST_LIMIT).default(25),
+      limit: z.number().int().min(1).max(MAX_LIST_LIMIT).default(DEFAULT_LIST_LIMIT),
     }),
     execute: withToolLogging('findFragments', storyId, async ({ query, types, fields, includeArchived, limit }: {
       query: string
@@ -276,9 +281,16 @@ export function createFragmentTools(
           })
           break
         }
-        if (matches.length >= (limit ?? 25)) break
       }
-      return { matches, total: matches.length }
+      // Counted across every fragment, not stopped at the limit: `total` naming
+      // the returned count told the model its search was exhaustive whenever it
+      // was in fact cut short, and there was no `truncated` to say otherwise.
+      const selected = limit ?? DEFAULT_LIST_LIMIT
+      return {
+        matches: matches.slice(0, selected),
+        total: matches.length,
+        truncated: matches.length > selected,
+      }
     }),
   })
 
@@ -288,7 +300,7 @@ export function createFragmentTools(
       type: z.string().optional().describe('Optional fragment type filter.'),
       query: z.string().optional().describe('Optional case-insensitive filter over name and description.'),
       includeArchived: z.boolean().default(false),
-      limit: z.number().int().min(1).max(MAX_LIST_LIMIT).default(50),
+      limit: z.number().int().min(1).max(MAX_LIST_LIMIT).default(DEFAULT_LIST_LIMIT),
     }),
     execute: withToolLogging('listFragments', storyId, async ({ type, query, includeArchived, limit }: {
       type?: string
@@ -304,32 +316,37 @@ export function createFragmentTools(
           fragment.description.toLowerCase().includes(lower),
         )
       }
-      const total = fragments.length
+      const selected = limit ?? DEFAULT_LIST_LIMIT
       return {
-        fragments: fragments.slice(0, limit ?? 50).map(summarizeFragment),
-        total,
-        truncated: total > (limit ?? 50),
+        fragments: fragments.slice(0, selected).map(summarizeFragment),
+        total: fragments.length,
+        truncated: fragments.length > selected,
       }
     }),
   })
 
   tools.readProseChain = tool({
-    description: 'Read the active prose chain in order. Use this for continuity and for scoping prose edits to active prose only.',
+    description: 'Read the active prose chain in order, most recent passages first when truncated. Use this for continuity and for scoping prose edits to active prose only.',
     inputSchema: z.object({
       includeContent: z.boolean().default(false).describe('When true, include full content. Otherwise returns summaries and `baseHash` only.'),
-      limit: z.number().int().min(1).max(MAX_LIST_LIMIT).default(50),
+      limit: z.number().int().min(1).max(MAX_LIST_LIMIT).default(DEFAULT_LIST_LIMIT),
     }),
     execute: withToolLogging('readProseChain', storyId, async ({ includeContent, limit }: { includeContent?: boolean; limit?: number }) => {
       const active = await loadActiveProseFragments(dataDir, storyId)
-      const selected = active.slice(0, limit ?? 50)
+      const selected = limit ?? DEFAULT_LIST_LIMIT
+      // The tail, not the head: a long chain truncated from the front returns
+      // the story's opening to a tool whose stated job is current continuity.
+      // `index` stays the position in the whole chain so the numbers still mean
+      // something once the window has moved.
+      const offset = Math.max(active.length - selected, 0)
       return {
-        fragments: selected.map((fragment, index) => ({
-          index,
+        fragments: active.slice(offset).map((fragment, position) => ({
+          index: offset + position,
           ...summarizeFragment(fragment),
           ...(includeContent ? { content: sanitizeTextForToolEcho(fragment.content) } : {}),
         })),
         total: active.length,
-        truncated: active.length > (limit ?? 50),
+        truncated: offset > 0,
       }
     }),
   })
@@ -425,8 +442,11 @@ export function createFragmentTools(
           }
         }
 
+        // No matches is the same outcome as every match failing — nothing was
+        // written — so it reports through the same envelope rather than a shape
+        // of its own that happens to omit `readFragmentIds`.
         if (operations.length === 0) {
-          return { ok: false, applied: 0, skipped: 0, operations: [], appliedChanges: [], unmatched, error: 'No active prose matches found.' }
+          return editResponse([], [], { unmatched, note: 'No active prose contains any of the given oldText.' })
         }
 
         const { appliedResults, appliedChanges } = await applyOperationsWithSnapshot(dataDir, storyId, operations, {
