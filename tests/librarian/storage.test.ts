@@ -111,7 +111,7 @@ describe('librarian storage', () => {
           },
         ],
         timelineEvents: [
-          { event: 'Entered cave', position: 'during' },
+          { event: 'Entered cave', position: 'before' },
           { event: 'Found sword', position: 'after' },
         ],
       }))

@@ -435,10 +435,18 @@ describe('analysis-tools', () => {
   it('places every event by the passage temporal frame', () => {
     expect(timelineEventsFor(['Alice draws'], { relation: 'flashback' }))
       .toEqual([{ event: 'Alice draws', position: 'before' }])
-    expect(timelineEventsFor(['Alice draws'], { relation: 'concurrent' }))
-      .toEqual([{ event: 'Alice draws', position: 'during' }])
     expect(timelineEventsFor(['Alice draws'], { relation: 'forward' }))
       .toEqual([{ event: 'Alice draws', position: 'after' }])
+    // A passage that named no frame still contributes to the timeline.
+    expect(timelineEventsFor(['Alice draws'], { relation: 'uncertain' }))
+      .toEqual([{ event: 'Alice draws', position: 'after' }])
+  })
+
+  it('rejects a frame that claims simultaneity instead of naming the occasion', () => {
+    const parsed = reportAnalysisInputSchema.safeParse({
+      temporalFrame: { relation: 'concurrent', anchor: 'during the First Address' },
+    })
+    expect(parsed.success).toBe(false)
   })
 
   it('reportAnalysis records validated candidate fragments for proposal context', async () => {

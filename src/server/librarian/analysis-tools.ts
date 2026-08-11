@@ -176,9 +176,7 @@ export function timelineEventsFor(
   events: string[],
   frame: ContinuityProjection['temporalFrame'],
 ): LibrarianAnalysis['timelineEvents'] {
-  const position = frame.relation === 'flashback' ? 'before'
-    : frame.relation === 'concurrent' ? 'during'
-    : 'after'
+  const position = frame.relation === 'flashback' ? 'before' : 'after'
   return events.map((event) => ({ event, position }))
 }
 
@@ -227,10 +225,10 @@ const proseCitationSchema = z.array(z.number().int().positive()).default([])
 const skippedToolNameSchema = z.enum(['proposeRecordCorrections', 'proposeNewRecords'])
 
 const temporalFrameSchema = z.object({
-  relation: z.enum(['forward', 'flashback', 'flash-forward', 'concurrent', 'uncertain']).default('uncertain')
-    .describe('The passage relationship to the current narrative present. Use forward for an ordinary continuation; uncertain only when the frame truly cannot be determined.'),
+  relation: z.enum(['forward', 'flashback', 'flash-forward', 'uncertain']).default('uncertain')
+    .describe('Where this passage sits relative to the current narrative present. Use forward for an ordinary continuation, including one set during an event already under way; flashback and flash-forward only when the passage leaves the present for an earlier or later time. Use uncertain only when the frame truly cannot be determined.'),
   anchor: z.string().trim().max(200).optional()
-    .describe('Optional story-time anchor in natural language, such as "three winters earlier".'),
+    .describe('Optional story-time anchor in natural language, such as "three winters earlier" or "during the coronation". Name the occasion here rather than in `relation`.'),
   evidenceSegments: proseCitationSchema
     .describe('Sentence numbers carrying the temporal cue, when the prose gives one.'),
 }).default({ relation: 'uncertain', evidenceSegments: [] })

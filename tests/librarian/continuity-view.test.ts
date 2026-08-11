@@ -100,6 +100,93 @@ describe('continuity view', () => {
     expect(view).toBeUndefined()
   })
 
+  it('keeps state from a passage that never determined its temporal frame', async () => {
+    const story = makeStory()
+    await createStory(dataDir, story)
+    await createFragment(dataDir, story.id, makeFragment({
+      id: 'pr-0001',
+      type: 'prose',
+      order: 1,
+      content: 'Prose 1',
+    }))
+    const passage = (await getFragment(dataDir, story.id, 'pr-0001'))!
+    await saveAnalysis(dataDir, story.id, {
+      ...analysis('pr-0001', 1),
+      sourceRevision: analysisSourceRevision(passage),
+      continuityProjection: {
+        version: 1,
+        // The schema default. Making no claim about time is not a claim to have
+        // stepped out of the present, so the state it reported still counts.
+        temporalFrame: { relation: 'uncertain' },
+        stateOperations: [{
+          stateKey: 'alice_location',
+          action: 'set',
+          subject: 'Alice location',
+          value: 'the great hall',
+          evidenceSegments: [1], evidenceText: 'Prose 1',
+        }],
+        threadOperations: [],
+        threadFocus: [],
+        knowledgeOperations: [],
+      },
+    })
+
+    const view = await buildContinuityView({
+      dataDir,
+      storyId: story.id,
+      activeProseFragments: [passage],
+    })
+
+    expect(view?.currentState).toMatchObject([{ stateKey: 'alice_location', value: 'the great hall' }])
+    // An undetermined frame is not worth a line in the Writer's context either.
+    expect(view?.temporalFrame).toMatchObject({ relation: 'uncertain' })
+    const rendered = renderContinuity({ continuityView: view }, 'generation.writer')!
+    expect(rendered).not.toContain('Current temporal frame')
+  })
+
+  it('surfaces the occasion a present-line passage names', async () => {
+    const story = makeStory()
+    await createStory(dataDir, story)
+    await createFragment(dataDir, story.id, makeFragment({
+      id: 'pr-0001',
+      type: 'prose',
+      order: 1,
+      content: 'Prose 1',
+    }))
+    const passage = (await getFragment(dataDir, story.id, 'pr-0001'))!
+    await saveAnalysis(dataDir, story.id, {
+      ...analysis('pr-0001', 1),
+      sourceRevision: analysisSourceRevision(passage),
+      continuityProjection: {
+        version: 1,
+        // What the removed `concurrent` relation was being used to say.
+        temporalFrame: { relation: 'forward', anchor: 'during the First Address' },
+        stateOperations: [{
+          stateKey: 'alice_location',
+          action: 'set',
+          subject: 'Alice location',
+          value: 'the rail',
+          evidenceSegments: [1], evidenceText: 'Prose 1',
+        }],
+        threadOperations: [],
+        threadFocus: [],
+        knowledgeOperations: [],
+      },
+    })
+
+    const view = await buildContinuityView({
+      dataDir,
+      storyId: story.id,
+      activeProseFragments: [passage],
+    })
+    const rendered = renderContinuity({ continuityView: view }, 'generation.writer')!
+
+    // The occasion is the useful part; `forward` is not worth naming beside it.
+    expect(rendered).toContain('Current temporal frame')
+    expect(rendered).toContain('- during the First Address')
+    expect(rendered).not.toContain('forward')
+  })
+
   // buildContinuityView runs inside buildContextState on the writer's critical
   // path, and its view-cache signature includes every prose hash, so it misses
   // after every accepted passage. Without a per-analysis memo the fold re-read

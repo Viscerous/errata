@@ -112,10 +112,13 @@ export interface LibrarianAnalysis {
   candidateFragments?: LibrarianCandidateFragment[]
   contradictions: LibrarianContradiction[]
   fragmentChangeProposals: LibrarianFragmentChangeProposal[]
-  /** The passage's events, placed by its temporal frame. Derived, not reported. */
+  /**
+   * The passage's events, placed by its temporal frame. Derived, not reported.
+   * Records written before the frame owned this also carry a `during` position.
+   */
   timelineEvents: Array<{
     event: string
-    position: 'before' | 'during' | 'after'
+    position: 'before' | 'after'
   }>
   directions?: LibrarianDirection[]
   analyzeLanes?: LibrarianAnalyzeLaneStatus

@@ -134,8 +134,24 @@ function sourceOf(item: LoadedAnalysis): ProjectionSource {
   }
 }
 
+/**
+ * Only a passage that explicitly leaves the present is off the present line.
+ * `uncertain` is the schema default, so treating it as a departure meant an
+ * analysis that simply never determined a frame had every state operation it
+ * reported silently discarded — making no claim about time is not the same as
+ * claiming to have stepped out of it.
+ */
 function isPresentLine(frame: TemporalFrame): boolean {
-  return frame.relation === 'forward' || frame.relation === 'concurrent'
+  return frame.relation !== 'flashback' && frame.relation !== 'flash-forward'
+}
+
+/**
+ * `forward` and `uncertain` tell a reader of the prose nothing it does not
+ * already show, so the frame is worth surfacing only when the passage left the
+ * present or named the occasion it sits in.
+ */
+function hasTemporalSignal(frame: TemporalFrame | undefined): frame is TemporalFrame {
+  return frame !== undefined && (!isPresentLine(frame) || Boolean(frame.anchor))
 }
 
 function projectionCurrent(projection: CachedProjection, fragment: Fragment): boolean {
@@ -314,7 +330,7 @@ export async function buildContinuityView(params: {
     currentState.size > 0
     || threads.length > 0
     || knowledge.length > 0
-    || (temporalFrame !== undefined && temporalFrame.relation !== 'forward')
+    || hasTemporalSignal(temporalFrame)
   ) ? {
       currentState: takeLatest([...currentState.values()], MAX_CURRENT_STATE),
       liveThreads: threads,
@@ -553,9 +569,9 @@ function renderAuthorialContinuity(
     `This is authorial, source-linked memory from accepted prose. ${copy.introduction} Information in this view is not automatically known by every character.`,
   ]
 
-  if (view.temporalFrame && view.temporalFrame.relation !== 'forward') {
-    const anchor = view.temporalFrame.anchor ? ` — ${view.temporalFrame.anchor}` : ''
-    parts.push(`### Current temporal frame\n- ${view.temporalFrame.relation}${anchor}`)
+  if (hasTemporalSignal(view.temporalFrame)) {
+    const departure = isPresentLine(view.temporalFrame) ? [] : [view.temporalFrame.relation]
+    parts.push(`### Current temporal frame\n- ${[...departure, view.temporalFrame.anchor].filter(Boolean).join(' — ')}`)
   }
   if (view.currentState.length > 0) {
     parts.push([

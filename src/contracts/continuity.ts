@@ -1,4 +1,10 @@
-export type TemporalRelation = 'forward' | 'flashback' | 'flash-forward' | 'concurrent' | 'uncertain'
+/**
+ * Whether a passage advances the narrative present or steps outside it. There is
+ * deliberately no value for "set during an ongoing in-story event": every one of
+ * the eight `concurrent` frames on record meant that and none meant simultaneity
+ * with the present, so the passage's `anchor` is the only home for it.
+ */
+export type TemporalRelation = 'forward' | 'flashback' | 'flash-forward' | 'uncertain'
 
 export interface AnalysisSourceRevision {
   contentHash: string

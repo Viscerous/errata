@@ -437,7 +437,7 @@ describe('branches', () => {
         mentions: [{ fragmentId: 'ch-alice', text: 'Alice' }],
         contradictions: [],
         fragmentChangeProposals: [],
-        timelineEvents: [{ event: 'Alice arrives', position: 'during' }],
+        timelineEvents: [{ event: 'Alice arrives', position: 'after' }],
       }
       await saveAnalysis(dataDir, TEST_STORY_ID, analysis)
 
