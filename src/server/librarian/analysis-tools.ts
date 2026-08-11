@@ -6,7 +6,7 @@ import { getFragment, updateFragment } from '../fragments/storage'
 import { FragmentIdSchema, type Fragment } from '../fragments/schema'
 import { numberSentences, resolveSegments, segmentText, stripSegmentMarker, type TextSegment } from '../llm/segments'
 import type { LibrarianAnalysis, LibrarianFragmentChangeProposal, LibrarianMention } from './storage'
-import type { ContinuityProjection, ContinuityRegistry, KnowledgeOperation, RegistryEntry, StateOperation, ThreadFocus, ThreadOperation } from './continuity-types'
+import type { CitedEvidence, ContinuityProjection, ContinuityRegistry, KnowledgeOperation, RegistryEntry, StateOperation, ThreadFocus, ThreadOperation } from './continuity-types'
 import { normalizeContinuityKey, scopedContinuityIdentity } from '@/lib/continuity-keys'
 import {
   correctionShapeError,
@@ -303,6 +303,21 @@ const MAX_STEERED_REGISTRY_KEYS = 24
 const MAX_CONTINUITY_KEY_CHARS = 100
 const MAX_DERIVED_KEY_CHARS = 64
 
+/**
+ * The two ways to name a continuity identity: point at a numbered registry
+ * entry, or spell the key. Every addressable field in the report shares this
+ * shape so one idea is not two shapes within one schema.
+ */
+function registryAddressFields(entryDescription: string, keyDescription: string) {
+  return {
+    // Pointing beats spelling for the same reason it does with sentences: the
+    // number is verifiable, and half of Timeline 13's non-create operations
+    // invented a plausible key that matched nothing.
+    entry: z.number().int().positive().nullish().describe(entryDescription),
+    key: z.string().trim().max(MAX_CONTINUITY_KEY_CHARS).nullish().describe(keyDescription),
+  }
+}
+
 function continuityKeyFields(
   existing: RegistryEntry[] | undefined,
   noun: string,
@@ -316,15 +331,10 @@ function continuityKeyFields(
   const reuse = unique.length > 0
     ? ` Reuse one of these exactly when the passage changes something already tracked: ${unique.slice(0, MAX_STEERED_REGISTRY_KEYS).join(', ')}.`
     : ''
-  return {
-    // Pointing beats spelling for the same reason it does with sentences: the
-    // number is verifiable, and half of Timeline 13's non-create operations
-    // invented a plausible key that matched nothing.
-    entry: z.number().int().positive().nullish()
-      .describe(`The numbered registry entry this operation changes, taken from the Continuity Registry. Cite it whenever the passage changes something already tracked; omit it only when a ${creationAction} introduces something genuinely new.`),
-    key: z.string().trim().max(MAX_CONTINUITY_KEY_CHARS).nullish()
-      .describe(`The ${noun}, when you are not citing an entry number.${reuse} For a genuinely new identity introduced by a ${creationAction} operation, omit both and the engine will derive one. If you coin a key, use snake_case naming the thing itself, such as ${example}; never include a character or fragment ID.`),
-  }
+  return registryAddressFields(
+    `The numbered registry entry this operation changes, taken from the Continuity Registry. Cite it whenever the passage changes something already tracked; omit it only when a ${creationAction} introduces something genuinely new.`,
+    `The ${noun}, when you are not citing an entry number.${reuse} For a genuinely new identity introduced by a ${creationAction} operation, omit both and the engine will derive one. If you coin a key, use snake_case naming the thing itself, such as ${example}; never include a character or fragment ID.`,
+  )
 }
 
 function stateOperationSchemaFor(registry: ContinuityRegistry) {
@@ -364,10 +374,10 @@ function threadOperationSchemaFor(registry: ContinuityRegistry) {
  * registry, so it is addressed the same way every other continuity identity is.
  */
 const threadFocusSchema = z.object({
-  entry: z.number().int().positive().nullish()
-    .describe('The numbered Continuity Registry entry for a still-relevant thread this passage did not act on.'),
-  threadKey: z.string().trim().max(MAX_CONTINUITY_KEY_CHARS).nullish()
-    .describe('That thread\'s key, when you are not citing an entry number.'),
+  ...registryAddressFields(
+    'The numbered Continuity Registry entry for a still-relevant thread this passage did not act on.',
+    'That thread\'s key, when you are not citing an entry number. It must already be open; focus cannot introduce a thread.',
+  ),
   visibility: z.enum(['foreground', 'background']),
 })
 
@@ -448,11 +458,14 @@ function keepLastByKey<T>(items: T[], keyFor: (item: T) => string, maxItems: num
 function citedEvidence(
   segments: TextSegment[],
   cited: number[],
-): { evidenceSegments: number[]; evidenceText: string; invalid: number[] } {
+): { evidence: CitedEvidence; invalid: number[] } {
   const resolved = resolveSegments(segments, cited.slice(0, MAX_CITED_SEGMENTS))
+  // `evidence` is the storable half and `invalid` the verdict on it. Returned
+  // flat, every lane spread the whole thing into its record and carried the
+  // verdict into the projection — 98 stored operations hold an `invalid: []`
+  // that no type declares and nothing reads.
   return {
-    evidenceSegments: resolved.indexes,
-    evidenceText: resolved.text,
+    evidence: { evidenceSegments: resolved.indexes, evidenceText: resolved.text },
     invalid: resolved.invalid,
   }
 }
@@ -485,12 +498,12 @@ function chosenKey(operation: { key?: unknown }, derivedFrom?: string): string |
 }
 
 function citationProblem(
-  resolved: { evidenceSegments: number[]; invalid: number[] },
+  cited: { evidence: CitedEvidence; invalid: number[] },
 ): string | null {
-  if (resolved.invalid.length > 0) {
-    return `Cited sentence ${resolved.invalid.join(', ')} does not exist in the passage.`
+  if (cited.invalid.length > 0) {
+    return `Cited sentence ${cited.invalid.join(', ')} does not exist in the passage.`
   }
-  if (resolved.evidenceSegments.length === 0) return 'No supporting sentence was cited.'
+  if (cited.evidence.evidenceSegments.length === 0) return 'No supporting sentence was cited.'
   return null
 }
 
@@ -637,6 +650,18 @@ function resolveIdentity<T>(
   }
 }
 
+/**
+ * A projection stores the resolved identity, so the addressing that produced it
+ * does not travel with it. Stored operations carried both the model's `key` and
+ * the engine's `stateKey`/`threadKey`/`knowledgeKey` — two fields claiming to be
+ * the identity, only one of them authoritative once an entry number,
+ * normalization, or derivation had spoken, and neither declared on the type.
+ */
+function withoutAddressing<T extends object>(operation: T): Omit<T, 'entry' | 'key'> {
+  const { entry: _entry, key: _key, ...rest } = operation as T & { entry?: unknown; key?: unknown }
+  return rest
+}
+
 /** Identities a non-create action may address, before this pass adds its own. */
 function liveIdentitySet(entries: RegistryEntry[], created: Iterable<string>): Set<string> {
   return new Set([
@@ -665,7 +690,7 @@ function normalizeContinuityProjection(
       skipped.push({ kind: 'temporal-frame', key: temporalFrame.relation, reason: problem })
       temporalFrame = { relation: 'uncertain', evidenceSegments: [] }
     } else {
-      temporalFrame = { ...temporalFrame, ...resolved }
+      temporalFrame = { ...temporalFrame, ...resolved.evidence }
     }
   }
 
@@ -704,7 +729,7 @@ function normalizeContinuityProjection(
       skipped.push({ kind: 'state', key: stateKey, reason: 'A set operation requires a value.' })
       continue
     }
-    stateOperations.push({ ...operation, ...resolved, stateKey })
+    stateOperations.push({ ...withoutAddressing(operation), ...resolved.evidence, stateKey })
   }
 
   const liveThreads = liveIdentitySet(
@@ -715,6 +740,7 @@ function normalizeContinuityProjection(
   // Assembled as the operations resolve, so the fold still receives one whole
   // snapshot without the model having to state each thread's focus twice.
   const threadFocus: ThreadFocus[] = []
+  const closedThisPass = new Set<string>()
   for (const { visibility, ...operation } of input.threadOperations) {
     const allowDerived = operation.action === 'open'
     const identity = resolveIdentity(operation, operation.label || operation.note, {
@@ -740,8 +766,8 @@ function normalizeContinuityProjection(
       continue
     }
     threadOperations.push({
-      ...operation,
-      ...resolved,
+      ...withoutAddressing(operation),
+      ...resolved.evidence,
       threadKey,
       relatedFragmentIds: uniqueStrings(operation.relatedFragmentIds, 20),
     })
@@ -749,6 +775,8 @@ function normalizeContinuityProjection(
     // and cannot be.
     if (operation.action === 'open' || operation.action === 'advance') {
       threadFocus.push({ threadKey, visibility: visibility ?? 'foreground' })
+    } else {
+      closedThisPass.add(threadKey)
     }
   }
 
@@ -789,17 +817,37 @@ function normalizeContinuityProjection(
       skipped.push({ kind: 'knowledge', key: label, reason: 'Learning or correcting knowledge requires a fact.' })
       continue
     }
-    knowledgeOperations.push({ ...operation, ...resolved, knowledgeKey })
+    knowledgeOperations.push({ ...withoutAddressing(operation), ...resolved.evidence, knowledgeKey })
   }
 
   for (const focus of input.threadFocus) {
     const threadKey = registryKeyAtIndex(registry.thread, focus.entry)
-      || normalizeContinuityKey(focus.threadKey ?? '')
+      || normalizeContinuityKey(focus.key ?? '')
     if (!threadKey) {
       skipped.push({
         kind: 'thread-focus',
         key: '',
         reason: 'A thread focus entry must cite a Continuity Registry entry number or name its thread key.',
+      })
+      continue
+    }
+    // Focus adjusts the prominence of a thread that is open after this passage;
+    // it can neither introduce one nor keep a closed one in view. Either way the
+    // stored entry would be one the fold can never match — inert, and reported
+    // nowhere. The operations lane closed exactly this hole.
+    if (closedThisPass.has(threadKey)) {
+      skipped.push({
+        kind: 'thread-focus',
+        key: threadKey,
+        reason: `This passage closed ${threadKey}, so it cannot also still be in view.`,
+      })
+      continue
+    }
+    if (!liveThreads.has(threadKey)) {
+      skipped.push({
+        kind: 'thread-focus',
+        key: threadKey,
+        reason: `No thread is open under ${threadKey}, so this focus entry would change nothing. Open it with a thread operation, or cite the entry number of the one you mean.`,
       })
       continue
     }
@@ -1378,7 +1426,7 @@ export function createAnalysisTools(
             const reusable = Boolean(fragment && fragment.type !== 'prose' && fragment.type !== 'summary')
             const resolved = reusable
               ? citedEvidence(segmentText(fragment!.content), evidence.segments)
-              : { evidenceSegments: [] as number[], evidenceText: '', invalid: [] as number[] }
+              : { evidence: { evidenceSegments: [] as number[], evidenceText: '' }, invalid: [] as number[] }
             return { fragmentId: evidence.fragmentId, valid: reusable && citationProblem(resolved) === null, resolved }
           }))
           const badEvidence = evidenceChecks.find((check) => !check.valid)
@@ -1391,14 +1439,14 @@ export function createAnalysisTools(
           }
           const conflictingEvidence = evidenceChecks.map((check) => ({
             fragmentId: check.fragmentId,
-            segments: check.resolved.evidenceSegments,
-            evidenceText: check.resolved.evidenceText,
+            segments: check.resolved.evidence.evidenceSegments,
+            evidenceText: check.resolved.evidence.evidenceText,
           }))
           groundedContradictions.push({
             description: contradiction.description,
             fragmentIds: uniqueStrings(evidenceChecks.map((check) => check.fragmentId), 8),
-            sourceSegments: citedSource.evidenceSegments,
-            sourceEvidenceText: citedSource.evidenceText,
+            sourceSegments: citedSource.evidence.evidenceSegments,
+            sourceEvidenceText: citedSource.evidence.evidenceText,
             conflictingEvidence,
           })
         }
@@ -1481,8 +1529,8 @@ export function createAnalysisTools(
           }
         }
         retained = {
-          evidenceSegments: resolved.evidenceSegments,
-          evidenceText: resolved.evidenceText,
+          evidenceSegments: resolved.evidence.evidenceSegments,
+          evidenceText: resolved.evidence.evidenceText,
           title,
           rationale,
         }

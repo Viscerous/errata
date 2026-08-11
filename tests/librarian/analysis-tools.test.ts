@@ -525,9 +525,11 @@ describe('analysis-tools', () => {
         action: 'open',
         label: 'Why the seal was broken',
         relatedFragmentIds: ['ch-0001'],
+        // The operation states its own prominence; threadFocus is for threads
+        // this passage did not act on.
+        visibility: 'background',
         evidenceSegments: [2],
       }],
-      threadFocus: [{ threadKey: 'broken-seal', visibility: 'background' }],
       knowledgeOperations: [{
         characterId: 'ch-0002',
         key: 'seal.broken',
@@ -1686,6 +1688,147 @@ describe('continuity keys steered by the live registry', () => {
     ])
     // A resolved thread is gone; it cannot also be in view.
     expect(collector.continuityProjection.threadFocus.map((f) => f.threadKey)).not.toContain('old_vow')
+  })
+
+  it('refuses a focus entry for a thread that is not open', async () => {
+    const collector = createEmptyCollector()
+    const prose = mockFragment({ id: 'pr-0001', type: 'prose', content: 'The gap closed.' })
+    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => id === 'pr-0001' ? prose : null)
+    const continuityKeys = { thread: [{ index: 1, key: 'ledger_question', label: 'Who keeps the ledger' }] }
+    const tools = createAnalysisTools(collector, {
+      dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001', continuityKeys,
+    })
+
+    const result = await tools.reportAnalysis.execute!(
+      await buildReportAnalysisInputSchema(continuityKeys).parseAsync({
+        summary: 'The gap closed.',
+        threadFocus: [
+          { key: 'ledger_question', visibility: 'background' },
+          { key: 'a_thread_nobody_opened', visibility: 'foreground' },
+        ],
+      }),
+      { toolCallId: 'report', messages: [], abortSignal: undefined as unknown as AbortSignal },
+    )
+
+    // Stored, it would have been an entry the fold could never match: inert, and
+    // reported nowhere. Same hole the operations lane already closed.
+    expect(collector.continuityProjection.threadFocus)
+      .toEqual([{ threadKey: 'ledger_question', visibility: 'background' }])
+    expect((result as { skippedContinuity: Array<{ kind: string; key: string }> }).skippedContinuity)
+      .toEqual([{
+        kind: 'thread-focus',
+        key: 'a_thread_nobody_opened',
+        reason: expect.stringContaining('No thread is open under a_thread_nobody_opened'),
+      }])
+  })
+
+  /**
+   * Types do not police a spread. Every lane builds its stored record by
+   * spreading the model's input, so an input-only field silently rides along
+   * into the persisted projection unless something checks — which is how `entry`
+   * and `key` came to sit beside the resolved identity in every stored record.
+   */
+  it('persists exactly the fields the projection contract declares', async () => {
+    const collector = createEmptyCollector()
+    const prose = mockFragment({
+      id: 'pr-0001',
+      type: 'prose',
+      content: 'Alice reached the north hall. She asked who had broken the seal. Bob was told it was broken.',
+    })
+    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => {
+      if (id === 'pr-0001') return prose
+      if (id === 'ch-0002') return mockFragment({ id, type: 'character' })
+      return null
+    })
+    const continuityKeys = { thread: [{ index: 1, key: 'older_thread', label: 'An older question' }] }
+    const tools = createAnalysisTools(collector, {
+      dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001', continuityKeys,
+    })
+
+    await tools.reportAnalysis.execute!(
+      await buildReportAnalysisInputSchema(continuityKeys).parseAsync({
+        summary: 'Alice arrived and asked about the seal.',
+        temporalFrame: { relation: 'flashback', anchor: 'years earlier', evidenceSegments: [1] },
+        stateOperations: [{
+          key: 'alice_location', action: 'set', subject: 'Alice location', value: 'north hall', evidenceSegments: [1],
+        }],
+        threadOperations: [{
+          key: 'broken_seal', action: 'open', label: 'Why the seal was broken',
+          note: 'Asked aloud', relatedFragmentIds: [], visibility: 'foreground', evidenceSegments: [2],
+        }],
+        threadFocus: [{ entry: 1, visibility: 'background' }],
+        knowledgeOperations: [{
+          characterId: 'ch-0002', key: 'seal_broken', action: 'learn',
+          fact: 'The seal is broken.', acquisition: 'told', evidenceSegments: [3],
+        }],
+      }),
+      { toolCallId: 'report', messages: [], abortSignal: undefined as unknown as AbortSignal },
+    )
+
+    const declared: Record<string, string[]> = {
+      stateOperations: ['stateKey', 'action', 'subject', 'value', 'evidenceSegments', 'evidenceText'],
+      threadOperations: ['threadKey', 'action', 'label', 'note', 'relatedFragmentIds', 'evidenceSegments', 'evidenceText'],
+      threadFocus: ['threadKey', 'visibility'],
+      knowledgeOperations: ['knowledgeKey', 'characterId', 'action', 'fact', 'acquisition', 'evidenceSegments', 'evidenceText'],
+    }
+    const projection = collector.continuityProjection as unknown as Record<string, Array<Record<string, unknown>>>
+    for (const [lane, allowed] of Object.entries(declared)) {
+      expect(projection[lane].length).toBeGreaterThan(0)
+      for (const record of projection[lane]) {
+        expect(Object.keys(record).filter((field) => !allowed.includes(field))).toEqual([])
+      }
+    }
+    // The frame resolves a citation the same way, so it leaked the same way.
+    const frameFields = ['relation', 'anchor', 'evidenceSegments', 'evidenceText']
+    expect(Object.keys(collector.continuityProjection.temporalFrame).filter((f) => !frameFields.includes(f)))
+      .toEqual([])
+  })
+
+  it('refuses to keep a thread in view that the same passage closed', async () => {
+    const collector = createEmptyCollector()
+    const prose = mockFragment({ id: 'pr-0001', type: 'prose', content: 'The ledger was found at last.' })
+    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => id === 'pr-0001' ? prose : null)
+    const continuityKeys = { thread: [{ index: 1, key: 'ledger_question', label: 'Who keeps the ledger' }] }
+    const tools = createAnalysisTools(collector, {
+      dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001', continuityKeys,
+    })
+
+    const result = await tools.reportAnalysis.execute!(
+      await buildReportAnalysisInputSchema(continuityKeys).parseAsync({
+        summary: 'The ledger question was answered.',
+        threadOperations: [{ entry: 1, action: 'resolve', relatedFragmentIds: [], evidenceSegments: [1] }],
+        threadFocus: [{ entry: 1, visibility: 'foreground' }],
+      }),
+      { toolCallId: 'report', messages: [], abortSignal: undefined as unknown as AbortSignal },
+    )
+
+    expect(collector.continuityProjection.threadOperations).toHaveLength(1)
+    expect(collector.continuityProjection.threadFocus).toEqual([])
+    expect((result as { skippedContinuity: Array<{ reason: string }> }).skippedContinuity[0].reason)
+      .toContain('closed ledger_question')
+  })
+
+  it('stores the resolved identity without the addressing that produced it', async () => {
+    const collector = createEmptyCollector()
+    const prose = mockFragment({ id: 'pr-0001', type: 'prose', content: 'Alice reached the north hall.' })
+    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => id === 'pr-0001' ? prose : null)
+    const tools = createAnalysisTools(collector, {
+      dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001',
+    })
+
+    await tools.reportAnalysis.execute!(await reportAnalysisInputSchema.parseAsync({
+      summary: 'Alice arrived.',
+      stateOperations: [{
+        key: 'Alice.Location', action: 'set', subject: 'Alice location', value: 'north hall', evidenceSegments: [1],
+      }],
+    }), { toolCallId: 'report', messages: [], abortSignal: undefined as unknown as AbortSignal })
+
+    const [operation] = collector.continuityProjection.stateOperations
+    expect(operation.stateKey).toBe('alice_location')
+    // Two fields claiming to be the identity, one of them stale the moment
+    // normalization spoke — and neither `entry` nor `key` is on the type.
+    expect(operation).not.toHaveProperty('key')
+    expect(operation).not.toHaveProperty('entry')
   })
 
   it('honours an explicit visibility on the operation itself', async () => {
