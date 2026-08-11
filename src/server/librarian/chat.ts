@@ -84,7 +84,9 @@ export function createLibrarianChatBespokeTools(
           fragmentId,
         }
       } catch (err) {
-        return { error: err instanceof Error ? err.message : String(err) }
+        // `ok` on one branch only left the model inferring failure from the
+        // shape of the result; every tool that can report a failure says so.
+        return { ok: false, error: err instanceof Error ? err.message : String(err) }
       }
     },
   })

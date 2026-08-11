@@ -42,6 +42,15 @@ export {
   fragmentNameError,
 } from '../fragments/change-operations'
 
+/**
+ * Convention across every LLM-facing tool here and in the librarian:
+ *
+ * A tool that can fail in a way the model should act on returns `ok` on *both*
+ * branches, with the guidance beside it. A tool that cannot fail returns its
+ * result plainly and no `ok` at all. `throw` is for a genuine exception — the
+ * SDK surfaces it as a tool error, which is the right shape for "the engine
+ * broke", not for "your request matched nothing".
+ */
 const logger = createLogger('llm-tools')
 const TOOL_LOG_MAX_CHARS = 1200
 const MAX_READ_FRAGMENTS = 30
@@ -385,11 +394,12 @@ export function createFragmentTools(
     inputSchema: z.object({}),
     execute: withToolLogging('readStorySummary', storyId, async () => {
       const story = await getStory(dataDir, storyId)
-      if (!story) return { error: 'Story not found' }
+      if (!story) return { ok: false, error: 'Story not found' }
       const context = await buildContextState(dataDir, storyId, '')
       const summary = renderSummaryProjection(context.summaryProjection, 'editing') ?? ''
       const summaryFragments = await listFragments(dataDir, storyId, 'summary')
       return {
+        ok: true,
         summary: summary || STORY_SUMMARY_PLACEHOLDER,
         fragments: summaryFragments.map(summarizeFragment),
       }

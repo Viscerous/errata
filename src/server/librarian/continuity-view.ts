@@ -6,7 +6,7 @@ import {
   type LibrarianAnalysisIndex,
 } from './storage'
 import { proseContentHash } from './continuity-source'
-import { continuityKeyLabel, normalizeContinuityKey } from '@/lib/continuity-keys'
+import { continuityKeyLabel, normalizeContinuityKey, scopedContinuityIdentity } from '@/lib/continuity-keys'
 import type { ContinuityRegistry, RegistryEntry, TemporalFrame } from './continuity-types'
 
 const MAX_CURRENT_STATE = 24
@@ -284,7 +284,7 @@ export async function buildContinuityView(params: {
 
     if (projection.temporalFrame.relation !== 'flash-forward') {
       for (const operation of projection.knowledgeOperations) {
-        const key = `${operation.characterId}\u0000${normalizeContinuityKey(operation.knowledgeKey)}`
+        const key = scopedContinuityIdentity(operation.knowledgeKey, operation.characterId)
         if (operation.action === 'forget') {
           characterKnowledge.delete(key)
           continue

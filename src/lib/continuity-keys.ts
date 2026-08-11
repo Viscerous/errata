@@ -56,3 +56,21 @@ export function continuityKeyLabel(key: string): string {
   const words = key.replace(/_+/g, ' ').trim()
   return words.charAt(0).toUpperCase() + words.slice(1)
 }
+
+/**
+ * A continuity identity, scoped where the lane has an owner: knowledge belongs
+ * to one character, state and threads to the story.
+ *
+ * One home for the pairing because there were three — the merge keyed it one
+ * way, the live membership set another, and the fold a third. All three
+ * partitioned alike, so nothing was broken; but change a separator in one place,
+ * or forget the normalization in one place, and two of them quietly stop
+ * agreeing. Normalizing here means no caller has to remember to.
+ *
+ * `::` rather than an escaped NUL: a normalized key is `[a-z0-9_]` only, so it
+ * cannot collide, and it stays readable in a log and a diff.
+ */
+export function scopedContinuityIdentity(key: string, scope?: string): string {
+  const normalized = normalizeContinuityKey(key)
+  return scope ? `${scope}::${normalized}` : normalized
+}

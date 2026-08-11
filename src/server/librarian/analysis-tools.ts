@@ -7,7 +7,7 @@ import { FragmentIdSchema, type Fragment } from '../fragments/schema'
 import { numberSentences, resolveSegments, segmentText, stripSegmentMarker, type TextSegment } from '../llm/segments'
 import type { LibrarianAnalysis, LibrarianFragmentChangeProposal, LibrarianMention } from './storage'
 import type { ContinuityProjection, ContinuityRegistry, KnowledgeOperation, RegistryEntry, StateOperation, ThreadFocus, ThreadOperation } from './continuity-types'
-import { normalizeContinuityKey } from '@/lib/continuity-keys'
+import { normalizeContinuityKey, scopedContinuityIdentity } from '@/lib/continuity-keys'
 import {
   correctionShapeError,
   MAX_CORRECTION_SPAN_CHARS,
@@ -345,14 +345,29 @@ function threadOperationSchemaFor(registry: ContinuityRegistry) {
       .describe('Optional plain-language phrasing of the question. Omit it and the key is used.'),
     note: z.string().trim().max(300).optional(),
     relatedFragmentIds: z.array(FragmentIdSchema).max(40).default([]),
+    // A thread this passage acted on is in view by the acting; carrying that
+    // here removes the whole reason to restate the operation in threadFocus.
+    visibility: z.enum(['foreground', 'background']).optional()
+      .describe('How present this thread is after the passage. Defaults to foreground for open and advance; ignored for resolve and abandon.'),
     evidenceSegments: proseCitationSchema,
   })
 }
 
-// Focus may name a thread opened in this call or inherit an aligned operation,
-// so its key remains open-ended and optional at the schema boundary.
+/**
+ * Focus for threads this passage did *not* operate on.
+ *
+ * It used to cover every live thread, which meant restating each operation a
+ * second time — 19 of 29 recorded focus arrays were exactly that mirror — and
+ * an "omit the key when the arrays align one-for-one" rule to make the
+ * restatement bearable. Five entries were lost to that rule when the alignment
+ * silently did not hold. An untouched thread is by definition already in the
+ * registry, so it is addressed the same way every other continuity identity is.
+ */
 const threadFocusSchema = z.object({
-  threadKey: z.string().trim().max(MAX_CONTINUITY_KEY_CHARS).nullish(),
+  entry: z.number().int().positive().nullish()
+    .describe('The numbered Continuity Registry entry for a still-relevant thread this passage did not act on.'),
+  threadKey: z.string().trim().max(MAX_CONTINUITY_KEY_CHARS).nullish()
+    .describe('That thread\'s key, when you are not citing an entry number.'),
   visibility: z.enum(['foreground', 'background']),
 })
 
@@ -396,7 +411,7 @@ export function buildReportAnalysisInputSchema(input: ContinuityKeyRegistry = {}
     threadOperations: z.array(threadOperationSchemaFor(registry)).max(80).default([])
       .describe('Explicit lifecycle changes for unresolved narrative questions. Resolve completed questions, never repurpose a key, and remember that omission only makes a thread dormant.'),
     threadFocus: z.array(threadFocusSchema).max(80).default([])
-      .describe('Snapshot of still-open threads relevant after this passage. Omitted live threads become dormant, not resolved. When this array aligns one-for-one with threadOperations, an omitted key inherits the key of the operation in the same position.'),
+      .describe('Threads this passage did NOT act on that are still relevant after it. Do not repeat threadOperations here — those carry their own visibility. A still-open thread named in neither becomes dormant, not resolved.'),
     knowledgeOperations: z.array(knowledgeOperationSchemaFor(registry)).max(120).default([])
       .describe('Only facts a specific character explicitly learns, corrects, or forgets and could later act upon. Do not store their desires, feelings, opinions, or facts merely visible to the reader.'),
   })
@@ -498,7 +513,7 @@ const PROJECTION_CAPS = { state: 12, thread: 12, focus: 16, knowledge: 24 } as c
 const stateKeyOf = (operation: StateOperation) => operation.stateKey
 const threadKeyOf = (operation: ThreadOperation) => operation.threadKey
 const threadFocusKeyOf = (focus: ThreadFocus) => focus.threadKey
-const knowledgeKeyOf = (operation: KnowledgeOperation) => `${operation.characterId}\u0000${operation.knowledgeKey}`
+const knowledgeKeyOf = (operation: KnowledgeOperation) => scopedContinuityIdentity(operation.knowledgeKey, operation.characterId)
 
 /**
  * Sentence citations are the stable part of a retry when a small model drops or
@@ -608,7 +623,7 @@ function resolveIdentity<T>(
         : `A ${lane} ${operation.action} operation must name the existing key; no unambiguous retry or live-registry match was found.`,
     }
   }
-  if (allowDerived || options.live.has(scopedIdentity(key, scope))) return { ok: true, key }
+  if (allowDerived || options.live.has(scopedContinuityIdentity(key, scope))) return { ok: true, key }
 
   const listed = inScope(registry, scope)
     .slice(0, MAX_STEERED_REGISTRY_KEYS)
@@ -622,19 +637,10 @@ function resolveIdentity<T>(
   }
 }
 
-/**
- * Knowledge keys belong to one character, so the live set is keyed per knower.
- * `::` rather than the usual escaped NUL: a normalized key is `[a-z0-9_]` only,
- * so this cannot collide, and it stays readable in a log and a diff.
- */
-function scopedIdentity(key: string, scope?: string): string {
-  return scope ? `${scope}::${key}` : key
-}
-
 /** Identities a non-create action may address, before this pass adds its own. */
 function liveIdentitySet(entries: RegistryEntry[], created: Iterable<string>): Set<string> {
   return new Set([
-    ...entries.map((entry) => scopedIdentity(entry.key, entry.scope)),
+    ...entries.map((entry) => scopedContinuityIdentity(entry.key, entry.scope)),
     ...created,
   ])
 }
@@ -706,8 +712,10 @@ function normalizeContinuityProjection(
     (previous?.threadOperations ?? []).filter((op) => op.action === 'open').map((op) => op.threadKey),
   )
   const threadOperations: ThreadOperation[] = []
-  const threadKeysByInputIndex: Array<string | undefined> = []
-  for (const [inputIndex, operation] of input.threadOperations.entries()) {
+  // Assembled as the operations resolve, so the fold still receives one whole
+  // snapshot without the model having to state each thread's focus twice.
+  const threadFocus: ThreadFocus[] = []
+  for (const { visibility, ...operation } of input.threadOperations) {
     const allowDerived = operation.action === 'open'
     const identity = resolveIdentity(operation, operation.label || operation.note, {
       lane: 'thread',
@@ -731,20 +739,24 @@ function normalizeContinuityProjection(
       skipped.push({ kind: 'thread', key: threadKey, reason: problem })
       continue
     }
-    threadKeysByInputIndex[inputIndex] = threadKey
     threadOperations.push({
       ...operation,
       ...resolved,
       threadKey,
       relatedFragmentIds: uniqueStrings(operation.relatedFragmentIds, 20),
     })
+    // Acting on a thread puts it in view; a resolved or abandoned one is gone
+    // and cannot be.
+    if (operation.action === 'open' || operation.action === 'advance') {
+      threadFocus.push({ threadKey, visibility: visibility ?? 'foreground' })
+    }
   }
 
   const liveKnowledge = liveIdentitySet(
     registry.knowledge,
     (previous?.knowledgeOperations ?? [])
       .filter((op) => op.action === 'learn')
-      .map((op) => scopedIdentity(op.knowledgeKey, op.characterId)),
+      .map((op) => scopedContinuityIdentity(op.knowledgeKey, op.characterId)),
   )
   const knowledgeOperations: KnowledgeOperation[] = []
   for (const operation of input.knowledgeOperations) {
@@ -765,7 +777,7 @@ function normalizeContinuityProjection(
       continue
     }
     const knowledgeKey = identity.key
-    if (allowDerived) liveKnowledge.add(scopedIdentity(knowledgeKey, operation.characterId))
+    if (allowDerived) liveKnowledge.add(scopedContinuityIdentity(knowledgeKey, operation.characterId))
     const label = `${operation.characterId}:${knowledgeKey}`
     const resolved = citedEvidence(segments, operation.evidenceSegments)
     const problem = citationProblem(resolved)
@@ -780,20 +792,18 @@ function normalizeContinuityProjection(
     knowledgeOperations.push({ ...operation, ...resolved, knowledgeKey })
   }
 
-  const threadFocus: ThreadFocus[] = []
-  const positionallyAlignedFocus = input.threadFocus.length === input.threadOperations.length
-  for (const [inputIndex, focus] of input.threadFocus.entries()) {
-    const explicitKey = normalizeContinuityKey(focus.threadKey ?? '')
-    const threadKey = explicitKey || (positionallyAlignedFocus ? threadKeysByInputIndex[inputIndex] : undefined)
+  for (const focus of input.threadFocus) {
+    const threadKey = registryKeyAtIndex(registry.thread, focus.entry)
+      || normalizeContinuityKey(focus.threadKey ?? '')
     if (!threadKey) {
       skipped.push({
         kind: 'thread-focus',
         key: '',
-        reason: 'A thread focus entry must name its thread key or align with a successfully recorded thread operation.',
+        reason: 'A thread focus entry must cite a Continuity Registry entry number or name its thread key.',
       })
       continue
     }
-    threadFocus.push({ ...focus, threadKey })
+    threadFocus.push({ threadKey, visibility: focus.visibility })
   }
 
   return {

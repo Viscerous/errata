@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { normalizeContinuityKey } from '@/lib/continuity-keys'
+import { normalizeContinuityKey, scopedContinuityIdentity } from '@/lib/continuity-keys'
 
 describe('continuity key normalization', () => {
   // Every key below is verbatim from the Timeline 9 dev run, where seven
@@ -39,5 +39,32 @@ describe('continuity key normalization', () => {
     expect(normalizeContinuityKey('|||')).toBe('')
     expect(normalizeContinuityKey('   ')).toBe('')
     expect(normalizeContinuityKey('  ch-abcdef|  ')).toBe('')
+  })
+})
+
+/**
+ * The identity was spelled three ways — the merge key, the live-membership set,
+ * and the fold — before one helper owned it. All three partitioned alike, so a
+ * drift would not have failed anything; these pin the partition itself.
+ */
+describe('scopedContinuityIdentity', () => {
+  it('keeps one knowledge key distinct per character', () => {
+    expect(scopedContinuityIdentity('board_status', 'ch-0001'))
+      .not.toBe(scopedContinuityIdentity('board_status', 'ch-0002'))
+  })
+
+  it('collapses spellings of one key within a character', () => {
+    expect(scopedContinuityIdentity('Board-Status', 'ch-0001'))
+      .toBe(scopedContinuityIdentity('board status', 'ch-0001'))
+  })
+
+  it('leaves an unscoped lane keyed on the key alone', () => {
+    expect(scopedContinuityIdentity('board_status')).toBe('board_status')
+  })
+
+  it('cannot collide through the separator, since a normalized key has none', () => {
+    // 'a::b' normalizes to 'a_b', so no key can forge a scope boundary.
+    expect(scopedContinuityIdentity('a::b')).toBe('a_b')
+    expect(scopedContinuityIdentity('b', 'a')).toBe('a::b')
   })
 })

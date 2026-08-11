@@ -1526,7 +1526,7 @@ describe('continuity keys steered by the live registry', () => {
     expect(collector.continuityProjection.stateOperations[0].stateKey).toBe('eastern_dike')
   })
 
-  it('reuses a unique live identity by its human label and aligns keyless focus by position', async () => {
+  it('reuses a unique live identity by its human label and takes focus from the operation', async () => {
     const collector = createEmptyCollector()
     const prose = mockFragment({
       id: 'pr-0001',
@@ -1557,10 +1557,10 @@ describe('continuity keys steered by the live registry', () => {
         stateOperations: [{
           action: 'set', subject: 'Medicine track clinical board', value: 'active', evidenceSegments: [1],
         }],
+        // No threadFocus entry: advancing the thread is what puts it in view.
         threadOperations: [{
           action: 'advance', label: 'Dutch coordination framework negotiation', relatedFragmentIds: [], evidenceSegments: [2],
         }],
-        threadFocus: [{ visibility: 'foreground' }],
         knowledgeOperations: [{
           characterId: 'ch-0001', action: 'correct', fact: 'The board remained active.', evidenceSegments: [3],
         }],
@@ -1641,8 +1641,77 @@ describe('continuity keys steered by the live registry', () => {
         'A state clear operation must name the existing key; no unambiguous retry or live-registry match was found.',
         'A thread resolve operation must name the existing key; no unambiguous retry or live-registry match was found.',
         'A knowledge forget operation must name the existing key; no unambiguous retry or live-registry match was found.',
-        'A thread focus entry must name its thread key or align with a successfully recorded thread operation.',
+        'A thread focus entry must cite a Continuity Registry entry number or name its thread key.',
       ])
+  })
+
+  it('derives thread focus from the operations and reserves the array for untouched threads', async () => {
+    const collector = createEmptyCollector()
+    const prose = mockFragment({
+      id: 'pr-0001',
+      type: 'prose',
+      content: 'The gap closed. The question of the ledger reopened. The old vow was kept at last.',
+    })
+    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => id === 'pr-0001' ? prose : null)
+    const continuityKeys = {
+      thread: [
+        { index: 1, key: 'ledger_question', label: 'Who keeps the ledger' },
+        { index: 2, key: 'old_vow', label: 'The old vow' },
+        { index: 3, key: 'missing_heir', label: 'Where the heir went' },
+      ],
+    }
+    const tools = createAnalysisTools(collector, {
+      dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001', continuityKeys,
+    })
+
+    const result = await tools.reportAnalysis.execute!(
+      await buildReportAnalysisInputSchema(continuityKeys).parseAsync({
+        summary: 'The ledger question reopened and the vow was kept.',
+        threadOperations: [
+          { entry: 1, action: 'advance', relatedFragmentIds: [], evidenceSegments: [2] },
+          { entry: 2, action: 'resolve', relatedFragmentIds: [], evidenceSegments: [3] },
+        ],
+        // Only the thread this passage never touched needs stating.
+        threadFocus: [{ entry: 3, visibility: 'background' }],
+      }),
+      { toolCallId: 'report', messages: [], abortSignal: undefined as unknown as AbortSignal },
+    )
+
+    expect(result).not.toHaveProperty('skippedContinuity')
+    expect(collector.continuityProjection.threadFocus).toEqual([
+      // Advanced, so in view by default and never restated by the model.
+      { threadKey: 'ledger_question', visibility: 'foreground' },
+      // Untouched, so pointed at by its registry entry.
+      { threadKey: 'missing_heir', visibility: 'background' },
+    ])
+    // A resolved thread is gone; it cannot also be in view.
+    expect(collector.continuityProjection.threadFocus.map((f) => f.threadKey)).not.toContain('old_vow')
+  })
+
+  it('honours an explicit visibility on the operation itself', async () => {
+    const collector = createEmptyCollector()
+    const prose = mockFragment({ id: 'pr-0001', type: 'prose', content: 'A rumour surfaced and was set aside.' })
+    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => id === 'pr-0001' ? prose : null)
+    const tools = createAnalysisTools(collector, {
+      dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001',
+    })
+
+    await tools.reportAnalysis.execute!(await reportAnalysisInputSchema.parseAsync({
+      summary: 'A rumour surfaced.',
+      threadOperations: [{
+        action: 'open',
+        label: 'What the rumour meant',
+        visibility: 'background',
+        relatedFragmentIds: [],
+        evidenceSegments: [1],
+      }],
+    }), { toolCallId: 'report', messages: [], abortSignal: undefined as unknown as AbortSignal })
+
+    expect(collector.continuityProjection.threadFocus).toEqual([
+      { threadKey: expect.stringContaining('rumour'), visibility: 'background' },
+    ])
+    // Visibility belongs to the snapshot, not to the stored operation.
+    expect(collector.continuityProjection.threadOperations[0]).not.toHaveProperty('visibility')
   })
 
   /**
