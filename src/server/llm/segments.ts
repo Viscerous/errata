@@ -1,12 +1,12 @@
 /**
  * Stable sentence addressing for text the model must cite.
  *
- * The Librarian contracts used to ask the model to retype an excerpt of the
- * passage it had just been shown, and a fuzzy matcher then absorbed the
- * transcription errors. Numbering the text instead lets the model *point*: a
- * segment index is verifiable by construction, costs one integer instead of a
- * few hundred output characters, and turns "could not quote it" into "cited the
- * wrong sentence" — a reviewable judgement rather than a mechanical retry.
+ * Asking a model to retype an excerpt of the passage it was just shown needs a
+ * fuzzy matcher behind it to absorb the transcription errors. Numbering the text
+ * instead lets the model *point*: a segment index is verifiable by construction,
+ * costs one integer instead of a few hundred output characters, and turns "could
+ * not quote it" into "cited the wrong sentence" — a reviewable judgement rather
+ * than a mechanical retry.
  *
  * Offsets are exact, so `source.slice(start, end) === text` always holds and a
  * cited segment resolves to byte-identical source text.
@@ -152,9 +152,8 @@ const SEGMENT_MARKER_RE = /^\s*\[\d+\]\s*/
  * The inverse of the marker `numberSentences` adds, for text a model writes back.
  * Numbering a record so it can be addressed by sentence teaches the model that a
  * sentence looks like `[16] He is waiting.`, so it writes the replacement the
- * same way: Timeline 12 sent `[16] He is deceased...` and nothing removed the
- * marker, which both inflated the length check and would have written `[16] `
- * verbatim into the record had the check passed.
+ * same way, marker included. Left in place that marker both inflates the length
+ * check and writes `[16] ` verbatim into the record.
  *
  * Stripping it here keeps the presentation format from leaking into stored
  * content no matter which surface echoes it back, and it lives beside the

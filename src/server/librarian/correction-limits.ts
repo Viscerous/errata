@@ -14,23 +14,18 @@ export const MIN_CORRECTION_ANCHOR_CHARS = 3
  * one sentence, so the replacement is one sentence as well. Sentence count is
  * the structural half of "correct the assertion, do not restate the scene": a
  * paragraph recap stops being expressible rather than being caught by its size.
- * Timeline 9's worst case — a 79-character assertion replaced by 298 characters
- * of scene summary — is two sentences around a paragraph break, so shape alone
- * rejects it.
+ * A scene summary runs to several sentences around a paragraph break, so shape
+ * alone rejects it.
  *
  * Size still matters, because a recap can be comma-spliced into one sentence,
- * and there it is measured against the assertion being replaced. What changed is
- * the floor. It used to grant a flat 80 extra characters, which is not enough
- * room to make a terse assertion specific: Timeline 12 could not correct
- * `He is waiting.` (14 characters) to say the character had been killed, because
- * the allowance derived from those fourteen characters was 94. The floor is now
- * an absolute allowance for one ordinary sentence, which is what the rule always
- * meant by "so short assertions remain correctable" — a terse assertion has room
- * for a full sentence no matter how terse it was, while a long one stays bounded
- * proportionally.
- *
- * Observed one-sentence corrections: 114 and 153 characters legitimate; 236 a
- * single-sentence recap that must not pass.
+ * and there it is measured against the assertion being replaced. The floor is an
+ * absolute allowance for one ordinary sentence rather than a small margin over
+ * the old text, because a proportional allowance off a terse assertion
+ * (`He is waiting.`) leaves no room to make it specific. That is what the rule
+ * always meant by "so short assertions remain correctable" — a terse assertion
+ * has room for a full sentence no matter how terse it was, while a long one
+ * stays bounded proportionally. The floor admits an ordinary corrective sentence
+ * and still rejects a recap spliced into one.
  */
 export const MAX_CORRECTION_GROWTH_RATIO = 1.5
 export const MIN_CORRECTION_SENTENCE_CHARS = 180

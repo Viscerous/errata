@@ -4,8 +4,8 @@
  * The analysis tools decline work by *returning* `{ ok: false, skipped: [...] }`
  * rather than throwing, and they keep partial results by returning `ok: true`
  * alongside a list of what they had to drop. Any reader that treats a returned
- * value as success reports a refusal as a success — which is how a limit that
- * blocked its own paradigm case survived a kill test.
+ * value as success reports a refusal as a success, which is how a limit that
+ * blocks its own paradigm case goes unnoticed.
  *
  * The trace panel and the stored-analysis audit both read outcomes through
  * here, so a run cannot look clean in one and lossy in the other.

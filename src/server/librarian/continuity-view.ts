@@ -230,8 +230,8 @@ export async function buildContinuityView(params: {
     temporalFrame = projection.temporalFrame
     // A thread omitted from a snapshot is dormant; an analysis that supplied no
     // snapshot at all asserted nothing about focus, so the last real one stands.
-    // Conflating the two let any analysis reporting no focus — 8 of 23 on
-    // Timeline 10 — silently empty the Writer's unresolved-continuity section.
+    // Conflating the two lets any analysis that reported no focus silently
+    // empty the Writer's unresolved-continuity section.
     if (projection.threadFocus.length > 0) {
       latestThreadFocus = new Map(
         projection.threadFocus.map((focus) => [normalizeContinuityKey(focus.threadKey), focus.visibility]),

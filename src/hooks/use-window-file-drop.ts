@@ -10,14 +10,13 @@ import {
  * dropped files.
  *
  * Overlay visibility is driven by `dragover` as a keepalive rather than a
- * dragenter/dragleave counter. The counter approach wedges the overlay open
- * whenever the balancing `dragleave` is missed — which happens when a file drag
- * is cancelled over the window (Esc, or dropped outside it) or when the platform
- * omits `Files` from `dataTransfer.types` on the exit event (seen under
- * Electron/Chromium). `dragover` fires continuously while a drag is live and
- * stops the instant it ends by ANY means, so a short watchdog reliably clears
- * the overlay. A null-`relatedTarget` `dragleave` (the pointer left the window)
- * hides it immediately for the common case, so the watchdog is only ever a
+ * dragenter/dragleave counter, which wedges the overlay open whenever the
+ * balancing `dragleave` is missed — a drag cancelled over the window (Esc, or
+ * dropped outside it), or a platform that omits `Files` from
+ * `dataTransfer.types` on the exit event, as Electron/Chromium does. `dragover`
+ * fires continuously while a drag is live and stops the instant it ends by any
+ * means, so a short watchdog reliably clears the overlay. A null-`relatedTarget`
+ * `dragleave` hides it immediately in the common case, leaving the watchdog as a
  * safety net for the cancel-in-place path.
  */
 export function useWindowFileDrop(

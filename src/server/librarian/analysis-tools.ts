@@ -162,10 +162,10 @@ const MAX_TIMELINE_EVENTS = 12
 
 /**
  * Analyze is given the prose chain and the rolling summary in its context, so
- * these two would offer it a second copy of what it is already looking at.
- * Neither was called once across 25 recorded runs, and an unused tool is still
- * schema the model reads past. listFragmentTypes stays: proposeNewRecords takes
- * a free-string `type` and this is where the valid ones are named.
+ * these two would only offer a second copy of what it is already looking at.
+ * They go unused, and an unused tool is still schema the model reads past.
+ * listFragmentTypes stays: proposeNewRecords takes a free-string `type` and this
+ * is where the valid ones are named.
  */
 const READ_TOOLS_ALREADY_IN_ANALYZE_CONTEXT = ['readProseChain', 'readStorySummary']
 
@@ -176,10 +176,10 @@ function summaryFromEvents(events: string[]): string {
 
 /**
  * Where a passage sits relative to the narrative present is a property of the
- * passage, not of each event in it, so the frame positions them all. The
- * per-event field this replaces was filled 26% of the time and restated a frame
- * filled 97% of the time — and where the two disagreed, every case was the model
- * reading `during` as "during another event here" rather than the frame's sense.
+ * passage, not of each event in it, so the frame positions them all. A per-event
+ * field mostly sat empty and otherwise restated the frame, and where the two
+ * disagreed it was the model reading `during` as "during another event here"
+ * rather than in the frame's sense.
  */
 export function timelineEventsFor(
   events: string[],
@@ -213,17 +213,16 @@ const coercedStringArray = z.array(coercedStringItem).max(200).default([])
 /**
  * Evidence is a citation, not a quotation. The passage is presented with
  * numbered sentences, so pointing at them is exact by construction and costs
- * one integer rather than a few hundred output characters. Timeline 9 lost four
- * of fourteen proposal calls to unquotable evidence; there is nothing to
- * mis-transcribe here.
+ * one integer rather than a few hundred output characters. Quoted evidence lost
+ * whole proposal calls whenever the model could not reproduce the span exactly;
+ * there is nothing to mis-transcribe here.
  */
 /**
  * How many cited sentences are kept. Brevity is a preference, not an invariant:
  * over-citing costs a longer stored evidence string and nothing else, so the
  * bound is applied when the citation is resolved rather than made a condition of
- * accepting the call. As a schema `.max()` it rejected the whole payload —
- * Timeline 10 lost a full reportAnalysis and proposeDirections round trip
- * because one knowledge operation cited nine sentences instead of eight.
+ * accepting the call. As a schema `.max()` it rejected the whole payload, losing
+ * an entire report round trip because one operation cited one sentence too many.
  */
 export const MAX_CITED_SEGMENTS = 8
 
@@ -286,14 +285,14 @@ const EMPTY_REGISTRY: ContinuityRegistry = { state: [], thread: [], knowledge: [
 /**
  * A continuity key is only an identity if two observations of the same thing
  * land on the same key. Asking for a free string and describing the rule did not
- * achieve that on its own: Timeline 9 produced seven knowledge keys for seven
- * facts, five carrying an invented fragment-id prefix.
+ * achieve that on its own: a model asked for a free key opens a fresh one per
+ * fact, many carrying an invented fragment-id prefix.
  *
  * Reuse is steered by naming the live keys at the point of use and by
  * canonicalizing whatever arrives, not by a closed enum. Splitting the field
  * into existingKey/newKey did enforce the choice, but enforcing it cost the
- * whole batched report whenever the model chose wrong — 11 of Timeline 11's 14
- * rejections, because a 12B cannot reliably pick between two sibling optional
+ * whole batched report whenever the model chose wrong, and that was most of the
+ * rejections — a small model cannot reliably pick between two sibling optional
  * fields. Normalization already collapses the spellings the enum was there to
  * collapse, so the enum was buying compliance the fold delivers anyway.
  */
@@ -311,8 +310,8 @@ const MAX_DERIVED_KEY_CHARS = 64
 function registryAddressFields(entryDescription: string, keyDescription: string) {
   return {
     // Pointing beats spelling for the same reason it does with sentences: the
-    // number is verifiable, and half of Timeline 13's non-create operations
-    // invented a plausible key that matched nothing.
+    // number is verifiable, where a spelled key is readily invented and matches
+    // nothing.
     entry: z.number().int().positive().nullish().describe(entryDescription),
     key: z.string().trim().max(MAX_CONTINUITY_KEY_CHARS).nullish().describe(keyDescription),
   }
@@ -366,12 +365,12 @@ function threadOperationSchemaFor(registry: ContinuityRegistry) {
 /**
  * Focus for threads this passage did *not* operate on.
  *
- * It used to cover every live thread, which meant restating each operation a
- * second time — 19 of 29 recorded focus arrays were exactly that mirror — and
- * an "omit the key when the arrays align one-for-one" rule to make the
- * restatement bearable. Five entries were lost to that rule when the alignment
- * silently did not hold. An untouched thread is by definition already in the
- * registry, so it is addressed the same way every other continuity identity is.
+ * It used to cover every live thread, so most focus arrays were just the
+ * operation list restated a second time, and an "omit the key when the arrays
+ * align one-for-one" rule existed to make that restatement bearable — which
+ * silently dropped entries whenever the alignment did not actually hold. An
+ * untouched thread is by definition already in the registry, so it is addressed
+ * the same way every other continuity identity is.
  */
 const threadFocusSchema = z.object({
   ...registryAddressFields(
@@ -462,7 +461,7 @@ function citedEvidence(
   const resolved = resolveSegments(segments, cited.slice(0, MAX_CITED_SEGMENTS))
   // `evidence` is the storable half and `invalid` the verdict on it. Returned
   // flat, every lane spread the whole thing into its record and carried the
-  // verdict into the projection — 98 stored operations hold an `invalid: []`
+  // verdict into the projection, leaving stored operations with an `invalid: []`
   // that no type declares and nothing reads.
   return {
     evidence: { evidenceSegments: resolved.indexes, evidenceText: resolved.text },
@@ -510,9 +509,9 @@ function citationProblem(
 /**
  * Dropped work explains itself on the entry, never only in a sibling note
  * beside the list: the trace panel and the model both read entries. Mentions
- * once carried their explanation in a `skippedMentionNote` alone, so seven
- * losses in one run rendered as blank rows the moment the panel learned to
- * report refusals at all.
+ * once carried their explanation in a `skippedMentionNote` alone, so dropped
+ * mentions rendered as blank rows the moment the panel learned to report
+ * refusals at all.
  */
 type Skipped<T> = T & { reason: string }
 
@@ -597,10 +596,9 @@ function uniquelyMatchingRegistryKey(
  * to derive one. An action that cannot — clear, advance, resolve, abandon,
  * correct, forget — can only mean something against an identity that already
  * exists, and until now nothing checked that it did: any spelling was accepted,
- * stored, and matched nothing at fold time. Half of Timeline 13's non-create
- * operations named a plausible key that was never created anywhere. Reporting
- * one back costs a single operation; letting it through costs the continuity it
- * was meant to record.
+ * stored, and matched nothing at fold time, which is exactly how a plausible
+ * invented key gets through. Reporting one back costs a single operation;
+ * letting it through costs the continuity it was meant to record.
  *
  * `live` carries the registry plus whatever this analysis has already created,
  * and the caller adds to it as identities appear, so a retried report can still
@@ -904,8 +902,8 @@ function superseded<T>(
  * Fold a re-reported projection onto the one already collected. `reportAnalysis`
  * is retried — after a rejected proposal lane, a bad citation, or a model simply
  * calling it again — and the second call is rarely a superset of the first, so
- * plain assignment made every retry a truncation: one passage reported two valid
- * thread operations and then seven empty sets, and only the empty set survived.
+ * plain assignment makes every retry a truncation: valid operations from the
+ * first call are replaced by the empty sets a later one did not restate.
  *
  * The new call has full authority over the keys it names and none over the keys
  * it does not — the discipline `hasSummarySignal` already applies to the summary,
@@ -953,12 +951,12 @@ const proposalEvidenceSchema = z.array(z.number().int().positive()).default([])
  * A correction names the sentence it replaces rather than reproducing it.
  *
  * The old shape asked for `oldText`/`newText`/`occurrence` — string surgery
- * against a record the model had only read. Timeline 9 shows what that bought:
- * one call failed outright on `oldText was not found`, and every call that
- * succeeded submitted a whole copied paragraph, so the "smallest correction"
- * rule had to be reconstructed server-side and still let two episode recaps
- * through. Addressing a sentence makes the scope structural — a paragraph
- * recap is not expressible — and removes the transcription step entirely.
+ * against a record the model had only read. Calls failed outright on `oldText
+ * was not found`, and those that succeeded submitted a whole copied paragraph,
+ * so the "smallest correction" rule had to be reconstructed server-side and
+ * still let scene recaps through. Addressing a sentence makes the scope
+ * structural — a paragraph recap is not expressible — and removes the
+ * transcription step entirely.
  */
 const correctionProposalItemSchema = z.object({
   fragmentId: z.string().min(1).describe('Target fragment ID.'),
@@ -1000,8 +998,8 @@ export const librarianNewRecordsInputSchema = z.object({
  * A bare tool name is accepted because it is the shape models reach for first,
  * and for a lane that was never called it is complete information — the gate
  * does not require those to be declared at all. Demanding {toolName, reason}
- * for them cost Timeline 10 a retry on five of twenty-three analyses and told
- * the gate nothing it went on to use.
+ * for them spent a retry on the bare form models send anyway, and told the gate
+ * nothing it went on to use.
  */
 export const librarianFinishAnalysisInputSchema = z.object({
   // No `completed` list. The gate already knows which calls succeeded — it
@@ -1238,12 +1236,12 @@ export function createAnalysisTools(
         threadFocus = [],
         knowledgeOperations = [],
       }) => {
-        // An empty report still must not be a *schema* rejection — that makes
-        // small models loop on resubmitting the whole payload. It is reported
-        // as an unsuccessful call with a nudge, which finishAnalysis then reads
-        // consistently. Returning ok:true here while withholding the success
-        // marker told the model its call had succeeded and then, at finish,
-        // that it had falsely claimed the very same call.
+        // An empty report must not be a *schema* rejection — that makes small
+        // models loop on resubmitting the whole payload. It is an unsuccessful
+        // call with a nudge, which finishAnalysis then reads consistently.
+        // Returning ok:true while withholding the success marker would tell the
+        // model its call succeeded and then, at finish, that it had falsely
+        // claimed that same call.
         const signalCount =
           Number(summary.trim().length > 0) +
           events.length +
@@ -1370,11 +1368,10 @@ export function createAnalysisTools(
 
         // Mentions become resolved context for the next writer turn; durable
         // candidates additionally constrain continuity and record maintenance.
-        // Both deltas are handed back here rather than demanded through
-        // readFragments: this call already loaded every referenced fragment to
-        // validate its ID, so requiring the model to fetch what the process is
-        // holding bought nothing but round trips. Directions cannot outrank
-        // context they did not see because the context arrives with the result.
+        // Both deltas come back here rather than through readFragments: this
+        // call already loaded every referenced fragment to validate its ID, so
+        // making the model fetch what the process is holding buys only round
+        // trips.
         const resolvedFragments = deliverResolvedFragments(
           checkedFragments,
           [...anchoredMentions.map((mention) => mention.fragmentId), ...candidateFragmentIds],
@@ -1555,10 +1552,10 @@ export function createAnalysisTools(
 
     /**
      * Queue everything eligible and report the rest, rather than failing the
-     * batch on its worst member. Timeline 13 sent three corrections to one
-     * record and lost two sound ones because the third replaced a sentence with
-     * itself; the model read `queuedOperationCount: 0` as a refusal and moved
-     * on. This is how evidence already behaves here — a citation survives a
+     * batch on its worst member. All-or-nothing loses the sound operations in a
+     * batch to one unusable sibling, and the model reads the resulting
+     * `queuedOperationCount: 0` as a refusal and moves on rather than retrying.
+     * This is how evidence already behaves here — a citation survives a
      * failed call so that a retry costs less than a redo.
      */
     const queueValidatedProposal = async (params: {
@@ -1707,8 +1704,8 @@ export function createAnalysisTools(
             // Continuity memory names its keys the way the catalog names
             // records, so aiming a correction at one is a category error the
             // framework invited rather than a misread instruction. Saying only
-            // that the target could not be read sent Timeline 10 into a whole
-            // extra report round trip to work the distinction out unaided.
+            // that the target could not be read costs a whole extra report round
+            // trip while the model works the distinction out unaided.
             const asContinuityKey = continuityKeyOwners.get(normalizeContinuityKey(correction.fragmentId))
             unresolved.push({
               operationId: '',
@@ -1733,12 +1730,11 @@ export function createAnalysisTools(
           const segment = segments.find((candidate) => candidate.index === correction.segment)
           // A single-sentence field is still correctable. Replacing the whole of
           // one is a rewrite rather than a localized edit, so it is held back
-          // from *unattended* application in `unattendedProposalError` — which
+          // from *unattended* application in `unattendedProposalError`, which
           // re-checks against the record as it stands at apply time. Refusing it
-          // here instead destroyed the proposal outright, and descriptions are
-          // both capped at 250 characters and the field the catalog shows, so
-          // the most load-bearing surface in the story was the one correction
-          // could never reach.
+          // outright here instead would put descriptions — capped at 250
+          // characters, usually one sentence, and the field the catalog shows —
+          // beyond correction entirely.
           if (!segment) {
             unresolved.push({
               operationId: '',
@@ -1763,14 +1759,11 @@ export function createAnalysisTools(
           })
         }
 
-        // One event is one proposal, so a record's edits stay together. How
-        // many writes they take is the engine's problem: `set_fields` carries a
-        // base hash and the shared validator will not let it share a fragment
-        // with localized edits, so when any field of a record is replaced
-        // outright, every edit to that record composes into one `set_fields`.
-        // Descriptions are capped at 250 characters and are usually a single
-        // sentence, which is why this path exists at all — without it the field
-        // the catalog shows could never be corrected.
+        // One event is one proposal, so a record's edits stay together. How many
+        // writes they take is the engine's problem: `set_fields` carries a base
+        // hash and the shared validator will not let it share a fragment with
+        // localized edits, so when any field of a record is replaced outright,
+        // every edit to that record composes into one `set_fields`.
         const byFragment = new Map<string, typeof resolved>()
         for (const item of resolved) {
           byFragment.set(item.fragmentId, [...(byFragment.get(item.fragmentId) ?? []), item])
@@ -1892,12 +1885,12 @@ export function createAnalysisTools(
         const missingRequired: string[] = []
         if (tools.reportAnalysis && !successfulToolNames.has('reportAnalysis')) missingRequired.push('reportAnalysis')
         // Record maintenance is optional, so a lane that was never called needs
-        // no declaration. Timeline 9 spent an extra finish round trip on six of
-        // sixteen analyses purely because a successful correction was not
-        // accompanied by a skip note for the discovery lane. Only a lane left
-        // with work outstanding must be retried or explicitly abandoned, and
-        // there the reason is load-bearing: it is the only record of why a
-        // known-wrong proposal was dropped rather than fixed.
+        // no declaration. Requiring one anyway spends an extra finish round trip
+        // whenever a successful correction is not accompanied by a skip note for
+        // the untouched discovery lane. Only a lane left with work outstanding
+        // must be retried or explicitly abandoned, and there the reason is
+        // load-bearing: it is the only record of why a known-wrong proposal was
+        // dropped rather than fixed.
         const unexplained: string[] = []
         for (const proposalToolName of ['proposeRecordCorrections', 'proposeNewRecords']) {
           if (!tools[proposalToolName] || !unfinishedProposalToolNames.has(proposalToolName)) continue

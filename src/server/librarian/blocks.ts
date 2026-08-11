@@ -67,9 +67,9 @@ function continuityBlock(
 
 /**
  * A full sheet whose body is sentence-numbered, so `proposeRecordCorrections`
- * can name the assertion it is replacing. Timeline 9's corrections all failed
- * to stay local because the model was asked to reproduce the target text; here
- * the target is addressable, and the server resolves the exact span.
+ * can name the assertion it is replacing. Asking the model to reproduce the
+ * target text instead is what stops a correction staying local; here the target
+ * is addressable, and the server resolves the exact span.
  */
 function renderNumberedFragmentSheet(fragment: Fragment): string {
   return markdownSection(3, fragmentSummaryLine(fragment), numberSentences(fragment.content))
@@ -102,11 +102,10 @@ export function buildAnalyzeSystemPrompt(opts?: {
   const canFinish = hasTool('finishAnalysis')
   const actions: string[] = []
 
-  // Its own step, deliberately. Buried mid-paragraph in the reportAnalysis step
-  // this instruction changed nothing for Qwen3.6 — it named only the record the
-  // passage already mentioned. It also comes *before* reporting rather than
-  // after, so the one batched call carries the ripple IDs instead of needing a
-  // second round trip to add them.
+  // Its own step, deliberately: buried mid-paragraph in the reportAnalysis step
+  // this instruction gets ignored and only the record the passage already names
+  // comes back. It also comes *before* reporting, so the one batched call
+  // carries the ripple IDs instead of needing a second round trip to add them.
   if (canReport) {
     actions.push('work out which existing records this passage has made inaccurate, before you report anything. Your context lists every record as `id | name | desc`. A death, departure, or reversal invalidates records the prose never names: when someone dies, the record of the person who worked under them still says they report to them, and the record of the thing they looked after still says they look after it. Read the descriptions for those ties and collect the IDs — you will pass them as candidateFragmentIds in the next step and their full text comes back numbered for correction.')
   }

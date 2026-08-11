@@ -489,9 +489,8 @@ export function createPrewriterBlocks(_ctx: AgentBlockContext): ContextBlock[] {
       source: 'builtin',
     },
     // The planner decides what the passage does, so it needs current state as a
-    // block it owns. It previously only saw continuity flattened inside
-    // full-context, which meant the preview showed a placeholder and the block
-    // editor could not reach it.
+    // block it owns. Flattened inside full-context instead, continuity is
+    // unreachable from the block editor and shows only a placeholder in preview.
     ...(planningContinuity ? [{
       id: 'continuity-observations',
       role: 'user' as const,

@@ -293,9 +293,9 @@ async function runOnlineAnalyzePass(
       abortSignal,
       idleTimeoutMs,
     })
-    // Attribute the work to the model that answered, not the one configured —
-    // behind a local endpoint those differ silently, and every analysis in a
-    // whole Qwen branch recorded itself as the Gemma the config still named.
+    // Attribute the work to the model that answered, not the one configured:
+    // behind a local endpoint those differ silently, so the config's name would
+    // claim every analysis a swapped-in model actually did.
     const { modelId: servedModelId } = await resolveAndReportServedUsage(
       dataDir,
       storyId,

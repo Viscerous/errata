@@ -4,9 +4,8 @@ let runIdCounter = 0
 
 /**
  * The one run-id generator for every agent-execution path (`runner.ts`'s
- * recursive `invokeAgent`, `agent-run.ts`'s `beginAgentRun`). A counter beats
- * `Math.random()` for uniqueness within a process — both paths used to roll
- * their own, in two different formats.
+ * recursive `invokeAgent`, `agent-run.ts`'s `beginAgentRun`), so the formats
+ * cannot diverge. A counter beats `Math.random()` for uniqueness in-process.
  */
 export function makeAgentRunId(): string {
   return `ar-${Date.now().toString(36)}-${(++runIdCounter).toString(36)}`

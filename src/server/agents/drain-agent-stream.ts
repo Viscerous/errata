@@ -104,8 +104,8 @@ function guardedNext(
  * Drains an AI SDK v6 `fullStream`, translating each part into an
  * `AgentStreamEvent` and accumulating the text/reasoning/tool-calls/step-count/
  * finish-reason every agent needs — the one place that owns the fullStream ↔
- * AgentStreamEvent translation, so five call sites can't quietly drift from
- * each other on what a `tool-result` or `finish-step` means.
+ * AgentStreamEvent translation, so call sites cannot drift from each other on
+ * what a `tool-result` or `finish-step` means.
  *
  * Callers choose the sink via `onEvent`: enqueue to a `ReadableStream`
  * controller (HTTP streaming), push onto an activity trace, both at once, or

@@ -1375,9 +1375,9 @@ function StoredTraceViewer({ trace }: { trace: LibrarianAnalysis['trace'] }) {
  * Every analysis tool refuses work by *returning* `{ ok: false, skipped: [...] }`
  * rather than throwing, and reports partial losses by returning `ok: true`
  * alongside a `skipped*` list. A row that renders a green "completed" for any
- * result it received therefore reports a refusal as a success: Timeline 12 shows
- * `proposeRecordCorrections completed` on a call whose payload had rejected the
- * only correction in it, which made the whole surface untestable by eye.
+ * result it received therefore reports a refusal as a success — a
+ * `proposeRecordCorrections completed` row on a call whose payload rejected the
+ * only correction in it — which makes the surface untestable by eye.
  *
  * The row states what the payload says about itself, so no tool has to remember
  * to signal failure a second way for the author to see it.

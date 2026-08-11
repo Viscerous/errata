@@ -5,23 +5,11 @@ import { Spinner } from "@/components/ui/async-view"
 import { Caption } from "@/components/ui/prose-text"
 
 /**
- * Panel — the side-drawer scaffold.
+ * Panel — the side-drawer scaffold, composed shadcn-style from the parts below.
  *
  * Panels live inside a sheet/drawer/column that already scopes width and
- * background. The scaffold provides the vertical rhythm: a breathable
+ * background, so the scaffold only supplies the vertical rhythm: a breathable
  * serif-titled header, a scrolling body, an optional sticky footer.
- *
- * Compose with the standard shadcn pattern:
- *
- *   <Panel>
- *     <PanelHeader>
- *       <PanelTitle>…</PanelTitle>
- *       <PanelDescription>…</PanelDescription>
- *       <PanelActions>…</PanelActions>
- *     </PanelHeader>
- *     <PanelBody>…</PanelBody>
- *     <PanelFooter>…</PanelFooter>
- *   </Panel>
  */
 
 function Panel({

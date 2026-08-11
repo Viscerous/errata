@@ -7,10 +7,8 @@ import { z } from 'zod/v4'
  * (`fs`, `path`, `Buffer`) and no browser (`window`, `document`) globals. The
  * hub repo keeps its own copy of this file; do not turn it into a workspace.
  *
- * A pack distributes fragments + assets only. The manifest's `capabilities`
- * and `dependencies` exist for forward compatibility, but the MVP install path
- * refuses any pack that declares non-empty capabilities (see
- * `isManifestSafeForMvp`).
+ * `dependencies` exists for forward compatibility only. `capabilities` is live
+ * but closed: see {@link isManifestSafeForMvp} for which packs may declare what.
  */
 
 /** Global pack id, e.g. `@some-handle/cozy-fantasy-starter`. */
@@ -41,10 +39,9 @@ export const AGENT_CONFIG_INCLUDES = [
 export type AgentConfigInclude = (typeof AGENT_CONFIG_INCLUDES)[number]
 
 /**
- * Discovery summary for an `agent-config` pack. Lets a hub or installing client
- * render and filter the pack without reading the payload. `fragmentTypes` /
- * `fragmentCount` carry no meaning for this kind (both `[]` / `0`); this is the
- * shape that matters instead.
+ * Discovery summary for an `agent-config` pack, so a hub or installing client can
+ * render and filter it without reading the payload. `fragmentTypes` and
+ * `fragmentCount` are meaningless for this kind (`[]` / `0`); this stands in.
  */
 export const AgentConfigSummarySchema = z.object({
   /** Names whose block configs are bundled, e.g. `['context', 'librarian']`. */
@@ -102,8 +99,7 @@ export const ErratapackManifestSchema = z.object({
   nsfw: z.boolean().default(false),
   /**
    * Content rating shown on the pack page. `r18` implies `nsfw`; the boolean
-   * `nsfw` above is kept for back-compat. NOTE: the hub's own copy at
-   * `app/lib/erratapack/index.ts` must stay in sync (synced by a later task).
+   * `nsfw` above is kept for back-compat.
    */
   contentRating: z.enum(['general', 'mature', 'r18']).optional(),
   /** Long-form markdown "information" rendered on the pack page. */
@@ -113,10 +109,7 @@ export const ErratapackManifestSchema = z.object({
     .array(z.object({ title: z.string().max(200), order: z.int().optional() }))
     .max(2000)
     .optional(),
-  /**
-   * Summary for `agent-config` packs. Absent for fragment/story packs. Lets the
-   * hub render and filter the pack without reading the payload.
-   */
+  /** Summary for `agent-config` packs. Absent for fragment/story packs. */
   agentConfig: AgentConfigSummarySchema.optional(),
   /** Asset uri or external url for a cover/preview image. Optional. */
   thumbnail: z.string().optional(),
@@ -211,11 +204,9 @@ export function packPageUrl(hubUrl: string | null | undefined, id: string): stri
  * Manifest trust gate. "Safe" here means the format is understood, NOT that the
  * pack runs nothing — see {@link manifestRequiresConsent} for the executable side.
  *
- * Rules:
- *  - Fragment/story packs must declare NO capabilities (unchanged from the MVP).
- *  - Only `agent-config` packs may declare capabilities, and every one must be in
- *    {@link KNOWN_CAPABILITIES}. An unknown capability is refused as
- *    forward-incompatible.
+ * Fragment and story packs must declare no capabilities at all. Only an
+ * `agent-config` pack may declare them, and every one must be in
+ * {@link KNOWN_CAPABILITIES}; an unknown capability is forward-incompatible.
  */
 export function isManifestSafeForMvp(manifest: ErratapackManifest): boolean {
   if (manifest.capabilities.length === 0) return true

@@ -1,13 +1,12 @@
 /**
  * What the provider actually served, learned from responses.
  *
- * A configured model id is a request, not an observation. Against a local
+ * A configured model id is a request, not an observation: against a local
  * llama.cpp endpoint it is a label on a port, so swapping the GGUF behind it
- * changes the weights and nothing else: a whole Qwen branch recorded itself as
- * Gemma, and the roll-up cache — whose invariant is that its key identifies the
- * weights — would have gone on serving nodes derived by a model no longer
- * loaded. Responses carry the id the server used, so the first completed call
- * after a swap corrects subsequent attribution and cache selection.
+ * changes the weights and nothing else. Every call then misattributes itself,
+ * and the roll-up cache — whose invariant is that its key identifies the weights
+ * — goes on serving nodes derived by a model no longer loaded. Responses carry
+ * the id the server used, so the first completed call after a swap corrects both.
  *
  * In-memory by design: an observation older than the process has no claim on
  * what is loaded now.

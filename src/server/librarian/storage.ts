@@ -373,8 +373,8 @@ export async function deleteAnalysis(
  * The panel polls this list every five seconds, and the counts it needs are a
  * few integers off each analysis — but the analysis file also carries the whole
  * agent trace, which is most of its bulk. Re-reading and re-parsing all of it on
- * every poll cost 28ms across 5.3MB on a 36-analysis branch, growing linearly
- * with the story, for rows that had not changed.
+ * every poll costs megabytes of I/O and parsing per tick, growing linearly with
+ * the story, for rows that had not changed.
  *
  * Files are written atomically and never mutated in place, so size and mtime
  * settle the question of whether a parse can be skipped. `continuityStale` is

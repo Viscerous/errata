@@ -8,19 +8,9 @@ import { getAgentBlockConfig, saveAgentBlockConfig, type AgentBlockConfig } from
 import { ImportConfigsPayloadSchema } from '@/contracts/block-config'
 
 /**
- * Block-related routes that are NOT scoped to a specific agent.
- *
- * Historical note: this module used to host the legacy generation-wide
- * block config (`GET /blocks`, `PATCH /blocks/config`, `POST/PUT/DELETE
- * /blocks/custom`, `GET /blocks/preview`). Those endpoints were deleted
- * when per-agent block configuration via `/agent-blocks/:agentName` became
- * the single source of truth for generation-writer blocks. The routes
- * that remain here are shared utilities:
- *
- *   - POST /blocks/eval-script — used by the script-block editor to
- *     evaluate a snippet against the current context
- *   - GET  /export-configs    — bundles every agent's block config
- *   - POST /import-configs    — restores agent block configs from a bundle
+ * Shared block utilities — the block routes that are not scoped to one agent.
+ * Per-agent block configuration lives at `/agent-blocks/:agentName`, which is
+ * the single source of truth for generation-writer blocks.
  */
 export function blockRoutes(dataDir: string) {
   return new Elysia({ detail: { tags: ['Blocks'] } })

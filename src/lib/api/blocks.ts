@@ -2,14 +2,9 @@ import { apiFetch } from './client'
 import type { ExportedConfigs, ImportConfigsPayload } from './types'
 
 /**
- * Block-related endpoints that aren't scoped to a specific agent.
- * Per-agent block configuration lives in `agentBlocks` (see agent-blocks.ts).
- *
- * Historical note: this module used to expose a second block-config storage
- * (get/updateConfig/createCustom/updateCustom/deleteCustom/preview) for the
- * legacy "Block Editor". Those endpoints were deleted when the Agent tab
- * became the single source of truth for generation-writer blocks. The
- * remaining exports are shared utilities (script eval, config import/export).
+ * Shared block utilities — script eval and config import/export. Per-agent block
+ * configuration lives in `agentBlocks` (see agent-blocks.ts), which is the single
+ * source of truth for generation-writer blocks.
  */
 export const blocks = {
   evalScript: (storyId: string, content: string) =>

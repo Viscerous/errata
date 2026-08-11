@@ -89,8 +89,8 @@ export function createDirectionsSuggestBlocks(ctx: AgentBlockContext): ContextBl
   }
 
   // Directions set macro trajectory, so they must not be proposed against a
-  // less-informed picture than the Writer's. Timeline 8 recorded exactly that
-  // failure: a direction generated without a record the following Writer had.
+  // less-informed picture than the Writer's: a direction generated without a
+  // record the following Writer holds will steer against it.
   const continuity = renderContinuity(ctx, 'directions.suggest')
   if (continuity) {
     blocks.push({

@@ -1,15 +1,14 @@
 /**
  * Shared settings primitives.
  *
- * One canonical set of building blocks for every settings surface (the main
- * SettingsPanel sections, TTS, Sharing, and any future settings panels). The
- * goal is consolidation, not a restyle: these match the existing warm, bookish,
- * quiet-typographic look (parchment / bronze OKLCH, text-[0.75rem] labels,
- * text-[0.625rem] muted descriptions, the pill toggle, the segmented control,
- * the thin range slider). Every interactive primitive accepts a `disabled` prop
- * that visibly greys it and blocks interaction.
+ * One canonical set of building blocks for every settings surface. These match
+ * the established warm, bookish, quiet-typographic look rather than restyling
+ * it: parchment / bronze OKLCH, text-[0.75rem] labels, text-[0.625rem] muted
+ * descriptions, the pill toggle, the segmented control, the thin range slider.
+ * Every interactive primitive accepts a `disabled` prop that visibly greys it
+ * and blocks interaction.
  *
- * No em dashes in copy or comments by project convention; use commas, colons,
+ * No em dashes in user-facing copy, per project convention; use commas, colons,
  * or periods.
  */
 import type { ReactNode } from 'react'

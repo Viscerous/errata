@@ -7,15 +7,14 @@ import { Caption } from '@/components/ui/prose-text'
 /**
  * Wizard scaffold.
  *
- * A compound component for multi-step flows (story setup, onboarding). Provides
- * the shared skeleton — step transition, header (serif title + caption), body,
- * footer with back/next — while leaving step-specific content untouched.
+ * A compound component for multi-step flows (story setup, onboarding). Supplies
+ * the shared skeleton — step transition, header, body, footer with back/next —
+ * while leaving step-specific content untouched.
  *
- * The typographic feel is bookish: chapter-heading titles in the display serif,
- * Roman-numeral page counts (iii / vii), no percent bars, no stepper dots with
- * check-marks. Transition uses the existing `animate-wizard-step-enter`; under
- * `prefers-reduced-motion` it collapses to `animate-onboarding-fade-in` (pure
- * opacity fade).
+ * The typographic feel is deliberately bookish: chapter-heading titles in the
+ * display serif, Roman-numeral page counts, no percent bars, no stepper dots.
+ * Transitions use `animate-wizard-step-enter`, collapsing to
+ * `animate-onboarding-fade-in` under `prefers-reduced-motion`.
  *
  * Keyboard:
  *  - Enter            → advance, when the current step passes `canAdvance`

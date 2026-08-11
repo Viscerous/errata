@@ -1,8 +1,9 @@
 /**
  * Whether a passage advances the narrative present or steps outside it. There is
- * deliberately no value for "set during an ongoing in-story event": every one of
- * the eight `concurrent` frames on record meant that and none meant simultaneity
- * with the present, so the passage's `anchor` is the only home for it.
+ * deliberately no value for "set during an ongoing in-story event": such a
+ * passage has not left the present, so it is `forward`, and the occasion it sits
+ * inside belongs in the passage's `anchor`. A separate relation for it would
+ * only offer a second way to say what the anchor already says.
  */
 export type TemporalRelation = 'forward' | 'flashback' | 'flash-forward' | 'uncertain'
 

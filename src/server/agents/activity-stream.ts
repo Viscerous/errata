@@ -55,8 +55,8 @@ export function pushActivityEvent(buffer: ActivityBuffer, event: ActivityStreamE
 /**
  * Append to a trace that will be stored, merging consecutive streamed text into
  * one entry. Streaming needs an event per token; a saved record does not, and
- * storing it that way was most of what an analysis weighed — 45 passages came to
- * 6.7MB, one `{"type":"reasoning","text":"Let"}` at a time. Live buffers keep the
+ * storing it unmerged makes the trace the bulk of what an analysis weighs, one
+ * `{"type":"reasoning","text":"..."}` envelope per token. Live buffers keep the
  * unmerged events, since a subscriber wants each token as it lands.
  */
 export function appendToStoredTrace(trace: ActivityStreamEvent[], event: ActivityStreamEvent): void {
