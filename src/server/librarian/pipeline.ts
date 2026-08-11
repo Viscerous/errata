@@ -8,6 +8,7 @@ import type { resolveAgentRuntime } from '../llm/client'
 import { resolveAndReportServedUsage } from '../llm/usage-normalizer'
 import type { ContextSelectionSource, FragmentSignal } from '../llm/context-selection'
 import { buildAnalyzeContext } from './blocks'
+import { continuityRegistry } from './continuity-view'
 import {
   createEmptyCollector,
   createLibrarianOnlineTools,
@@ -251,25 +252,11 @@ async function runOnlineAnalyzePass(
     // have shown before user overrides were applied.
     const numberedFragmentIds = new Set<string>()
 
-    // The live registry is repeated beside each key field. It steers reuse
-    // without making the registry a closed enum, which smaller models handled
-    // poorly and which rejected the whole batched report on a wrong choice.
-    const continuityKeys = {
-      state: (context.continuityView?.currentState ?? []).map((entry) => ({
-        key: entry.stateKey,
-        label: entry.subject,
-      })),
-      thread: (context.continuityView?.liveThreads ?? []).map((entry) => ({
-        key: entry.threadKey,
-        label: entry.label,
-      })),
-      knowledge: (context.continuityView?.characterKnowledge ?? [])
-        .map((entry) => ({
-          key: entry.knowledgeKey,
-          label: entry.fact,
-          scope: entry.characterId,
-        })),
-    }
+    // The same numbered registry the continuity block renders, so an entry
+    // number means the same thing in the prompt and in the tool. Building it
+    // twice is how the numbers would drift — knowledge is scoped by character
+    // on the rendered side, and a second derivation would number it unfiltered.
+    const continuityKeys = continuityRegistry(context)
 
     const tools = createLibrarianOnlineTools(collector, {
       dataDir,

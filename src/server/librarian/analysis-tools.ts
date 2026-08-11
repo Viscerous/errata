@@ -6,7 +6,7 @@ import { getFragment, updateFragment } from '../fragments/storage'
 import { FragmentIdSchema, type Fragment } from '../fragments/schema'
 import { numberSentences, resolveSegments, segmentText, stripSegmentMarker, type TextSegment } from '../llm/segments'
 import type { LibrarianFragmentChangeProposal, LibrarianMention } from './storage'
-import type { ContinuityProjection, KnowledgeOperation, StateOperation, ThreadFocus, ThreadOperation } from './continuity-types'
+import type { ContinuityProjection, ContinuityRegistry, KnowledgeOperation, RegistryEntry, StateOperation, ThreadFocus, ThreadOperation } from './continuity-types'
 import { normalizeContinuityKey } from '@/lib/continuity-keys'
 import {
   correctionShapeError,
@@ -239,19 +239,45 @@ const temporalFrameSchema = z.object({
 }).default({ relation: 'uncertain', evidenceSegments: [] })
 
 /** The live registry, so an operation can pick an identity rather than spell one. */
-export interface ContinuityKeyReference {
-  key: string
-  /** Human-readable identity already stored under the key. */
-  label?: string
-  /** Character id for knowledge, whose keys are scoped per character. */
-  scope?: string
-}
+/** A bare key is accepted so a caller with nothing to number can stay terse. */
+export type ContinuityKeyInput = string | (Omit<RegistryEntry, 'index' | 'label'> & { index?: number; label?: string })
 
 export interface ContinuityKeyRegistry {
-  state?: Array<string | ContinuityKeyReference>
-  thread?: Array<string | ContinuityKeyReference>
-  knowledge?: Array<string | ContinuityKeyReference>
+  state?: ContinuityKeyInput[]
+  thread?: ContinuityKeyInput[]
+  knowledge?: ContinuityKeyInput[]
 }
+
+/**
+ * Canonicalize the registry once, at the boundary. Every lookup below then reads
+ * one shape with normalized keys, instead of each re-deciding what a bare string
+ * means and whether a key still needs normalizing.
+ */
+function normalizeRegistry(registry: ContinuityKeyRegistry): ContinuityRegistry {
+  const lane = (entries: ContinuityKeyInput[] | undefined): RegistryEntry[] => (
+    (entries ?? []).map((entry, position) => {
+      const reference = typeof entry === 'string' ? { key: entry } : entry
+      return {
+        index: reference.index ?? position + 1,
+        key: normalizeContinuityKey(reference.key),
+        label: reference.label ?? '',
+        ...(reference.scope ? { scope: reference.scope } : {}),
+      }
+    }).filter((entry) => entry.key)
+  )
+  return {
+    state: lane(registry.state),
+    thread: lane(registry.thread),
+    knowledge: lane(registry.knowledge),
+  }
+}
+
+/** Entries a scoped lane may address; knowledge keys belong to one character. */
+function inScope(entries: RegistryEntry[], scope?: string): RegistryEntry[] {
+  return entries.filter((entry) => !entry.scope || !scope || entry.scope === scope)
+}
+
+const EMPTY_REGISTRY: ContinuityRegistry = { state: [], thread: [], knowledge: [] }
 
 /**
  * A continuity key is only an identity if two observations of the same thing
@@ -273,12 +299,8 @@ const MAX_STEERED_REGISTRY_KEYS = 24
 const MAX_CONTINUITY_KEY_CHARS = 100
 const MAX_DERIVED_KEY_CHARS = 64
 
-function registryKey(reference: string | ContinuityKeyReference): string {
-  return typeof reference === 'string' ? reference : reference.key
-}
-
 function continuityKeyFields(
-  existing: Array<string | ContinuityKeyReference> | undefined,
+  existing: RegistryEntry[] | undefined,
   noun: string,
   example: string,
   creationAction: 'set' | 'open' | 'learn',
@@ -286,19 +308,22 @@ function continuityKeyFields(
   // Sorted so the description is byte-identical whenever the key set is
   // unchanged. Registry order follows recency of update, which would otherwise
   // rewrite the tool block on every analysis and cost the prompt cache.
-  const unique = [...new Set((existing ?? []).map((reference) => (
-    normalizeContinuityKey(registryKey(reference))
-  )))].filter(Boolean).sort()
+  const unique = [...new Set((existing ?? []).map((entry) => entry.key))].sort()
   const reuse = unique.length > 0
     ? ` Reuse one of these exactly when the passage changes something already tracked: ${unique.slice(0, MAX_STEERED_REGISTRY_KEYS).join(', ')}.`
     : ''
   return {
+    // Pointing beats spelling for the same reason it does with sentences: the
+    // number is verifiable, and half of Timeline 13's non-create operations
+    // invented a plausible key that matched nothing.
+    entry: z.number().int().positive().nullish()
+      .describe(`The numbered registry entry this operation changes, taken from the Continuity Registry. Cite it whenever the passage changes something already tracked; omit it only when a ${creationAction} introduces something genuinely new.`),
     key: z.string().trim().max(MAX_CONTINUITY_KEY_CHARS).nullish()
-      .describe(`The ${noun}.${reuse} For a genuinely new identity introduced by a ${creationAction} operation, you may omit this and the engine will derive it. Every other action must name the existing key. If you coin one, use snake_case naming the thing itself, such as ${example}; never include a character or fragment ID.`),
+      .describe(`The ${noun}, when you are not citing an entry number.${reuse} For a genuinely new identity introduced by a ${creationAction} operation, omit both and the engine will derive one. If you coin a key, use snake_case naming the thing itself, such as ${example}; never include a character or fragment ID.`),
   }
 }
 
-function stateOperationSchemaFor(registry: ContinuityKeyRegistry) {
+function stateOperationSchemaFor(registry: ContinuityRegistry) {
   return z.object({
     ...continuityKeyFields(registry.state, 'state identity', 'captivity_status', 'set'),
     action: z.enum(['set', 'clear']),
@@ -308,7 +333,7 @@ function stateOperationSchemaFor(registry: ContinuityKeyRegistry) {
   })
 }
 
-function threadOperationSchemaFor(registry: ContinuityKeyRegistry) {
+function threadOperationSchemaFor(registry: ContinuityRegistry) {
   return z.object({
     ...continuityKeyFields(registry.thread, 'unresolved question', 'who_betrayed_the_house', 'open'),
     action: z.enum(['open', 'advance', 'resolve', 'abandon']),
@@ -327,7 +352,7 @@ const threadFocusSchema = z.object({
   visibility: z.enum(['foreground', 'background']),
 })
 
-function knowledgeOperationSchemaFor(registry: ContinuityKeyRegistry) {
+function knowledgeOperationSchemaFor(registry: ContinuityRegistry) {
   return z.object({
     characterId: FragmentIdSchema,
     ...continuityKeyFields(registry.knowledge, 'fact identity', 'queen_identity', 'learn'),
@@ -338,7 +363,8 @@ function knowledgeOperationSchemaFor(registry: ContinuityKeyRegistry) {
   })
 }
 
-export function buildReportAnalysisInputSchema(registry: ContinuityKeyRegistry = {}) {
+export function buildReportAnalysisInputSchema(input: ContinuityKeyRegistry = {}) {
+  const registry = normalizeRegistry(input)
   return z.object({
     summary: z.string().max(2400).default('').describe('A concise retrospective record of what had happened in the new prose fragment, written as past history rather than a scene to continue — a paragraph or two'),
     events: coercedStringArray
@@ -509,44 +535,113 @@ function uniquelyMatchingKey<T>(
   return matches.length === 1 ? keyOf(matches[0]) : undefined
 }
 
+/** The single key an entry set agrees on, or nothing when it is ambiguous. */
+function soleKey(entries: RegistryEntry[]): string | undefined {
+  const keys = new Set(entries.map((entry) => entry.key))
+  return keys.size === 1 ? [...keys][0] : undefined
+}
+
+/**
+ * The entry the model pointed at. Exact by construction, which is the whole
+ * point: every other rung reconstructs an identity from something the model
+ * spelled, and spelling is where the identity was being lost.
+ */
+function registryKeyAtIndex(
+  entries: RegistryEntry[],
+  entry: unknown,
+  scope?: string,
+): string | undefined {
+  if (typeof entry !== 'number' || !Number.isInteger(entry)) return undefined
+  return soleKey(inScope(entries, scope).filter((candidate) => candidate.index === entry))
+}
+
 function uniquelyMatchingRegistryKey(
-  references: Array<string | ContinuityKeyReference> | undefined,
+  entries: RegistryEntry[],
   source: string | undefined,
   scope?: string,
 ): string | undefined {
   const identity = normalizeContinuityKey(source ?? '')
   if (!identity) return undefined
-  const matches = new Set<string>()
-  for (const reference of references ?? []) {
-    if (typeof reference !== 'string' && reference.scope && reference.scope !== scope) continue
-    const key = normalizeContinuityKey(registryKey(reference))
-    const label = typeof reference === 'string' ? '' : normalizeContinuityKey(reference.label ?? '')
-    if (identity === key || identity === label) matches.add(key)
-  }
-  return matches.size === 1 ? [...matches][0] : undefined
+  return soleKey(inScope(entries, scope).filter((candidate) => (
+    identity === candidate.key || identity === normalizeContinuityKey(candidate.label)
+  )))
 }
 
-function retryAwareKey<T>(
-  operation: { key?: unknown },
+/**
+ * The identity an operation addresses, or why it has none.
+ *
+ * Two rules, one place. An action that can create an identity only needs enough
+ * to derive one. An action that cannot — clear, advance, resolve, abandon,
+ * correct, forget — can only mean something against an identity that already
+ * exists, and until now nothing checked that it did: any spelling was accepted,
+ * stored, and matched nothing at fold time. Half of Timeline 13's non-create
+ * operations named a plausible key that was never created anywhere. Reporting
+ * one back costs a single operation; letting it through costs the continuity it
+ * was meant to record.
+ *
+ * `live` carries the registry plus whatever this analysis has already created,
+ * and the caller adds to it as identities appear, so a retried report can still
+ * address what its own earlier call opened.
+ */
+function resolveIdentity<T>(
+  operation: { key?: unknown; entry?: unknown; action: string },
   derivedFrom: string | undefined,
   options: {
+    lane: 'state' | 'thread' | 'knowledge'
     allowDerived: boolean
+    live: Set<string>
     previous: T[]
-    registry: Array<string | ContinuityKeyReference> | undefined
+    registry: RegistryEntry[]
     scope?: string
     signature: string
     signatureOf: (item: T) => string
     keyOf: (item: T) => string
   },
-): string | null {
-  return chosenKey(operation)
+): { ok: true; key: string } | { ok: false; reason: string } {
+  const { lane, allowDerived, registry, scope } = options
+  const key = registryKeyAtIndex(registry, operation.entry, scope)
+    || chosenKey(operation)
     || uniquelyMatchingKey(options.previous, options.signature, options.signatureOf, options.keyOf)
-    || uniquelyMatchingRegistryKey(options.registry, derivedFrom, options.scope)
-    || (options.allowDerived ? chosenKey(operation, derivedFrom) : null)
+    || uniquelyMatchingRegistryKey(registry, derivedFrom, scope)
+    || (allowDerived ? chosenKey(operation, derivedFrom) : null)
+
+  if (!key) {
+    return {
+      ok: false,
+      reason: allowDerived
+        ? `A ${lane} operation needs enough identity to derive a key.`
+        : `A ${lane} ${operation.action} operation must name the existing key; no unambiguous retry or live-registry match was found.`,
+    }
+  }
+  if (allowDerived || options.live.has(scopedIdentity(key, scope))) return { ok: true, key }
+
+  const listed = inScope(registry, scope)
+    .slice(0, MAX_STEERED_REGISTRY_KEYS)
+    .map((entry) => `[${entry.index}] ${entry.key}`)
+  return {
+    ok: false,
+    reason: `No ${lane} identity is tracked under ${key}, so this ${operation.action} would change nothing. `
+      + (listed.length > 0
+        ? `Cite the entry number of the one you mean: ${listed.join(', ')}.`
+        : `The ${lane} registry is empty, so there is nothing to ${operation.action}.`),
+  }
 }
 
-function missingExistingKeyReason(lane: 'state' | 'thread' | 'knowledge', action: string): string {
-  return `A ${lane} ${action} operation must name the existing key; no unambiguous retry or live-registry match was found.`
+/**
+ * Knowledge keys belong to one character, so the live set is keyed per knower.
+ * `::` rather than the usual escaped NUL: a normalized key is `[a-z0-9_]` only,
+ * so this cannot collide, and it stays readable in a log and a diff.
+ */
+function scopedIdentity(key: string, scope?: string): string {
+  return scope ? `${scope}::${key}` : key
+}
+
+/** Identities a non-create action may address, before this pass adds its own. */
+function liveIdentitySet(entries: RegistryEntry[], created: Iterable<string>): Set<string> {
+  return new Set([
+    ...entries.map((entry) => scopedIdentity(entry.key, entry.scope)),
+    ...created,
+  ])
 }
 
 function normalizeContinuityProjection(
@@ -558,7 +653,7 @@ function normalizeContinuityProjection(
     | 'knowledgeOperations'>,
   segments: TextSegment[],
   previous?: ContinuityProjection,
-  registry: ContinuityKeyRegistry = {},
+  registry: ContinuityRegistry = EMPTY_REGISTRY,
 ): { projection: ContinuityProjection; skipped: Array<Skipped<{ kind: string; key: string }>> } {
   const skipped: Array<Skipped<{ kind: string; key: string }>> = []
   let temporalFrame = input.temporalFrame
@@ -573,30 +668,31 @@ function normalizeContinuityProjection(
     }
   }
 
+  // Seeded from what an earlier call of a retried report already created, so a
+  // restated new identity stays addressable across the retry.
+  const liveState = liveIdentitySet(
+    registry.state,
+    (previous?.stateOperations ?? []).filter((op) => op.action === 'set').map((op) => op.stateKey),
+  )
   const stateOperations: StateOperation[] = []
   for (const operation of input.stateOperations) {
-    const stateKey = retryAwareKey(
-      operation,
-      operation.subject,
-      {
-        allowDerived: operation.action === 'set',
-        previous: previous?.stateOperations ?? [],
-        registry: registry.state,
-        signature: stateSignatureOf(operation),
-        signatureOf: stateSignatureOf,
-        keyOf: stateKeyOf,
-      },
-    )
-    if (!stateKey) {
-      skipped.push({
-        kind: 'state',
-        key: operation.subject,
-        reason: operation.action === 'set'
-          ? 'A state operation needs enough identity to derive a key.'
-          : missingExistingKeyReason('state', operation.action),
-      })
+    const allowDerived = operation.action === 'set'
+    const identity = resolveIdentity(operation, operation.subject, {
+      lane: 'state',
+      allowDerived,
+      live: liveState,
+      previous: previous?.stateOperations ?? [],
+      registry: registry.state,
+      signature: stateSignatureOf(operation),
+      signatureOf: stateSignatureOf,
+      keyOf: stateKeyOf,
+    })
+    if (!identity.ok) {
+      skipped.push({ kind: 'state', key: operation.subject, reason: identity.reason })
       continue
     }
+    const stateKey = identity.key
+    if (allowDerived) liveState.add(stateKey)
     const resolved = citedEvidence(segments, operation.evidenceSegments)
     const problem = citationProblem(resolved)
     if (problem) {
@@ -610,31 +706,30 @@ function normalizeContinuityProjection(
     stateOperations.push({ ...operation, ...resolved, stateKey })
   }
 
+  const liveThreads = liveIdentitySet(
+    registry.thread,
+    (previous?.threadOperations ?? []).filter((op) => op.action === 'open').map((op) => op.threadKey),
+  )
   const threadOperations: ThreadOperation[] = []
   const threadKeysByInputIndex: Array<string | undefined> = []
   for (const [inputIndex, operation] of input.threadOperations.entries()) {
-    const threadKey = retryAwareKey(
-      operation,
-      operation.label || operation.note,
-      {
-        allowDerived: operation.action === 'open',
-        previous: previous?.threadOperations ?? [],
-        registry: registry.thread,
-        signature: threadSignatureOf(operation),
-        signatureOf: threadSignatureOf,
-        keyOf: threadKeyOf,
-      },
-    )
-    if (!threadKey) {
-      skipped.push({
-        kind: 'thread',
-        key: operation.label ?? '',
-        reason: operation.action === 'open'
-          ? 'A thread operation needs enough identity to derive a key.'
-          : missingExistingKeyReason('thread', operation.action),
-      })
+    const allowDerived = operation.action === 'open'
+    const identity = resolveIdentity(operation, operation.label || operation.note, {
+      lane: 'thread',
+      allowDerived,
+      live: liveThreads,
+      previous: previous?.threadOperations ?? [],
+      registry: registry.thread,
+      signature: threadSignatureOf(operation),
+      signatureOf: threadSignatureOf,
+      keyOf: threadKeyOf,
+    })
+    if (!identity.ok) {
+      skipped.push({ kind: 'thread', key: operation.label ?? '', reason: identity.reason })
       continue
     }
+    const threadKey = identity.key
+    if (allowDerived) liveThreads.add(threadKey)
     const resolved = citedEvidence(segments, operation.evidenceSegments)
     const problem = citationProblem(resolved)
     if (problem) {
@@ -650,31 +745,32 @@ function normalizeContinuityProjection(
     })
   }
 
+  const liveKnowledge = liveIdentitySet(
+    registry.knowledge,
+    (previous?.knowledgeOperations ?? [])
+      .filter((op) => op.action === 'learn')
+      .map((op) => scopedIdentity(op.knowledgeKey, op.characterId)),
+  )
   const knowledgeOperations: KnowledgeOperation[] = []
   for (const operation of input.knowledgeOperations) {
-    const knowledgeKey = retryAwareKey(
-      operation,
-      operation.fact,
-      {
-        allowDerived: operation.action === 'learn',
-        previous: previous?.knowledgeOperations ?? [],
-        registry: registry.knowledge,
-        scope: operation.characterId,
-        signature: knowledgeSignatureOf(operation),
-        signatureOf: knowledgeSignatureOf,
-        keyOf: (item) => item.knowledgeKey,
-      },
-    )
-    if (!knowledgeKey) {
-      skipped.push({
-        kind: 'knowledge',
-        key: operation.characterId,
-        reason: operation.action === 'learn'
-          ? 'A knowledge operation needs enough identity to derive a key.'
-          : missingExistingKeyReason('knowledge', operation.action),
-      })
+    const allowDerived = operation.action === 'learn'
+    const identity = resolveIdentity(operation, operation.fact, {
+      lane: 'knowledge',
+      allowDerived,
+      live: liveKnowledge,
+      previous: previous?.knowledgeOperations ?? [],
+      registry: registry.knowledge,
+      scope: operation.characterId,
+      signature: knowledgeSignatureOf(operation),
+      signatureOf: knowledgeSignatureOf,
+      keyOf: (item) => item.knowledgeKey,
+    })
+    if (!identity.ok) {
+      skipped.push({ kind: 'knowledge', key: operation.characterId, reason: identity.reason })
       continue
     }
+    const knowledgeKey = identity.key
+    if (allowDerived) liveKnowledge.add(scopedIdentity(knowledgeKey, operation.characterId))
     const label = `${operation.characterId}:${knowledgeKey}`
     const resolved = citedEvidence(segments, operation.evidenceSegments)
     const problem = citationProblem(resolved)
@@ -1062,13 +1158,12 @@ export function createAnalysisTools(
    * reported back does.
    */
   const unfinishedProposalToolNames = new Set<string>()
+  // Normalized once here; every lookup below reads the same shape and numbering.
+  const continuityRegistry = normalizeRegistry(opts?.continuityKeys ?? {})
   /** Which continuity lane owns a key, so a correction aimed at one can say so. */
   const continuityKeyOwners = new Map<string, 'state' | 'thread' | 'knowledge'>()
   for (const lane of ['state', 'thread', 'knowledge'] as const) {
-    for (const key of opts?.continuityKeys?.[lane] ?? []) {
-      const normalized = normalizeContinuityKey(registryKey(key))
-      if (normalized) continuityKeyOwners.set(normalized, lane)
-    }
+    for (const entry of continuityRegistry[lane]) continuityKeyOwners.set(entry.key, lane)
   }
   let retainedCorrectionEvidence: RetainedProposalEvidence | null = null
   let retainedNewRecordEvidence: RetainedProposalEvidence | null = null
@@ -1164,7 +1259,7 @@ export function createAnalysisTools(
           threadOperations,
           threadFocus,
           knowledgeOperations,
-        }, proseSegments, collector.continuityProjection, opts?.continuityKeys ?? {})
+        }, proseSegments, collector.continuityProjection, continuityRegistry)
         collector.continuityProjection = mergeContinuityProjection(
           collector.continuityProjection,
           normalizedProjection.projection,

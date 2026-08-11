@@ -1612,6 +1612,90 @@ describe('continuity keys steered by the live registry', () => {
       ])
   })
 
+  /**
+   * The registry entry number is the point-don't-spell rung: exact by
+   * construction, where every other rung reconstructs an identity from
+   * something the model wrote out.
+   */
+  it('resolves an operation by the registry entry it points at', async () => {
+    const collector = createEmptyCollector()
+    const prose = mockFragment({ id: 'pr-0001', type: 'prose', content: 'The dike closed. The room accepted it.' })
+    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => id === 'pr-0001' ? prose : null)
+    const tools = createAnalysisTools(collector, {
+      dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001',
+      continuityKeys: {
+        state: [{ index: 1, key: 'eastern_works_gap', label: 'Eastern works gap' }],
+        thread: [
+          { index: 1, key: 'first_address_outcome', label: 'How the Address lands' },
+          { index: 2, key: 'participation_commitments', label: 'What participation commits to' },
+        ],
+      },
+    })
+
+    await tools.reportAnalysis.execute!(await reportAnalysisInputSchema.parseAsync({
+      summary: 'The dike closed.',
+      stateOperations: [{ entry: 1, action: 'clear', subject: 'Eastern works gap', evidenceSegments: [1] }],
+      threadOperations: [{ entry: 2, action: 'resolve', relatedFragmentIds: [], evidenceSegments: [2] }],
+    }), { toolCallId: 'entry', messages: [], abortSignal: undefined as unknown as AbortSignal })
+
+    expect(collector.continuityProjection.stateOperations.map((operation) => operation.stateKey))
+      .toEqual(['eastern_works_gap'])
+    expect(collector.continuityProjection.threadOperations.map((operation) => operation.threadKey))
+      .toEqual(['participation_commitments'])
+  })
+
+  /**
+   * Timeline 13's real failure was silent: half of its non-create operations
+   * named a plausible key that had never been created, and the tool stored them
+   * to match nothing at fold time. A reported skip costs one operation.
+   */
+  it('refuses a non-create operation whose identity was never created', async () => {
+    const collector = createEmptyCollector()
+    const prose = mockFragment({ id: 'pr-0001', type: 'prose', content: 'The dike closed. The room accepted it.' })
+    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => id === 'pr-0001' ? prose : null)
+    const tools = createAnalysisTools(collector, {
+      dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001',
+      continuityKeys: { thread: [{ index: 1, key: 'first_address_outcome', label: 'How the Address lands' }] },
+    })
+
+    const report = await tools.reportAnalysis.execute!(await reportAnalysisInputSchema.parseAsync({
+      summary: 'The dike closed.',
+      threadOperations: [
+        // Invented, plausible, and matching nothing — the shape that used to pass.
+        { key: 'eastern_works_completion', action: 'advance', relatedFragmentIds: [], evidenceSegments: [1] },
+        { key: 'first_address_outcome', action: 'advance', relatedFragmentIds: [], evidenceSegments: [2] },
+      ],
+    }), { toolCallId: 'orphan', messages: [], abortSignal: undefined as unknown as AbortSignal })
+
+    // The sound operation still lands; only the orphan is reported back.
+    expect(collector.continuityProjection.threadOperations.map((operation) => operation.threadKey))
+      .toEqual(['first_address_outcome'])
+    expect(report).toMatchObject({ ok: true })
+    expect(JSON.stringify(report)).toContain('No thread identity is tracked under eastern_works_completion')
+    // The reply names the numbers it could have pointed at instead.
+    expect(JSON.stringify(report)).toContain('[1] first_address_outcome')
+  })
+
+  it('lets a non-create operation reach an identity this same analysis created', async () => {
+    const collector = createEmptyCollector()
+    const prose = mockFragment({ id: 'pr-0001', type: 'prose', content: 'A question opened. It closed again.' })
+    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => id === 'pr-0001' ? prose : null)
+    const tools = createAnalysisTools(collector, {
+      dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001',
+    })
+    const call = async (threadOperations: Array<Record<string, unknown>>) => tools.reportAnalysis.execute!(
+      await reportAnalysisInputSchema.parseAsync({ summary: 'A question opened.', threadOperations }),
+      { toolCallId: 'report', messages: [], abortSignal: undefined as unknown as AbortSignal },
+    )
+
+    await call([{ key: 'who_closed_the_dike', action: 'open', label: 'Who closed the dike', relatedFragmentIds: [], evidenceSegments: [1] }])
+    // A retry may advance what its own earlier call opened, registry or not.
+    await call([{ key: 'who_closed_the_dike', action: 'advance', relatedFragmentIds: [], evidenceSegments: [2] }])
+
+    expect(collector.continuityProjection.threadOperations.map((operation) => operation.action))
+      .toEqual(['advance'])
+  })
+
   it('still skips an operation that carries no identity anywhere', async () => {
     const collector = createEmptyCollector()
     const prose = mockFragment({ id: 'pr-0001', type: 'prose', content: 'He claims her line. She accepts.' })
@@ -1751,6 +1835,13 @@ describe('continuity keys steered by the live registry', () => {
     vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => id === 'pr-0001' ? prose : null)
     const tools = createAnalysisTools(collector, {
       dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001',
+      // An advance can only reach a thread that already exists; these two do.
+      continuityKeys: {
+        thread: [
+          { index: 1, key: 'eastern_works_aftermath', label: 'Eastern works aftermath' },
+          { index: 2, key: 'why_doesnt_she_intervene', label: 'Why does she not intervene' },
+        ],
+      },
     })
     const call = async (threadOperations: Array<Record<string, unknown>>) => tools.reportAnalysis.execute!(
       await reportAnalysisInputSchema.parseAsync({ summary: 'The room accepted the proof.', threadOperations }),
@@ -1791,6 +1882,12 @@ describe('continuity keys steered by the live registry', () => {
     })
     const tools = createAnalysisTools(collector, {
       dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001',
+      continuityKeys: {
+        thread: [
+          { index: 1, key: 'eastern_works_aftermath', label: 'Eastern works aftermath' },
+          { index: 2, key: 'why_doesnt_she_intervene', label: 'Why does she not intervene' },
+        ],
+      },
     })
     const call = async (input: Record<string, unknown>) => tools.reportAnalysis.execute!(
       await reportAnalysisInputSchema.parseAsync({ summary: 'The examination continued.', ...input }),

@@ -183,7 +183,7 @@ describe('Librarian Analyze Blocks', () => {
 
     const memory = blocks.find((block) => block.id === 'continuity-memory')
     expect(memory?.content).toContain('alice.location | Alice location | north gate')
-    expect(memory?.content).toContain('missing-key | dormant | The missing key')
+    expect(memory?.content).toContain('missing-key | The missing key | dormant')
     expect(memory?.content).toContain('Thread omission means dormancy, never resolution')
   })
 

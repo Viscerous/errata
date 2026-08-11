@@ -610,7 +610,8 @@ describe('renderContinuity', () => {
         characterCatalog: [{ id: 'ch-0002', name: 'Mara' }],
       }, 'librarian.analyze')!
       expect(rendered).toContain('who_sent_the_letter |')
-      expect(rendered).toContain('Knower: Mara (ch-0002) | hero_lied')
+      // Every lane reads `[n] key | label | detail`, so an operation can cite n.
+      expect(rendered).toMatch(/\[\d+\] hero_lied \| .* \| known by Mara \(ch-0002\)/)
       expect(rendered).toContain('the knower, not necessarily the person or thing described')
       expect(rendered).not.toContain('key_missing')
     })

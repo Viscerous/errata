@@ -42,6 +42,29 @@ export interface ThreadFocus {
   visibility: 'foreground' | 'background'
 }
 
+/**
+ * One live identity, numbered so an operation can point at it instead of
+ * spelling it. The number is the addressing scheme, so the block the analyst
+ * reads and the tool it writes back through must be built from one list.
+ */
+export interface RegistryEntry {
+  /** 1-based within its lane; the model sees this number. */
+  index: number
+  key: string
+  /** Human-readable identity, matched as a fallback when no number is cited. */
+  label: string
+  /** The lane's extra column: a state value, a thread's focus, a fact's knower. */
+  detail?: string
+  /** Character id for knowledge, whose keys are scoped per character. */
+  scope?: string
+}
+
+export interface ContinuityRegistry {
+  state: RegistryEntry[]
+  thread: RegistryEntry[]
+  knowledge: RegistryEntry[]
+}
+
 export interface KnowledgeOperation extends CitedEvidence {
   characterId: string
   knowledgeKey: string

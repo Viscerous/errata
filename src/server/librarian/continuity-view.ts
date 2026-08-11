@@ -7,7 +7,7 @@ import {
 } from './storage'
 import { proseContentHash } from './continuity-source'
 import { continuityKeyLabel, normalizeContinuityKey } from '@/lib/continuity-keys'
-import type { TemporalFrame } from './continuity-types'
+import type { ContinuityRegistry, RegistryEntry, TemporalFrame } from './continuity-types'
 
 const MAX_CURRENT_STATE = 24
 const MAX_KNOWLEDGE_PER_CHARACTER = 16
@@ -531,7 +531,7 @@ export function renderContinuity(source: ContinuitySource, reader: ContinuityRea
   }
   if (!view) return null
   if (presentation === 'registry') {
-    return renderContinuityRegistry(source, view, charactersInScope(source, policy.characterScope))
+    return renderContinuityRegistry(source)
   }
   return renderAuthorialContinuity(
     source,
@@ -616,37 +616,63 @@ function renderSelfAwareness(view: ContinuityView | undefined, characterId: stri
   ].join('\n')
 }
 
+/**
+ * The registry as the analyst sees it. The block it reads and the tool it writes
+ * back through are built from this one function, so an entry number means the
+ * same thing on both sides — knowledge is filtered by character scope here, and
+ * a second derivation would silently number it differently.
+ */
+export function continuityRegistry(source: ContinuitySource): ContinuityRegistry {
+  const view = source.continuityView
+  if (!view) return { state: [], thread: [], knowledge: [] }
+  const characterIds = charactersInScope(source, 'passage-candidates')
+  const knowers = characterLabels(source, view.characterKnowledge.map((entry) => entry.characterId))
+  return {
+    state: view.currentState.map((item, index) => ({
+      index: index + 1,
+      key: item.stateKey,
+      label: item.subject,
+      detail: item.value,
+    })),
+    thread: view.liveThreads.map((thread, index) => ({
+      index: index + 1,
+      key: thread.threadKey,
+      label: thread.label,
+      detail: thread.note ? `${thread.visibility} — ${thread.note}` : thread.visibility,
+    })),
+    knowledge: view.characterKnowledge
+      .filter((entry) => characterIds.has(entry.characterId))
+      .map((entry, index) => ({
+        index: index + 1,
+        key: entry.knowledgeKey,
+        label: entry.fact,
+        detail: `known by ${knowers.get(entry.characterId)} (${entry.characterId})`,
+        scope: entry.characterId,
+      })),
+  }
+}
+
 /** Full keyed registry for the Librarian, including dormant unresolved threads. */
-function renderContinuityRegistry(source: ContinuitySource, view: ContinuityView, characterIds: Set<string>): string {
-  const parts = [
+function renderContinuityRegistry(source: ContinuitySource): string {
+  const registry = continuityRegistry(source)
+  const section = (heading: string, entries: RegistryEntry[], guidance?: string): string | null => (
+    entries.length === 0 ? null : [
+      heading,
+      ...(guidance ? [guidance] : []),
+      ...entries.map((entry) => (
+        `[${entry.index}] ${entry.key} | ${entry.label}${entry.detail ? ` | ${entry.detail}` : ''}`
+      )),
+    ].join('\n')
+  )
+  return [
     '## Continuity Registry Before This Passage',
-    'Reuse the exact keys below. Thread omission means dormancy, never resolution; resolve or abandon only with explicit source evidence.',
-  ]
-  if (view.currentState.length > 0) {
-    parts.push([
-      '### Current state keys',
-      ...view.currentState.map((item) => `- ${item.stateKey} | ${item.subject} | ${item.value}`),
-    ].join('\n'))
-  }
-  if (view.liveThreads.length > 0) {
-    parts.push([
-      '### Live thread keys',
-      ...view.liveThreads.map((thread) => `- ${thread.threadKey} | ${thread.visibility} | ${thread.label}${thread.note ? ` | ${thread.note}` : ''}`),
-    ].join('\n'))
-  }
-  const knowledge = characterIds.size > 0
-    ? view.characterKnowledge.filter((entry) => characterIds.has(entry.characterId))
-    : []
-  if (knowledge.length > 0) {
-    parts.push([
-      '### Character knowledge keys',
+    'These are the identities that already exist. Point at one by its number to change it; only something genuinely new gets a fresh key. Thread omission means dormancy, never resolution; resolve or abandon only with explicit source evidence.',
+    section('### Current state', registry.state),
+    section('### Live threads', registry.thread),
+    section(
+      '### Character knowledge',
+      registry.knowledge,
       'The character is the knower, not necessarily the person or thing described by the fact.',
-      ...knowledge.map((entry) => {
-        const name = characterName(source, entry.characterId)
-        const knower = name ? `${name} (${entry.characterId})` : entry.characterId
-        return `- Knower: ${knower} | ${entry.knowledgeKey} | ${entry.fact}`
-      }),
-    ].join('\n'))
-  }
-  return parts.join('\n\n')
+    ),
+  ].filter((part): part is string => part !== null).join('\n\n')
 }
