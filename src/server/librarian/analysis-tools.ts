@@ -4,7 +4,7 @@ import { z } from 'zod/v4'
 import { suggestionDirectionSchema, type SuggestionDirection } from '../directions/schema'
 import { getFragment, updateFragment } from '../fragments/storage'
 import { FragmentIdSchema, type Fragment } from '../fragments/schema'
-import { renderSegments, resolveSegments, segmentText, stripSegmentMarker, type TextSegment } from '../llm/segments'
+import { numberSentences, resolveSegments, segmentText, stripSegmentMarker, type TextSegment } from '../llm/segments'
 import type { LibrarianFragmentChangeProposal, LibrarianMention } from './storage'
 import type { ContinuityProjection, KnowledgeOperation, StateOperation, ThreadFocus, ThreadOperation } from './continuity-types'
 import { normalizeContinuityKey } from '@/lib/continuity-keys'
@@ -994,25 +994,29 @@ function correctionContractError(operation: FragmentChangeOperation): string | n
 /** Bodies are numbered so a correction can address a sentence instead of retyping one. */
 const MAX_DELIVERED_FRAGMENTS = 24
 
+/**
+ * Deliver the records not shown numbered yet, and register that they now are.
+ * One ledger carries both halves of the rule: nothing is sent twice, and nothing
+ * is addressable that was never numbered.
+ */
 function deliverResolvedFragments(
   loaded: Map<string, Fragment>,
   referencedIds: string[],
-  alreadyPresented: Set<string>,
+  numberedFragmentIds: Set<string>,
 ): Array<{ id: string; type: string; name: string; description: string; content: string }> {
   const delivered: Array<{ id: string; type: string; name: string; description: string; content: string }> = []
-  const seen = new Set<string>()
   for (const fragmentId of referencedIds) {
     if (delivered.length >= MAX_DELIVERED_FRAGMENTS) break
-    if (alreadyPresented.has(fragmentId) || seen.has(fragmentId)) continue
+    if (numberedFragmentIds.has(fragmentId)) continue
     const fragment = loaded.get(fragmentId)
     if (!fragment) continue
-    seen.add(fragmentId)
+    numberedFragmentIds.add(fragmentId)
     delivered.push({
       id: fragment.id,
       type: fragment.type,
       name: fragment.name,
       description: fragment.description,
-      content: renderSegments(segmentText(fragment.content)),
+      content: numberSentences(fragment.content),
     })
   }
   return delivered
@@ -1031,25 +1035,33 @@ export function createAnalysisTools(
     includeReadTools?: boolean;
     includeReportTool?: boolean;
     includeFinishTool?: boolean;
-    presentedFullFragmentIds?: Set<string> | readonly string[];
+    numberedFragmentIds?: Set<string> | readonly string[];
     continuityKeys?: ContinuityKeyRegistry;
     customFragmentTypes?: Array<{ type: string; name: string }>;
   },
 ) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const tools: Record<string, any> = {}
-  // Pipeline compilation can populate this Set after tools are constructed,
-  // once user block overrides reveal what will actually be shown in full.
-  const presentedFullFragmentIds = opts?.presentedFullFragmentIds instanceof Set
-    ? opts.presentedFullFragmentIds
-    : new Set(opts?.presentedFullFragmentIds ?? [])
+  /**
+   * Every record the model has been shown numbered, from context blocks, reads,
+   * or resolved reports. It is what makes a segment number mean anything: an
+   * unread record still segments server-side, so a citation against one resolves
+   * to a real sentence, just not the one being counted to.
+   *
+   * Held by reference — pipeline compilation adds the context-block half after
+   * the tools exist, once user block overrides settle what is actually shown.
+   */
+  const numberedFragmentIds = opts?.numberedFragmentIds instanceof Set
+    ? opts.numberedFragmentIds
+    : new Set(opts?.numberedFragmentIds ?? [])
   const successfulToolNames = new Set<string>()
   /**
-   * Proposal lanes whose most recent call failed. Record maintenance is
-   * optional, so never calling a lane needs no declaration — but abandoning a
-   * failed attempt without retrying or saying why does.
+   * Proposal lanes whose most recent call left something undone — refused
+   * outright, or queued in part. Record maintenance is optional, so never
+   * calling a lane needs no declaration; walking away from work the lane
+   * reported back does.
    */
-  const failedProposalToolNames = new Set<string>()
+  const unfinishedProposalToolNames = new Set<string>()
   /** Which continuity lane owns a key, so a correction aimed at one can say so. */
   const continuityKeyOwners = new Map<string, 'state' | 'thread' | 'knowledge'>()
   for (const lane of ['state', 'thread', 'knowledge'] as const) {
@@ -1230,7 +1242,7 @@ export function createAnalysisTools(
         const resolvedFragments = deliverResolvedFragments(
           checkedFragments,
           [...anchoredMentions.map((mention) => mention.fragmentId), ...candidateFragmentIds],
-          presentedFullFragmentIds,
+          numberedFragmentIds,
         )
 
         // Persist annotations now so the prose highlights appear as soon as
@@ -1353,9 +1365,12 @@ export function createAnalysisTools(
   }
 
   if (opts && opts.includeReadTools !== false) {
-    // Reads stay available for anything the analyst genuinely wants to look up.
-    // They are no longer instrumented, because nothing gates on having read.
-    Object.assign(tools, createFragmentTools(opts.dataDir, opts.storyId, { readOnly: true }))
+    // Sharing the ledger is what makes a read the way to earn a record's
+    // numbers, rather than a second presentation that forgets to grant them.
+    Object.assign(tools, createFragmentTools(opts.dataDir, opts.storyId, {
+      readOnly: true,
+      numberedFragmentIds,
+    }))
   }
 
   if (!opts?.disableSuggestions && opts?.proseFragmentId) {
@@ -1410,6 +1425,14 @@ export function createAnalysisTools(
       return { retained }
     }
 
+    /**
+     * Queue everything eligible and report the rest, rather than failing the
+     * batch on its worst member. Timeline 13 sent three corrections to one
+     * record and lost two sound ones because the third replaced a sentence with
+     * itself; the model read `queuedOperationCount: 0` as a refusal and moved
+     * on. This is how evidence already behaves here — a citation survives a
+     * failed call so that a retry costs less than a redo.
+     */
     const queueValidatedProposal = async (params: {
       toolName: 'proposeRecordCorrections' | 'proposeNewRecords'
       proposalKind: 'correction' | 'new-fragment'
@@ -1417,41 +1440,40 @@ export function createAnalysisTools(
       title?: string
       rationale?: string
       operations: FragmentChangeOperation[]
+      /** Rejected before this call saw them, merged into the same report. */
+      rejected?: AnalysisProposalSkipped[]
     }) => {
-      const skipped: AnalysisProposalSkipped[] = []
+      const skipped: AnalysisProposalSkipped[] = [...(params.rejected ?? [])]
+      const eligible: FragmentChangeOperation[] = []
       for (const operation of params.operations) {
         if (operation.action === 'replace_text') {
           const contractError = correctionContractError(operation)
-          if (contractError) skipped.push({ operationId: operation.operationId ?? '', action: operation.action, reason: contractError })
+          if (contractError) {
+            skipped.push({ operationId: operation.operationId ?? '', action: operation.action, reason: contractError })
+            continue
+          }
         } else if (operation.action === 'create_fragment' && operation.content.length > MAX_NEW_FRAGMENT_CONTENT_CHARS) {
           skipped.push({
             operationId: operation.operationId ?? '',
             action: operation.action,
             reason: `A new fragment proposed for unattended application must stay within ${MAX_NEW_FRAGMENT_CONTENT_CHARS} characters.`,
           })
+          continue
         }
-      }
-      if (skipped.length > 0) {
-        return {
-          ok: false,
-          proposalCount: collector.fragmentChangeProposals.length,
-          queuedOperationCount: 0,
-          invalid: skipped.length,
-          evidenceMatched: true,
-          evidenceRetained: true,
-          skipped,
-          note: 'The ineligible proposal was not queued. The grounded evidence is retained; resubmit only narrower operations.',
-        }
+        eligible.push(operation)
       }
 
-      const validation = await validateOperations(opts.dataDir, opts.storyId, params.operations, {
-        allowedCreateTypes: allowedTypes,
-        createTypeScopeDescription: 'librarian analysis proposals',
-      })
+      const validation = eligible.length > 0
+        ? await validateOperations(opts.dataDir, opts.storyId, eligible, {
+          allowedCreateTypes: allowedTypes,
+          createTypeScopeDescription: 'librarian analysis proposals',
+        })
+        : { operations: [], results: [] as OperationValidation[] }
       for (const result of validation.results) {
         if (result.status !== 'valid') skipped.push(skippedOperation(result))
       }
-      if (skipped.length > 0) {
+
+      if (validation.operations.length === 0) {
         return {
           ok: false,
           proposalCount: collector.fragmentChangeProposals.length,
@@ -1461,7 +1483,7 @@ export function createAnalysisTools(
           evidenceRetained: true,
           ...operationEchoFields(validation.results),
           skipped,
-          note: 'No operation was queued. The grounded evidence is retained; fix only the reported operation fields and retry.',
+          note: 'No operation was queued. The grounded evidence is retained; fix only the reported operations and retry.',
         }
       }
 
@@ -1479,37 +1501,47 @@ export function createAnalysisTools(
       })
       const duplicate = validation.operations.length > 0 && queuedResult.queued.length === 0
       successfulToolNames.add(params.toolName)
-      if (params.proposalKind === 'correction') retainedCorrectionEvidence = null
-      else retainedNewRecordEvidence = null
+      // Only a fully accepted call is done with its citation; otherwise it stays
+      // for the narrower retry, which would otherwise cost a fresh report.
+      if (skipped.length === 0) {
+        if (params.proposalKind === 'correction') retainedCorrectionEvidence = null
+        else retainedNewRecordEvidence = null
+      }
       return {
         ok: true,
         proposalCount: collector.fragmentChangeProposals.length,
         queuedOperationCount: queuedResult.queued.length,
-        invalid: 0,
+        invalid: skipped.length,
         evidenceMatched: true,
         autoApplySafe: true,
+        ...(skipped.length > 0 ? { evidenceRetained: true } : {}),
         ...(duplicate ? { duplicate: true, note: 'An identical fragment change proposal was already queued; not queued again.' } : {}),
+        ...(skipped.length > 0 && !duplicate ? {
+          note: 'The eligible operations were queued. The rest are reported above with the grounded evidence retained; resubmit only those, addressed as each reason directs.',
+        } : {}),
         ...operationEchoFields(validation.results),
         skipped,
       }
     }
 
-    // Every proposal-lane return path funnels through here so finishAnalysis
-    // can tell "never attempted" from "attempted and left failing".
-    const recordProposalOutcome = <T extends { ok: boolean }>(
+    // Every proposal-lane return path funnels through here so finishAnalysis can
+    // tell "never attempted" from "attempted and left work behind". A partly
+    // queued call counts as the latter: the queued operations are safe, and the
+    // rejected ones would otherwise vanish with nothing asking after them.
+    const recordProposalOutcome = <T extends { ok: boolean; invalid?: number }>(
       toolName: 'proposeRecordCorrections' | 'proposeNewRecords',
       result: T,
     ): T => {
-      if (result.ok) failedProposalToolNames.delete(toolName)
-      else failedProposalToolNames.add(toolName)
+      if (result.ok && !result.invalid) unfinishedProposalToolNames.delete(toolName)
+      else unfinishedProposalToolNames.add(toolName)
       return result
     }
 
     tools.proposeRecordCorrections = tool({
-      description: 'Correct an assertion in an existing reusable record that accepted prose has made inaccurate. Name the numbered sentence to replace and supply its corrected wording; the record is shown with its sentences numbered.',
+      description: 'Correct an assertion in an existing reusable record that accepted prose has made inaccurate. Name the numbered sentence to replace and supply its corrected wording. Cite a number only for a record you have been shown numbered; read it first otherwise. Eligible corrections are queued even when others in the same call are rejected.',
       inputSchema: librarianRecordCorrectionsInputSchema,
       execute: async ({ title, evidenceSegments = [], rationale, corrections = [] }) => {
-        const record = <T extends { ok: boolean }>(result: T) => recordProposalOutcome('proposeRecordCorrections', result)
+        const record = <T extends { ok: boolean; invalid?: number }>(result: T) => recordProposalOutcome('proposeRecordCorrections', result)
         const evidence = await resolveEvidence('correction', evidenceSegments, title, rationale)
         if (evidence.error) return record(evidence.error as { ok: boolean })
         if (corrections.length === 0) {
@@ -1556,6 +1588,16 @@ export function createAnalysisTools(
               reason: asContinuityKey
                 ? `${correction.fragmentId} is a ${asContinuityKey} key in continuity memory, not a reusable record. Change it with a reportAnalysis ${asContinuityKey} operation instead.`
                 : `There is no reusable record ${correction.fragmentId}${field === 'content' ? '' : ` with a ${field} field`}. Correct only records whose numbered sentences you were shown.`,
+            })
+            continue
+          }
+          // A record merely recognised from the catalog would otherwise be
+          // corrected at whichever sentence happens to hold the cited position.
+          if (!numberedFragmentIds.has(correction.fragmentId)) {
+            unresolved.push({
+              operationId: '',
+              action: 'replace_text',
+              reason: `You have not been shown ${correction.fragmentId} with its sentences numbered, so its sentence numbers are not yours to cite. Read it with readFragments and correct the sentence you are shown.`,
             })
             continue
           }
@@ -1650,20 +1692,10 @@ export function createAnalysisTools(
             ...(reasons.length > 0 ? { reason: reasons.join(' ') } : {}),
           })
         }
-        if (unresolved.length > 0) {
-          return record({
-            ok: false,
-            proposalCount: collector.fragmentChangeProposals.length,
-            queuedOperationCount: 0,
-            invalid: unresolved.length,
-            evidenceMatched: true,
-            evidenceRetained: true,
-            skipped: unresolved,
-            // Each entry already carries its own diagnosis; a blanket note
-            // about sentence numbers actively mislabels a wrong-target failure.
-            note: 'The citation is retained; resubmit only the targets named above, addressed as each reason directs.',
-          })
-        }
+        // Unresolvable targets are reported alongside whatever did resolve, not
+        // instead of it. Each carries its own diagnosis, so the shared note
+        // stays generic; a blanket line about sentence numbers would mislabel a
+        // wrong-target failure.
         return record(await queueValidatedProposal({
           toolName: 'proposeRecordCorrections',
           proposalKind: 'correction',
@@ -1671,6 +1703,7 @@ export function createAnalysisTools(
           title,
           rationale,
           operations,
+          rejected: unresolved,
         }))
       },
     })
@@ -1679,7 +1712,7 @@ export function createAnalysisTools(
       description: 'Create genuinely new reusable named story records established by accepted prose. Do not use this for events, temporary conditions, unnamed scenery, or psychological state.',
       inputSchema: librarianNewRecordsInputSchema,
       execute: async ({ title, evidenceSegments = [], rationale, newFragments = [] }) => {
-        const record = <T extends { ok: boolean }>(result: T) => recordProposalOutcome('proposeNewRecords', result)
+        const record = <T extends { ok: boolean; invalid?: number }>(result: T) => recordProposalOutcome('proposeNewRecords', result)
         const evidence = await resolveEvidence('new-fragment', evidenceSegments, title, rationale)
         if (evidence.error) return record(evidence.error as { ok: boolean })
         if (newFragments.length === 0) {
@@ -1739,13 +1772,12 @@ export function createAnalysisTools(
         // no declaration. Timeline 9 spent an extra finish round trip on six of
         // sixteen analyses purely because a successful correction was not
         // accompanied by a skip note for the discovery lane. Only a lane left
-        // in a failed state still has to be retried or explicitly abandoned.
-        // Abandoning a lane that is sitting in a failed state is the one case
-        // where the reason is load-bearing: it is the only record of why a
+        // with work outstanding must be retried or explicitly abandoned, and
+        // there the reason is load-bearing: it is the only record of why a
         // known-wrong proposal was dropped rather than fixed.
         const unexplained: string[] = []
         for (const proposalToolName of ['proposeRecordCorrections', 'proposeNewRecords']) {
-          if (!tools[proposalToolName] || !failedProposalToolNames.has(proposalToolName)) continue
+          if (!tools[proposalToolName] || !unfinishedProposalToolNames.has(proposalToolName)) continue
           if (!skippedNames.has(proposalToolName)) {
             missingRequired.push(proposalToolName)
             continue
@@ -1763,7 +1795,7 @@ export function createAnalysisTools(
             falseCompleted,
             missingRequired,
             ...(unexplained.length > 0 ? { unexplained } : {}),
-            note: 'Finish only after required tools succeed. A proposal call that failed must be retried, or listed under skipped as {toolName, reason} saying why it was abandoned; a lane you never needed requires nothing.',
+            note: 'Finish only after required tools succeed. A proposal call that failed or was only partly queued must be retried, or listed under skipped as {toolName, reason} saying why the rest was abandoned; a lane you never needed requires nothing.',
           }
         }
         return { ok: true, completed, skipped: abandoned }
@@ -1790,7 +1822,7 @@ export function createLibrarianOnlineTools(
     proseFragmentId?: string
     disableDirections?: boolean
     disableSuggestions?: boolean
-    presentedFullFragmentIds?: Set<string> | readonly string[]
+    numberedFragmentIds?: Set<string> | readonly string[]
     continuityKeys?: ContinuityKeyRegistry
     customFragmentTypes?: Array<{ type: string; name: string }>
   },

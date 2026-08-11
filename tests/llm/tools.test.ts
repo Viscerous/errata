@@ -11,6 +11,7 @@ import {
 import { initProseChain } from '@/server/fragments/prose-chain'
 import type { StoryMeta, Fragment } from '@/server/fragments/schema'
 import { coreProposalToolNames, coreReadToolNames, createFragmentTools } from '@/server/llm/tools'
+import { segmentText } from '@/server/llm/segments'
 import { proposeFragmentChangesSchema, sanitizeTextForToolEcho } from '@/server/fragments/change-operations'
 
 function makeStory(): StoryMeta {
@@ -110,6 +111,74 @@ describe('LLM tools', () => {
     expect(result.fragments[0]).toMatchObject({ id: 'kn-0001', content: 'Secret lore.' })
     expect(result.fragments[0].baseHash).toMatch(/^[a-f0-9]{16}$/)
     expect(result.missing).toEqual(['kn-missing'])
+  })
+
+  /**
+   * A lane that addresses record sentences by number must show that numbering
+   * on its reads. The ledger is shared with the write path, so passing one is
+   * both the switch and the record of what the model may cite.
+   */
+  it('numbers read content and registers it in the ledger', async () => {
+    await createFragment(dataDir, storyId, makeFragment({
+      id: 'kn-0001',
+      type: 'knowledge',
+      content: 'Secret lore. The gate is oak.',
+    }))
+    const numberedFragmentIds = new Set<string>()
+    const tools = createFragmentTools(dataDir, storyId, { numberedFragmentIds })
+
+    const result = await execTool(tools.readFragments, { fragmentIds: ['kn-0001', 'kn-missing'] })
+
+    expect(result.fragments[0].content).toBe('[1] Secret lore.\n[2] The gate is oak.')
+    expect([...numberedFragmentIds]).toEqual(['kn-0001'])
+  })
+
+  /**
+   * A citation resolves against the stored content, so the numbering shown must
+   * come from there too. Sanitizing before segmenting would renumber everything
+   * after a leaked reasoning block and point the correction at the wrong line.
+   */
+  it('keeps read numbering aligned with stored content when an echo is sanitized', async () => {
+    const content = 'One stands. <think>drifting</think>Two waits. Three leaves.'
+    await createFragment(dataDir, storyId, makeFragment({ id: 'kn-0001', type: 'knowledge', content }))
+    const tools = createFragmentTools(dataDir, storyId, { numberedFragmentIds: new Set() })
+
+    const result = await execTool(tools.readFragments, { fragmentIds: ['kn-0001'] })
+    const lines: string[] = result.fragments[0].content.split('\n')
+
+    expect(result.fragments[0].content).not.toContain('<think>')
+    // Same count and order as the segmentation a correction is resolved against.
+    const stored = await getFragment(dataDir, storyId, 'kn-0001')
+    expect(lines).toHaveLength(segmentText(stored!.content).length)
+    expect(lines[2]).toBe('[3] Three leaves.')
+  })
+
+  it('leaves read content plain when no ledger is supplied', async () => {
+    await createFragment(dataDir, storyId, makeFragment({
+      id: 'kn-0001',
+      type: 'knowledge',
+      content: 'Secret lore. The gate is oak.',
+    }))
+    const tools = createFragmentTools(dataDir, storyId)
+
+    const result = await execTool(tools.readFragments, { fragmentIds: ['kn-0001'] })
+
+    expect(result.fragments[0].content).toBe('Secret lore. The gate is oak.')
+  })
+
+  it('names the segment a search hit falls in, so a match is addressable', async () => {
+    await createFragment(dataDir, storyId, makeFragment({
+      id: 'kn-0001',
+      type: 'knowledge',
+      content: 'Secret lore. The gate is oak. Moon ritual requires river water.',
+    }))
+    const tools = createFragmentTools(dataDir, storyId, { numberedFragmentIds: new Set() })
+
+    const found = await execTool(tools.findFragments, { query: 'river' })
+    expect(found.matches[0]).toMatchObject({ id: 'kn-0001', field: 'content', segment: 3 })
+
+    const plain = await execTool(createFragmentTools(dataDir, storyId).findFragments, { query: 'river' })
+    expect(plain.matches[0]).not.toHaveProperty('segment')
   })
 
   it('finds and lists fragments without returning full content from listFragments', async () => {

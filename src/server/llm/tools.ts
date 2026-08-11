@@ -28,6 +28,7 @@ import {
 } from '../fragments/change-operations'
 import { applyOperationsWithSnapshot, type AppliedChange } from '../fragments/change-apply'
 import { buildContextState, STORY_SUMMARY_PLACEHOLDER } from './context-builder'
+import { numberSentences, sentenceIndexAt } from './segments'
 import { renderSummaryProjection } from '../librarian/summary-projection'
 
 export {
@@ -111,6 +112,15 @@ const proseReplaceSchema = z.object({
 export interface FragmentToolsOptions {
   /** true: read tools only. false: add the direct edit tools. Defaults to true. */
   readOnly?: boolean
+  /**
+   * The caller's ledger of records shown with numbered sentences. Supplying one
+   * turns numbering on and registers what was shown, so a write path addressing
+   * sentences by number shares one object with the reads that earn them.
+   *
+   * Analyze numbered a record in three of the four places it could appear and
+   * left the reads plain, leaving Muse-Glimmer-30B to count sentences by eye.
+   */
+  numberedFragmentIds?: Set<string>
 }
 
 function summarizeFragment(fragment: Fragment) {
@@ -128,10 +138,12 @@ function summarizeFragment(fragment: Fragment) {
   }
 }
 
-function fullFragmentForTool(fragment: Fragment) {
+function fullFragmentForTool(fragment: Fragment, numbered: boolean) {
   return {
     ...summarizeFragment(fragment),
-    content: sanitizeTextForToolEcho(fragment.content),
+    content: numbered
+      ? numberSentences(fragment.content, sanitizeTextForToolEcho)
+      : sanitizeTextForToolEcho(fragment.content),
     meta: fragment.meta,
   }
 }
@@ -193,11 +205,14 @@ export function createFragmentTools(
   storyId: string,
   opts: FragmentToolsOptions = {},
 ) {
-  const { readOnly = true } = opts
+  const { readOnly = true, numberedFragmentIds } = opts
+  const numbered = numberedFragmentIds !== undefined
   const tools: ToolSet = {}
 
   tools.readFragments = tool({
-    description: 'Read one or more fragments by ID. Returns full editable fields and `baseHash`. Use `baseHash` when applying `set_fields` whole-field rewrites.',
+    description: numbered
+      ? 'Read one or more fragments by ID. Returns full editable fields and `baseHash`, with `content` sentence-numbered as `[n] sentence` — the same numbering used to address a sentence for correction.'
+      : 'Read one or more fragments by ID. Returns full editable fields and `baseHash`. Use `baseHash` when applying `set_fields` whole-field rewrites.',
     inputSchema: z.object({
       fragmentIds: z.array(z.string()).min(1).max(MAX_READ_FRAGMENTS).describe('Fragment IDs to read. Batch related reads in one call.'),
     }),
@@ -210,14 +225,17 @@ export function createFragmentTools(
           missing.push(id)
           continue
         }
-        fragments.push(fullFragmentForTool(fragment))
+        fragments.push(fullFragmentForTool(fragment, numbered))
+        numberedFragmentIds?.add(fragment.id)
       }
       return { fragments, missing }
     }),
   })
 
   tools.findFragments = tool({
-    description: 'Search fragments by case-insensitive substring. Returns matching IDs and excerpts; call `readFragments` before relying on details or editing.',
+    description: numbered
+      ? 'Search fragments by case-insensitive substring. Returns matching IDs, excerpts, and the `segment` number the match falls in; call `readFragments` before relying on details or addressing a sentence you have not seen numbered in full.'
+      : 'Search fragments by case-insensitive substring. Returns matching IDs and excerpts; call `readFragments` before relying on details or editing.',
     inputSchema: z.object({
       query: z.string().min(1).describe('Case-insensitive text to search for in name, description, or content.'),
       types: z.array(z.string()).optional().describe('Optional fragment types to include. Omit to search all textual fragment types.'),
@@ -236,7 +254,7 @@ export function createFragmentTools(
       const typeSet = types?.length ? new Set(types) : null
       const lowerQuery = query.toLowerCase()
       const fragments = await listFragments(dataDir, storyId, undefined, { includeArchived: includeArchived ?? false })
-      const matches: Array<{ id: string; type: string; name: string; field: EditableField; excerpt: string; baseHash: string }> = []
+      const matches: Array<{ id: string; type: string; name: string; field: EditableField; excerpt: string; baseHash: string; segment?: number }> = []
       for (const fragment of fragments) {
         if (typeSet && !typeSet.has(fragment.type)) continue
         if (!typeSet && (fragment.type === 'image' || fragment.type === 'icon')) continue
@@ -244,6 +262,9 @@ export function createFragmentTools(
           const value = fragment[field]
           const index = value.toLowerCase().indexOf(lowerQuery)
           if (index === -1) continue
+          // An excerpt is a window, not an addressable unit; the segment it
+          // lands in keeps search on the same coordinates as the citation.
+          const segment = numbered ? sentenceIndexAt(value, index) : null
           matches.push({
             id: fragment.id,
             type: fragment.type,
@@ -251,6 +272,7 @@ export function createFragmentTools(
             field,
             excerpt: sanitizeTextForToolEcho(excerptAround(value, index, query.length)),
             baseHash: fragmentBaseHash(fragment),
+            ...(segment !== null ? { segment } : {}),
           })
           break
         }

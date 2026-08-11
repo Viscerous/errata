@@ -191,7 +191,11 @@ describe('analysis-tools', () => {
     })
     const collector = createEmptyCollector()
     const tools = createAnalysisTools(collector, {
-      dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001', disableDirections: true,
+      dataDir: '/tmp',
+      storyId: 'story-test',
+      proseFragmentId: 'pr-0001',
+      disableDirections: true,
+      numberedFragmentIds: ['ch-0001'],
     })
     await tools.reportAnalysis.execute!({ summary: 'Alice resigned.' }, {
       toolCallId: 'report', messages: [], abortSignal: undefined as unknown as AbortSignal,
@@ -211,6 +215,52 @@ describe('analysis-tools', () => {
 
     expect(correction).toMatchObject({ ok: true, queuedOperationCount: 1 })
     expect(finish).toMatchObject({ ok: true })
+  })
+
+  /**
+   * Partial credit keeps the queued work; it must not also quietly close the
+   * lane. What the call rejected is still outstanding, so finish either sees a
+   * retry or a reason.
+   */
+  it('finishAnalysis holds a partly queued lane to the same account as a failed one', async () => {
+    const current = 'Alice is captain of the guard. She keeps the north gate.'
+    const prose = mockFragment({ id: 'pr-0001', type: 'prose', content: 'Alice resigned from the guard.' })
+    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => {
+      if (id === 'pr-0001') return prose
+      if (id === 'ch-0001') return mockFragment({ id, content: current })
+      return null
+    })
+    const collector = createEmptyCollector()
+    const tools = createAnalysisTools(collector, {
+      dataDir: '/tmp',
+      storyId: 'story-test',
+      proseFragmentId: 'pr-0001',
+      disableDirections: true,
+      numberedFragmentIds: ['ch-0001'],
+    })
+    await tools.reportAnalysis.execute!({ summary: 'Alice resigned.' }, {
+      toolCallId: 'report', messages: [], abortSignal: undefined as unknown as AbortSignal,
+    })
+    const correction = await tools.proposeRecordCorrections.execute!({
+      evidenceSegments: [1],
+      corrections: [
+        { fragmentId: 'ch-0001', segment: 1, newText: 'Alice is the former captain of the guard.' },
+        { fragmentId: 'ch-0001', segment: 2, newText: 'She keeps the north gate.' },
+      ],
+    }, { toolCallId: 'partial', messages: [], abortSignal: undefined as unknown as AbortSignal })
+
+    expect(correction).toMatchObject({ ok: true, queuedOperationCount: 1, invalid: 1 })
+
+    const bare = await tools.finishAnalysis.execute!({
+      completed: ['reportAnalysis', 'proposeRecordCorrections'],
+    }, { toolCallId: 'finish-bare', messages: [], abortSignal: undefined as unknown as AbortSignal })
+    expect(bare).toMatchObject({ ok: false, missingRequired: ['proposeRecordCorrections'] })
+
+    const explained = await tools.finishAnalysis.execute!({
+      completed: ['reportAnalysis'],
+      skipped: [{ toolName: 'proposeRecordCorrections', reason: 'The rejected line was already accurate.' }],
+    }, { toolCallId: 'finish-explained', messages: [], abortSignal: undefined as unknown as AbortSignal })
+    expect(explained).toMatchObject({ ok: true })
   })
 
   it('finishAnalysis still refuses to abandon a proposal lane left in a failed state', async () => {
@@ -770,6 +820,7 @@ describe('analysis-tools', () => {
       dataDir: '/tmp',
       storyId: 'story-test',
       proseFragmentId: 'pr-0001',
+      numberedFragmentIds: ['ch-0001'],
     })
 
     const result = await tools.proposeRecordCorrections.execute!({
@@ -807,6 +858,7 @@ describe('analysis-tools', () => {
       dataDir: '/tmp',
       storyId: 'story-test',
       proseFragmentId: 'pr-0001',
+      numberedFragmentIds: ['ch-0001'],
     })
 
     const correctionResult = await tools.proposeRecordCorrections.execute!({
@@ -851,6 +903,7 @@ describe('analysis-tools', () => {
       dataDir: '/tmp',
       storyId: 'story-test',
       proseFragmentId: 'pr-0001',
+      numberedFragmentIds: ['ch-0001'],
     })
 
     const result = await tools.proposeRecordCorrections.execute!({
@@ -896,7 +949,7 @@ describe('analysis-tools', () => {
     })
     const collector = createEmptyCollector()
     const tools = createAnalysisTools(collector, {
-      dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001',
+      dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001', numberedFragmentIds: ['ch-0001'],
     })
 
     const first = await tools.proposeRecordCorrections.execute!({
@@ -921,6 +974,7 @@ describe('analysis-tools', () => {
   // were episode recaps. None of those shapes is expressible now: a correction
   // names one numbered sentence and the server resolves the exact span.
   it('resolves a cited sentence to the exact span it replaces', async () => {
+    // The record was shown numbered, which is what makes segment 2 addressable.
     const current = 'Sanne is a River Hearth priestess. She has never met Victoria. She keeps the gate.'
     const prose = mockFragment({ id: 'pr-0001', type: 'prose', content: 'Sanne greets me at the First Hearth.' })
     vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => {
@@ -930,7 +984,7 @@ describe('analysis-tools', () => {
     })
     const collector = createEmptyCollector()
     const tools = createAnalysisTools(collector, {
-      dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001',
+      dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001', numberedFragmentIds: ['ch-0001'],
     })
 
     const result = await tools.proposeRecordCorrections.execute!({
@@ -962,7 +1016,7 @@ describe('analysis-tools', () => {
     })
     const collector = createEmptyCollector()
     const tools = createAnalysisTools(collector, {
-      dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001',
+      dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001', numberedFragmentIds: ['ch-0001'],
     })
 
     const result = await tools.proposeRecordCorrections.execute!({
@@ -996,7 +1050,7 @@ describe('analysis-tools', () => {
     })
     const collector = createEmptyCollector()
     const tools = createAnalysisTools(collector, {
-      dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001',
+      dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001', numberedFragmentIds: ['ch-0001'],
     })
 
     const result = await tools.proposeRecordCorrections.execute!({
@@ -1027,7 +1081,7 @@ describe('analysis-tools', () => {
     })
     const collector = createEmptyCollector()
     const tools = createAnalysisTools(collector, {
-      dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001',
+      dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001', numberedFragmentIds: ['ch-0001'],
     })
 
     const result = await tools.proposeRecordCorrections.execute!({
@@ -1061,7 +1115,7 @@ describe('analysis-tools', () => {
     })
     const collector = createEmptyCollector()
     const tools = createAnalysisTools(collector, {
-      dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001',
+      dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001', numberedFragmentIds: ['ch-0001'],
     })
 
     const result = await tools.proposeRecordCorrections.execute!({
@@ -1089,7 +1143,7 @@ describe('analysis-tools', () => {
     })
     const collector = createEmptyCollector()
     const tools = createAnalysisTools(collector, {
-      dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001',
+      dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001', numberedFragmentIds: ['ch-0001'],
     })
 
     const result = await tools.proposeRecordCorrections.execute!({
@@ -1112,7 +1166,7 @@ describe('analysis-tools', () => {
     })
     const collector = createEmptyCollector()
     const tools = createAnalysisTools(collector, {
-      dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001',
+      dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001', numberedFragmentIds: ['ch-0001'],
     })
 
     await tools.proposeRecordCorrections.execute!({
@@ -1123,6 +1177,88 @@ describe('analysis-tools', () => {
     const operation = collector.fragmentChangeProposals[0].operations[0]
     if (operation.action !== 'replace_text') throw new Error('Expected replace_text')
     expect(operation).toMatchObject({ oldText: 'The gate is shut.', occurrence: 2 })
+  })
+
+  /**
+   * A record the model never saw numbered still has segments server-side, so an
+   * index against it resolves to a real sentence — just not the one the model
+   * was counting to. Muse-Glimmer-30B read a record through readFragments, found
+   * it unnumbered, and said so; the model that counts anyway gets a silent wrong
+   * write instead of an error.
+   */
+  it('refuses a sentence number for a record it was never shown numbered', async () => {
+    const current = 'Alice is captain of the guard. She keeps the north gate.'
+    const prose = mockFragment({ id: 'pr-0001', type: 'prose', content: 'Alice resigned from the guard.' })
+    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => {
+      if (id === 'pr-0001') return prose
+      if (id === 'ch-0001') return mockFragment({ id, content: current })
+      return null
+    })
+    const collector = createEmptyCollector()
+    const tools = createAnalysisTools(collector, {
+      dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001',
+    })
+
+    const blind = await tools.proposeRecordCorrections.execute!({
+      evidenceSegments: [1],
+      corrections: [{ fragmentId: 'ch-0001', segment: 1, newText: 'Alice is the former captain of the guard.' }],
+    }, { toolCallId: 'blind', messages: [], abortSignal: undefined as unknown as AbortSignal })
+
+    expect(blind).toMatchObject({ ok: false, queuedOperationCount: 0, evidenceRetained: true })
+    expect(JSON.stringify(blind)).toContain('not yours to cite')
+    expect(collector.fragmentChangeProposals).toEqual([])
+
+    // Reading it is what earns the numbers, and the retry then lands.
+    await tools.readFragments.execute!({ fragmentIds: ['ch-0001'] }, {
+      toolCallId: 'read', messages: [], abortSignal: undefined as unknown as AbortSignal,
+    })
+    const afterRead = await tools.proposeRecordCorrections.execute!({
+      corrections: [{ fragmentId: 'ch-0001', segment: 1, newText: 'Alice is the former captain of the guard.' }],
+    }, { toolCallId: 'read-retry', messages: [], abortSignal: undefined as unknown as AbortSignal })
+
+    expect(afterRead).toMatchObject({ ok: true, queuedOperationCount: 1 })
+  })
+
+  /**
+   * All-or-nothing made one bad operation cost every good one beside it:
+   * Timeline 13 lost two sound tense corrections because a third replaced a
+   * sentence with itself, and the model read the zero as a refusal of the lane.
+   */
+  it('queues the eligible corrections and reports only the rejected one', async () => {
+    const current = 'Alice is captain of the guard. She keeps the north gate. The gate is oak.'
+    const prose = mockFragment({ id: 'pr-0001', type: 'prose', content: 'Alice resigned and the gate was rebuilt in iron.' })
+    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => {
+      if (id === 'pr-0001') return prose
+      if (id === 'ch-0001') return mockFragment({ id, content: current })
+      return null
+    })
+    const collector = createEmptyCollector()
+    const tools = createAnalysisTools(collector, {
+      dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001', numberedFragmentIds: ['ch-0001'],
+    })
+
+    const result = await tools.proposeRecordCorrections.execute!({
+      evidenceSegments: [1],
+      corrections: [
+        { fragmentId: 'ch-0001', segment: 1, newText: 'Alice is the former captain of the guard.' },
+        // A no-op: the model using the correction channel to say "still true".
+        { fragmentId: 'ch-0001', segment: 2, newText: 'She keeps the north gate.' },
+        { fragmentId: 'ch-0001', segment: 3, newText: 'The gate is iron.' },
+      ],
+    }, { toolCallId: 'partial', messages: [], abortSignal: undefined as unknown as AbortSignal })
+
+    expect(result).toMatchObject({
+      ok: true,
+      queuedOperationCount: 2,
+      invalid: 1,
+      // Unfinished business, so the citation survives for the narrower retry.
+      evidenceRetained: true,
+    })
+    expect(JSON.stringify(result)).toContain('does not materially differ')
+    const operations = collector.fragmentChangeProposals[0].operations
+    expect(operations).toHaveLength(2)
+    expect(operations.map((operation) => 'oldText' in operation ? operation.oldText : null))
+      .toEqual(['Alice is captain of the guard.', 'The gate is oak.'])
   })
 
   it('does not expose append, archive, or whole-field rewrite operations to online analysis', () => {
@@ -1206,7 +1342,7 @@ describe('analysis-tools', () => {
       dataDir: '/tmp',
       storyId: 'story-test',
       proseFragmentId: 'pr-0001',
-      presentedFullFragmentIds: ['ch-0001'],
+      numberedFragmentIds: ['ch-0001'],
     })
 
     const report = await tools.reportAnalysis.execute!({
@@ -1224,16 +1360,16 @@ describe('analysis-tools', () => {
       if (id === 'ch-0001') return mockFragment({ id, content: 'Alice avoids the northern road.' })
       return null
     })
-    const presentedFullFragmentIds = new Set<string>()
+    const numberedFragmentIds = new Set<string>()
     const collector = createEmptyCollector()
     const tools = createAnalysisTools(collector, {
       dataDir: '/tmp',
       storyId: 'story-test',
       proseFragmentId: 'pr-0001',
-      presentedFullFragmentIds,
+      numberedFragmentIds,
     })
     // compileAgentContext determines this only after the tools and blocks exist.
-    presentedFullFragmentIds.add('ch-0001')
+    numberedFragmentIds.add('ch-0001')
 
     const report = await tools.reportAnalysis.execute!({
       summary: 'Alice entered the forest.',

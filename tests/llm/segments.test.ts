@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { renderSegments, resolveSegments, segmentText, stripSegmentMarker } from '@/server/llm/segments'
+import { numberSentences, resolveSegments, sentenceIndexAt, segmentText, stripSegmentMarker } from '@/server/llm/segments'
 
 const texts = (source: string) => segmentText(source).map((segment) => segment.text)
 
@@ -89,7 +89,10 @@ describe('sentence segmentation', () => {
   })
 
   it('renders one numbered line per segment', () => {
-    expect(renderSegments(segmentText('One. Two.'))).toBe('[1] One.\n[2] Two.')
+    expect(numberSentences('One. Two.')).toBe('[1] One.\n[2] Two.')
+    // A render transform cleans each sentence without moving an index.
+    expect(numberSentences('One. Two.', (text) => text.toUpperCase()))
+      .toBe('[1] ONE.\n[2] TWO.')
   })
 })
 
@@ -126,8 +129,8 @@ describe('segment resolution', () => {
  * presentation and must never reach stored content.
  */
 describe('stripSegmentMarker', () => {
-  it('removes the marker renderSegments adds, and nothing else', () => {
-    const rendered = renderSegments(segmentText('Alpha one. Beta two.'))
+  it('removes the marker numberSentences adds, and nothing else', () => {
+    const rendered = numberSentences('Alpha one. Beta two.')
     for (const line of rendered.split('\n')) {
       expect(stripSegmentMarker(line)).not.toMatch(/^\[\d+\]/)
     }
@@ -140,5 +143,30 @@ describe('stripSegmentMarker', () => {
     expect(stripSegmentMarker('He is waiting.')).toBe('He is waiting.')
     // Only the leading marker goes; a citation inside the sentence is content.
     expect(stripSegmentMarker('[2] See [4] for the rest.')).toBe('See [4] for the rest.')
+  })
+})
+
+/**
+ * A search returns a window into a field, which is not an addressable unit. The
+ * sentence the hit lands in is, so lookup keeps search on the same coordinates
+ * as the citation contract.
+ */
+describe('sentenceIndexAt', () => {
+  const source = 'First sentence. Second one!\n\nA new paragraph? Yes.'
+
+  it('finds the sentence holding an offset', () => {
+    expect(sentenceIndexAt(source, source.indexOf('First'))).toBe(1)
+    expect(sentenceIndexAt(source, source.indexOf('Second'))).toBe(2)
+    expect(sentenceIndexAt(source, source.indexOf('paragraph'))).toBe(3)
+    expect(sentenceIndexAt(source, source.indexOf('Yes'))).toBe(4)
+  })
+
+  it('resolves an offset in trimmed whitespace to the sentence it follows', () => {
+    // The blank line between paragraphs belongs to no segment's span.
+    expect(sentenceIndexAt(source, source.indexOf('\n\n') + 1)).toBe(2)
+  })
+
+  it('has nothing to point at in empty text', () => {
+    expect(sentenceIndexAt('', 0)).toBeNull()
   })
 })

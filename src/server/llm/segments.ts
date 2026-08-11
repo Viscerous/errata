@@ -135,15 +135,21 @@ export function segmentText(source: string): TextSegment[] {
   return segments
 }
 
-/** Render for a prompt block: `[1] First sentence.` one per line. */
-export function renderSegments(segments: TextSegment[]): string {
-  return segments.map((segment) => `[${segment.index}] ${segment.text}`).join('\n')
+/**
+ * Address a body for citation: `[1] First sentence.` one per line. Numbering is
+ * always taken from the stored text, so `render` cleans each sentence for
+ * display without any transform being able to shift an index.
+ */
+export function numberSentences(source: string, render?: (text: string) => string): string {
+  return segmentText(source)
+    .map((segment) => `[${segment.index}] ${render ? render(segment.text) : segment.text}`)
+    .join('\n')
 }
 
 const SEGMENT_MARKER_RE = /^\s*\[\d+\]\s*/
 
 /**
- * The inverse of the marker `renderSegments` adds, for text a model writes back.
+ * The inverse of the marker `numberSentences` adds, for text a model writes back.
  * Numbering a record so it can be addressed by sentence teaches the model that a
  * sentence looks like `[16] He is waiting.`, so it writes the replacement the
  * same way: Timeline 12 sent `[16] He is deceased...` and nothing removed the
@@ -156,6 +162,21 @@ const SEGMENT_MARKER_RE = /^\s*\[\d+\]\s*/
  */
 export function stripSegmentMarker(text: string): string {
   return text.replace(SEGMENT_MARKER_RE, '')
+}
+
+/**
+ * The 1-based sentence holding `offset`. An offset can land in whitespace a
+ * segment was trimmed of, so it resolves to the sentence it follows: a caller
+ * pointing at a match wants an addressable neighbourhood, not containment.
+ */
+export function sentenceIndexAt(source: string, offset: number): number | null {
+  let previous: number | null = null
+  for (const segment of segmentText(source)) {
+    if (offset < segment.start) break
+    previous = segment.index
+    if (offset < segment.end) return segment.index
+  }
+  return previous
 }
 
 export interface ResolvedSegments {

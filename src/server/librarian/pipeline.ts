@@ -245,10 +245,11 @@ async function runOnlineAnalyzePass(
     context.attentionCandidateIds = fragmentCandidateIds(initialCandidates)
     context.attentionCandidateSignals = candidateSignals(initialCandidates)
 
-    // Filled from the compiled blocks below. Keeping the Set by reference lets
-    // reportAnalysis distinguish actual full presentation from fragments a
-    // default block would have shown before user overrides were applied.
-    const presentedFullFragmentIds = new Set<string>()
+    // Seeded from the compiled blocks below, then extended by the tools as they
+    // show records numbered. Keeping the Set by reference lets reportAnalysis
+    // distinguish actual full presentation from fragments a default block would
+    // have shown before user overrides were applied.
+    const numberedFragmentIds = new Set<string>()
 
     // The live registry is repeated beside each key field. It steers reuse
     // without making the registry a closed enum, which smaller models handled
@@ -276,7 +277,7 @@ async function runOnlineAnalyzePass(
       proseFragmentId: fragment.id,
       disableDirections,
       disableSuggestions,
-      presentedFullFragmentIds,
+      numberedFragmentIds,
       continuityKeys,
       customFragmentTypes: story.settings.customFragmentTypes,
     })
@@ -284,7 +285,7 @@ async function runOnlineAnalyzePass(
     for (const block of compiled.blocks) {
       if (block.fragmentContext?.mode !== 'full') continue
       for (const fragmentId of block.fragmentContext.fragmentIds ?? []) {
-        presentedFullFragmentIds.add(fragmentId)
+        numberedFragmentIds.add(fragmentId)
       }
     }
     requestLogger.info('Calling LLM for online analysis...', {

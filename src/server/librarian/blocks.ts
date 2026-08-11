@@ -16,7 +16,7 @@ import {
   storySummaryBlock,
 } from '../llm/fragment-context-blocks'
 import { contextSignalMap, selectAttentionContext } from '../llm/context-selection'
-import { renderSegments, segmentText } from '../llm/segments'
+import { numberSentences } from '../llm/segments'
 import { baseBlockContext, type AgentBlockContext } from '../agents/agent-block-context'
 import type { Fragment, StoryMeta } from '../fragments/schema'
 import { getStory, getFragment } from '../fragments/storage'
@@ -72,7 +72,7 @@ function continuityBlock(
  * the target is addressable, and the server resolves the exact span.
  */
 function renderNumberedFragmentSheet(fragment: Fragment): string {
-  return markdownSection(3, fragmentSummaryLine(fragment), renderSegments(segmentText(fragment.content)))
+  return markdownSection(3, fragmentSummaryLine(fragment), numberSentences(fragment.content))
 }
 
 // ─── Librarian Analyze ───
@@ -120,7 +120,7 @@ export function buildAnalyzeSystemPrompt(opts?: {
     const typeNamesList = ['characters', 'knowledge', ...customTypes.map(t => t.name.toLowerCase())].join(', ')
     const proposalActions: string[] = []
     if (canCorrectRecords) {
-      proposalActions.push('Use **proposeRecordCorrections** only when accepted prose makes a specific current assertion in an existing reusable fragment inaccurate, including through ordinary story progression. Records are shown with numbered sentences: name the sentence to replace and give its corrected wording. Replace that one assertion — never restate the scene. Only a listed record can be corrected: a continuity memory key is not one, and changes to it belong in the reportAnalysis state, thread, or knowledge operations.')
+      proposalActions.push('Use **proposeRecordCorrections** only when accepted prose makes a specific current assertion in an existing reusable fragment inaccurate, including through ordinary story progression. Records are shown with numbered sentences: name the sentence to replace and give its corrected wording. Correct only a record you have actually been shown numbered — in your context, in a resolved report, or from **readFragments**, which numbers what it returns. Never count sentences yourself. Replace that one assertion — never restate the scene. Eligible corrections are queued even when others in the same call are rejected, so fix and resubmit only the ones reported back. Only a listed record can be corrected: a continuity memory key is not one, and changes to it belong in the reportAnalysis state, thread, or knowledge operations.')
     }
     if (canCreateRecords) {
       proposalActions.push(`Use **proposeNewRecords** only for genuinely new reusable named records in the allowed fragment types (${typeNamesList}). Cite the sentence numbers that establish it. A temporary scene label, unnamed scenery, episode recap, current condition, feeling, or interpretation is not a reusable record.`)
@@ -312,7 +312,7 @@ export function createLibrarianAnalyzeBlocks(ctx: AgentBlockContext): ContextBlo
       content: markdownSection(2, 'New Prose Fragment', [
         `Fragment ID: ${ctx.newProse.id}`,
         'Sentences are numbered. Cite them by number as evidence.',
-        renderSegments(segmentText(ctx.newProse.content)),
+        numberSentences(ctx.newProse.content),
       ]),
       order: 400,
       source: 'builtin',
