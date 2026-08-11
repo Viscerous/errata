@@ -308,15 +308,10 @@ async function seedStory(dataDir: string, options: HarnessOptions): Promise<{
       sourceRevision: analysisSourceRevision(proseFragment),
       summaryUpdate: makeSummaryUpdate(i),
       summaryContractVersion: SUMMARY_CONTRACT_VERSION,
-      structuredSummary: {
-        events: [`Event beat ${i}`],
-        stateChanges: [`State shift ${i % 11}`],
-        openThreads: [`Open thread ${i % 7}`],
-      },
       mentions: [],
       contradictions: [],
       fragmentChangeProposals: [],
-      timelineEvents: [],
+      timelineEvents: [{ event: `Event beat ${i}`, position: 'after' }],
     }
     await saveAnalysis(dataDir, storyId, analysis)
     analysisCount += 1
@@ -360,15 +355,10 @@ async function seedStory(dataDir: string, options: HarnessOptions): Promise<{
         sourceRevision: analysisSourceRevision(proseFragment),
         summaryUpdate: makeSummaryUpdate(i, 'reanalysis'),
         summaryContractVersion: SUMMARY_CONTRACT_VERSION,
-        structuredSummary: {
-          events: [`Reanalysis event ${i}`],
-          stateChanges: [`Reanalysis state ${i % 11}`],
-          openThreads: [`Reanalysis thread ${i % 7}`],
-        },
         mentions: [],
         contradictions: [],
         fragmentChangeProposals: [],
-        timelineEvents: [],
+        timelineEvents: [{ event: `Reanalysis event ${i}`, position: 'after' }],
       }
       await saveAnalysis(dataDir, storyId, analysis)
       created += 1

@@ -106,17 +106,13 @@ export interface LibrarianAnalysis {
   /** The summary text the librarian intended to record. */
   summaryUpdate: string
   summaryContractVersion?: number
-  structuredSummary?: {
-    events: string[]
-    stateChanges: string[]
-    openThreads: string[]
-  }
   continuityProjection?: ContinuityProjection
   mentions: LibrarianMention[]
   candidateFragmentIds?: string[]
   candidateFragments?: LibrarianCandidateFragment[]
   contradictions: LibrarianContradiction[]
   fragmentChangeProposals: LibrarianFragmentChangeProposal[]
+  /** The passage's events, placed by its temporal frame. Derived, not reported. */
   timelineEvents: Array<{
     event: string
     position: 'before' | 'during' | 'after'

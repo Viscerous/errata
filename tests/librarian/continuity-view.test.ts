@@ -54,15 +54,10 @@ function analysis(fragmentId: string, position: number): LibrarianAnalysis {
     createdAt: `2026-01-${String(position).padStart(2, '0')}T00:00:00.000Z`,
     fragmentId,
     summaryUpdate: `Summary ${position}`,
-    structuredSummary: {
-      events: [`Event ${position}`],
-      stateChanges: [`State ${position}`],
-      openThreads: [`Thread ${position}`],
-    },
     mentions: [],
     contradictions: [],
     fragmentChangeProposals: [],
-    timelineEvents: [],
+    timelineEvents: [{ event: `Event ${position}`, position: 'after' }],
   }
 }
 

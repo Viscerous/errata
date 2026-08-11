@@ -1504,21 +1504,43 @@ describe('librarian agent', () => {
       {
         toolName: 'reportAnalysis',
         args: {
-          timelineEvents: [
-            { event: 'Hero defeated the dragon', position: 'during' },
-            { event: 'Village celebration', position: 'after' },
-          ],
+          events: ['Hero defeated the dragon', 'Village celebration'],
+          temporalFrame: { relation: 'flashback', evidenceSegments: [1] },
         },
       },
     ])
 
     const analysis = await runLibrarian(dataDir, storyId, 'pr-0001')
-    expect(analysis.timelineEvents).toHaveLength(2)
+    // The frame the passage reported places every one of its events.
+    expect(analysis.timelineEvents).toEqual([
+      { event: 'Hero defeated the dragon', position: 'before' },
+      { event: 'Village celebration', position: 'before' },
+    ])
 
     const state = await getState(dataDir, storyId)
     expect(state.timeline).toHaveLength(2)
     expect(state.timeline[0].event).toBe('Hero defeated the dragon')
     expect(state.timeline[0].fragmentId).toBe('pr-0001')
+  })
+
+  it('re-analyzing a fragment replaces its timeline entries in place', async () => {
+    await createStory(dataDir, makeStory())
+    await createFragment(dataDir, storyId, makeFragment({ id: 'pr-0001', content: 'Alice waits.' }))
+    await createFragment(dataDir, storyId, makeFragment({ id: 'pr-0002', content: 'Bob arrives.' }))
+    await setupProseChain(dataDir, storyId, ['pr-0001', 'pr-0002'])
+
+    mockStreamWithToolCalls([{ toolName: 'reportAnalysis', args: { summary: 'S', events: ['Alice waits'] } }])
+    await runLibrarian(dataDir, storyId, 'pr-0001')
+    mockStreamWithToolCalls([{ toolName: 'reportAnalysis', args: { summary: 'S', events: ['Bob arrives'] } }])
+    await runLibrarian(dataDir, storyId, 'pr-0002')
+    mockStreamWithToolCalls([{ toolName: 'reportAnalysis', args: { summary: 'S', events: ['Alice waits at the gate'] } }])
+    await runLibrarian(dataDir, storyId, 'pr-0001')
+
+    const state = await getState(dataDir, storyId)
+    expect(state.timeline).toEqual([
+      { event: 'Alice waits at the gate', fragmentId: 'pr-0001' },
+      { event: 'Bob arrives', fragmentId: 'pr-0002' },
+    ])
   })
 
   it('saves the analysis result with trace', async () => {
@@ -1609,21 +1631,12 @@ describe('librarian agent', () => {
         args: {
           summary: ' ',
           events: ['Alice entered the vault'],
-          stateChanges: ['Alice now has the key'],
-          openThreads: ['Who locked the vault?'],
         },
       },
     ])
 
     const analysis = await runLibrarian(dataDir, storyId, 'pr-0001')
-    expect(analysis.summaryUpdate).toContain('Events: Alice entered the vault.')
-    expect(analysis.summaryUpdate).toContain('State changes: Alice now has the key.')
-    expect(analysis.summaryUpdate).toContain('Open threads: Who locked the vault?.')
-    expect(analysis.structuredSummary).toEqual({
-      events: ['Alice entered the vault'],
-      stateChanges: ['Alice now has the key'],
-      openThreads: ['Who locked the vault?'],
-    })
+    expect(analysis.summaryUpdate).toBe('Alice entered the vault.')
     expect(analysis.sourceRevision?.contentHash).toMatch(/^[a-f0-9]{64}$/)
     expect(analysis.continuityProjection).toMatchObject({
       version: 1,

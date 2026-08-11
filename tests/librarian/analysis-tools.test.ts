@@ -10,6 +10,7 @@ import {
   anchorMentionText,
   mentionInputSchema,
   reportAnalysisInputSchema,
+  timelineEventsFor,
 } from '@/server/librarian/analysis-tools'
 import { getFragment } from '@/server/fragments/storage'
 import type { Fragment } from '@/server/fragments/schema'
@@ -53,12 +54,11 @@ describe('analysis-tools', () => {
   it('creates a collector with empty fields', () => {
     const collector = createEmptyCollector()
     expect(collector.summaryUpdate).toBe('')
-    expect(collector.structuredSummary).toEqual({ events: [], stateChanges: [], openThreads: [] })
+    expect(collector.events).toEqual([])
     expect(collector.mentions).toEqual([])
     expect(collector.candidateFragmentIds).toEqual([])
     expect(collector.contradictions).toEqual([])
     expect(collector.fragmentChangeProposals).toEqual([])
-    expect(collector.timelineEvents).toEqual([])
     expect(collector.continuityProjection).toEqual({
       version: 1,
       temporalFrame: { relation: 'uncertain' },
@@ -375,48 +375,70 @@ describe('analysis-tools', () => {
       .toBe('There is no reusable record ch-missing. Correct only records whose numbered sentences you were shown.')
   })
 
-  it('reportAnalysis sets summary, structured signals, mentions, contradictions, and timeline events', async () => {
+  it('reportAnalysis sets summary, events, mentions, and contradictions', async () => {
     const collector = createEmptyCollector()
     const tools = createAnalysisTools(collector)
 
     const result = await tools.reportAnalysis.execute!({
       summary: 'Alice drew her sword.',
       events: ['Alice drew her sword', 'Alice drew her sword'],
-      stateChanges: ['Alice is armed'],
-      openThreads: ['Who follows her?'],
       mentions: [
         { fragmentId: 'ch-0001', text: 'Alice' },
         { fragmentId: 'ch-0001', text: 'alice' },
         { fragmentId: 'kn-0001', text: 'Silver ash' },
       ],
       contradictions: [{ description: 'Eye color mismatch', fragmentIds: ['ch-0001'] }],
-      timelineEvents: [{ event: 'Alice arms herself', position: 'during' }],
     }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
 
-    expect(result).toMatchObject({ ok: true, mentionCount: 2, contradictionCount: 1, timelineEventCount: 1 })
+    expect(result).toMatchObject({ ok: true, mentionCount: 2, contradictionCount: 1, eventCount: 1 })
     expect(collector.summaryUpdate).toBe('Alice drew her sword.')
-    expect(collector.structuredSummary.events).toEqual(['Alice drew her sword'])
+    expect(collector.events).toEqual(['Alice drew her sword'])
     expect(collector.mentions).toEqual([
       { fragmentId: 'ch-0001', text: 'Alice' },
       { fragmentId: 'kn-0001', text: 'Silver ash' },
     ])
     expect(collector.contradictions[0].description).toBe('Eye color mismatch')
-    expect(collector.timelineEvents[0]).toEqual({ event: 'Alice arms herself', position: 'during' })
   })
 
-  it('deduplicates contradictions and timeline events when a model repeats reportAnalysis', async () => {
+  it('deduplicates contradictions and events when a model repeats reportAnalysis', async () => {
     const collector = createEmptyCollector()
     const tools = createAnalysisTools(collector)
     const report = {
       contradictions: [{ description: 'Eye color mismatch', fragmentIds: ['ch-0001'] }],
-      timelineEvents: [{ event: 'Alice arms herself', position: 'during' as const }],
+      events: ['Alice arms herself'],
     }
 
     await tools.reportAnalysis.execute!(report, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
     await tools.reportAnalysis.execute!(report, { toolCallId: 'b', messages: [], abortSignal: undefined as unknown as AbortSignal })
 
     expect(collector.contradictions).toHaveLength(1)
-    expect(collector.timelineEvents).toHaveLength(1)
+    expect(collector.events).toEqual(['Alice arms herself'])
+  })
+
+  it('a re-report extends the timeline rather than truncating it', async () => {
+    const collector = createEmptyCollector()
+    const tools = createAnalysisTools(collector)
+
+    await tools.reportAnalysis.execute!(
+      { summary: 'First pass.', events: ['Alice draws', 'Bob flees'] },
+      { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal },
+    )
+    await tools.reportAnalysis.execute!(
+      { summary: 'Corrected pass.', events: ['Bob flees', 'The door bars'] },
+      { toolCallId: 'b', messages: [], abortSignal: undefined as unknown as AbortSignal },
+    )
+
+    expect(collector.summaryUpdate).toBe('Corrected pass.')
+    expect(collector.events).toEqual(['Alice draws', 'Bob flees', 'The door bars'])
+  })
+
+  it('places every event by the passage temporal frame', () => {
+    expect(timelineEventsFor(['Alice draws'], { relation: 'flashback' }))
+      .toEqual([{ event: 'Alice draws', position: 'before' }])
+    expect(timelineEventsFor(['Alice draws'], { relation: 'concurrent' }))
+      .toEqual([{ event: 'Alice draws', position: 'during' }])
+    expect(timelineEventsFor(['Alice draws'], { relation: 'forward' }))
+      .toEqual([{ event: 'Alice draws', position: 'after' }])
   })
 
   it('reportAnalysis records validated candidate fragments for proposal context', async () => {
@@ -601,20 +623,16 @@ describe('analysis-tools', () => {
     }])
   })
 
-  it('reportAnalysis derives a summary from structured signals when summary text is empty', async () => {
+  it('reportAnalysis derives a summary from the events when summary text is empty', async () => {
     const collector = createEmptyCollector()
     const tools = createAnalysisTools(collector)
 
     await tools.reportAnalysis.execute!({
       summary: '   ',
       events: ['Found the map', 'Met the guide'],
-      stateChanges: ['Trust increased'],
-      openThreads: ['Who sent the letter?'],
     }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
 
-    expect(collector.summaryUpdate).toContain('Events: Found the map; Met the guide.')
-    expect(collector.summaryUpdate).toContain('State changes: Trust increased.')
-    expect(collector.summaryUpdate).toContain('Open threads: Who sent the letter?.')
+    expect(collector.summaryUpdate).toBe('Found the map. Met the guide.')
   })
 
   it('reportAnalysis nudges an empty payload instead of raising a schema error', async () => {
@@ -793,15 +811,13 @@ describe('analysis-tools', () => {
       // 80 distinct mentions — working cap keeps 60.
       mentions: Array.from({ length: 80 }, (_, i) => ({ fragmentId: 'ch-0001', text: `Term ${i}` })),
       contradictions: Array.from({ length: 20 }, (_, i) => ({ description: `C${i}`, fragmentIds: ['ch-0001'] })),
-      timelineEvents: Array.from({ length: 20 }, (_, i) => ({ event: `T${i}`, position: 'during' as const })),
     }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
 
     expect(collector.summaryUpdate).toHaveLength(1200)
-    expect(collector.structuredSummary.events).toHaveLength(8)
-    expect(collector.structuredSummary.events[0]).toHaveLength(200)
+    expect(collector.events).toHaveLength(8)
+    expect(collector.events[0]).toHaveLength(200)
     expect(collector.mentions).toHaveLength(60)
     expect(collector.contradictions).toHaveLength(12)
-    expect(collector.timelineEvents).toHaveLength(12)
   })
 
   it('online analysis marks an exact evidence-backed correction safe for unattended apply', async () => {

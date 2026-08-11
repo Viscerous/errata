@@ -5,7 +5,7 @@ import { suggestionDirectionSchema, type SuggestionDirection } from '../directio
 import { getFragment, updateFragment } from '../fragments/storage'
 import { FragmentIdSchema, type Fragment } from '../fragments/schema'
 import { numberSentences, resolveSegments, segmentText, stripSegmentMarker, type TextSegment } from '../llm/segments'
-import type { LibrarianFragmentChangeProposal, LibrarianMention } from './storage'
+import type { LibrarianAnalysis, LibrarianFragmentChangeProposal, LibrarianMention } from './storage'
 import type { ContinuityProjection, ContinuityRegistry, KnowledgeOperation, RegistryEntry, StateOperation, ThreadFocus, ThreadOperation } from './continuity-types'
 import { normalizeContinuityKey } from '@/lib/continuity-keys'
 import {
@@ -102,11 +102,8 @@ async function persistMentionAnnotations(
 
 export interface AnalysisCollector {
   summaryUpdate: string
-  structuredSummary: {
-    events: string[]
-    stateChanges: string[]
-    openThreads: string[]
-  }
+  /** What happened, one bullet each. Positioned into a timeline by the frame. */
+  events: string[]
   mentions: LibrarianMention[]
   candidateFragmentIds: string[]
   contradictions: Array<{
@@ -117,7 +114,6 @@ export interface AnalysisCollector {
     conflictingEvidence?: Array<{ fragmentId: string; segments: number[]; evidenceText: string }>
   }>
   fragmentChangeProposals: LibrarianFragmentChangeProposal[]
-  timelineEvents: Array<{ event: string; position: 'before' | 'during' | 'after' }>
   continuityProjection: ContinuityProjection
   directions: SuggestionDirection[]
 }
@@ -125,16 +121,11 @@ export interface AnalysisCollector {
 export function createEmptyCollector(): AnalysisCollector {
   return {
     summaryUpdate: '',
-    structuredSummary: {
-      events: [],
-      stateChanges: [],
-      openThreads: [],
-    },
+    events: [],
     mentions: [],
     candidateFragmentIds: [],
     contradictions: [],
     fragmentChangeProposals: [],
-    timelineEvents: [],
     continuityProjection: {
       version: 1,
       temporalFrame: { relation: 'uncertain' },
@@ -166,23 +157,29 @@ function sentenceJoin(values: string[]): string {
   return values.map((v) => v.endsWith('.') ? v : `${v}.`).join(' ')
 }
 
-export function renderStructuredSummary(structured: {
-  events: string[]
-  stateChanges: string[]
-  openThreads: string[]
-}): string {
-  const parts: string[] = []
-  if (structured.events.length > 0) {
-    parts.push(`Events: ${structured.events.join('; ')}.`)
-  }
-  if (structured.stateChanges.length > 0) {
-    parts.push(`State changes: ${structured.stateChanges.join('; ')}.`)
-  }
-  if (structured.openThreads.length > 0) {
-    parts.push(`Open threads: ${structured.openThreads.join('; ')}.`)
-  }
+/** Events kept per passage, across however many reports build the timeline. */
+const MAX_TIMELINE_EVENTS = 12
 
-  return sentenceJoin(parts).trim()
+/** Last resort when a report carried events but no summary prose. */
+function summaryFromEvents(events: string[]): string {
+  return events.length > 0 ? sentenceJoin(events).trim() : ''
+}
+
+/**
+ * Where a passage sits relative to the narrative present is a property of the
+ * passage, not of each event in it, so the frame positions them all. The
+ * per-event field this replaces was filled 26% of the time and restated a frame
+ * filled 97% of the time — and where the two disagreed, every case was the model
+ * reading `during` as "during another event here" rather than the frame's sense.
+ */
+export function timelineEventsFor(
+  events: string[],
+  frame: ContinuityProjection['temporalFrame'],
+): LibrarianAnalysis['timelineEvents'] {
+  const position = frame.relation === 'flashback' ? 'before'
+    : frame.relation === 'concurrent' ? 'during'
+    : 'after'
+  return events.map((event) => ({ event, position }))
 }
 
 // Two-tier limits: the schema `.max()` is a wide ceiling that rejects only
@@ -368,11 +365,7 @@ export function buildReportAnalysisInputSchema(input: ContinuityKeyRegistry = {}
   return z.object({
     summary: z.string().max(2400).default('').describe('A concise retrospective record of what had happened in the new prose fragment, written as past history rather than a scene to continue — a paragraph or two'),
     events: coercedStringArray
-      .describe('Bullet-like event statements from the prose fragment — the few that matter, at most 8 are kept'),
-    stateChanges: coercedStringArray
-      .describe('What changed in goals, relationships, world state, or character condition — at most 8 are kept'),
-    openThreads: coercedStringArray
-      .describe('Unresolved continuity introduced or materially advanced by this prose. These are memory observations, not directions or promises that the next passage should resolve them — at most 8 are kept'),
+      .describe('What happened, one short statement each — the few that matter, at most 8 are kept. These become the story timeline; `temporalFrame` places them, so do not restate when they happened.'),
     mentions: z.array(mentionInputSchema).max(150).default([])
       .describe('Distinct mentions of listed fragments in the new prose — at most one entry per fragment/text pair; a single mention highlights every occurrence of that text. Use exact prose text; never a bare pronoun.'),
     candidateFragmentIds: z.array(FragmentIdSchema).max(120).default([])
@@ -389,11 +382,6 @@ export function buildReportAnalysisInputSchema(input: ContinuityKeyRegistry = {}
           .describe(`Sentence numbers in that record carrying the incompatible claim; only the first ${MAX_CITED_SEGMENTS} are kept.`),
       })).max(8).default([])
         .describe('The reusable non-prose records this conflicts with, cited by sentence. State changes across successive prose are not contradictions.'),
-    })).max(32).default([]),
-    timelineEvents: z.array(z.object({
-      event: z.string().describe('Description of the significant event'),
-      position: z.union([z.literal('before'), z.literal('during'), z.literal('after')])
-        .describe('"before" for flashback, "during" for concurrent, "after" for sequential'),
     })).max(32).default([]),
     temporalFrame: temporalFrameSchema,
     stateOperations: z.array(stateOperationSchemaFor(registry)).max(80).default([])
@@ -1170,17 +1158,14 @@ export function createAnalysisTools(
 
   if (opts?.includeReportTool !== false) {
     tools.reportAnalysis = tool({
-      description: 'Report the prose analysis in one batch: summary, mentions, temporal frame, keyed state changes, thread lifecycle/focus, explicit character knowledge changes, contradictions, and timeline events. Call once with everything you found. If a later step proves the report wrong or incomplete, call it again with the corrected set: the newest summary replaces the prior one, continuity entries it restates supersede their prior versions, and omitted continuity entries plus mentions, candidates, contradictions, and timeline events are retained.',
+      description: 'Report the prose analysis in one batch: summary, events, mentions, temporal frame, keyed state changes, thread lifecycle/focus, explicit character knowledge changes, and contradictions. Call once with everything you found. If a later step proves the report wrong or incomplete, call it again with the corrected set: the newest summary replaces the prior one, continuity entries it restates supersede their prior versions, and omitted continuity entries plus events, mentions, candidates, and contradictions are retained.',
       inputSchema: buildReportAnalysisInputSchema(opts?.continuityKeys ?? {}),
       execute: async ({
         summary = '',
         events = [],
-        stateChanges = [],
-        openThreads = [],
         mentions = [],
         candidateFragmentIds = [],
         contradictions = [],
-        timelineEvents = [],
         temporalFrame = { relation: 'uncertain', evidenceSegments: [] },
         stateOperations = [],
         threadOperations = [],
@@ -1196,12 +1181,9 @@ export function createAnalysisTools(
         const signalCount =
           Number(summary.trim().length > 0) +
           events.length +
-          stateChanges.length +
-          openThreads.length +
           mentions.length +
           candidateFragmentIds.length +
           contradictions.length +
-          timelineEvents.length +
           Number(temporalFrame.relation !== 'uncertain') +
           stateOperations.length +
           threadOperations.length +
@@ -1265,23 +1247,16 @@ export function createAnalysisTools(
           normalizedProjection.projection,
         )
 
+        // A re-report replaces the summary but only extends the timeline: a
+        // retry aimed at one bad citation must not shorten the record of what
+        // happened. Each call contributes at most the working target, so a
+        // verbose one cannot crowd out the calls after it.
+        const reportedEvents = normalizeUniqueLines(events, 8)
+        collector.events = normalizeUniqueLines([...collector.events, ...reportedEvents], MAX_TIMELINE_EVENTS)
+
         const trimmedSummary = summary.trim().slice(0, 1200)
-        const hasSummarySignal =
-          trimmedSummary.length > 0 ||
-          events.length > 0 ||
-          stateChanges.length > 0 ||
-          openThreads.length > 0
-        if (hasSummarySignal) {
-          const normalized = {
-            events: normalizeUniqueLines(events, 8),
-            stateChanges: normalizeUniqueLines(stateChanges, 8),
-            openThreads: normalizeUniqueLines(openThreads, 8),
-          }
-          collector.structuredSummary = normalized
-          collector.summaryUpdate = trimmedSummary.length > 0
-            ? trimmedSummary
-            : renderStructuredSummary(normalized)
-        }
+        if (trimmedSummary.length > 0) collector.summaryUpdate = trimmedSummary
+        else if (!collector.summaryUpdate) collector.summaryUpdate = summaryFromEvents(collector.events)
 
         // Anchor mentions to the prose: a highlight can only bind text that
         // actually occurs in the passage. Quote-wrapped reports are salvaged by
@@ -1420,23 +1395,13 @@ export function createAnalysisTools(
           collector.contradictions.push(contradiction)
         }
 
-        const timelineKeys = new Set(collector.timelineEvents.map((event) => (
-          `${event.position}\u0000${normalizeForDedupe(event.event)}`
-        )))
-        for (const event of timelineEvents) {
-          if (collector.timelineEvents.length >= 12) break
-          const key = `${event.position}\u0000${normalizeForDedupe(event.event)}`
-          if (timelineKeys.has(key)) continue
-          timelineKeys.add(key)
-          collector.timelineEvents.push(event)
-        }
         successfulToolNames.add('reportAnalysis')
         return {
           ok: true,
           mentionCount: collector.mentions.length,
           candidateFragmentCount: collector.candidateFragmentIds.length,
           contradictionCount: collector.contradictions.length,
-          timelineEventCount: collector.timelineEvents.length,
+          eventCount: collector.events.length,
           stateOperationCount: collector.continuityProjection.stateOperations.length,
           threadOperationCount: collector.continuityProjection.threadOperations.length,
           focusedThreadCount: collector.continuityProjection.threadFocus.length,

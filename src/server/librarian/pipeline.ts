@@ -433,7 +433,7 @@ export async function runLibrarianPipeline(input: LibrarianPipelineInput): Promi
     contradictions: collector.contradictions.length,
     fragmentChangeProposals: collector.fragmentChangeProposals.length,
     directions: collector.directions.length,
-    timelineEvents: collector.timelineEvents.length,
+    events: collector.events.length,
   })
 
   emit({

@@ -23,7 +23,7 @@ import {
   ProposalValidationError,
 } from './suggestions'
 import { createLogger } from '../logging'
-import { toMentionAnnotations } from './analysis-tools'
+import { timelineEventsFor, toMentionAnnotations } from './analysis-tools'
 import { appendToStoredTrace, getActivityBuffer, pushActivityEvent, type ActivityStreamEvent } from '../agents/activity-stream'
 import { runLibrarianPipeline } from './pipeline'
 
@@ -51,6 +51,30 @@ function updateRecentMentionsForFragment(
   }
 
   return next
+}
+
+/** How much story timeline the state file carries; the panel reads the tail. */
+const MAX_STATE_TIMELINE_EVENTS = 200
+
+/**
+ * A fragment owns its stretch of the timeline, so re-analyzing one replaces its
+ * entries where they already sit rather than appending a second copy at the end.
+ */
+function updateTimelineForFragment(
+  current: Array<{ event: string; fragmentId: string }>,
+  fragmentId: string,
+  events: Array<{ event: string }>,
+): Array<{ event: string; fragmentId: string }> {
+  const others = current.filter((entry) => entry.fragmentId !== fragmentId)
+  // Everything before the fragment's first entry is another fragment's, so that
+  // index is already the insertion point in the filtered list.
+  const first = current.findIndex((entry) => entry.fragmentId === fragmentId)
+  const insertAt = first === -1 ? others.length : first
+  return [
+    ...others.slice(0, insertAt),
+    ...events.map((event) => ({ event: event.event, fragmentId })),
+    ...others.slice(insertAt),
+  ].slice(-MAX_STATE_TIMELINE_EVENTS)
 }
 
 export async function runLibrarian(
@@ -131,13 +155,12 @@ async function runLibrarianInner(
     sourceRevision: analysisSourceRevision(fragment),
     summaryUpdate: collector.summaryUpdate,
     summaryContractVersion: SUMMARY_CONTRACT_VERSION,
-    structuredSummary: collector.structuredSummary,
     continuityProjection: collector.continuityProjection,
     mentions: collector.mentions,
     candidateFragmentIds,
     candidateFragments,
     contradictions: collector.contradictions,
-    timelineEvents: collector.timelineEvents,
+    timelineEvents: timelineEventsFor(collector.events, collector.continuityProjection.temporalFrame),
     fragmentChangeProposals: collector.fragmentChangeProposals.map((proposal) => ({
       ...proposal,
       sourceFragmentId: fragmentId,
@@ -242,15 +265,10 @@ async function runLibrarianInner(
     mentionedFragmentIds,
   )
 
-  const updatedTimeline = [...state.timeline]
-  for (const event of analysis.timelineEvents) {
-    updatedTimeline.push({ event: event.event, fragmentId })
-  }
-
   const updatedState = {
     lastAnalyzedFragmentId: fragmentId,
     recentMentions: updatedMentions,
-    timeline: updatedTimeline,
+    timeline: updateTimelineForFragment(state.timeline, fragmentId, analysis.timelineEvents),
   }
 
   // The source-linked analysis is the level-0 summary contribution. Context

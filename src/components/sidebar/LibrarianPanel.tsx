@@ -1002,42 +1002,6 @@ function AnalysisItem({
             )}
           </div>
 
-          {analysis.structuredSummary && (
-            <div className="space-y-1.5">
-              <AnalysisFieldLabel>Structured summary</AnalysisFieldLabel>
-
-              {analysis.structuredSummary.events.length > 0 && (
-                <div>
-                  <AnalysisSubLabel>Events</AnalysisSubLabel>
-                  <AnalysisList items={analysis.structuredSummary.events.map((event, i) => ({
-                    key: `structured-event-${i}`,
-                    content: event,
-                  }))} />
-                </div>
-              )}
-
-              {analysis.structuredSummary.stateChanges.length > 0 && (
-                <div>
-                  <AnalysisSubLabel>State changes</AnalysisSubLabel>
-                  <AnalysisList items={analysis.structuredSummary.stateChanges.map((change, i) => ({
-                    key: `structured-state-${i}`,
-                    content: change,
-                  }))} />
-                </div>
-              )}
-
-              {analysis.structuredSummary.openThreads.length > 0 && (
-                <div>
-                  <AnalysisSubLabel>Open threads</AnalysisSubLabel>
-                  <AnalysisList items={analysis.structuredSummary.openThreads.map((thread, i) => ({
-                    key: `structured-thread-${i}`,
-                    content: thread,
-                  }))} />
-                </div>
-              )}
-            </div>
-          )}
-
           {analysis.continuityProjection && (
             <div className="space-y-1.5">
               <AnalysisFieldLabel>Continuity notes</AnalysisFieldLabel>
