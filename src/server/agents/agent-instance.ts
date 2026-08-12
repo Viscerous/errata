@@ -33,7 +33,7 @@ function safeSerialize(value: unknown): Record<string, unknown> | undefined {
 
 export function createAgentInstance<K extends string>(
   agentName: K,
-  context: { dataDir: string; storyId: string },
+  context: { dataDir: string; storyId: string; runId?: string },
 ): AgentInstance<K> {
   ensureCoreAgentsRegistered()
 
@@ -77,7 +77,11 @@ export function createAgentInstance<K extends string>(
 
     async execute(input: AgentInput<K>): Promise<AgentStreamResult> {
       // Begin the run before parsing so a validation error is still recorded.
-      handle = beginAgentRun(context.storyId, agentName, safeSerialize(input))
+      const abortController = new AbortController()
+      handle = beginAgentRun(context.storyId, agentName, safeSerialize(input), {
+        runId: context.runId,
+        abortController,
+      })
       const parsedInput = definition.inputSchema.parse(input)
 
       const invocationContext: AgentInvocationContext = {
@@ -88,6 +92,7 @@ export function createAgentInstance<K extends string>(
         parentRunId: null,
         rootRunId: handle.runId,
         depth: 0,
+        abortSignal: abortController.signal,
         invokeAgent: async () => {
           throw new Error('Nested agent calls not supported via createAgentInstance')
         },

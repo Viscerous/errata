@@ -127,14 +127,16 @@ export async function librarianChat(
   dataDir: string,
   storyId: string,
   opts: ChatOptions,
+  execution: { abortSignal?: AbortSignal } = {},
 ): Promise<ChatResult> {
-  return withBranch(dataDir, storyId, () => librarianChatInner(dataDir, storyId, opts))
+  return withBranch(dataDir, storyId, () => librarianChatInner(dataDir, storyId, opts, execution))
 }
 
 async function librarianChatInner(
   dataDir: string,
   storyId: string,
   opts: ChatOptions,
+  execution: { abortSignal?: AbortSignal },
 ): Promise<ChatResult> {
   const requestLogger = logger.child({ storyId })
   requestLogger.info('Starting librarian chat...', { messageCount: opts.messages.length })
@@ -217,15 +219,37 @@ async function librarianChatInner(
   ]
 
   // Stream with write tools. Hold analysis so multi-step prose edits analyze once on the
-  // final state, not per edit (see holdLibrarianAnalysis).
-  const result = await chatAgent.stream({
-    messages: aiMessages,
-  })
+  // final state, not per edit (see holdLibrarianAnalysis). The abort wiring matches
+  // createStreamingRunner's: a client that stops reading stops the LLM call, rather
+  // than leaving a write-enabled agent stepping against a consumer that has gone.
+  const abortController = new AbortController()
+  const abortFromCaller = () => abortController.abort()
+  if (execution.abortSignal?.aborted) abortController.abort()
+  else execution.abortSignal?.addEventListener('abort', abortFromCaller, { once: true })
+
+  let result: Awaited<ReturnType<typeof chatAgent.stream>>
+  try {
+    result = abortController.signal.aborted
+      ? { fullStream: (async function* () {})() } as unknown as Awaited<ReturnType<typeof chatAgent.stream>>
+      : await chatAgent.stream({
+          messages: aiMessages,
+          abortSignal: abortController.signal,
+        })
+  } catch (error) {
+    execution.abortSignal?.removeEventListener('abort', abortFromCaller)
+    throw error
+  }
   const releaseAnalysis = holdLibrarianAnalysis(storyId)
   // Active-marker/activity-trace/history for this run come from createAgentInstance
   // (the only caller — routes/librarian.ts), which wraps this whole call in
   // beginAgentRun and tees the event stream into the trace. Not duplicated here.
-  const stream = createEventStream(result.fullStream)
+  const stream = createEventStream(
+    result.fullStream,
+    () => abortController.abort(),
+    abortController.signal,
+  )
+  const unlinkAbort = () => execution.abortSignal?.removeEventListener('abort', abortFromCaller)
+  void stream.completion.then(unlinkAbort, unlinkAbort)
   void stream.completion.then(releaseAnalysis, releaseAnalysis)
   stream.completion
     .then((completion) => resolveAndReportServedUsage(dataDir, storyId, 'librarian.chat', result.totalUsage, {

@@ -304,7 +304,14 @@ export type ChatEvent =
   | { type: 'tool-result'; id: string; toolName: string; result: unknown }
   | { type: 'tool-error'; id: string; toolName: string; error: string }
   | { type: 'phase'; phase: string }
-  | { type: 'finish'; finishReason: string; stepCount: number }
+  /**
+   * A run ended. `stopped` marks the ones the server tore down on request:
+   * those close the stream just as cleanly as a completed run, so termination
+   * alone cannot tell a client whether anything was committed.
+   *
+   * Every cancellable streaming route reports the same flag.
+   */
+  | { type: 'finish'; finishReason: string; stepCount: number; stopped?: boolean }
   | { type: 'generation-rejected'; reason: string; code: 'empty_output' | 'incomplete_finish' | 'reasoning_leak'; finishReason: string }
   | { type: 'prewriter-directions'; directions: SuggestionDirection[] }
   | { type: 'clarify-questions'; questions: ClarifyQuestion[]; round: number }

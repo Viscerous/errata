@@ -108,7 +108,11 @@ export function characterChatRoutes(dataDir: string) {
 
       let agent: ReturnType<typeof createAgentInstance> | undefined
       try {
-        agent = createAgentInstance('character-chat.chat', { dataDir, storyId: params.storyId })
+        agent = createAgentInstance('character-chat.chat', {
+          dataDir,
+          storyId: params.storyId,
+          runId: body.runId,
+        })
         const { eventStream, completion } = await agent.execute({
           characterId: conv.characterId,
           persona: conv.persona,
@@ -159,6 +163,7 @@ export function characterChatRoutes(dataDir: string) {
     }, {
       detail: { summary: 'Send a message (streaming NDJSON)' },
       body: t.Object({
+        runId: t.Optional(t.String()),
         messages: t.Array(t.Object({
           role: t.Union([t.Literal('user'), t.Literal('assistant')]),
           content: t.String(),

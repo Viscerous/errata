@@ -89,7 +89,7 @@ const refineDefinition: AgentDefinition<typeof RefineInputSchema> = {
   inputSchema: RefineInputSchema,
   allowedCalls: ['librarian.analyze'],
   run: async (ctx, input) => {
-    return refineFragment(ctx.dataDir, ctx.storyId, input)
+    return refineFragment(ctx.dataDir, ctx.storyId, input, { abortSignal: ctx.abortSignal })
   },
 }
 
@@ -98,7 +98,7 @@ const optimizeCharacterDefinition: AgentDefinition<typeof OptimizeCharacterInput
   description: 'Optimize a character sheet using depth-focused writing methodology.',
   inputSchema: OptimizeCharacterInputSchema,
   run: async (ctx, input) => {
-    return optimizeCharacter(ctx.dataDir, ctx.storyId, input)
+    return optimizeCharacter(ctx.dataDir, ctx.storyId, input, { abortSignal: ctx.abortSignal })
   },
 }
 
@@ -108,7 +108,7 @@ const chatDefinition: AgentDefinition<typeof ChatInputSchema> = {
   inputSchema: ChatInputSchema,
   allowedCalls: ['librarian.refine', 'librarian.analyze', 'librarian.optimize-character'],
   run: async (ctx, input) => {
-    return librarianChat(ctx.dataDir, ctx.storyId, input)
+    return librarianChat(ctx.dataDir, ctx.storyId, input, { abortSignal: ctx.abortSignal })
   },
 }
 
@@ -117,7 +117,7 @@ const proseTransformDefinition: AgentDefinition<typeof ProseTransformInputSchema
   description: 'Transform a selected prose span using librarian model guidance.',
   inputSchema: ProseTransformInputSchema,
   run: async (ctx, input) => {
-    return transformProseSelection(ctx.dataDir, ctx.storyId, input)
+    return transformProseSelection(ctx.dataDir, ctx.storyId, input, { abortSignal: ctx.abortSignal })
   },
 }
 

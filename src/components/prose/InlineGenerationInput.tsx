@@ -73,6 +73,14 @@ export function InlineGenerationInput({
   // In-flight generation context, preserved across the clarify round trip.
   const genCtxRef = useRef<{ input: string; clarifications: Clarification[]; round: number }>({ input: '', clarifications: [], round: 0 })
 
+  useEffect(() => () => {
+    const controller = abortRef.current
+    const runId = runIdRef.current
+    if (!controller) return
+    if (runId) void api.agents.cancel(storyId, runId).catch(() => controller.abort())
+    else controller.abort()
+  }, [storyId])
+
   // Mode state with localStorage persistence
   const [mode, setMode] = useState<InputMode>(() => {
     try {
@@ -239,6 +247,17 @@ export function InlineGenerationInput({
     runIdRef.current = runId
     let askedQuestions: ClarifyQuestion[] | null = null
 
+    /**
+     * A run torn down on request. Refresh — a stop can land after tool writes —
+     * but leave the prompt in the composer, since no passage was committed.
+     * Reached two ways: the server says so on a cleanly closed stream, or the
+     * client's own abort throws first. Same outcome either way.
+     */
+    const finishStopped = async () => {
+      await invalidateStoryContent(queryClient, storyId)
+      onGenerationComplete()
+    }
+
     try {
       const opts = {
         ...(clarifications.length || round > 0 ? { clarifications, clarifyRound: round } : {}),
@@ -251,6 +270,7 @@ export function InlineGenerationInput({
       let accumulatedText = ''
       let accumulatedReasoning = ''
       let rejectionReason: string | null = null
+      let stopped = false
       const thoughtSteps: ThoughtStep[] = []
       let thoughtsDirty = false
       let rafScheduled = false
@@ -300,6 +320,8 @@ export function InlineGenerationInput({
           askedQuestions = value.questions
         } else if (value.type === 'generation-rejected') {
           rejectionReason = value.reason
+        } else if (value.type === 'finish') {
+          stopped = value.stopped === true
         } else if (value.type === 'phase') {
           accumulatedReasoning = ''
           thoughtSteps.push({ type: 'phase', phase: value.phase })
@@ -337,6 +359,13 @@ export function InlineGenerationInput({
         return
       }
 
+      // A stopped run closes its stream as cleanly as a finished one, so the
+      // flag — not the end of the stream — is what says a run produced prose.
+      if (stopped) {
+        await finishStopped()
+        return
+      }
+
       await invalidateStoryContent(queryClient, storyId)
 
       if (prewriterDirectionsRef.current?.length) {
@@ -355,8 +384,7 @@ export function InlineGenerationInput({
     } catch (err) {
       // User-initiated abort — not an error
       if (ac.signal.aborted) {
-        await invalidateStoryContent(queryClient, storyId)
-        onGenerationComplete()
+        await finishStopped()
       } else {
         setError(err instanceof Error ? err.message : 'Generation failed')
         onGenerationError()
@@ -391,7 +419,9 @@ export function InlineGenerationInput({
       controller.abort()
       return
     }
-    void api.generation.cancel(storyId, runId).finally(() => controller.abort())
+    // The stream remains attached for the server's final `stopped` event.
+    // Transport abort is only the fallback when the cancel request fails.
+    void api.agents.cancel(storyId, runId).catch(() => controller.abort())
   }
 
   const handleCompose = async () => {

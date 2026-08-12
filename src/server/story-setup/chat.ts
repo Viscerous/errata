@@ -1,4 +1,4 @@
-import { createStreamingRunner } from '../agents/create-streaming-runner'
+import { createStreamingRunner, type StreamingRunOptions } from '../agents/create-streaming-runner'
 import { tool } from 'ai'
 import { StorySetupAssessmentSchema, StorySetupSnapshotSchema } from './schema'
 import { listStorySetupFragments, syncStorySetupSnapshot } from './sync'
@@ -110,8 +110,9 @@ export async function storySetupChat(
   dataDir: string,
   storyId: string,
   opts: StorySetupChatOptions,
+  execution?: StreamingRunOptions,
 ) {
-  const result = await runStorySetupChat(dataDir, storyId, opts)
+  const result = await runStorySetupChat(dataDir, storyId, opts, execution)
   return {
     ...result,
     completion: result.completion.then((completion) => {

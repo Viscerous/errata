@@ -101,6 +101,10 @@ export interface StreamingRunnerConfig<TOpts, TValidated = Record<string, unknow
   afterStream?: (result: AgentStreamResult) => void
 }
 
+export interface StreamingRunOptions {
+  abortSignal?: AbortSignal
+}
+
 /**
  * Create a streaming agent runner function from a config object.
  *
@@ -109,13 +113,18 @@ export interface StreamingRunnerConfig<TOpts, TValidated = Record<string, unknow
  */
 export function createStreamingRunner<TOpts extends object, TValidated = Record<string, unknown>>(
   config: StreamingRunnerConfig<TOpts, TValidated>,
-): (dataDir: string, storyId: string, opts: TOpts) => Promise<AgentStreamResult> {
+): (dataDir: string, storyId: string, opts: TOpts, execution?: StreamingRunOptions) => Promise<AgentStreamResult> {
   const logger = createLogger(config.name)
   const role = config.role ?? config.name
   const defaultMaxSteps = config.maxSteps ?? 10
   const shouldBuildContext = config.buildContext !== false
 
-  return async function run(dataDir: string, storyId: string, opts: TOpts): Promise<AgentStreamResult> {
+  return async function run(
+    dataDir: string,
+    storyId: string,
+    opts: TOpts,
+    execution: StreamingRunOptions = {},
+  ): Promise<AgentStreamResult> {
     return withBranch(dataDir, storyId, async () => {
       const requestLogger = logger.child({ storyId })
       requestLogger.info(`Starting ${config.name}...`)
@@ -194,7 +203,19 @@ export function createStreamingRunner<TOpts extends object, TValidated = Record<
       // analyze once on the final state (see holdLibrarianAnalysis); abort the LLM
       // call if the consumer disconnects.
       const abortController = new AbortController()
-      const result = await agent.stream({ messages, abortSignal: abortController.signal })
+      const abortFromCaller = () => abortController.abort()
+      if (execution.abortSignal?.aborted) abortController.abort()
+      else execution.abortSignal?.addEventListener('abort', abortFromCaller, { once: true })
+
+      let result: Awaited<ReturnType<typeof agent.stream>>
+      try {
+        result = abortController.signal.aborted
+          ? { fullStream: (async function* () {})() } as unknown as Awaited<ReturnType<typeof agent.stream>>
+          : await agent.stream({ messages, abortSignal: abortController.signal })
+      } catch (error) {
+        execution.abortSignal?.removeEventListener('abort', abortFromCaller)
+        throw error
+      }
       const releaseAnalysis = config.readOnly === false
         ? holdLibrarianAnalysis(storyId)
         : () => {}
@@ -203,7 +224,13 @@ export function createStreamingRunner<TOpts extends object, TValidated = Record<
       // createAgentInstance (HTTP routes) or runner.ts's invokeAgent (nested/
       // scheduled calls) — both already wrap the whole call in beginAgentRun and
       // tee the event stream into the trace. Registering here too would double it.
-      const streamResult = createEventStream(result.fullStream, () => abortController.abort())
+      const streamResult = createEventStream(
+        result.fullStream,
+        () => abortController.abort(),
+        abortController.signal,
+      )
+      const unlinkAbort = () => execution.abortSignal?.removeEventListener('abort', abortFromCaller)
+      void streamResult.completion.then(unlinkAbort, unlinkAbort)
       void streamResult.completion.then(releaseAnalysis, releaseAnalysis)
 
       // 12. Track token usage after stream completes

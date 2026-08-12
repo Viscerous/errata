@@ -1,17 +1,13 @@
-import { useState, useRef, useCallback, useEffect } from 'react'
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { api, type ChatEvent } from '@/lib/api'
+import { api } from '@/lib/api'
 import { useActiveBranchId } from '@/lib/query-keys'
-import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Send, Loader2 } from 'lucide-react'
 import { EmptyHint } from '@/components/ui/prose-text'
-import {
-  AssistantMessageView,
-  type AssistantMessage,
-  type ChatMessage,
-} from '@/components/chat/ChatMessageParts'
+import { AssistantMessageView } from '@/components/chat/ChatMessageParts'
+import { ChatSendButton } from '@/components/chat/ChatSendButton'
+import { useChatTurn, type ChatTurnMessage } from '@/components/chat/use-chat-turn'
 
 interface LibrarianChatProps {
   storyId: string
@@ -22,15 +18,56 @@ interface LibrarianChatProps {
 export function LibrarianChat({ storyId, conversationId, initialInput }: LibrarianChatProps) {
   const queryClient = useQueryClient()
   const branchId = useActiveBranchId(storyId)
-  const [messages, setMessages] = useState<ChatMessage[]>([])
-  const [input, setInput] = useState('')
-  const [isStreaming, setIsStreaming] = useState(false)
-  const [error, setError] = useState<string | null>(null)
   const [loaded, setLoaded] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
   const initialInputAppliedRef = useRef<string | null>(null)
   const prevConversationIdRef = useRef<string | null | undefined>(undefined)
+
+  // Query key depends on whether we're in a conversation or legacy chat.
+  // Branch-scoped so switching timelines doesn't surface another branch's chat.
+  const historyQueryKey = useMemo(() => (
+    conversationId
+      ? ['librarian-conversation-history', storyId, conversationId]
+      : ['librarian-chat-history', storyId, branchId]
+  ), [branchId, conversationId, storyId])
+
+  const startTurn = useCallback((messages: ChatTurnMessage[], runId: string, signal: AbortSignal) => (
+    conversationId
+      ? api.librarian.conversationChat(storyId, conversationId, messages, runId, signal)
+      : api.librarian.chat(storyId, messages, runId, signal)
+  ), [conversationId, storyId])
+
+  const cancelTurn = useCallback(
+    (runId: string) => api.agents.cancel(storyId, runId),
+    [storyId],
+  )
+
+  const commitTurn = useCallback(async () => {
+    // Independent refetches, and the composer only regains focus once they
+    // settle — so they run together rather than one round trip after another.
+    await Promise.all([
+      // Fragment queries so sidebar lists update
+      queryClient.invalidateQueries({ queryKey: ['fragments', storyId] }),
+      queryClient.invalidateQueries({ queryKey: historyQueryKey }),
+      // Conversation list so titles/timestamps refresh
+      ...(conversationId
+        ? [queryClient.invalidateQueries({ queryKey: ['librarian-conversations', storyId] })]
+        : []),
+    ])
+  }, [conversationId, historyQueryKey, queryClient, storyId])
+
+  const {
+    messages,
+    setMessages,
+    input,
+    setInput,
+    isStreaming,
+    error,
+    setError,
+    send,
+    stop,
+    textareaRef,
+  } = useChatTurn({ start: startTurn, cancel: cancelTurn, onCommit: commitTurn })
 
   // Reset state when conversationId changes
   useEffect(() => {
@@ -53,12 +90,6 @@ export function LibrarianChat({ storyId, conversationId, initialInput }: Librari
       }, 0)
     }
   })
-
-  // Query key depends on whether we're in a conversation or legacy chat.
-  // Branch-scoped so switching timelines doesn't surface another branch's chat.
-  const historyQueryKey = conversationId
-    ? ['librarian-conversation-history', storyId, conversationId]
-    : ['librarian-chat-history', storyId, branchId]
 
   // Load persisted chat history on mount
   const { data: chatHistory } = useQuery({
@@ -112,111 +143,12 @@ export function LibrarianChat({ storyId, conversationId, initialInput }: Librari
     }
   }, [messages, scrollToBottom])
 
-  // Auto-resize textarea
-  useEffect(() => {
-    const el = textareaRef.current
-    if (!el) return
-    el.style.height = 'auto'
-    el.style.height = Math.min(el.scrollHeight, 400) + 'px'
-  }, [input])
-
-  const handleSend = useCallback(async () => {
-    const text = input.trim()
-    if (!text || isStreaming) return
-
-    setInput('')
-    setError(null)
-
-    const userMessage: ChatMessage = { role: 'user', content: text }
-    const updatedMessages = [...messages, userMessage]
-    setMessages(updatedMessages)
-
-    // Add placeholder assistant message for streaming
-    const emptyAssistant: AssistantMessage = { role: 'assistant', content: '' }
-    setMessages([...updatedMessages, emptyAssistant])
-    setIsStreaming(true)
-
-    try {
-      // Send only text content for the API (history doesn't include tool calls)
-      const apiMessages = updatedMessages.map(m => ({
-        role: m.role,
-        content: m.content,
-      }))
-
-      const stream = conversationId
-        ? await api.librarian.conversationChat(storyId, conversationId, apiMessages)
-        : await api.librarian.chat(storyId, apiMessages)
-      const reader = stream.getReader()
-
-      let currentAssistant: AssistantMessage = { role: 'assistant', content: '' }
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-
-        const event: ChatEvent = value
-
-        switch (event.type) {
-          case 'text':
-            currentAssistant = { ...currentAssistant, content: currentAssistant.content + (event.text ?? '') }
-            break
-          case 'reasoning':
-            currentAssistant = {
-              ...currentAssistant,
-              reasoning: (currentAssistant.reasoning ?? '') + (event.text ?? ''),
-            }
-            break
-          case 'tool-call': {
-            const existingCalls = currentAssistant.toolCalls ?? []
-            currentAssistant = {
-              ...currentAssistant,
-              toolCalls: [...existingCalls, { id: event.id, toolName: event.toolName, args: event.args ?? {} }],
-            }
-            break
-          }
-          case 'tool-result': {
-            const calls = currentAssistant.toolCalls ?? []
-            currentAssistant = {
-              ...currentAssistant,
-              toolCalls: calls.map(tc =>
-                tc.id === event.id ? { ...tc, result: event.result } : tc
-              ),
-            }
-            break
-          }
-          case 'finish':
-            // Stream done
-            break
-        }
-
-        setMessages([...updatedMessages, currentAssistant])
-      }
-
-      setMessages([...updatedMessages, currentAssistant])
-
-      // Invalidate fragment queries so sidebar lists update
-      await queryClient.invalidateQueries({ queryKey: ['fragments', storyId] })
-      await queryClient.invalidateQueries({ queryKey: historyQueryKey })
-      // Also invalidate conversation list so titles/timestamps refresh
-      if (conversationId) {
-        await queryClient.invalidateQueries({ queryKey: ['librarian-conversations', storyId] })
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Chat failed')
-      // Remove the empty assistant message on error
-      setMessages(updatedMessages)
-    } finally {
-      setIsStreaming(false)
-      textareaRef.current?.focus()
-    }
-  }, [input, isStreaming, messages, storyId, conversationId, queryClient, historyQueryKey])
-
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
-      handleSend()
+      send()
     }
-  }, [handleSend])
+  }, [send])
 
   return (
     <div className="flex flex-col h-full" data-component-id="librarian-chat-root">
@@ -280,19 +212,14 @@ export function LibrarianChat({ storyId, conversationId, initialInput }: Librari
             rows={1}
             data-component-id="librarian-chat-input"
           />
-          <Button
-            size="icon"
-            className="size-8 shrink-0"
-            disabled={!input.trim() || isStreaming}
-            onClick={handleSend}
-            data-component-id="librarian-chat-send"
-          >
-            {isStreaming ? (
-              <Loader2 className="size-3.5 animate-spin" />
-            ) : (
-              <Send className="size-3.5" />
-            )}
-          </Button>
+          <ChatSendButton
+            isStreaming={isStreaming}
+            canSend={!!input.trim()}
+            onSend={send}
+            onStop={stop}
+            stopLabel="Stop the librarian"
+            idPrefix="librarian-chat"
+          />
         </div>
 
         <p className="text-[0.625rem] text-muted-foreground text-center">

@@ -4,22 +4,11 @@ import { invokeAgent } from '../agents/runner'
 import { createLogger } from '../logging'
 import type { DirectionProposalResult } from '../directions/suggest'
 import { runGeneration } from '../generation/run-generation'
-import { requestAgentCancellation } from '../agents/active-registry'
 
 export function generationRoutes(dataDir: string) {
   const logger = createLogger('api:generation', { dataDir })
 
   return new Elysia({ detail: { tags: ['Generation'] } })
-    .post('/stories/:storyId/generations/:runId/cancel', ({ params }) => {
-      const active = requestAgentCancellation(params.storyId, params.runId)
-      logger.child({ storyId: params.storyId }).info('Generation cancellation requested', {
-        runId: params.runId,
-        active,
-      })
-      return { ok: true, active }
-    }, {
-      detail: { summary: 'Cancel a prose generation run' },
-    })
     .post('/stories/:storyId/propose-directions', async ({ params, body, set }) => {
       const requestLogger = logger.child({ storyId: params.storyId })
       requestLogger.info('Propose directions request')

@@ -41,14 +41,14 @@ export const librarian = {
     apiFetch<{ analysis: LibrarianAnalysis }>(`/stories/${storyId}/librarian/analyses/${analysisId}/contradictions/${index}/dismiss`, { method: 'POST' }),
   deleteAnalysis: (storyId: string, analysisId: string) =>
     apiFetch<{ ok: boolean }>(`/stories/${storyId}/librarian/analyses/${analysisId}`, { method: 'DELETE' }),
-  refine: (storyId: string, fragmentId: string, instructions?: string) =>
-    fetchEventStream(`/stories/${storyId}/librarian/refine`, { fragmentId, instructions }),
+  refine: (storyId: string, fragmentId: string, instructions: string | undefined, runId: string, signal?: AbortSignal) =>
+    fetchEventStream(`/stories/${storyId}/librarian/refine`, { fragmentId, instructions, runId }, signal),
   transformProseSelection: (
     storyId: string,
     fragmentId: string,
     operation: 'rewrite' | 'expand' | 'compress' | 'custom',
     selectedText: string,
-    options?: { sourceContent?: string; contextBefore?: string; contextAfter?: string; instruction?: string },
+    options?: { sourceContent?: string; contextBefore?: string; contextAfter?: string; instruction?: string; runId?: string },
   ) => fetchEventStream(`/stories/${storyId}/librarian/prose-transform`, {
     fragmentId,
     operation,
@@ -57,9 +57,10 @@ export const librarian = {
     contextBefore: options?.contextBefore,
     contextAfter: options?.contextAfter,
     instruction: options?.instruction,
+    runId: options?.runId,
   }),
-  chat: (storyId: string, messages: Array<{ role: 'user' | 'assistant'; content: string }>) =>
-    fetchEventStream(`/stories/${storyId}/librarian/chat`, { messages }),
+  chat: (storyId: string, messages: Array<{ role: 'user' | 'assistant'; content: string }>, runId: string, signal?: AbortSignal) =>
+    fetchEventStream(`/stories/${storyId}/librarian/chat`, { messages, runId }, signal),
   getChatHistory: (storyId: string) =>
     apiFetch<ChatHistory>(`/stories/${storyId}/librarian/chat`),
   clearChatHistory: (storyId: string) =>
@@ -78,6 +79,6 @@ export const librarian = {
     }),
   getConversationHistory: (storyId: string, conversationId: string) =>
     apiFetch<ChatHistory>(`/stories/${storyId}/librarian/conversations/${conversationId}/chat`),
-  conversationChat: (storyId: string, conversationId: string, messages: Array<{ role: 'user' | 'assistant'; content: string }>) =>
-    fetchEventStream(`/stories/${storyId}/librarian/conversations/${conversationId}/chat`, { messages }),
+  conversationChat: (storyId: string, conversationId: string, messages: Array<{ role: 'user' | 'assistant'; content: string }>, runId: string, signal?: AbortSignal) =>
+    fetchEventStream(`/stories/${storyId}/librarian/conversations/${conversationId}/chat`, { messages, runId }, signal),
 }

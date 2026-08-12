@@ -5,7 +5,7 @@ export type AgentStreamEvent =
   | { type: 'tool-call'; id: string; toolName: string; args: Record<string, unknown> }
   | { type: 'tool-result'; id: string; toolName: string; result: unknown }
   | { type: 'tool-error'; id: string; toolName: string; error: string }
-  | { type: 'finish'; finishReason: string; stepCount: number }
+  | { type: 'finish'; finishReason: string; stepCount: number; stopped?: boolean }
 
 export interface AgentStreamCompletion {
   text: string

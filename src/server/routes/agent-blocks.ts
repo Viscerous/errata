@@ -5,7 +5,7 @@ import { agentBlockRegistry, type AgentBlockDefinition } from '../agents/agent-b
 import type { AgentBlockContext } from '../agents/agent-block-context'
 import { modelRoleRegistry } from '../agents/model-role-registry'
 import { ensureCoreAgentsRegistered } from '../agents/register-core'
-import { listActiveAgents } from '../agents/active-registry'
+import { listActiveAgents, requestAgentCancellation } from '../agents/active-registry'
 import { createActivitySSE } from '../agents/activity-stream'
 import { encodeStream } from './encode-stream'
 import { compileBlocks, expandMessagesFragmentTags } from '../llm/context-builder'
@@ -76,6 +76,13 @@ export function agentBlockRoutes(dataDir: string) {
   ensureCoreAgentsRegistered()
 
   return new Elysia({ detail: { tags: ['Agent Blocks'] } })
+    // Stop any client-addressable agent run. The run registry is agent-agnostic,
+    // so cancellation lives under the same namespace instead of generation.
+    .post('/stories/:storyId/agents/:runId/cancel', ({ params }) => ({
+      ok: true,
+      active: requestAgentCancellation(params.storyId, params.runId),
+    }), { detail: { summary: 'Cancel an agent run' } })
+
     // List currently running agents for a story
     .get('/stories/:storyId/active-agents', ({ params }) => {
       return listActiveAgents(params.storyId)

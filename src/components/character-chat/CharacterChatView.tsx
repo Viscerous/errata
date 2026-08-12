@@ -1,17 +1,13 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { api, type ChatEvent, type Fragment } from '@/lib/api'
+import { api, type Fragment } from '@/lib/api'
 import type { PersonaMode, CharacterChatConversationSummary } from '@/lib/api/types'
-import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Send, Loader2 } from 'lucide-react'
 import { Caption, EmptyHint } from '@/components/ui/prose-text'
-import {
-  AssistantMessageView,
-  type AssistantMessage,
-  type ChatMessage,
-} from '@/components/chat/ChatMessageParts'
+import { AssistantMessageView } from '@/components/chat/ChatMessageParts'
+import { ChatSendButton } from '@/components/chat/ChatSendButton'
+import { useChatTurn, type ChatTurnMessage } from '@/components/chat/use-chat-turn'
 import { CharacterAvatar } from '@/components/shared/CharacterAvatar'
 import { ChatConfig } from './ChatConfig'
 import { ConversationList } from './ConversationList'
@@ -34,14 +30,52 @@ export function CharacterChatView({ storyId, initialCharacterId, onClose }: Char
 
   // Conversation state
   const [conversationId, setConversationId] = useState<string | null>(null)
-  const [messages, setMessages] = useState<ChatMessage[]>([])
-  const [input, setInput] = useState('')
-  const [isStreaming, setIsStreaming] = useState(false)
-  const [error, setError] = useState<string | null>(null)
   const [showConversations, setShowConversations] = useState(false)
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  // The conversation is created by the first turn that is actually sent, so a
+  // turn that never lands leaves no empty conversation behind either.
+  const startTurn = useCallback(async (
+    turnMessages: ChatTurnMessage[],
+    runId: string,
+    signal: AbortSignal,
+  ) => {
+    if (!characterId) throw new Error('Select a character first')
+    let activeConvId = conversationId
+    if (!activeConvId) {
+      const conv = await api.characterChat.createConversation(storyId, {
+        characterId,
+        persona,
+        storyPointFragmentId: storyPointId,
+      })
+      activeConvId = conv.id
+      setConversationId(conv.id)
+    }
+    return api.characterChat.chat(storyId, activeConvId, turnMessages, runId, signal)
+  }, [characterId, conversationId, persona, storyId, storyPointId])
+
+  const cancelTurn = useCallback(
+    (runId: string) => api.agents.cancel(storyId, runId),
+    [storyId],
+  )
+
+  const commitTurn = useCallback(async () => {
+    await queryClient.invalidateQueries({ queryKey: ['character-chat-conversations', storyId] })
+  }, [queryClient, storyId])
+
+  const {
+    messages,
+    setMessages,
+    input,
+    setInput,
+    isStreaming,
+    error,
+    setError,
+    send,
+    stop,
+    textareaRef,
+  } = useChatTurn({ start: startTurn, cancel: cancelTurn, onCommit: commitTurn })
 
   // Data queries
   const { data: allFragments } = useQuery(q.fragments(storyId, branchId))
@@ -93,14 +127,6 @@ export function CharacterChatView({ storyId, initialCharacterId, onClose }: Char
     }
   }, [messages, scrollToBottom])
 
-  // Auto-resize textarea
-  useEffect(() => {
-    const el = textareaRef.current
-    if (!el) return
-    el.style.height = 'auto'
-    el.style.height = Math.min(el.scrollHeight, 400) + 'px'
-  }, [input])
-
   // Handle character change — reset conversation
   const handleCharacterChange = useCallback((id: string) => {
     setCharacterId(id)
@@ -143,110 +169,12 @@ export function CharacterChatView({ storyId, initialCharacterId, onClose }: Char
     }
   }, [storyId])
 
-  // Send a message
-  const handleSend = useCallback(async () => {
-    const text = input.trim()
-    if (!text || isStreaming || !characterId) return
-
-    setInput('')
-    setError(null)
-
-    const userMessage: ChatMessage = { role: 'user', content: text }
-    const updatedMessages = [...messages, userMessage]
-    setMessages(updatedMessages)
-
-    // Add placeholder assistant message
-    const emptyAssistant: AssistantMessage = { role: 'assistant', content: '' }
-    setMessages([...updatedMessages, emptyAssistant])
-    setIsStreaming(true)
-
-    try {
-      // Create conversation on first message if needed
-      let activeConvId = conversationId
-      if (!activeConvId) {
-        const conv = await api.characterChat.createConversation(storyId, {
-          characterId,
-          persona,
-          storyPointFragmentId: storyPointId,
-        })
-        activeConvId = conv.id
-        setConversationId(conv.id)
-      }
-
-      // Build API messages (text only)
-      const apiMessages = updatedMessages.map((m) => ({
-        role: m.role,
-        content: m.content,
-      }))
-
-      const stream = await api.characterChat.chat(storyId, activeConvId, apiMessages)
-      const reader = stream.getReader()
-
-      let currentAssistant: AssistantMessage = { role: 'assistant', content: '' }
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-
-        const event: ChatEvent = value
-
-        switch (event.type) {
-          case 'text':
-            currentAssistant = {
-              ...currentAssistant,
-              content: currentAssistant.content + (event.text ?? ''),
-            }
-            break
-          case 'reasoning':
-            currentAssistant = {
-              ...currentAssistant,
-              reasoning: (currentAssistant.reasoning ?? '') + (event.text ?? ''),
-            }
-            break
-          case 'tool-call': {
-            const existing = currentAssistant.toolCalls ?? []
-            currentAssistant = {
-              ...currentAssistant,
-              toolCalls: [...existing, { id: event.id, toolName: event.toolName, args: event.args ?? {} }],
-            }
-            break
-          }
-          case 'tool-result': {
-            const calls = currentAssistant.toolCalls ?? []
-            currentAssistant = {
-              ...currentAssistant,
-              toolCalls: calls.map((tc) =>
-                tc.id === event.id ? { ...tc, result: event.result } : tc,
-              ),
-            }
-            break
-          }
-          case 'finish':
-            break
-        }
-
-        setMessages([...updatedMessages, currentAssistant])
-      }
-
-      setMessages([...updatedMessages, currentAssistant])
-
-      // Invalidate conversation list
-      await queryClient.invalidateQueries({ queryKey: ['character-chat-conversations', storyId] })
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Chat failed')
-      setMessages(updatedMessages)
-    } finally {
-      setIsStreaming(false)
-      textareaRef.current?.focus()
-    }
-  }, [input, isStreaming, characterId, messages, conversationId, storyId, persona, storyPointId, queryClient])
-
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
-      handleSend()
+      send()
     }
-  }, [handleSend])
+  }, [send])
 
   return (
     <div className="flex flex-col h-full relative" data-component-id="character-chat-view">
@@ -379,19 +307,15 @@ export function CharacterChatView({ storyId, initialCharacterId, onClose }: Char
               rows={1}
               data-component-id="character-chat-input"
             />
-            <Button
-              size="icon"
-              className="size-9 shrink-0"
-              disabled={!input.trim() || isStreaming || !characterId}
-              onClick={handleSend}
-              data-component-id="character-chat-send"
-            >
-              {isStreaming ? (
-                <Loader2 className="size-4 animate-spin" />
-              ) : (
-                <Send className="size-4" />
-              )}
-            </Button>
+            <ChatSendButton
+              isStreaming={isStreaming}
+              canSend={!!input.trim() && !!characterId}
+              onSend={send}
+              onStop={stop}
+              stopLabel={`Stop ${selectedCharacter?.name ?? 'the character'}`}
+              idPrefix="character-chat"
+              size="md"
+            />
           </div>
 
           <p className="text-[0.625rem] text-muted-foreground text-center mt-2">

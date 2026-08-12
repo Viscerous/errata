@@ -35,6 +35,17 @@ async function apiJson(path: string, body: unknown, method = 'POST') {
   })
 }
 
+describe('Agent cancellation route', () => {
+  it('uses the agent namespace for every run type', async () => {
+    const response = await api('/stories/story-1/agents/run-1/cancel', { method: 'POST' })
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toEqual({ ok: true, active: false })
+
+    const legacy = await api('/stories/story-1/generations/run-1/cancel', { method: 'POST' })
+    expect(legacy.status).toBe(404)
+  })
+})
+
 // --- Story Routes ---
 
 describe('Story API routes', () => {

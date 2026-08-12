@@ -1,10 +1,11 @@
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Sparkles, Square, X } from 'lucide-react'
 import { StreamMarkdown } from '@/components/ui/stream-markdown'
+import { generateRunId } from '@/lib/client-ids'
 
 interface RefinementPanelProps {
   storyId: string
@@ -27,25 +28,53 @@ export function RefinementPanel({
   const [isRefining, setIsRefining] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [done, setDone] = useState(false)
+  const [cancelled, setCancelled] = useState(false)
   const outputRef = useRef<HTMLDivElement>(null)
+  const abortRef = useRef<AbortController | null>(null)
+  const runIdRef = useRef<string | null>(null)
+
+  // The panel's lifetime bounds the run: closing it — by its own X or by the
+  // surface that mounted it dropping the target — stops the refinement rather
+  // than leaving it writing to a fragment nobody is watching.
+  useEffect(() => () => {
+    const runId = runIdRef.current
+    const controller = abortRef.current
+    if (!controller) return
+    if (runId) void api.agents.cancel(storyId, runId).catch(() => controller.abort())
+    else controller.abort()
+  }, [storyId])
 
   const handleRefine = useCallback(async () => {
-    if (isRefining) return
+    if (abortRef.current) return
 
     setIsRefining(true)
     setStreamedText('')
     setError(null)
     setDone(false)
+    setCancelled(false)
+
+    const ac = new AbortController()
+    abortRef.current = ac
+    const runId = generateRunId()
+    runIdRef.current = runId
+
+    const refreshFragments = () => Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['fragments', storyId] }),
+      queryClient.invalidateQueries({ queryKey: ['fragment', storyId] }),
+    ])
 
     try {
       const stream = await api.librarian.refine(
         storyId,
         fragmentId,
         instructions.trim() || undefined,
+        runId,
+        ac.signal,
       )
 
       const reader = stream.getReader()
       let accumulated = ''
+      let stopped = false
 
       while (true) {
         const { done, value } = await reader.read()
@@ -53,6 +82,8 @@ export function RefinementPanel({
         if (value.type === 'text') {
           accumulated += value.text
           setStreamedText(accumulated)
+        } else if (value.type === 'finish') {
+          stopped = value.stopped === true
         }
 
         if (outputRef.current) {
@@ -60,17 +91,36 @@ export function RefinementPanel({
         }
       }
 
-      // Invalidate fragment queries to show updated content
-      await queryClient.invalidateQueries({ queryKey: ['fragments', storyId] })
-      await queryClient.invalidateQueries({ queryKey: ['fragment', storyId] })
+      // A stopped write-enabled run may have landed a tool call already. Always
+      // refresh, but do not infer completion from the events that preceded it.
+      await refreshFragments()
+      if (stopped) {
+        setCancelled(true)
+        return
+      }
       setDone(true)
       onComplete?.()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Refinement failed')
+      if (!ac.signal.aborted) {
+        setError(err instanceof Error ? err.message : 'Refinement failed')
+        return
+      }
+      await refreshFragments()
+      setCancelled(true)
     } finally {
+      abortRef.current = null
+      if (runIdRef.current === runId) runIdRef.current = null
       setIsRefining(false)
     }
-  }, [instructions, isRefining, storyId, fragmentId, queryClient, onComplete])
+  }, [instructions, storyId, fragmentId, queryClient, onComplete])
+
+  const handleCancel = useCallback(() => {
+    const controller = abortRef.current
+    const runId = runIdRef.current
+    if (!controller) return
+    if (runId) void api.agents.cancel(storyId, runId).catch(() => controller.abort())
+    else controller.abort()
+  }, [storyId])
 
   return (
     <div className="border border-border/40 rounded-lg bg-card/30" data-component-id="refinement-root">
@@ -134,12 +184,19 @@ export function RefinementPanel({
             size="sm"
             variant="outline"
             className="h-7 text-xs gap-1.5"
-            onClick={onClose}
+            onClick={handleCancel}
             data-component-id="refinement-stop"
           >
             <Square className="size-3" />
             Cancel
           </Button>
+        )}
+
+        {/* Cancelled */}
+        {cancelled && (
+          <div className="text-xs text-muted-foreground" data-component-id="refinement-cancelled">
+            Refinement stopped. Review the fragment before trying again.
+          </div>
         )}
 
         {/* Error */}

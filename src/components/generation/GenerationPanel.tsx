@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { invalidateStoryContent } from '@/lib/branch-cache'
@@ -46,6 +46,14 @@ export function GenerationPanel({ storyId, onBack }: GenerationPanelProps) {
     round: 0,
   })
 
+  useEffect(() => () => {
+    const controller = abortRef.current
+    const runId = runIdRef.current
+    if (!controller) return
+    if (runId) void api.agents.cancel(storyId, runId).catch(() => controller.abort())
+    else controller.abort()
+  }, [storyId])
+
   const runGeneration = useCallback(async (
     genInput: string,
     saveResult: boolean,
@@ -69,6 +77,7 @@ export function GenerationPanel({ storyId, onBack }: GenerationPanelProps) {
 
     let asked: ClarifyQuestion[] | null = null
     let rejectionReason: string | null = null
+    let stopped = false
     try {
       const opts = clarifications.length || round > 0
         ? { clarifications, clarifyRound: round, runId }
@@ -90,6 +99,8 @@ export function GenerationPanel({ storyId, onBack }: GenerationPanelProps) {
           asked = value.questions
         } else if (value.type === 'generation-rejected') {
           rejectionReason = value.reason
+        } else if (value.type === 'finish') {
+          stopped = value.stopped === true
         }
 
         if (!rafScheduled && accumulated) {
@@ -116,7 +127,10 @@ export function GenerationPanel({ storyId, onBack }: GenerationPanelProps) {
       }
 
       setStreamedText(accumulated)
-      if (saveResult) {
+      // A stopped run closes its stream as cleanly as a finished one, so the
+      // flag is what distinguishes them. Nothing was committed, so the prompt
+      // stays in the textarea.
+      if (saveResult && !stopped) {
         await invalidateStoryContent(queryClient, storyId)
         setInput('')
       }
@@ -151,12 +165,14 @@ export function GenerationPanel({ storyId, onBack }: GenerationPanelProps) {
     const runId = runIdRef.current
     if (controller) {
       if (runId) {
-        void api.generation.cancel(storyId, runId).finally(() => controller.abort())
+        // Keep the transport open so the server's final `stopped` event is the
+        // single completion signal. Abort locally only if cancellation itself
+        // could not be requested.
+        void api.agents.cancel(storyId, runId).catch(() => controller.abort())
       } else {
         controller.abort()
       }
     }
-    setIsGenerating(false)
     setPendingQuestions(null)
   }, [storyId])
 

@@ -17,7 +17,11 @@ export function storySetupRoutes(dataDir: string) {
 
       let agent: ReturnType<typeof createAgentInstance> | undefined
       try {
-        agent = createAgentInstance('story-setup.chat', { dataDir, storyId: params.storyId })
+        agent = createAgentInstance('story-setup.chat', {
+          dataDir,
+          storyId: params.storyId,
+          runId: body.runId,
+        })
         const { eventStream, completion } = await agent.execute({ messages: body.messages, mode: body.mode })
         void completion.catch((error) => {
           logger.error('Story setup stream completed without a valid snapshot', {
@@ -39,6 +43,7 @@ export function storySetupRoutes(dataDir: string) {
       }
     }, {
       body: t.Object({
+        runId: t.Optional(t.String()),
         messages: t.Array(t.Object({
           role: t.Union([t.Literal('user'), t.Literal('assistant')]),
           content: t.String(),

@@ -321,7 +321,11 @@ export function librarianRoutes(dataDir: string) {
 
       let agent: ReturnType<typeof createAgentInstance> | undefined
       try {
-        agent = createAgentInstance('librarian.refine', { dataDir, storyId: params.storyId })
+        agent = createAgentInstance('librarian.refine', {
+          dataDir,
+          storyId: params.storyId,
+          runId: body.runId,
+        })
         const { eventStream, completion } = await agent.execute({
           fragmentId: body.fragmentId,
           instructions: body.instructions,
@@ -352,6 +356,7 @@ export function librarianRoutes(dataDir: string) {
       }
     }, {
       body: t.Object({
+        runId: t.Optional(t.String()),
         fragmentId: t.String(),
         instructions: t.Optional(t.String()),
       }),
@@ -385,7 +390,11 @@ export function librarianRoutes(dataDir: string) {
 
       let agent: ReturnType<typeof createAgentInstance> | undefined
       try {
-        agent = createAgentInstance('librarian.prose-transform', { dataDir, storyId: params.storyId })
+        agent = createAgentInstance('librarian.prose-transform', {
+          dataDir,
+          storyId: params.storyId,
+          runId: body.runId,
+        })
         const { eventStream, completion } = await agent.execute({
           fragmentId: body.fragmentId,
           selectedText: body.selectedText,
@@ -422,6 +431,7 @@ export function librarianRoutes(dataDir: string) {
       }
     }, {
       body: t.Object({
+        runId: t.Optional(t.String()),
         fragmentId: t.String(),
         selectedText: t.String({ minLength: 1 }),
         operation: t.Union([t.Literal('rewrite'), t.Literal('expand'), t.Literal('compress'), t.Literal('custom')]),
@@ -460,7 +470,11 @@ export function librarianRoutes(dataDir: string) {
 
       let agent: ReturnType<typeof createAgentInstance> | undefined
       try {
-        agent = createAgentInstance('librarian.chat', { dataDir, storyId: params.storyId })
+        agent = createAgentInstance('librarian.chat', {
+          dataDir,
+          storyId: params.storyId,
+          runId: body.runId,
+        })
         const { eventStream, completion } = await agent.execute({
           messages: body.messages,
           maxSteps: story.settings.maxSteps ?? 10,
@@ -497,6 +511,7 @@ export function librarianRoutes(dataDir: string) {
       }
     }, {
       body: t.Object({
+        runId: t.Optional(t.String()),
         messages: t.Array(t.Object({
           role: t.Union([t.Literal('user'), t.Literal('assistant')]),
           content: t.String(),
@@ -537,7 +552,11 @@ export function librarianRoutes(dataDir: string) {
 
       let agent: ReturnType<typeof createAgentInstance> | undefined
       try {
-        agent = createAgentInstance('librarian.chat', { dataDir, storyId: params.storyId })
+        agent = createAgentInstance('librarian.chat', {
+          dataDir,
+          storyId: params.storyId,
+          runId: body.runId,
+        })
         const { eventStream, completion } = await agent.execute({
           messages: body.messages,
           maxSteps: story.settings.maxSteps ?? 10,
@@ -573,6 +592,7 @@ export function librarianRoutes(dataDir: string) {
       }
     }, {
       body: t.Object({
+        runId: t.Optional(t.String()),
         messages: t.Array(t.Object({
           role: t.Union([t.Literal('user'), t.Literal('assistant')]),
           content: t.String(),

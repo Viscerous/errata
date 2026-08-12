@@ -36,7 +36,7 @@ const chatDefinition: AgentDefinition<typeof ChatInputSchema> = {
   inputSchema: ChatInputSchema,
   allowedCalls: [],
   run: async (ctx, input) => {
-    return characterChat(ctx.dataDir, ctx.storyId, input)
+    return characterChat(ctx.dataDir, ctx.storyId, input, { abortSignal: ctx.abortSignal })
   },
 }
 

@@ -11,6 +11,10 @@ export interface ActiveAgent {
 }
 
 export const agents = {
+  cancel: (storyId: string, runId: string) =>
+    apiFetch<{ ok: boolean; active: boolean }>(`/stories/${storyId}/agents/${runId}/cancel`, {
+      method: 'POST',
+    }),
   listActive: (storyId: string) =>
     apiFetch<ActiveAgent[]>(`/stories/${storyId}/active-agents`),
   // Live reasoning/tool trace for a running agent (NDJSON event stream).

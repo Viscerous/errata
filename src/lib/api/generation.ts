@@ -43,9 +43,6 @@ export const generation = {
   /** Refine an existing fragment with instructions */
   refine: (storyId: string, fragmentId: string, input: string, signal?: AbortSignal, opts?: GenerationRequestOpts) =>
     fetchEventStream(`/stories/${storyId}/generate`, { input, saveResult: true, mode: 'refine', fragmentId, ...generationRequestBody(opts) }, signal),
-  /** Explicit server-side cancellation; transport abort remains a fallback. */
-  cancel: (storyId: string, runId: string) =>
-    apiFetch<{ ok: boolean; active: boolean }>(`/stories/${storyId}/generations/${runId}/cancel`, { method: 'POST' }),
   /** Get AI-generated story direction proposals */
   proposeDirections: (storyId: string, count?: number) =>
     apiFetch<{ suggestions: SuggestionDirection[] }>(

@@ -37,5 +37,6 @@ export const storySetup = {
     messages: StorySetupMessage[],
     mode: StorySetupChatMode,
     signal?: AbortSignal,
-  ) => fetchEventStream(`/stories/${storyId}/setup/chat`, { messages, mode }, signal),
+    runId?: string,
+  ) => fetchEventStream(`/stories/${storyId}/setup/chat`, { messages, mode, runId }, signal),
 }
