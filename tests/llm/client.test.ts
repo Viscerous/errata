@@ -1,11 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { createTempDir, makeTestSettings, makeTestGlobalConfig } from '../setup'
+import { createTempDir, makeTestSettings, makeTestGlobalConfig, seedTestProvider } from '../setup'
 import { createStory } from '@/server/fragments/storage'
 import { saveGlobalConfig } from '@/server/config/storage'
 import {
   getModel,
+  resolveAgentRuntime,
   resolveGenerationGuards,
-  DEFAULT_MAX_OUTPUT_TOKENS,
+  translateOpenAICompatibleTopK,
 } from '@/server/llm/client'
 import type { StoryMeta } from '@/server/fragments/schema'
 
@@ -23,9 +24,9 @@ function makeStory(): StoryMeta {
 }
 
 describe('resolveGenerationGuards', () => {
-  it('applies the default token cap when unset', () => {
+  it('delegates output length to the provider when unset', () => {
     expect(resolveGenerationGuards(undefined)).toEqual({
-      maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
+      maxOutputTokens: undefined,
     })
   })
 
@@ -199,5 +200,104 @@ describe('llm client model resolution', () => {
 
     expect((resolved.model as unknown as { provider: string }).provider).toBe('google.generative-ai')
     expect(resolved.config.baseURL).toBe('https://generativelanguage.googleapis.com/v1beta')
+  })
+
+  it('inherits top-p and top-k independently through the role chain', async () => {
+    await seedTestProvider(dataDir)
+    const story = makeStory()
+    story.settings.modelOverrides = {
+      generation: { topP: 0.9, topK: 64 },
+      librarian: { topK: 20 },
+    }
+    await createStory(dataDir, story)
+
+    const writer = await getModel(dataDir, story.id, { role: 'generation.writer' })
+    const analyze = await getModel(dataDir, story.id, { role: 'librarian.analyze' })
+
+    expect(writer).toMatchObject({ topP: 0.9, topK: 64 })
+    expect(analyze).toMatchObject({ topP: 0.9, topK: 20 })
+  })
+
+  it('prefers canonical role overrides to legacy aliases regardless of property order', async () => {
+    await seedTestProvider(dataDir)
+    const story = makeStory()
+    story.settings.modelOverrides = {
+      prewriter: { topK: 64 },
+      'generation.prewriter': { topK: 20 },
+    }
+    await createStory(dataDir, story)
+
+    const resolved = await getModel(dataDir, story.id, { role: 'generation.prewriter' })
+
+    expect(resolved.topK).toBe(20)
+  })
+
+  it('translates canonical topK only at the OpenAI-compatible provider boundary', async () => {
+    const params = {
+      prompt: [],
+      topK: 64,
+      providerOptions: { Test: { reasoning_effort: 'high' } },
+    } as Parameters<typeof translateOpenAICompatibleTopK>[0]
+
+    expect(translateOpenAICompatibleTopK(params, 'Test')).toMatchObject({
+      topK: undefined,
+      providerOptions: { Test: { reasoning_effort: 'high', top_k: 64 } },
+    })
+  })
+
+  it('rebuilds an OpenAI-compatible provider when its options namespace changes', async () => {
+    const provider = {
+      id: 'rename-test',
+      name: 'Before Rename',
+      preset: 'custom',
+      baseURL: 'https://example.com/v1',
+      apiKey: 'test-key',
+      defaultModel: 'test-model',
+      enabled: true,
+      customHeaders: {},
+      temperature: undefined,
+      createdAt: new Date().toISOString(),
+    }
+    await saveGlobalConfig(dataDir, makeTestGlobalConfig({
+      defaultProviderId: provider.id,
+      providers: [provider],
+    }))
+    await createStory(dataDir, makeStory())
+
+    const before = await getModel(dataDir, 'story-test')
+    await saveGlobalConfig(dataDir, makeTestGlobalConfig({
+      defaultProviderId: provider.id,
+      providers: [{ ...provider, name: 'After Rename' }],
+    }))
+    const after = await getModel(dataDir, 'story-test')
+
+    expect((before.model as unknown as { provider: string }).provider).toBe('Before Rename.chat')
+    expect((after.model as unknown as { provider: string }).provider).toBe('After Rename.chat')
+  })
+
+  it('uses the SDK top-k field for native Gemini providers', async () => {
+    await saveGlobalConfig(dataDir, makeTestGlobalConfig({
+      defaultProviderId: 'gemini',
+      providers: [{
+        id: 'gemini',
+        name: 'Google Gemini',
+        preset: 'gemini',
+        baseURL: 'https://generativelanguage.googleapis.com/v1beta',
+        apiKey: 'test-gemini-key',
+        defaultModel: 'gemini-3.5-flash',
+        enabled: true,
+        customHeaders: {},
+        temperature: undefined,
+        createdAt: new Date().toISOString(),
+      }],
+    }))
+    const story = makeStory()
+    story.settings.modelOverrides = { generation: { topK: 20 } }
+    await createStory(dataDir, story)
+
+    const runtime = await resolveAgentRuntime(dataDir, story.id, 'generation.writer', story)
+
+    expect(runtime.topK).toBe(20)
+    expect(runtime.providerOptions).toBeUndefined()
   })
 })

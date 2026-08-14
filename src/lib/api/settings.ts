@@ -6,7 +6,7 @@ export const settings = {
     enabledPlugins?: string[]
     outputFormat?: 'plaintext' | 'markdown'
     maxSteps?: number
-    modelOverrides?: Record<string, { providerId?: string | null; modelId?: string | null; temperature?: number | null }>
+    modelOverrides?: StoryMeta['settings']['modelOverrides']
     // Legacy fields (backward compat)
     providerId?: string | null
     modelId?: string | null

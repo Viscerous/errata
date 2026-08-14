@@ -374,10 +374,10 @@ describe('generation endpoint', () => {
     expect(systemText).toContain('Do not call tools unless continuity depends on it.')
   })
 
-  it('POST /stories/:storyId/generate passes resolved temperature to the writer agent', async () => {
+  it('POST /stories/:storyId/generate passes resolved sampling settings to the writer agent', async () => {
     const story = makeStory({
       modelOverrides: {
-        'generation.writer': { temperature: 0.42 },
+        'generation.writer': { temperature: 0.42, topP: 0.9, topK: 64 },
       },
     })
     await updateStory(dataDir, story)
@@ -399,6 +399,8 @@ describe('generation endpoint', () => {
 
     const callArgs = mockAgentCtor.mock.calls[0][0] as any
     expect(callArgs.temperature).toBe(0.42)
+    expect(callArgs.topP).toBe(0.9)
+    expect(callArgs.topK).toBe(64)
   })
 
   it('POST /stories/:storyId/generate caps the writer agent output tokens from generationLimits', async () => {

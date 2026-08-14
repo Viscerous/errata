@@ -1418,8 +1418,9 @@ return rules.map(r => r.content).join('\\n')`}</div>
             <P>
               Errata supports multiple model providers. Each provider has an API endpoint and key.
               Settings exposes namespace-level model roles for generation, librarian, character chat,
-              and direction suggestions. Individual agents can still override provider, model, and
-              temperature from the Agents panel.
+              and direction suggestions. Individual agents can still override provider, model,
+              temperature, Top P, and Top K from the Agents panel. Empty sampling fields inherit from
+              a parent role or leave the choice to the model/provider.
             </P>
             <P>
               Add or edit providers through the Manage Providers panel in Settings. OpenAI-compatible

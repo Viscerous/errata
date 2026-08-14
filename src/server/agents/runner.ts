@@ -194,7 +194,9 @@ export async function invokeAgent<TOutput = unknown>(args: {
   const options: Required<AgentCallOptions> = {
     maxDepth: args.options?.maxDepth ?? 3,
     maxCalls: args.options?.maxCalls ?? 20,
-    timeoutMs: args.options?.timeoutMs ?? 60000 * 5,
+    // A caller may still opt into a wall-clock deadline. By default, rely on
+    // cancellation and provider termination rather than aborting long reasoning.
+    timeoutMs: args.options?.timeoutMs ?? 0,
   }
 
   const runtime: RuntimeState = {

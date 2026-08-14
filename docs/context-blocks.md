@@ -694,7 +694,7 @@ All endpoints are under `/api/stories/:storyId/agent-blocks`.
 
 ## UI
 
-The **Agent Configure** panel is accessible from the sidebar under **Management > Agents**. It allows browsing registered agents, viewing their compiled context, exporting/importing configs, changing provider/model/temperature per agent, toggling tools, and customizing block overrides.
+The **Agent Configure** panel is accessible from the sidebar under **Management > Agents**. It allows browsing registered agents, viewing their compiled context, exporting/importing configs, changing provider/model/temperature/Top P/Top K per agent, toggling tools, and customizing block overrides. Empty sampling fields inherit through the role chain and ultimately delegate to the model/provider default.
 
 ## File Reference
 

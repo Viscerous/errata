@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback, useMemo, useEffect } from 'react'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 import { api } from '@/lib/api'
-import type { BlockOverride, CustomBlockDefinition, AgentBlockInfo } from '@/lib/api/types'
+import type { BlockOverride, CustomBlockDefinition, AgentBlockInfo, StoryMeta } from '@/lib/api/types'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
@@ -35,7 +35,13 @@ import { BlockContentView } from '@/components/blocks/BlockContentView'
 import { ScriptBlockEditor, FragmentReference } from '@/components/blocks/ScriptBlockEditor'
 import { ProviderSelect } from '@/components/settings/ProviderSelect'
 import { ModelSelect } from '@/components/settings/ModelSelect'
-import { resolveProvider, getInheritLabel, resolveInheritedTemperature } from '@/lib/model-role-helpers'
+import { SamplingNumberInput } from '@/components/settings/SamplingNumberInput'
+import {
+  resolveProvider,
+  getInheritLabel,
+  resolveInheritedTemperature,
+  resolveInheritedSamplingValue,
+} from '@/lib/model-role-helpers'
 import { cn } from '@/lib/utils'
 
 interface AgentConfigurePanelProps {
@@ -301,7 +307,7 @@ function AgentBlockEditor({ storyId, agentName, agents, onBack }: AgentBlockEdit
   })
 
   const modelOverrideMutation = useMutation({
-    mutationFn: (data: { modelOverrides: Record<string, { providerId?: string | null; modelId?: string | null; temperature?: number | null }> }) =>
+    mutationFn: (data: { modelOverrides: StoryMeta['settings']['modelOverrides'] }) =>
       api.settings.update(storyId, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['story', storyId] })
@@ -628,6 +634,21 @@ function AgentBlockEditor({ storyId, agentName, agents, onBack }: AgentBlockEdit
             const inherited = directTemp == null
               ? resolveInheritedTemperature(overrideKey, story.settings, globalConfig ?? null)
               : null
+            const directTopP = overrides[overrideKey]?.topP
+            const inheritedTopP = directTopP == null
+              ? resolveInheritedSamplingValue(overrideKey, 'topP', story.settings)
+              : null
+            const directTopK = overrides[overrideKey]?.topK
+            const inheritedTopK = directTopK == null
+              ? resolveInheritedSamplingValue(overrideKey, 'topK', story.settings)
+              : null
+
+            const updateSampling = (key: 'temperature' | 'topP' | 'topK', value: number | null) => {
+              const current = overrides[overrideKey] ?? {}
+              modelOverrideMutation.mutate({
+                modelOverrides: { ...overrides, [overrideKey]: { ...current, [key]: value } },
+              })
+            }
 
             return (
               <div className="rounded-lg border border-border/30 divide-y divide-border/20">
@@ -638,8 +659,9 @@ function AgentBlockEditor({ storyId, agentName, agents, onBack }: AgentBlockEdit
                       value={directProviderId}
                       globalConfig={globalConfig ?? null}
                       onChange={(id) => {
+                        const current = overrides[overrideKey] ?? {}
                         modelOverrideMutation.mutate({
-                          modelOverrides: { ...overrides, [overrideKey]: { providerId: id, modelId: null } },
+                          modelOverrides: { ...overrides, [overrideKey]: { ...current, providerId: id, modelId: null } },
                         })
                       }}
                       disabled={modelOverrideMutation.isPending}
@@ -680,24 +702,59 @@ function AgentBlockEditor({ storyId, agentName, agents, onBack }: AgentBlockEdit
                       </p>
                     )}
                   </div>
-                  <input
-                    type="number"
+                  <SamplingNumberInput
                     min={0}
                     max={2}
                     step={0.1}
-                    value={directTemp ?? ''}
-                    onChange={(e) => {
-                      const val = e.target.value
-                      const temp = val === '' ? null : parseFloat(val)
-                      const current = overrides[overrideKey] ?? {}
-                      modelOverrideMutation.mutate({
-                        modelOverrides: { ...overrides, [overrideKey]: { ...current, temperature: temp } },
-                      })
-                    }}
+                    value={directTemp}
+                    onCommit={(value) => updateSampling('temperature', value)}
                     disabled={modelOverrideMutation.isPending}
                     placeholder={inherited ? `${inherited.value}` : '—'}
                     title="Temperature (0–2). Leave empty to inherit."
-                    className="w-[72px] h-[26px] px-1.5 text-[0.6875rem] font-mono text-center bg-background border border-border/40 rounded-md focus:border-foreground/20 focus:outline-none placeholder:text-muted-foreground/50"
+                    className="w-[72px]"
+                  />
+                </div>
+                <div className="flex items-center justify-between gap-3 px-3 py-2">
+                  <div className="shrink-0">
+                    <p className="text-[0.75rem] font-medium text-foreground/80">Top P</p>
+                    {inheritedTopP && directTopP == null && (
+                      <p className="text-[0.5625rem] text-muted-foreground/60 leading-tight">
+                        {inheritedTopP.value} via {inheritedTopP.source}
+                      </p>
+                    )}
+                  </div>
+                  <SamplingNumberInput
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={directTopP}
+                    onCommit={(value) => updateSampling('topP', value)}
+                    disabled={modelOverrideMutation.isPending}
+                    placeholder={inheritedTopP ? `${inheritedTopP.value}` : '—'}
+                    title="Nucleus sampling (0–1). Leave empty to inherit or use the model default."
+                    className="w-[72px]"
+                  />
+                </div>
+                <div className="flex items-center justify-between gap-3 px-3 py-2">
+                  <div className="shrink-0">
+                    <p className="text-[0.75rem] font-medium text-foreground/80">Top K</p>
+                    {inheritedTopK && directTopK == null && (
+                      <p className="text-[0.5625rem] text-muted-foreground/60 leading-tight">
+                        {inheritedTopK.value} via {inheritedTopK.source}
+                      </p>
+                    )}
+                  </div>
+                  <SamplingNumberInput
+                    min={1}
+                    max={1000}
+                    step={1}
+                    integer
+                    value={directTopK}
+                    onCommit={(value) => updateSampling('topK', value)}
+                    disabled={modelOverrideMutation.isPending}
+                    placeholder={inheritedTopK ? `${inheritedTopK.value}` : '—'}
+                    title="Top-k sampling (1–1000). Leave empty to inherit or use the model default."
+                    className="w-[72px]"
                   />
                 </div>
               </div>

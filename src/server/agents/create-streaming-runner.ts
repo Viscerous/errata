@@ -10,7 +10,7 @@ import type { StoryMeta } from '../fragments/schema'
 import type { ContextBuildState } from '../llm/context-builder'
 import { type AgentBlockContext, baseBlockContext } from './agent-block-context'
 import type { AgentStreamResult } from './stream-types'
-import { resolveAgentRuntime } from '../llm/client'
+import { resolveAgentRuntime, samplingCallSettings, samplingDiagnostics } from '../llm/client'
 import { MISSING_SYSTEM_PROMPT_FALLBACK } from '../instructions'
 import { getStory } from '../fragments/storage'
 import { buildContextState } from '../llm/context-builder'
@@ -139,8 +139,9 @@ export function createStreamingRunner<TOpts extends object, TValidated = Record<
         : ({} as TValidated)
 
       // 3. Resolve model early (modelId needed for instruction resolution)
-      const { model, modelId, providerId, temperature, providerOptions, guards } = await resolveAgentRuntime(dataDir, storyId, role, story)
-      requestLogger.info('Resolved model', { modelId })
+      const runtime = await resolveAgentRuntime(dataDir, storyId, role, story)
+      const { model, modelId, providerId, providerOptions, guards } = runtime
+      requestLogger.info('Resolved model', { modelId, sampling: samplingDiagnostics(runtime) })
 
       // 4. Build story context (optional)
       let ctxState: ContextBuildState | null = null
@@ -189,7 +190,7 @@ export function createStreamingRunner<TOpts extends object, TValidated = Record<
         tools: compiled.tools,
         toolChoice: config.toolChoice ?? 'auto',
         stopWhen: stepCountIs(maxSteps ?? defaultMaxSteps),
-        temperature,
+        ...samplingCallSettings(runtime),
         providerOptions,
         maxOutputTokens: guards.maxOutputTokens,
       })

@@ -1,6 +1,6 @@
 import { ToolLoopAgent, stepCountIs } from 'ai'
 import { z } from 'zod/v4'
-import { resolveAgentRuntime } from '../llm/client'
+import { resolveAgentRuntime, samplingCallSettings, samplingDiagnostics } from '../llm/client'
 import { getStory } from '../fragments/storage'
 import { buildContextState } from '../llm/context-builder'
 import { compileAgentContext } from '../agents/compile-agent-context'
@@ -64,7 +64,8 @@ export async function proposeDirections(
   // Load story to get custom prompt if configured
   const story = await getStory(dataDir, storyId)
   if (!story) throw new Error(`Story not found: ${storyId}`)
-  const { model, modelId, providerId, temperature, providerOptions, guards } = await resolveAgentRuntime(dataDir, storyId, 'directions.suggest', story)
+  const runtime = await resolveAgentRuntime(dataDir, storyId, 'directions.suggest', story)
+  const { model, modelId, providerId, providerOptions, guards } = runtime
 
   const resolvedTemplate = instructionRegistry.resolve('directions.suggest-template', modelId)
   const promptTemplate = story.settings.guidedSuggestPrompt || resolvedTemplate
@@ -83,7 +84,7 @@ export async function proposeDirections(
   const systemMsg = compiled.messages.find(m => m.role === 'system')
   const userMessages = compiled.messages.filter(m => m.role !== 'system')
 
-  requestLogger.info('Generating suggestions', { modelId, count })
+  requestLogger.info('Generating suggestions', { modelId, count, sampling: samplingDiagnostics(runtime) })
 
   const agent = new ToolLoopAgent({
     model,
@@ -91,7 +92,7 @@ export async function proposeDirections(
     tools: {},
     toolChoice: 'none' as const,
     stopWhen: stepCountIs(1),
-    temperature,
+    ...samplingCallSettings(runtime),
     providerOptions,
     maxOutputTokens: guards.maxOutputTokens,
   })

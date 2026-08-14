@@ -1,5 +1,5 @@
 import { ToolLoopAgent, stepCountIs } from 'ai'
-import { resolveAgentRuntime } from '../llm/client'
+import { resolveAgentRuntime, samplingCallSettings, samplingDiagnostics } from '../llm/client'
 import { getStory, getFragment, updateFragment } from '../fragments/storage'
 import { getProseChain } from '../fragments/prose-chain'
 import { instructionRegistry } from '../instructions'
@@ -74,8 +74,9 @@ export async function summarizeChapter(
   const story = await getStory(dataDir, storyId)
   if (!story) throw new Error(`Story ${storyId} not found`)
 
-  const { model, modelId, providerId, temperature, providerOptions, guards } = await resolveAgentRuntime(dataDir, storyId, 'librarian', story)
-  requestLogger.info('Resolved model', { modelId })
+  const runtime = await resolveAgentRuntime(dataDir, storyId, 'librarian', story)
+  const { model, modelId, providerId, providerOptions, guards } = runtime
+  requestLogger.info('Resolved model', { modelId, sampling: samplingDiagnostics(runtime) })
 
   const agent = new ToolLoopAgent({
     model,
@@ -83,7 +84,7 @@ export async function summarizeChapter(
     tools: {},
     toolChoice: 'none' as const,
     stopWhen: stepCountIs(1),
-    temperature,
+    ...samplingCallSettings(runtime),
     providerOptions,
     maxOutputTokens: guards.maxOutputTokens,
   })

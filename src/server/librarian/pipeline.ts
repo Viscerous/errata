@@ -4,8 +4,8 @@ import type { Fragment, StoryMeta } from '../fragments/schema'
 import { compileAgentContext } from '../agents/compile-agent-context'
 import type { ActivityStreamEvent } from '../agents/activity-stream'
 import type { ContextMessage } from '../llm/context-builder'
-import type { resolveAgentRuntime } from '../llm/client'
-import { resolveAndReportServedUsage } from '../llm/usage-normalizer'
+import { samplingDiagnostics, type resolveAgentRuntime } from '../llm/client'
+import { normalizeTokenUsage, resolveAndReportServedUsage } from '../llm/usage-normalizer'
 import type { ContextSelectionSource, FragmentSignal } from '../llm/context-selection'
 import { buildAnalyzeContext } from './blocks'
 import { continuityRegistry } from './continuity-view'
@@ -28,7 +28,12 @@ import {
   type LibrarianAnalyzeLaneStatus,
   type LibrarianPassRecord,
 } from './storage'
-import { runToolLoopPass, type ToolLoopPassArgs } from './tool-runner'
+import {
+  runToolLoopPass,
+  ToolLoopPassError,
+  type ToolLoopPassArgs,
+  type ToolLoopStepUsage,
+} from './tool-runner'
 
 type LibrarianRuntime = Awaited<ReturnType<typeof resolveAgentRuntime>>
 
@@ -42,8 +47,10 @@ interface RunCompiledPassArgs {
   compiled: { messages: ContextMessage[]; tools: ToolSet; blocks: Array<{ id: string }> }
   model: ToolLoopPassArgs['model']
   temperature: ToolLoopPassArgs['temperature']
+  topP: ToolLoopPassArgs['topP']
+  topK: ToolLoopPassArgs['topK']
   providerOptions: ToolLoopPassArgs['providerOptions']
-  maxOutputTokens: number
+  maxOutputTokens?: number
   maxSteps?: number
   emit: (event: ActivityStreamEvent) => void
   terminalToolName?: string
@@ -89,6 +96,7 @@ async function runCompiledToolPass(args: RunCompiledPassArgs): Promise<{
   finishReason: string
   servedModelId?: string
   totalUsage: PromiseLike<unknown>
+  stepUsages: ToolLoopStepUsage[]
 }> {
   const systemMessage = args.compiled.messages.find(m => m.role === 'system')
   const userMessage = args.compiled.messages.find(m => m.role === 'user')
@@ -98,6 +106,8 @@ async function runCompiledToolPass(args: RunCompiledPassArgs): Promise<{
     tools: args.compiled.tools,
     prompt: userMessage?.content ?? '',
     temperature: args.temperature,
+    topP: args.topP,
+    topK: args.topK,
     providerOptions: args.providerOptions,
     maxOutputTokens: args.maxOutputTokens,
     maxSteps: args.maxSteps,
@@ -214,24 +224,65 @@ async function initialOnlineCandidates(input: LibrarianPipelineInput): Promise<{
   }
 }
 
+type OnlineToolCall = { toolName: string; args: Record<string, unknown>; result: unknown }
+
+interface OnlinePassOutcome {
+  fullText: string
+  pass: LibrarianPassRecord
+  stepCount?: number
+  finishReason?: string
+  toolCalls: OnlineToolCall[]
+  error?: unknown
+}
+
+function registerFullContextFragments(
+  compiled: { blocks: Array<{ fragmentContext?: { mode?: string; fragmentIds?: string[] } }> },
+  numberedFragmentIds: Set<string>,
+): void {
+  for (const block of compiled.blocks) {
+    if (block.fragmentContext?.mode !== 'full') continue
+    for (const fragmentId of block.fragmentContext.fragmentIds ?? []) numberedFragmentIds.add(fragmentId)
+  }
+}
+
+function aggregateCompletedStepUsage(stepUsages: ToolLoopStepUsage[]): { inputTokens: number; outputTokens: number } | undefined {
+  let inputTokens = 0
+  let outputTokens = 0
+  let found = false
+  for (const step of stepUsages) {
+    const usage = normalizeTokenUsage(step.usage)
+    if (!usage) continue
+    found = true
+    inputTokens += usage.inputTokens
+    outputTokens += usage.outputTokens
+  }
+  return found ? { inputTokens, outputTokens } : undefined
+}
+
+function completedStepUsageDiagnostics(stepUsages: ToolLoopStepUsage[]): Array<Record<string, unknown>> {
+  return stepUsages.map((step) => {
+    const usage = normalizeTokenUsage(step.usage)
+    return {
+      stepNumber: step.stepNumber,
+      finishReason: step.finishReason,
+      ...(step.servedModelId ? { modelId: step.servedModelId } : {}),
+      ...(usage ? { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens } : {}),
+    }
+  })
+}
+
 async function runOnlineAnalyzePass(
   input: LibrarianPipelineInput,
   collector: AnalysisCollector,
   initialCandidates: MergedFragmentCandidate[],
   disableDirections: boolean,
   disableSuggestions: boolean,
-): Promise<{
-  fullText: string
-  pass: LibrarianPassRecord
-  stepCount?: number
-  finishReason?: string
-  toolCalls: Array<{ toolName: string; args: Record<string, unknown>; result: unknown }>
-  error?: unknown
-}> {
+): Promise<OnlinePassOutcome> {
   const { dataDir, storyId, story, fragment, runtime, requestLogger, emit, abortSignal, idleTimeoutMs } = input
-  const { model, modelId, providerId, config, temperature, providerOptions, guards } = runtime
-  const analyzeStartedAt = new Date().toISOString()
-  const analyzeStartTime = Date.now()
+  const { model, modelId, providerId, config, temperature, topP, topK, providerOptions, guards } = runtime
+  const startedAt = new Date().toISOString()
+  const startTime = Date.now()
+  const sampling = samplingDiagnostics(runtime)
   const requestHeaders = {
     ...config.headers,
     'User-Agent': config.headers['User-Agent'] ?? 'errata-librarian/1.0',
@@ -246,18 +297,10 @@ async function runOnlineAnalyzePass(
     context.attentionCandidateIds = fragmentCandidateIds(initialCandidates)
     context.attentionCandidateSignals = candidateSignals(initialCandidates)
 
-    // Seeded from the compiled blocks below, then extended by the tools as they
-    // show records numbered. Keeping the Set by reference lets reportAnalysis
-    // distinguish actual full presentation from fragments a default block would
-    // have shown before user overrides were applied.
+    // Seeded from the compiled blocks below, then extended by tools as they show
+    // numbered records. The shared ledger suppresses duplicate reads within the
+    // adaptive tool loop without forcing a second model invocation.
     const numberedFragmentIds = new Set<string>()
-
-    // The same numbered registry the continuity block renders, so an entry
-    // number means the same thing in the prompt and in the tool. Building it
-    // twice is how the numbers would drift — knowledge is scoped by character
-    // on the rendered side, and a second derivation would number it unfiltered.
-    const continuityKeys = continuityRegistry(context)
-
     const tools = createLibrarianOnlineTools(collector, {
       dataDir,
       storyId,
@@ -265,62 +308,88 @@ async function runOnlineAnalyzePass(
       disableDirections,
       disableSuggestions,
       numberedFragmentIds,
-      continuityKeys,
+      continuityKeys: continuityRegistry(context),
       customFragmentTypes: story.settings.customFragmentTypes,
     })
-    const compiled = await compileAgentContext(dataDir, storyId, 'librarian.analyze', context, tools)
-    for (const block of compiled.blocks) {
-      if (block.fragmentContext?.mode !== 'full') continue
-      for (const fragmentId of block.fragmentContext.fragmentIds ?? []) {
-        numberedFragmentIds.add(fragmentId)
-      }
-    }
+    const compiled = await compileAgentContext(
+      dataDir,
+      storyId,
+      'librarian.analyze',
+      context,
+      tools,
+    )
+    registerFullContextFragments(compiled, numberedFragmentIds)
+
     requestLogger.info('Calling LLM for online analysis...', {
       attentionCandidates: context.attentionCandidateIds.length,
       toolNames: Object.keys(compiled.tools),
+      blockIds: compiled.blocks.map((block) => block.id),
+      sampling,
     })
 
     const result = await runCompiledToolPass({
       compiled,
       model,
       temperature,
+      topP,
+      topK,
       providerOptions,
       maxOutputTokens: guards.maxOutputTokens,
       maxSteps: 8,
       emit,
       terminalToolName: compiled.tools.finishAnalysis ? 'finishAnalysis' : undefined,
-      terminalRequiresToolName: compiled.tools.finishAnalysis && compiled.tools.reportAnalysis ? 'reportAnalysis' : undefined,
+      terminalRequiresToolName: compiled.tools.finishAnalysis && compiled.tools.reportAnalysis
+        ? 'reportAnalysis'
+        : undefined,
       abortSignal,
       idleTimeoutMs,
     })
-    // Attribute the work to the model that answered, not the one configured:
-    // behind a local endpoint those differ silently, so the config's name would
-    // claim every analysis a swapped-in model actually did.
-    const { modelId: servedModelId } = await resolveAndReportServedUsage(
+    const { modelId: servedModelId, usage } = await resolveAndReportServedUsage(
       dataDir,
       storyId,
       'librarian.analyze',
       result.totalUsage,
       { providerId, configuredModelId: modelId, servedModelId: result.servedModelId },
     )
+    const toolCallNames = result.toolCalls.map((call) => call.toolName)
+    const proposalToolNames = new Set(['proposeRecordCorrections', 'proposeNewRecords'])
+    const proposalToolResults = result.toolCalls
+      .filter((call) => proposalToolNames.has(call.toolName))
+      .map((call) => call.result)
+    const stepUsage = completedStepUsageDiagnostics(result.stepUsages)
+    const durationMs = Date.now() - startTime
+    const diagnostics = {
+      toolNames: Object.keys(compiled.tools),
+      toolCallNames,
+      blockIds: compiled.blocks.map((block) => block.id),
+      inputTokens: usage?.inputTokens,
+      outputTokens: usage?.outputTokens,
+      sampling,
+      stepUsage,
+      reportToolCallCount: toolCallNames.filter((name) => name === 'reportAnalysis').length,
+      proposalToolCallCount: proposalToolResults.length,
+      proposalToolFailureCount: proposalToolResults.filter((result) => booleanToolResultField(result, 'ok') === false).length,
+      proposalQueuedOperationCount: proposalToolResults.reduce<number>((sum, result) => sum + numericToolResultField(result, 'queuedOperationCount'), 0),
+      proposalInvalidOperationCount: proposalToolResults.reduce<number>((sum, result) => sum + numericToolResultField(result, 'invalid'), 0),
+      directionToolCallCount: toolCallNames.filter((name) => name === 'proposeDirections').length,
+      finishToolCallCount: toolCallNames.filter((name) => name === 'finishAnalysis').length,
+      attentionCandidateIds: context.attentionCandidateIds,
+      initialCandidateFragments: initialCandidates,
+      proposalCount: collector.fragmentChangeProposals.length,
+      directionCount: collector.directions.length,
+    }
 
     requestLogger.info('LLM online analysis completed', {
-      durationMs: Date.now() - analyzeStartTime,
+      durationMs,
       providerId,
       modelId: servedModelId,
       providerName: config.providerName,
       baseURL: config.baseURL,
       headers: Object.keys(requestHeaders),
+      finishReason: result.finishReason,
+      stepCount: result.stepCount,
+      ...diagnostics,
     })
-
-    const toolCallNames = result.toolCalls.map((call) => call.toolName)
-    const proposalToolNames = new Set(['proposeRecordCorrections', 'proposeNewRecords'])
-    const proposalToolCalls = toolCallNames.filter((name) => proposalToolNames.has(name))
-    const directionToolCalls = toolCallNames.filter((name) => name === 'proposeDirections')
-    const finishToolCalls = toolCallNames.filter((name) => name === 'finishAnalysis')
-    const proposalToolResults = result.toolCalls
-      .filter((call) => proposalToolNames.has(call.toolName))
-      .map((call) => call.result)
     return {
       fullText: result.fullText,
       stepCount: result.stepCount,
@@ -329,44 +398,52 @@ async function runOnlineAnalyzePass(
       pass: passRecord({
         name: 'analyze',
         status: 'complete',
-        startedAt: analyzeStartedAt,
-        durationMs: Date.now() - analyzeStartTime,
+        startedAt,
+        durationMs,
         modelId: servedModelId,
         stepCount: result.stepCount,
         finishReason: result.finishReason,
-        diagnostics: {
-          toolNames: Object.keys(compiled.tools),
-          toolCallNames,
-          reportToolCallCount: toolCallNames.filter((name) => name === 'reportAnalysis').length,
-          proposalToolCallCount: proposalToolCalls.length,
-          proposalToolFailureCount: proposalToolResults.filter((toolResult) => booleanToolResultField(toolResult, 'ok') === false).length,
-          proposalQueuedOperationCount: proposalToolResults.reduce<number>((sum, toolResult) => sum + numericToolResultField(toolResult, 'queuedOperationCount'), 0),
-          proposalInvalidOperationCount: proposalToolResults.reduce<number>((sum, toolResult) => sum + numericToolResultField(toolResult, 'invalid'), 0),
-          directionToolCallCount: directionToolCalls.length,
-          finishToolCallCount: finishToolCalls.length,
-          blockIds: compiled.blocks.map((block) => block.id),
-          attentionCandidateIds: context.attentionCandidateIds,
-          initialCandidateFragments: initialCandidates,
-          proposalCount: collector.fragmentChangeProposals.length,
-          directionCount: collector.directions.length,
-        },
+        diagnostics,
       }),
     }
-  } catch (err) {
-    const errorMsg = err instanceof Error ? err.message : String(err)
-    requestLogger.error('Online analysis failed', { error: errorMsg })
-    emit({ type: 'error', error: errorMsg })
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error)
+    const stepUsages = error instanceof ToolLoopPassError ? error.stepUsages : []
+    const partialUsage = aggregateCompletedStepUsage(stepUsages)
+    const stepUsage = completedStepUsageDiagnostics(stepUsages)
+    const partialServedModelId = [...stepUsages].reverse().find((step) => step.servedModelId)?.servedModelId
+    let attributedModelId = modelId
+    if (partialUsage) {
+      const reported = await resolveAndReportServedUsage(
+        dataDir,
+        storyId,
+        'librarian.analyze',
+        Promise.resolve(partialUsage),
+        { providerId, configuredModelId: modelId, servedModelId: partialServedModelId },
+      )
+      attributedModelId = reported.modelId
+    }
+    const diagnostics = {
+      completedStepCount: stepUsages.length,
+      inputTokens: partialUsage?.inputTokens,
+      outputTokens: partialUsage?.outputTokens,
+      sampling,
+      stepUsage,
+    }
+    requestLogger.error('Online analysis failed', { error: errorMessage, ...diagnostics })
+    emit({ type: 'error', error: errorMessage })
     return {
       fullText: '',
       toolCalls: [],
-      error: err,
+      error,
       pass: passRecord({
         name: 'analyze',
         status: 'failed',
-        startedAt: analyzeStartedAt,
-        durationMs: Date.now() - analyzeStartTime,
-        modelId,
-        error: errorMsg,
+        startedAt,
+        durationMs: Date.now() - startTime,
+        modelId: attributedModelId,
+        error: errorMessage,
+        diagnostics,
       }),
     }
   }
@@ -388,8 +465,9 @@ export async function runLibrarianPipeline(input: LibrarianPipelineInput): Promi
     disableSuggestions,
   )
   passes.push(analyzeOutcome.pass)
+  const passFailed = analyzeOutcome.pass.status === 'failed'
   const observationComplete = collector.summaryUpdate.trim().length > 0
-  if (analyzeOutcome.pass.status === 'failed' && !observationComplete) {
+  if (passFailed && !observationComplete) {
     if (analyzeOutcome.error instanceof Error) throw analyzeOutcome.error
     throw new Error(analyzeOutcome.pass.error ?? 'Online analysis failed')
   }
@@ -402,11 +480,11 @@ export async function runLibrarianPipeline(input: LibrarianPipelineInput): Promi
     disableDirections,
     disableSuggestions,
     toolCalls: analyzeOutcome.toolCalls,
-    passFailed: analyzeOutcome.pass.status === 'failed',
+    passFailed,
     observationComplete,
   })
   let completionError: string | undefined
-  if (analyzeOutcome.pass.status === 'failed') {
+  if (passFailed) {
     completionError = analyzeOutcome.pass.error ?? 'Analyze stopped after completing its observation lane'
   } else if (analyzeLanes.directions.completion === 'incomplete') {
     completionError = 'Analyze ended without completing automatic directions required by the story setting'

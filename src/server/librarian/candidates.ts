@@ -52,7 +52,7 @@ export function observationFragmentCandidates(params: {
     out.push({
       fragmentId,
       source: 'current-observation',
-      reason: 'The observation pass reported a mention.',
+      reason: 'The Analyze observation reported a mention.',
     })
   }
   for (const fragmentId of params.candidateFragmentIds) {

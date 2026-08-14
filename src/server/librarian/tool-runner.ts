@@ -1,10 +1,12 @@
 import { ToolLoopAgent, stepCountIs, type ToolSet } from 'ai'
 import { drainAgentStream } from '../agents/drain-agent-stream'
 import type { ActivityStreamEvent } from '../agents/activity-stream'
+import { servedModelIdFromResponse } from '../llm/served-models'
 
 type ToolLoopAgentSettings = ConstructorParameters<typeof ToolLoopAgent>[0]
 
-export const DEFAULT_TOOL_LOOP_IDLE_TIMEOUT_MS = 60000
+/** Zero disables the watchdog; callers may opt in when a provider needs one. */
+export const DEFAULT_TOOL_LOOP_IDLE_TIMEOUT_MS = 0
 
 export interface ToolLoopPassArgs {
   model: ToolLoopAgentSettings['model']
@@ -12,8 +14,10 @@ export interface ToolLoopPassArgs {
   prompt: string
   tools: ToolSet
   temperature: ToolLoopAgentSettings['temperature']
+  topP: ToolLoopAgentSettings['topP']
+  topK: ToolLoopAgentSettings['topK']
   providerOptions: ToolLoopAgentSettings['providerOptions']
-  maxOutputTokens: number
+  maxOutputTokens?: number
   emit?: (event: ActivityStreamEvent) => void
   maxSteps?: number
   terminalToolName?: string
@@ -29,6 +33,26 @@ export interface ToolLoopPassResult {
   finishReason: string
   servedModelId?: string
   totalUsage: PromiseLike<unknown>
+  /** Per-request usage, retained so successful multi-step passes expose their peak context size. */
+  stepUsages: ToolLoopStepUsage[]
+}
+
+export interface ToolLoopStepUsage {
+  stepNumber: number
+  finishReason: string
+  usage: unknown
+  servedModelId?: string
+}
+
+/** Carries usage from completed steps when a later request in the loop fails. */
+export class ToolLoopPassError extends Error {
+  readonly stepUsages: ToolLoopStepUsage[]
+
+  constructor(cause: unknown, stepUsages: ToolLoopStepUsage[]) {
+    super(cause instanceof Error ? cause.message : String(cause), { cause })
+    this.name = 'ToolLoopPassError'
+    this.stepUsages = stepUsages
+  }
 }
 
 function toolOutputOk(output: unknown): boolean {
@@ -71,6 +95,7 @@ function linkedAbortController(parent?: AbortSignal): { controller: AbortControl
 }
 
 export async function runToolLoopPass(args: ToolLoopPassArgs): Promise<ToolLoopPassResult> {
+  const stepUsages: ToolLoopStepUsage[] = []
   const agent = new ToolLoopAgent({
     model: args.model,
     instructions: args.instructions,
@@ -80,8 +105,18 @@ export async function runToolLoopPass(args: ToolLoopPassArgs): Promise<ToolLoopP
       ? [stepCountIs(args.maxSteps ?? 6), terminalToolSucceeded(args.terminalToolName, args.terminalRequiresToolName)]
       : stepCountIs(args.maxSteps ?? 6),
     temperature: args.temperature,
+    topP: args.topP,
+    topK: args.topK,
     providerOptions: args.providerOptions,
     maxOutputTokens: args.maxOutputTokens,
+    onStepFinish: (event) => {
+      stepUsages.push({
+        stepNumber: event.stepNumber,
+        finishReason: event.finishReason,
+        usage: event.usage,
+        servedModelId: servedModelIdFromResponse(event.response),
+      })
+    },
   })
 
   const { controller, dispose } = linkedAbortController(args.abortSignal)
@@ -102,10 +137,11 @@ export async function runToolLoopPass(args: ToolLoopPassArgs): Promise<ToolLoopP
       finishReason: drained.finishReason,
       servedModelId: drained.servedModelId,
       totalUsage: result.totalUsage,
+      stepUsages,
     }
   } catch (error) {
     if (!controller.signal.aborted) controller.abort()
-    throw error
+    throw new ToolLoopPassError(error, stepUsages)
   } finally {
     dispose()
   }

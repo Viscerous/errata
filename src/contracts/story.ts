@@ -60,6 +60,13 @@ export type NormalizedFragment = z.infer<typeof FragmentSchema>
 export type Fragment = Omit<NormalizedFragment, 'archived' | 'version' | 'versions'> &
   Partial<Pick<NormalizedFragment, 'archived' | 'version' | 'versions'>>
 
+/** Provider-facing sampling values used by and recorded with model calls. */
+export interface SamplingSettings {
+  temperature?: number
+  topP?: number
+  topK?: number
+}
+
 export const StoryMetaSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -72,18 +79,18 @@ export const StoryMetaSchema = z.object({
       outputFormat: z.enum(['plaintext', 'markdown']).default('markdown'),
       enabledPlugins: z.array(z.string()).default([]),
       maxSteps: z.int().min(1).max(50).default(10),
-      // Per-generation safety limits for the agent LLM calls. Optional; code
-      // applies a sensible default cap (see resolveGenerationGuards) when unset.
-      // The cap bounds a runaway/looping generation so it fails fast instead of
-      // streaming until the request timeout.
+      // Optional provider-facing generation limits. When absent, Errata leaves
+      // output length to the provider/model and its configured context window.
       generationLimits: z.object({
-        maxOutputTokens: z.int().min(256).max(32768).optional(),
+        maxOutputTokens: z.int().min(256).optional(),
       }).optional(),
       // Canonical model overrides map: { [roleKey]: { providerId?, modelId? } }
       modelOverrides: z.record(z.string(), z.object({
         providerId: z.string().nullable().optional(),
         modelId: z.string().nullable().optional(),
         temperature: z.number().min(0).max(2).nullable().optional(),
+        topP: z.number().min(0).max(1).nullable().optional(),
+        topK: z.number().int().min(1).max(1000).nullable().optional(),
       })).default({}),
       // Legacy per-role fields (read for migration, no longer written)
       providerId: z.string().nullable().optional(),

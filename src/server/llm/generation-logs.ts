@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { existsSync } from 'node:fs'
 import { getContentRoot } from '../fragments/branches'
 import { writeJsonAtomic } from '../fs-utils'
+import type { SamplingSettings } from '../fragments/schema'
 
 export interface ToolCallLog {
   toolName: string
@@ -24,6 +25,7 @@ export interface GenerationLog {
   generatedText: string
   fragmentId: string | null
   model: string
+  sampling?: SamplingSettings
   durationMs: number
   stepCount: number
   finishReason: string
@@ -38,6 +40,7 @@ export interface GenerationLog {
   prewriterMessages?: Array<{ role: string; content: string }>
   prewriterDurationMs?: number
   prewriterModel?: string
+  prewriterSampling?: SamplingSettings
   prewriterUsage?: TokenUsage
   prewriterToolCalls?: ToolCallLog[]
   prewriterDirections?: Array<{ pacing: string; title: string; description: string; instruction: string }>
@@ -49,6 +52,7 @@ export interface GenerationLogSummary {
   input: string
   fragmentId: string | null
   model: string
+  sampling?: SamplingSettings
   durationMs: number
   toolCallCount: number
   stepCount: number
@@ -106,6 +110,7 @@ export async function listGenerationLogs(
       input: log.input,
       fragmentId: log.fragmentId,
       model: log.model,
+      sampling: log.sampling,
       durationMs: log.durationMs,
       toolCallCount: log.toolCalls.length,
       stepCount: log.stepCount ?? 1,

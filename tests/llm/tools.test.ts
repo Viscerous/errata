@@ -133,6 +133,24 @@ describe('LLM tools', () => {
     expect([...numberedFragmentIds]).toEqual(['kn-0001'])
   })
 
+  it('does not echo numbered fragments that are already present when requested', async () => {
+    await createFragment(dataDir, storyId, makeFragment({
+      id: 'kn-0001',
+      type: 'knowledge',
+      content: 'Secret lore. The gate is oak.',
+    }))
+    const tools = createFragmentTools(dataDir, storyId, {
+      numberedFragmentIds: new Set(['kn-0001']),
+      skipNumberedFragments: true,
+    })
+
+    const result = await execTool(tools.readFragments, { fragmentIds: ['kn-0001'] })
+
+    expect(result.fragments).toEqual([])
+    expect(result.missing).toEqual([])
+    expect(result.alreadyAvailable).toEqual(['kn-0001'])
+  })
+
   /**
    * A citation resolves against the stored content, so the numbering shown must
    * come from there too. Sanitizing before segmenting would renumber everything

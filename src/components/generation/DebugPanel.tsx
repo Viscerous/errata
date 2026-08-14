@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { api, type GenerationLog, type GenerationLogSummary } from '@/lib/api'
+import { api, type GenerationLog, type GenerationLogSummary, type SamplingSettings } from '@/lib/api'
 import { qk, useActiveBranchId } from '@/lib/query-keys'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -18,6 +18,21 @@ interface DebugPanelProps {
   logId?: string
   fragmentId?: string
   onClose: () => void
+}
+
+function formatSampling(settings: SamplingSettings | undefined): string | null {
+  if (!settings) return null
+  const parts = [
+    settings.temperature !== undefined ? `T ${settings.temperature}` : null,
+    settings.topP !== undefined ? `P ${settings.topP}` : null,
+    settings.topK !== undefined ? `K ${settings.topK}` : null,
+  ].filter((part): part is string => part !== null)
+  return parts.length > 0 ? parts.join(' · ') : null
+}
+
+function SamplingLabel({ settings, title }: { settings?: SamplingSettings; title: string }) {
+  const label = formatSampling(settings)
+  return label ? <span title={title}>{label}</span> : null
 }
 
 export function DebugPanel({ storyId, logId, fragmentId, onClose }: DebugPanelProps) {
@@ -121,6 +136,7 @@ export function DebugPanel({ storyId, logId, fragmentId, onClose }: DebugPanelPr
                     </Badge>
                   )}
                   <span>{selectedLog.model}</span>
+                  <SamplingLabel settings={selectedLog.sampling} title="Writer sampling settings" />
                   <span>{selectedLog.durationMs}ms</span>
                   <span>{selectedLog.stepCount ?? 1} steps</span>
                   {selectedLog.totalUsage && (

@@ -347,7 +347,7 @@ For agents that need full manual control, the pipeline is:
 
 ```ts
 import { ToolLoopAgent, stepCountIs } from 'ai'
-import { resolveAgentRuntime } from '../llm/client'
+import { resolveAgentRuntime, samplingCallSettings } from '../llm/client'
 import { getStory, getFragment } from '../fragments/storage'
 import { buildContextState } from '../llm/context-builder'
 import { createFragmentTools } from '../llm/tools'
@@ -366,7 +366,8 @@ export async function myAgent(dataDir, storyId, opts): Promise<AgentStreamResult
     if (!fragment) throw new Error(`Fragment ${opts.fragmentId} not found`)
 
     // 3. Resolve model + runtime knobs early (modelId needed for instruction resolution)
-    const { model, modelId, temperature, providerOptions, guards } = await resolveAgentRuntime(dataDir, storyId, 'my-agent', story)
+    const runtime = await resolveAgentRuntime(dataDir, storyId, 'my-agent', story)
+    const { model, modelId, providerOptions, guards } = runtime
 
     // 4. Build story context
     const ctxState = await buildContextState(dataDir, storyId, '', { excludeFragmentId: opts.fragmentId })
@@ -403,7 +404,7 @@ export async function myAgent(dataDir, storyId, opts): Promise<AgentStreamResult
       tools: compiled.tools,
       toolChoice: 'auto',
       stopWhen: stepCountIs(opts.maxSteps ?? 5),
-      temperature,
+      ...samplingCallSettings(runtime),
       providerOptions,
       maxOutputTokens: guards.maxOutputTokens,
     })
@@ -714,13 +715,13 @@ temporary-directory and story helpers for filesystem isolation.
 
 ## Runner Safety
 
-The agent runner (`src/server/agents/runner.ts`) enforces hard limits:
+The agent runner (`src/server/agents/runner.ts`) supports these execution limits:
 
 | Limit | Default | Description |
 |---|---|---|
 | `maxDepth` | 3 | Maximum nesting depth for agent-calls-agent chains |
 | `maxCalls` | 20 | Maximum total agent invocations in a single root call |
-| `timeoutMs` | 300,000 (5 min) | Wall-clock timeout for the entire call tree |
+| `timeoutMs` | 0 (disabled) | Optional wall-clock timeout for the entire call tree |
 
 Cycle detection is stack-based — `A → B → A` throws immediately. The `allowedCalls` whitelist on the agent definition controls which sub-agents can be invoked.
 

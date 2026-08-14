@@ -428,10 +428,10 @@ describe('prewriter', () => {
       const writerConfig = mockAgentCtor.mock.calls[1][0] as any
       expect(writerConfig.toolChoice).toBe('auto')
 
-      // Both agents must carry the per-generation output-token cap so a looping
-      // small model fails fast instead of streaming to the request timeout.
-      expect(prewriterConfig.maxOutputTokens).toBeGreaterThan(0)
-      expect(writerConfig.maxOutputTokens).toBeGreaterThan(0)
+      // With no story override, both agents delegate output length to the
+      // provider/model rather than imposing an Errata default.
+      expect(prewriterConfig.maxOutputTokens).toBeUndefined()
+      expect(writerConfig.maxOutputTokens).toBeUndefined()
     })
 
     it('prewriter mode passes stripped context to writer', async () => {

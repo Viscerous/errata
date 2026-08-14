@@ -197,6 +197,8 @@ export function storyRoutes(dataDir: string) {
           providerId: t.Optional(t.Union([t.String(), t.Null()])),
           modelId: t.Optional(t.Union([t.String(), t.Null()])),
           temperature: t.Optional(t.Union([t.Number(), t.Null()])),
+          topP: t.Optional(t.Union([t.Number({ minimum: 0, maximum: 1 }), t.Null()])),
+          topK: t.Optional(t.Union([t.Integer({ minimum: 1, maximum: 1000 }), t.Null()])),
         }))),
         // Legacy fields (backward compat)
         providerId: t.Optional(t.Union([t.String(), t.Null()])),

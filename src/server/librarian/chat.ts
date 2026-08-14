@@ -1,6 +1,6 @@
 import { tool, ToolLoopAgent, stepCountIs, type ToolSet } from 'ai'
 import { z } from 'zod/v4'
-import { resolveAgentRuntime } from '../llm/client'
+import { resolveAgentRuntime, samplingCallSettings, samplingDiagnostics } from '../llm/client'
 import { resolveAndReportServedUsage } from '../llm/usage-normalizer'
 import { MISSING_SYSTEM_PROMPT_FALLBACK } from '../instructions'
 import { getFragment, getStory } from '../fragments/storage'
@@ -154,8 +154,9 @@ async function librarianChatInner(
   const systemPromptFragments = await loadSystemPromptFragments(dataDir, storyId, getFragmentsByTag, getFragment)
 
   // Resolve model early so modelId is available for instruction resolution
-  const { model, modelId, providerId, temperature, providerOptions, guards } = await resolveAgentRuntime(dataDir, storyId, 'librarian.chat', story)
-  requestLogger.info('Resolved model', { modelId })
+  const runtime = await resolveAgentRuntime(dataDir, storyId, 'librarian.chat', story)
+  const { model, modelId, providerId, providerOptions, guards } = runtime
+  requestLogger.info('Resolved model', { modelId, sampling: samplingDiagnostics(runtime) })
 
   // Create write-enabled fragment tools + enabled plugin tools
   const enabledPlugins = (story.settings.enabledPlugins ?? [])
@@ -203,7 +204,7 @@ async function librarianChatInner(
     tools: compiled.tools,
     toolChoice: 'auto',
     stopWhen: stepCountIs(opts.maxSteps ?? 10),
-    temperature,
+    ...samplingCallSettings(runtime),
     providerOptions,
     maxOutputTokens: guards.maxOutputTokens,
   })

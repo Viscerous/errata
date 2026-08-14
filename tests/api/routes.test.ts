@@ -115,6 +115,22 @@ describe('Story API routes', () => {
     expect(data.settings.disableLibrarianAutoAnalysis).toBe(true)
   })
 
+  it('PATCH /api/stories/:id/settings persists per-agent sampling overrides', async () => {
+    const created = await (await apiJson('/stories', story)).json()
+    const res = await apiJson(
+      `/stories/${created.id}/settings`,
+      { modelOverrides: { 'generation.writer': { temperature: 0.7, topP: 0.9, topK: 64 } } },
+      'PATCH',
+    )
+
+    expect(res.status).toBe(200)
+    expect((await res.json()).settings.modelOverrides['generation.writer']).toEqual({
+      temperature: 0.7,
+      topP: 0.9,
+      topK: 64,
+    })
+  })
+
   it('PATCH /api/stories/:id/settings clears guided prompt overrides when saved empty', async () => {
     const created = await (await apiJson('/stories', story)).json()
     const setRes = await apiJson(

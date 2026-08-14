@@ -128,6 +128,12 @@ anything merely more verbose than wanted is accepted and bounded on the way in.
   string and nothing else.
 - Mention and candidate lists take a verbose-but-sane ceiling and are clipped in
   `execute`; only a degenerate repeat is rejected.
+- Summary and timeline prose are shortened at sentence or word boundaries, with
+  an ellipsis when a partial tail is omitted, so stored diagnostics do not end
+  in a misleading word fragment.
+- Proposal titles and rationales are preference-sized metadata. Overlong values
+  are accepted and shortened in `execute` rather than invalidating otherwise
+  grounded operations.
 - `finishAnalysis` accepts an abandoned lane as a bare tool name, because that is
   complete information for a lane never called — and the gate does not require
   those to be declared at all. It still demands a reason for abandoning a lane
@@ -151,19 +157,25 @@ The current policy is semantic first, with no numeric context caps chosen yet:
   source.
 - **Fragment routing** remains a bounded supporting job for deeper or historical
   work. Routine online analysis does not block on a synchronous router fallback.
-- **Automatic directions** remain a required lane in the fused analyze loop
-  when enabled. When disabled, their tool and instructions are absent.
-  `reportAnalysis` already
-  loads every referenced fragment to validate its ID, so it *returns* the ones
-  not already in context rather than demanding a `readFragments` round trip and
-  refusing until it happens. A direction cannot outrank context it did not see
-  because that context arrives with the result. `finishAnalysis` still rejects
-  falsely completed calls, and directions cannot be abandoned as an optional
-  skip. The dedicated `directions.suggest` runner remains available for
-  guided/on-demand suggestions even when automatic directions are disabled.
+- **Online analysis uses one adaptive tool loop.** `reportAnalysis` is required
+  before `finishAnalysis`, but reporting does not force a fresh Analyze
+  invocation. Its normalized result returns newly resolved numbered records in
+  the same tool history; another model step happens only when the tool workflow
+  needs one. A repeated `readFragments` request for an available record returns
+  its ID under `alreadyAvailable` instead of echoing the body again. Pass
+  diagnostics retain usage for each model step as well as the aggregate, making
+  both total work and the largest individual request visible.
+- **Automatic directions** remain a required lane in the adaptive loop when
+  enabled. When disabled, their tool and instructions are absent.
+  `reportAnalysis` loads every referenced fragment to validate its ID and makes
+  records not already in the initial prompt available to subsequent model
+  steps. `finishAnalysis` still rejects falsely completed calls, and directions
+  cannot be abandoned as an optional skip. The dedicated `directions.suggest`
+  runner remains available for guided/on-demand suggestions even when automatic
+  directions are disabled.
 - **Lane completion is explicit.** Observation is required, record maintenance
   is conditional, and automatic directions are required-or-disabled. If a
-  later tool-loop step fails after a valid observation, that source-linked
+  later model or tool step fails after a valid observation, that source-linked
   observation is saved with incomplete lane state before the run reports its
   failure; expensive factual work is not discarded with the tail.
 - **Continuity keys are steered, not enumerated.** State, thread, and knowledge

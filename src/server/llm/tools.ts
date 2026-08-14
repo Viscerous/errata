@@ -135,6 +135,11 @@ export interface FragmentToolsOptions {
    * left the reads plain, leaving Muse-Glimmer-30B to count sentences by eye.
    */
   numberedFragmentIds?: Set<string>
+  /**
+   * Do not echo a full fragment that the current prompt or an earlier tool
+   * result already supplied. Intended for long-running numbered-record loops.
+   */
+  skipNumberedFragments?: boolean
 }
 
 function summarizeFragment(fragment: Fragment) {
@@ -219,13 +224,13 @@ export function createFragmentTools(
   storyId: string,
   opts: FragmentToolsOptions = {},
 ) {
-  const { readOnly = true, numberedFragmentIds } = opts
+  const { readOnly = true, numberedFragmentIds, skipNumberedFragments = false } = opts
   const numbered = numberedFragmentIds !== undefined
   const tools: ToolSet = {}
 
   tools.readFragments = tool({
     description: numbered
-      ? 'Read one or more fragments by ID. Returns full editable fields and `baseHash`, with `content` sentence-numbered as `[n] sentence` — the same numbering used to address a sentence for correction.'
+      ? `Read one or more fragments by ID. Returns full editable fields and \`baseHash\`, with \`content\` sentence-numbered as \`[n] sentence\` — the same numbering used to address a sentence for correction.${skipNumberedFragments ? ' Records already present in this context are reported under `alreadyAvailable` instead of being echoed again.' : ''}`
       : 'Read one or more fragments by ID. Returns full editable fields and `baseHash`. Use `baseHash` when applying `set_fields` whole-field rewrites.',
     inputSchema: z.object({
       fragmentIds: z.array(z.string()).min(1).max(MAX_READ_FRAGMENTS).describe('Fragment IDs to read. Batch related reads in one call.'),
@@ -233,7 +238,12 @@ export function createFragmentTools(
     execute: withToolLogging('readFragments', storyId, async ({ fragmentIds }: { fragmentIds: string[] }) => {
       const fragments = []
       const missing = []
+      const alreadyAvailable = []
       for (const id of [...new Set(fragmentIds)]) {
+        if (skipNumberedFragments && numberedFragmentIds?.has(id)) {
+          alreadyAvailable.push(id)
+          continue
+        }
         const fragment = await getFragment(dataDir, storyId, id)
         if (!fragment) {
           missing.push(id)
@@ -242,7 +252,11 @@ export function createFragmentTools(
         fragments.push(fullFragmentForTool(fragment, numbered))
         numberedFragmentIds?.add(fragment.id)
       }
-      return { fragments, missing }
+      return {
+        fragments,
+        missing,
+        ...(alreadyAvailable.length > 0 ? { alreadyAvailable } : {}),
+      }
     }),
   })
 

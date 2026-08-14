@@ -74,7 +74,11 @@ describe('generation-logs storage', () => {
   it('lists generation logs sorted newest-first', async () => {
     const log1 = makeLog({ id: 'log-001', createdAt: '2025-01-01T00:00:00.000Z' })
     const log2 = makeLog({ id: 'log-002', createdAt: '2025-01-02T00:00:00.000Z' })
-    const log3 = makeLog({ id: 'log-003', createdAt: '2025-01-03T00:00:00.000Z' })
+    const log3 = makeLog({
+      id: 'log-003',
+      createdAt: '2025-01-03T00:00:00.000Z',
+      sampling: { temperature: 0.7, topP: 0.9, topK: 64 },
+    })
 
     await saveGenerationLog(dataDir, storyId, log1)
     await saveGenerationLog(dataDir, storyId, log2)
@@ -84,6 +88,7 @@ describe('generation-logs storage', () => {
     expect(logs).toHaveLength(3)
     // Newest first
     expect(logs[0].id).toBe('log-003')
+    expect(logs[0].sampling).toEqual({ temperature: 0.7, topP: 0.9, topK: 64 })
     expect(logs[1].id).toBe('log-002')
     expect(logs[2].id).toBe('log-001')
   })

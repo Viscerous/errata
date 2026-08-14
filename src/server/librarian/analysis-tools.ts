@@ -138,11 +138,53 @@ export function createEmptyCollector(): AnalysisCollector {
   }
 }
 
+function lastWhitespaceIndex(value: string): number {
+  for (let index = value.length - 1; index >= 0; index -= 1) {
+    if (/\s/.test(value[index])) return index
+  }
+  return -1
+}
+
+/** Keep bounded prose readable and make a clipped tail explicit. */
+function truncateAtWordBoundary(value: string, maxChars: number): { value: string; truncated: boolean } {
+  const trimmed = value.trim()
+  if (trimmed.length <= maxChars) return { value: trimmed, truncated: false }
+  if (maxChars <= 0) return { value: '', truncated: true }
+  if (maxChars === 1) return { value: '…', truncated: true }
+
+  const clipped = trimmed.slice(0, maxChars - 1).trimEnd()
+  const lastWhitespace = lastWhitespaceIndex(clipped)
+  const readable = (lastWhitespace > 0 ? clipped.slice(0, lastWhitespace) : clipped).trimEnd()
+  return { value: `${readable}…`, truncated: true }
+}
+
+/** Prefer a complete sentence when durable summary-like prose must be bounded. */
+function truncateAtSentenceBoundary(value: string, maxChars: number): { value: string; truncated: boolean } {
+  const trimmed = value.trim()
+  if (trimmed.length <= maxChars) return { value: trimmed, truncated: false }
+
+  const clipped = trimmed.slice(0, maxChars)
+  let sentenceEnd = -1
+  for (let index = 0; index < clipped.length; index += 1) {
+    if (!/[.!?]/.test(clipped[index])) continue
+    let end = index + 1
+    while (end < clipped.length && /["'’”)\]]/.test(clipped[end])) end += 1
+    if (end === clipped.length || /\s/.test(clipped[end])) sentenceEnd = end
+  }
+  // Do not turn a long useful summary into a tiny first sentence. If no
+  // reasonably late sentence boundary exists, retain as much as possible and
+  // end at a word boundary instead.
+  if (sentenceEnd >= Math.floor(maxChars / 2)) {
+    return { value: clipped.slice(0, sentenceEnd).trimEnd(), truncated: true }
+  }
+  return truncateAtWordBoundary(trimmed, maxChars)
+}
+
 function normalizeUniqueLines(values: string[] | undefined, maxItems: number, maxItemChars = 200): string[] {
   const out: string[] = []
   const seen = new Set<string>()
   for (const value of values ?? []) {
-    const trimmed = value.trim().slice(0, maxItemChars)
+    const trimmed = truncateAtWordBoundary(value, maxItemChars).value
     if (!trimmed) continue
     const key = trimmed.toLowerCase()
     if (seen.has(key)) continue
@@ -394,7 +436,10 @@ function knowledgeOperationSchemaFor(registry: ContinuityRegistry) {
 export function buildReportAnalysisInputSchema(input: ContinuityKeyRegistry = {}) {
   const registry = normalizeRegistry(input)
   return z.object({
-    summary: z.string().max(2400).default('').describe('A concise retrospective record of what had happened in the new prose fragment, written as past history rather than a scene to continue — a paragraph or two'),
+    // Accept verbosity here and normalize it in execute. Rejecting the entire
+    // structured report for an overlong summary makes reasoning models retain
+    // a large failed tool call and regenerate every otherwise-valid field.
+    summary: z.string().default('').describe('A concise retrospective record of what had happened in the new prose fragment, written as past history rather than a scene to continue — a paragraph or two, at most 1200 characters. Longer input is shortened by the server.'),
     events: coercedStringArray
       .describe('What happened, one short statement each — the few that matter, at most 8 are kept. These become the story timeline; `temporalFrame` places them, so do not restate when they happened.'),
     mentions: z.array(mentionInputSchema).max(150).default([])
@@ -433,6 +478,12 @@ type ReportAnalysisInput = z.infer<ReturnType<typeof buildReportAnalysisInputSch
 
 function uniqueStrings(values: string[], maxItems: number): string[] {
   return [...new Set(values)].slice(0, maxItems)
+}
+
+const MAX_STORED_ANALYSIS_SUMMARY_CHARS = 1200
+
+function normalizeAnalysisSummary(value: string): { value: string; truncated: boolean } {
+  return truncateAtSentenceBoundary(value, MAX_STORED_ANALYSIS_SUMMARY_CHARS)
 }
 
 function keepLastByKey<T>(items: T[], keyFor: (item: T) => string, maxItems: number): T[] {
@@ -976,20 +1027,27 @@ const newFragmentProposalItemSchema = createFragmentOperationSchema.omit({ actio
  * propose one genuinely new reusable record. Routine events and state changes
  * already have first-class homes in reportAnalysis.
  */
+const MAX_PROPOSAL_TITLE_CHARS = 100
+const MAX_PROPOSAL_RATIONALE_CHARS = 600
+
 export const librarianRecordCorrectionsInputSchema = z.object({
-  title: z.string().max(100).optional(),
+  title: z.string().optional()
+    .describe(`Optional proposal title. Aim for at most ${MAX_PROPOSAL_TITLE_CHARS} characters; longer input is shortened by the server.`),
   evidenceSegments: proposalEvidenceSchema
     .describe('Sentence numbers from the New Prose Fragment that establish this change. Required on the first attempt; a retry may omit them because the tool retains the last grounded citation.'),
-  rationale: z.string().trim().max(600).optional(),
+  rationale: z.string().trim().optional()
+    .describe(`Optional shared rationale. Aim for at most ${MAX_PROPOSAL_RATIONALE_CHARS} characters; longer input is shortened by the server.`),
   corrections: z.array(correctionProposalItemSchema).max(4).default([])
     .describe('Localized replacements for existing assertions made inaccurate by this prose, including through ordinary story progression.'),
 })
 
 export const librarianNewRecordsInputSchema = z.object({
-  title: z.string().max(100).optional(),
+  title: z.string().optional()
+    .describe(`Optional proposal title. Aim for at most ${MAX_PROPOSAL_TITLE_CHARS} characters; longer input is shortened by the server.`),
   evidenceSegments: proposalEvidenceSchema
     .describe('Sentence numbers from the New Prose Fragment that establish this change. Required on the first attempt; a retry may omit them because the tool retains the last grounded citation.'),
-  rationale: z.string().trim().max(600).optional(),
+  rationale: z.string().trim().optional()
+    .describe(`Optional shared rationale. Aim for at most ${MAX_PROPOSAL_RATIONALE_CHARS} characters; longer input is shortened by the server.`),
   newFragments: z.array(newFragmentProposalItemSchema).max(4).default([])
     .describe('Genuinely new reusable named records. Do not create event logs, current-condition notes, scene details, or duplicates.'),
 })
@@ -1078,6 +1136,15 @@ function queueFragmentChangeProposal(params: {
   operations: FragmentChangeOperation[]
   validation: OperationValidation[]
 }): { queued: FragmentChangeOperation[]; alreadyQueued: FragmentChangeOperation[] } {
+  const title = params.title
+    ? truncateAtWordBoundary(params.title, MAX_PROPOSAL_TITLE_CHARS).value
+    : ''
+  const rationale = params.rationale
+    ? truncateAtSentenceBoundary(params.rationale, MAX_PROPOSAL_RATIONALE_CHARS).value
+    : ''
+  const eligibilityReason = params.eligibilityReason
+    ? truncateAtSentenceBoundary(params.eligibilityReason, MAX_PROPOSAL_RATIONALE_CHARS).value
+    : ''
   const queuedKeys = new Set(
     params.collector.fragmentChangeProposals.flatMap((proposal) =>
       proposal.operations.map(operationDedupeKey),
@@ -1098,12 +1165,12 @@ function queueFragmentChangeProposal(params: {
 
   const queuedIds = new Set(queued.map((operation) => operation.operationId ?? ''))
   params.collector.fragmentChangeProposals.push({
-    ...(params.title?.trim() ? { title: params.title.trim() } : {}),
-    ...(params.rationale?.trim() ? { rationale: params.rationale.trim() } : {}),
+    ...(title ? { title } : {}),
+    ...(rationale ? { rationale } : {}),
     ...(params.proposalKind ? { proposalKind: params.proposalKind } : {}),
     ...(params.evidenceSegments?.length ? { evidenceSegments: params.evidenceSegments } : {}),
     ...(params.evidenceText ? { evidenceText: params.evidenceText } : {}),
-    ...(params.eligibilityReason ? { eligibilityReason: params.eligibilityReason } : {}),
+    ...(eligibilityReason ? { eligibilityReason } : {}),
     ...(params.autoApplySafe !== undefined ? { autoApplySafe: params.autoApplySafe } : {}),
     operations: queued,
     validation: params.validation.filter((result) => queuedIds.has(result.operationId)),
@@ -1236,6 +1303,7 @@ export function createAnalysisTools(
         threadFocus = [],
         knowledgeOperations = [],
       }) => {
+        const normalizedSummary = normalizeAnalysisSummary(summary)
         // An empty report must not be a *schema* rejection — that makes small
         // models loop on resubmitting the whole payload. It is an unsuccessful
         // call with a nudge, which finishAnalysis then reads consistently.
@@ -1243,7 +1311,7 @@ export function createAnalysisTools(
         // model its call succeeded and then, at finish, that it had falsely
         // claimed that same call.
         const signalCount =
-          Number(summary.trim().length > 0) +
+          Number(normalizedSummary.value.length > 0) +
           events.length +
           mentions.length +
           candidateFragmentIds.length +
@@ -1318,8 +1386,7 @@ export function createAnalysisTools(
         const reportedEvents = normalizeUniqueLines(events, 8)
         collector.events = normalizeUniqueLines([...collector.events, ...reportedEvents], MAX_TIMELINE_EVENTS)
 
-        const trimmedSummary = summary.trim().slice(0, 1200)
-        if (trimmedSummary.length > 0) collector.summaryUpdate = trimmedSummary
+        if (normalizedSummary.value.length > 0) collector.summaryUpdate = normalizedSummary.value
         else if (!collector.summaryUpdate) collector.summaryUpdate = summaryFromEvents(collector.events)
 
         // Anchor mentions to the prose: a highlight can only bind text that
@@ -1469,6 +1536,10 @@ export function createAnalysisTools(
           threadOperationCount: collector.continuityProjection.threadOperations.length,
           focusedThreadCount: collector.continuityProjection.threadFocus.length,
           knowledgeOperationCount: collector.continuityProjection.knowledgeOperations.length,
+          ...(normalizedSummary.truncated ? {
+            summaryTruncated: true,
+            summaryNote: `The reported summary was shortened to fit the ${MAX_STORED_ANALYSIS_SUMMARY_CHARS}-character storage limit.`,
+          } : {}),
           ...(resolvedFragments.length > 0 ? {
             resolvedFragments,
             resolvedFragmentNote: 'Full records for what you just reported, not already in your context. Their sentences are numbered for correction targeting. Use them for directions and record maintenance; no further reads are needed for these.',
@@ -1493,6 +1564,7 @@ export function createAnalysisTools(
     const readTools = createFragmentTools(opts.dataDir, opts.storyId, {
       readOnly: true,
       numberedFragmentIds,
+      skipNumberedFragments: true,
     })
     for (const name of READ_TOOLS_ALREADY_IN_ANALYZE_CONTEXT) delete readTools[name]
     Object.assign(tools, readTools)
@@ -1925,9 +1997,10 @@ export function createAnalysisTools(
  * The analyze toolset. Single source for the runtime handler and the agent's
  * available-tools list, so the toggle path and the model stay in sync.
  *
- * Online analysis is a fused tool loop: report first, then read/propose as
- * needed. Deeper router/audit/backfill jobs can feed candidates into this same
- * shape; they are not separate observe/proposal analyze modes.
+ * Online analysis uses one shared collector and numbered-record ledger. The
+ * adaptive Analyze loop reports its observation, then reads/proposes as needed
+ * without returning bodies already available in the prompt or tool history.
+ * Deeper router/audit/backfill jobs can feed candidates into this same shape.
  */
 export function createLibrarianOnlineTools(
   collector: AnalysisCollector,

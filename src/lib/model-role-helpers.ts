@@ -63,6 +63,24 @@ export function resolveInheritedTemperature(
   return null
 }
 
+type SamplingOverrideKey = 'topP' | 'topK'
+
+/** Resolve a sampling override from parent roles; absence delegates to the model. */
+export function resolveInheritedSamplingValue(
+  roleKey: string,
+  key: SamplingOverrideKey,
+  settings: StoryMeta['settings'],
+): { value: number; source: string } | null {
+  const overrides = settings.modelOverrides ?? {}
+  const chain = getModelFallbackChain(roleKey)
+  for (let index = 1; index < chain.length; index += 1) {
+    const parentKey = chain[index]
+    const value = overrides[parentKey]?.[key]
+    if (value != null) return { value, source: parentKey }
+  }
+  return null
+}
+
 /** Get the inherit label for a role's provider dropdown (e.g. "Inherit (Librarian)") */
 export function getInheritLabel(
   roleKey: string,

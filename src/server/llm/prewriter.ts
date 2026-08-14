@@ -1,6 +1,6 @@
 import { tool, ToolLoopAgent, stepCountIs, hasToolCall, type ToolSet } from 'ai'
 import { z } from 'zod/v4'
-import { resolveAgentRuntime } from './client'
+import { resolveAgentRuntime, samplingCallSettings, samplingDiagnostics } from './client'
 import { addCacheBreakpoints, compileBlocks, expandMessagesFragmentTags, type ContextBlock } from './context-builder'
 import { proseWindowBlock } from './fragment-context-blocks'
 import { compileAgentContext } from '../agents/compile-agent-context'
@@ -9,7 +9,7 @@ import { buildContextState } from './context-builder'
 import { type AgentBlockContext, baseBlockContext } from '../agents/agent-block-context'
 import { renderContinuity } from '../librarian/continuity-view'
 import { suggestionDirectionSchema } from '../directions/schema'
-import type { Fragment, StoryMeta } from '../fragments/schema'
+import type { Fragment, SamplingSettings, StoryMeta } from '../fragments/schema'
 import type { TokenUsage, ToolCallLog } from './generation-logs'
 import { resolveAndReportServedUsage } from './usage-normalizer'
 import { servedModelIdFromResponse } from './served-models'
@@ -187,6 +187,7 @@ export interface PrewriterResult {
   stepCount: number
   durationMs: number
   model: string
+  sampling: SamplingSettings
   usage?: TokenUsage
   /** Structured story blocks actually presented through the full-context slot. */
   presentedContextBlocks: ContextBlock[]
@@ -205,8 +206,9 @@ export async function runPrewriter(args: RunPrewriterArgs): Promise<PrewriterRes
   const canAskQuestions = clarifyEnabled && round < MAX_CLARIFY_ROUNDS
 
   const startTime = Date.now()
-  const { model, modelId, providerId, temperature, providerOptions, guards } = await resolveAgentRuntime(dataDir, storyId, 'generation.prewriter', story)
-  requestLogger.info('Prewriter model resolved', { modelId })
+  const runtime = await resolveAgentRuntime(dataDir, storyId, 'generation.prewriter', story)
+  const { model, modelId, providerId, providerOptions, guards } = runtime
+  requestLogger.info('Prewriter model resolved', { modelId, sampling: samplingDiagnostics(runtime) })
 
   // Build the prewriter prompt from blocks (allows user customization via block editor).
   // Falls back to the real story's empty context state (never a fabricated
@@ -344,7 +346,7 @@ export async function runPrewriter(args: RunPrewriterArgs): Promise<PrewriterRes
       hasToolCall('proposeDirections'),
       hasToolCall('askClarifyingQuestions'),
     ],
-    temperature,
+    ...samplingCallSettings(runtime),
     providerOptions,
     maxOutputTokens: guards.maxOutputTokens,
   })
@@ -460,6 +462,7 @@ export async function runPrewriter(args: RunPrewriterArgs): Promise<PrewriterRes
     stepCount,
     durationMs,
     model: modelId,
+    sampling: samplingDiagnostics(runtime),
     usage,
     presentedContextBlocks: prewriterBlocks.filter((block) => block.id.startsWith('full-context:')),
     questions: capturedQuestions ?? undefined,

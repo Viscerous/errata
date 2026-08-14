@@ -5,6 +5,7 @@ import {
   buildReportAnalysisInputSchema,
   createLibrarianOnlineTools,
   librarianFinishAnalysisInputSchema,
+  librarianNewRecordsInputSchema,
   librarianRecordCorrectionsInputSchema,
   listLibrarianAnalyzeToolNames,
   anchorMentionText,
@@ -823,8 +824,8 @@ describe('analysis-tools', () => {
     const collector = createEmptyCollector()
     const tools = createAnalysisTools(collector)
 
-    await tools.reportAnalysis.execute!({
-      summary: 'S'.repeat(2400),
+    const result = await tools.reportAnalysis.execute!({
+      summary: 'S'.repeat(5000),
       // 15 distinct events, one over-long — kept set clips to 8, items to 200 chars.
       events: Array.from({ length: 15 }, (_, i) => i === 0 ? 'E'.repeat(400) : `Event ${i}`),
       // 80 distinct mentions — working cap keeps 60.
@@ -833,10 +834,65 @@ describe('analysis-tools', () => {
     }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
 
     expect(collector.summaryUpdate).toHaveLength(1200)
+    expect(result).toMatchObject({ ok: true, summaryTruncated: true })
     expect(collector.events).toHaveLength(8)
     expect(collector.events[0]).toHaveLength(200)
     expect(collector.mentions).toHaveLength(60)
     expect(collector.contradictions).toHaveLength(12)
+  })
+
+  it('shortens summaries and events without persisting partial words', async () => {
+    const collector = createEmptyCollector()
+    const tools = createAnalysisTools(collector)
+    const completeSummary = `${'Established context remains relevant '.repeat(30).trim()}.`
+    const event = `${'The delegates crossed the courtyard '.repeat(8)}before the ceremony resumed`
+
+    await tools.reportAnalysis.execute!({
+      summary: `${completeSummary} ${'This trailing sentence would be cut mid-thought '.repeat(20)}`,
+      events: [event],
+    }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
+
+    expect(completeSummary.length).toBeGreaterThan(600)
+    expect(collector.summaryUpdate).toBe(completeSummary)
+    expect(collector.events[0].length).toBeLessThanOrEqual(200)
+    expect(collector.events[0]).toMatch(/\w…$/)
+    expect(event.startsWith(collector.events[0].slice(0, -1))).toBe(true)
+  })
+
+  it('accepts verbose proposal metadata and bounds it after validating the operations', async () => {
+    const prose = mockFragment({
+      id: 'pr-0001',
+      type: 'prose',
+      content: 'Alice founded the Lantern Archive.',
+    })
+    vi.mocked(getFragment).mockResolvedValue(prose)
+    const collector = createEmptyCollector()
+    const tools = createAnalysisTools(collector, {
+      dataDir: '/tmp',
+      storyId: 'story-test',
+      proseFragmentId: 'pr-0001',
+    })
+    const input = librarianNewRecordsInputSchema.parse({
+      title: 'A deliberately verbose proposal title '.repeat(8),
+      evidenceSegments: [1],
+      rationale: 'This reusable named institution is grounded by the accepted prose. '.repeat(14),
+      newFragments: [{
+        type: 'knowledge',
+        name: 'Lantern Archive',
+        description: 'An archive founded by Alice.',
+        content: 'The Lantern Archive was founded by Alice.',
+      }],
+    })
+
+    const result = await tools.proposeNewRecords.execute!(input, {
+      toolCallId: 'proposal',
+      messages: [],
+      abortSignal: undefined as unknown as AbortSignal,
+    })
+
+    expect(result).toMatchObject({ ok: true, queuedOperationCount: 1 })
+    expect(collector.fragmentChangeProposals[0].title?.length).toBeLessThanOrEqual(100)
+    expect(collector.fragmentChangeProposals[0].rationale?.length).toBeLessThanOrEqual(600)
   })
 
   it('online analysis marks an exact evidence-backed correction safe for unattended apply', async () => {

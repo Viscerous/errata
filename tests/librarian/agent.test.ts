@@ -25,12 +25,21 @@ vi.mock('ai', async () => {
     ToolLoopAgent: class {
       tools: Record<string, { execute: (args: unknown) => Promise<unknown> }>
       instructions: string
-      constructor(opts: { tools?: Record<string, unknown>; instructions?: string } = {}) {
+      onStepFinish?: (event: Record<string, unknown>) => Promise<void> | void
+      constructor(opts: {
+        tools?: Record<string, unknown>
+        instructions?: string
+        onStepFinish?: (event: Record<string, unknown>) => Promise<void> | void
+      } = {}) {
         this.tools = (opts.tools ?? {}) as Record<string, { execute: (args: unknown) => Promise<unknown> }>
         this.instructions = opts.instructions ?? ''
+        this.onStepFinish = opts.onStepFinish
       }
       async stream(args: unknown) {
-        return mockAgentStream(args, this.tools, { instructions: this.instructions })
+        return mockAgentStream(args, this.tools, {
+          instructions: this.instructions,
+          onStepFinish: this.onStepFinish,
+        })
       }
     },
   }
@@ -103,14 +112,12 @@ function mockStreamWithToolCalls(toolCalls: Array<{ toolName: string; args: Reco
       fullStream: (async function* () {
         let callId = 0
         for (const tc of toolCalls) {
+          const toolDef = tools[tc.toolName]
+          if (!toolDef?.execute) continue
           const id = `call-${callId++}`
           yield { type: 'tool-call' as const, toolCallId: id, toolName: tc.toolName, input: tc.args }
           // Actually execute the tool so the collector gets populated
-          const toolDef = tools[tc.toolName]
-          let output: unknown = { ok: true }
-          if (toolDef?.execute) {
-            output = await toolDef.execute(tc.args)
-          }
+          const output: unknown = await toolDef.execute(tc.args)
           yield { type: 'tool-result' as const, toolCallId: id, toolName: tc.toolName, output }
         }
         yield { type: 'finish' as const, finishReason: 'stop' }
@@ -331,6 +338,10 @@ describe('librarian agent', () => {
       if (!capturedPrompt && args.prompt) capturedPrompt = args.prompt
       return {
         fullStream: (async function* () {
+          if (!tools.reportAnalysis) {
+            yield { type: 'finish' as const, finishReason: 'stop' }
+            return
+          }
           const input = { summary: 'Alice fought bravely.' }
           yield { type: 'tool-call' as const, toolCallId: 'call-report', toolName: 'reportAnalysis', input }
           yield {
@@ -350,6 +361,99 @@ describe('librarian agent', () => {
     expect(capturedPrompt).toContain('### Characters')
     expect(capturedPrompt).toContain('#### `ch-0001` | Alice | The protagonist')
     expect(capturedPrompt).toContain('Alice carries a rune-etched blade.')
+  })
+
+  it('keeps resolved records available within one adaptive Analyze loop', async () => {
+    await createStory(dataDir, makeStory({
+      settings: {
+        modelOverrides: {
+          'librarian.analyze': { temperature: 0.6, topP: 0.95, topK: 20 },
+        },
+      },
+    }))
+    await createFragment(dataDir, storyId, makeFragment({
+      id: 'ch-0001',
+      type: 'character',
+      name: 'Alice',
+      description: 'The gate captain',
+      content: 'Alice commands the north gate. She carries the iron key.',
+    }))
+    await createFragment(dataDir, storyId, makeFragment({
+      id: 'pr-0001',
+      content: 'Alice resigned at dawn.',
+    }))
+    await setupProseChain(dataDir, storyId, ['pr-0001'])
+
+    let duplicateReadResult: unknown
+    mockAgentStream.mockImplementation(async (
+      args: { prompt?: string },
+      tools: Record<string, { execute: (args: unknown) => Promise<unknown> }>,
+      opts?: { onStepFinish?: (event: Record<string, unknown>) => Promise<void> | void },
+    ) => ({
+      fullStream: (async function* () {
+        expect(args.prompt).not.toContain('## Recorded Observation Checkpoint')
+        const input = {
+          summary: 'Alice resigned from command at dawn.',
+          candidateFragmentIds: ['ch-0001'],
+        }
+        yield { type: 'tool-call' as const, toolCallId: 'observe', toolName: 'reportAnalysis', input }
+        yield {
+          type: 'tool-result' as const,
+          toolCallId: 'observe',
+          toolName: 'reportAnalysis',
+          output: await tools.reportAnalysis.execute(input),
+        }
+        await opts?.onStepFinish?.({
+          stepNumber: 0,
+          finishReason: 'tool-calls',
+          usage: { inputTokens: 111, outputTokens: 22 },
+          response: { modelId: 'test-model' },
+        })
+        const readInput = { fragmentIds: ['ch-0001'] }
+        duplicateReadResult = await tools.readFragments.execute(readInput)
+        yield { type: 'tool-call' as const, toolCallId: 'read', toolName: 'readFragments', input: readInput }
+        yield { type: 'tool-result' as const, toolCallId: 'read', toolName: 'readFragments', output: duplicateReadResult }
+        const finishInput = {}
+        yield { type: 'tool-call' as const, toolCallId: 'finish', toolName: 'finishAnalysis', input: finishInput }
+        yield {
+          type: 'tool-result' as const,
+          toolCallId: 'finish',
+          toolName: 'finishAnalysis',
+          output: await tools.finishAnalysis.execute(finishInput),
+        }
+        await opts?.onStepFinish?.({
+          stepNumber: 1,
+          finishReason: 'tool-calls',
+          usage: { inputTokens: 333, outputTokens: 44 },
+          response: { modelId: 'test-model' },
+        })
+        yield { type: 'finish' as const, finishReason: 'stop' }
+      })(),
+    }))
+
+    const analysis = await runLibrarian(dataDir, storyId, 'pr-0001')
+
+    expect(duplicateReadResult).toEqual({ fragments: [], missing: [], alreadyAvailable: ['ch-0001'] })
+    expect(analysis.passes?.map((pass) => [pass.name, pass.status])).toEqual([
+      ['analyze', 'complete'],
+    ])
+    expect(analysis.passes?.[0].diagnostics?.stepUsage).toEqual([
+      {
+        stepNumber: 0,
+        finishReason: 'tool-calls',
+        modelId: 'test-model',
+        inputTokens: 111,
+        outputTokens: 22,
+      },
+      {
+        stepNumber: 1,
+        finishReason: 'tool-calls',
+        modelId: 'test-model',
+        inputTokens: 333,
+        outputTokens: 44,
+      },
+    ])
+    expect(analysis.passes?.[0].diagnostics?.sampling).toEqual({ temperature: 0.6, topP: 0.95, topK: 20 })
   })
 
   it('detects character mentions', async () => {
@@ -462,7 +566,7 @@ describe('librarian agent', () => {
     expect(state.recentMentions['loc-0001']).toEqual(['pr-0001'])
   })
 
-  it('runs directions in the fused analyze pass when enabled', async () => {
+  it('runs directions in the fused Analyze pass when enabled', async () => {
     await createStory(dataDir, makeStory({ settings: { disableLibrarianDirections: false } }))
     await createFragment(dataDir, storyId, makeFragment({
       id: 'pr-0001',
@@ -546,7 +650,7 @@ describe('librarian agent', () => {
     expect(result.suggestions).toEqual(directions)
   })
 
-  it('saves a valid observation when a later fused-lane stream step fails', async () => {
+  it('saves a valid observation when a later Analyze step fails', async () => {
     await createStory(dataDir, makeStory())
     await createFragment(dataDir, storyId, makeFragment({ id: 'pr-0001' }))
     await setupProseChain(dataDir, storyId, ['pr-0001'])
@@ -554,6 +658,7 @@ describe('librarian agent', () => {
     mockAgentStream.mockImplementation(async (
       _args: unknown,
       tools: Record<string, { execute: (args: unknown) => Promise<unknown> }>,
+      opts?: { onStepFinish?: (event: Record<string, unknown>) => Promise<void> | void },
     ) => ({
       fullStream: (async function* () {
         const input = { summary: 'The hero reached the gate.' }
@@ -564,6 +669,12 @@ describe('librarian agent', () => {
           toolName: 'reportAnalysis',
           output: await tools.reportAnalysis.execute(input),
         }
+        await opts?.onStepFinish?.({
+          stepNumber: 0,
+          finishReason: 'tool-calls',
+          usage: { inputTokens: 321, outputTokens: 123 },
+          response: { modelId: 'test-model' },
+        })
         throw new Error('late proposal connection failure')
       })(),
     }))
@@ -576,6 +687,18 @@ describe('librarian agent', () => {
     const analysis = await getAnalysis(dataDir, storyId, summaries[0].id)
     expect(analysis?.summaryUpdate).toBe('The hero reached the gate.')
     expect(analysis?.passes?.[0]).toMatchObject({ name: 'analyze', status: 'failed' })
+    expect(analysis?.passes?.[0].diagnostics).toMatchObject({
+      completedStepCount: 1,
+      inputTokens: 321,
+      outputTokens: 123,
+      stepUsage: [{
+        stepNumber: 0,
+        finishReason: 'tool-calls',
+        modelId: 'test-model',
+        inputTokens: 321,
+        outputTokens: 123,
+      }],
+    })
     expect(analysis?.analyzeLanes?.observation.completion).toBe('complete')
   })
 

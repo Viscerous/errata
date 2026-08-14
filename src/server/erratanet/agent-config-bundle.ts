@@ -37,6 +37,8 @@ export const PortableModelRoleSchema = z.object({
   providerName: z.string().nullable().optional(),
   model: z.string().nullable().optional(),
   temperature: z.number().nullable().optional(),
+  topP: z.number().min(0).max(1).nullable().optional(),
+  topK: z.number().int().min(1).max(1000).nullable().optional(),
 })
 export type PortableModelRole = z.infer<typeof PortableModelRoleSchema>
 
@@ -116,12 +118,14 @@ export async function snapshotAgentConfig(
     for (const [role, ov] of Object.entries(overrides)) {
       const name = providerName(ov.providerId)
       // Skip empty overrides that carry nothing portable.
-      if (!name && !ov.modelId && ov.temperature == null) continue
+      if (!name && !ov.modelId && ov.temperature == null && ov.topP == null && ov.topK == null) continue
       roles.push({
         role,
         ...(name ? { providerName: name } : {}),
         ...(ov.modelId ? { model: ov.modelId } : {}),
         ...(ov.temperature != null ? { temperature: ov.temperature } : {}),
+        ...(ov.topP != null ? { topP: ov.topP } : {}),
+        ...(ov.topK != null ? { topK: ov.topK } : {}),
       })
     }
     if (roles.length > 0) bundle.modelRoles = roles
@@ -345,6 +349,8 @@ export async function applyAgentConfigToStory(
         ...(providerId ? { providerId } : {}),
         ...(role.model ? { modelId: role.model } : {}),
         ...(role.temperature != null ? { temperature: role.temperature } : {}),
+        ...(role.topP != null ? { topP: role.topP } : {}),
+        ...(role.topK != null ? { topK: role.topK } : {}),
       }
       result.modelRolesApplied.push(role.role)
       if (role.providerName && !providerId) result.modelRolesNeedingProvider.push(role.role)

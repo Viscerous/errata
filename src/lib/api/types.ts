@@ -3,7 +3,7 @@ import type {
   AgentBlockConfig,
   BlockConfig,
 } from '@/contracts/block-config'
-import type { Fragment as StoryFragment } from '@/contracts/story'
+import type { Fragment as StoryFragment, SamplingSettings } from '@/contracts/story'
 export type {
   AgentBlockConfig,
   BlockConfig,
@@ -19,6 +19,7 @@ export type {
   ProseChainResponse,
   ProseChainResponseEntry,
   ProseVariationSummary,
+  SamplingSettings,
   StoryMeta,
 } from '@/contracts/story'
 export type {
@@ -106,6 +107,7 @@ export interface GenerationLogSummary {
   input: string
   fragmentId: string | null
   model: string
+  sampling?: SamplingSettings
   durationMs: number
   toolCallCount: number
   stepCount: number
@@ -179,6 +181,7 @@ export interface GenerationLog {
   generatedText: string
   fragmentId: string | null
   model: string
+  sampling?: SamplingSettings
   durationMs: number
   stepCount: number
   finishReason: string
@@ -193,6 +196,7 @@ export interface GenerationLog {
   prewriterMessages?: Array<{ role: string; content: string }>
   prewriterDurationMs?: number
   prewriterModel?: string
+  prewriterSampling?: SamplingSettings
   prewriterUsage?: { inputTokens: number; outputTokens: number }
   prewriterDirections?: Array<{ pacing: string; title: string; description: string; instruction: string }>
 }
@@ -491,6 +495,8 @@ export interface AgentConfigModelRole {
   providerName?: string | null
   model?: string | null
   temperature?: number | null
+  topP?: number | null
+  topK?: number | null
 }
 
 /** Inspectable, side-effect-free view of a config (incl. verbatim script source). */

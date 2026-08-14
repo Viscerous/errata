@@ -16,7 +16,8 @@ import { createContextReceipt } from '../llm/context-receipt'
 import { applyBlockConfig } from '../blocks/apply'
 import { createScriptHelpers } from '../blocks/script-context'
 import { createFragmentTools } from '../llm/tools'
-import { resolveAgentRuntime } from '../llm/client'
+import { resolveAgentRuntime, samplingCallSettings, samplingDiagnostics } from '../llm/client'
+import type { SamplingSettings } from '../fragments/schema'
 import { runPrewriter, createWriterBriefBlocks } from '../llm/prewriter'
 import {
   saveGenerationLog,
@@ -178,12 +179,13 @@ export async function runGeneration(
   requestLogger.info('BeforeContext hooks completed')
 
   // Resolve model early so modelId is available for instruction resolution
-  const { model, modelId: resolvedModelId, providerId, temperature, providerOptions, guards } = await resolveAgentRuntime(dataDir, storyId, 'generation.writer', story)
+  const runtime = await resolveAgentRuntime(dataDir, storyId, 'generation.writer', story)
+  const { model, modelId: resolvedModelId, providerId, providerOptions, guards } = runtime
   // What the provider reports it answered with, once it has answered. Until then
   // the configured id is the best available name for it.
   let servedModelId = resolvedModelId
   abortController.signal.throwIfAborted()
-  requestLogger.info('Resolved model', { resolvedModelId })
+  requestLogger.info('Resolved model', { resolvedModelId, sampling: samplingDiagnostics(runtime) })
   ctxState.modelId = resolvedModelId
 
   // Merge fragment tools + plugin tools, then filter by agent block config
@@ -264,6 +266,7 @@ export async function runGeneration(
   let prewriterReasoning: string | undefined
   let prewriterDurationMs: number | undefined
   let prewriterModel: string | undefined
+  let prewriterSampling: SamplingSettings | undefined
   let prewriterUsage: { inputTokens: number; outputTokens: number } | undefined
   let prewriterLogMessages: Array<{ role: string; content: string }> | undefined
   let prewriterDirections: Array<{ pacing: string; title: string; description: string; instruction: string }> | undefined
@@ -371,6 +374,7 @@ export async function runGeneration(
             prewriterReasoning = prewriterResult.reasoning || undefined
             prewriterDurationMs = prewriterResult.durationMs
             prewriterModel = prewriterResult.model
+            prewriterSampling = prewriterResult.sampling
             prewriterUsage = prewriterResult.usage
             prewriterLogMessages = prewriterResult.messages
             prewriterToolCalls = prewriterResult.toolCalls
@@ -422,7 +426,7 @@ export async function runGeneration(
           tools,
           toolChoice: 'auto',
           stopWhen: stepCountIs(writerMaxSteps),
-          temperature,
+          ...samplingCallSettings(runtime),
           providerOptions,
           maxOutputTokens: guards.maxOutputTokens,
         })
@@ -505,6 +509,7 @@ export async function runGeneration(
             generatedText: fullText,
             fragmentId: null,
             model: servedModelId,
+            sampling: samplingDiagnostics(runtime),
             durationMs,
             stepCount,
             finishReason: lastFinishReason,
@@ -519,6 +524,7 @@ export async function runGeneration(
             ...(prewriterLogMessages ? { prewriterMessages: prewriterLogMessages } : {}),
             ...(prewriterDurationMs ? { prewriterDurationMs } : {}),
             ...(prewriterModel ? { prewriterModel } : {}),
+            ...(prewriterSampling ? { prewriterSampling } : {}),
             ...(prewriterUsage ? { prewriterUsage } : {}),
             ...(prewriterToolCalls.length ? { prewriterToolCalls } : {}),
             ...(prewriterDirections?.length ? { prewriterDirections } : {}),
@@ -661,6 +667,7 @@ export async function runGeneration(
             generatedText: genResult.text,
             fragmentId: savedFragmentId,
             model: servedModelId,
+            sampling: samplingDiagnostics(runtime),
             durationMs,
             stepCount,
             finishReason: String(finishReason),
@@ -673,6 +680,7 @@ export async function runGeneration(
             ...(prewriterLogMessages ? { prewriterMessages: prewriterLogMessages } : {}),
             ...(prewriterDurationMs ? { prewriterDurationMs } : {}),
             ...(prewriterModel ? { prewriterModel } : {}),
+            ...(prewriterSampling ? { prewriterSampling } : {}),
             ...(prewriterUsage ? { prewriterUsage } : {}),
             ...(prewriterToolCalls.length ? { prewriterToolCalls } : {}),
             ...(prewriterDirections?.length ? { prewriterDirections } : {}),

@@ -12,7 +12,7 @@ import { withKeyLock } from '../async-lock'
 import { createLogger } from '../logging'
 import { drainAgentStream } from '../agents/drain-agent-stream'
 import type { AgentStreamEvent } from '../agents/stream-types'
-import { buildProviderOptions, resolveAgentRuntime } from '../llm/client'
+import { buildProviderOptions, resolveAgentRuntime, samplingCallSettings } from '../llm/client'
 import { resolveAndReportServedUsage } from '../llm/usage-normalizer'
 import { getObservedServedModelId } from '../llm/served-models'
 import { proseContentHash } from './continuity-source'
@@ -361,11 +361,15 @@ function nodeIdentity(level: number, children: RollupInput[], modelConfigKey: st
 function rollupModelConfigKey(runtime: {
   providerId: string | null
   temperature?: number
+  topP?: number
+  topK?: number
 }, modelId: string): string {
   return hash(stableJson({
     providerId: runtime.providerId,
     modelId,
     temperature: runtime.temperature ?? null,
+    topP: runtime.topP ?? null,
+    topK: runtime.topK ?? null,
   }))
 }
 
@@ -445,12 +449,15 @@ async function deriveNextSummaryRollupNodeInner(
     // One repair round, which is what the analysis lane shows a rejected tool
     // call reliably needs.
     stopWhen: [terminalToolSucceeded(ROLLUP_TOOL_NAME), stepCountIs(2)],
-    temperature: runtime.temperature,
+    ...samplingCallSettings(runtime),
     // Compression, not deliberation. Reasoning stays off whatever the story
     // setting says: with it on, the output budget is spent before the record is
     // reached, which is how this tier produced nothing at all.
     providerOptions: buildProviderOptions(true),
-    maxOutputTokens: Math.min(runtime.guards.maxOutputTokens, SUMMARY_ROLLUP_MAX_OUTPUT_TOKENS),
+    maxOutputTokens: Math.min(
+      runtime.guards.maxOutputTokens ?? SUMMARY_ROLLUP_MAX_OUTPUT_TOKENS,
+      SUMMARY_ROLLUP_MAX_OUTPUT_TOKENS,
+    ),
   })
   const controller = new AbortController()
   const abort = () => controller.abort()
