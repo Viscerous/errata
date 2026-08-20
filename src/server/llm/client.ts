@@ -4,6 +4,7 @@ import { getGlobalConfig } from '../config/storage'
 import { getStory } from '../fragments/storage'
 import { modelRoleRegistry } from '../agents/model-role-registry'
 import { ensureCoreAgentsRegistered } from '../agents/register-core'
+import { extractReasoningMiddleware, wrapLanguageModel } from 'ai'
 import type { LanguageModel } from 'ai'
 import { createLogger } from '../logging'
 
@@ -203,9 +204,16 @@ export async function getModel(dataDir: string, storyId?: string, opts: GetModel
     const modelId = (usingFallback ? null : targetModelId) || provider.defaultModel
     const nativeGemini = isGeminiProvider(provider)
     const baseURL = nativeGemini ? normalizeGeminiBaseURL(provider.baseURL) : provider.baseURL
+    // Locally-hosted thinking models (Qwen-style) behind plain OpenAI-compatible
+    // endpoints emit `<think>...</think>` inside ordinary text deltas. Extract
+    // those into proper reasoning parts so they never leak into saved prose or
+    // JSON parsing. Native Gemini already separates reasoning server-side.
     const model = nativeGemini
       ? getCachedGoogleProvider(provider.id, baseURL, provider.apiKey, provider.customHeaders)(modelId)
-      : getCachedProvider(provider.id, provider.baseURL, provider.apiKey, provider.name, provider.customHeaders).chatModel(modelId)
+      : wrapLanguageModel({
+          model: getCachedProvider(provider.id, provider.baseURL, provider.apiKey, provider.name, provider.customHeaders).chatModel(modelId),
+          middleware: extractReasoningMiddleware({ tagName: 'think' }),
+        })
     // Story-level temperature takes precedence over provider-level
     const temperature = targetTemperature ?? provider.temperature
     const toReturn = {
