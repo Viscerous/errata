@@ -1,5 +1,6 @@
 import type { ContextBlock } from '../llm/context-builder'
 import type { AgentBlockContext } from '../agents/agent-block-context'
+import type { Fragment } from '../fragments/schema'
 import { getStory, listFragments, getFragment } from '../fragments/storage'
 import { getFragmentsByTag } from '../fragments/associations'
 import { instructionRegistry } from '../instructions'
@@ -343,6 +344,20 @@ export function createProseTransformBlocks(ctx: AgentBlockContext): ContextBlock
     source: 'builtin',
   })
 
+  const stickyContext = [...ctx.stickyGuidelines, ...ctx.stickyKnowledge]
+  if (stickyContext.length > 0) {
+    blocks.push({
+      id: 'sticky-fragments',
+      role: 'user',
+      content: [
+        'Pinned guidelines and knowledge:',
+        ...stickyContext.map(f => `### ${f.name}\n${f.content}`),
+      ].join('\n'),
+      order: 250,
+      source: 'builtin',
+    })
+  }
+
   if (ctx.sourceContent) {
     blocks.push({
       id: 'source',
@@ -378,15 +393,37 @@ export function createProseTransformBlocks(ctx: AgentBlockContext): ContextBlock
   return blocks
 }
 
+/**
+ * Targeted fetch of sticky guidelines and knowledge for the prose-transform
+ * agent — skips the full buildContextState pipeline (prose chain, summary
+ * migration, characters) that a single-step, tool-less transform doesn't need.
+ */
+export async function loadStickyContextFragments(
+  dataDir: string,
+  storyId: string,
+): Promise<Pick<AgentBlockContext, 'stickyGuidelines' | 'stickyKnowledge'>> {
+  const sortByOrder = (a: Fragment, b: Fragment) => a.order - b.order || a.createdAt.localeCompare(b.createdAt)
+  const [guidelines, knowledge] = await Promise.all([
+    listFragments(dataDir, storyId, 'guideline'),
+    listFragments(dataDir, storyId, 'knowledge'),
+  ])
+  return {
+    stickyGuidelines: guidelines.filter(f => f.sticky).sort(sortByOrder),
+    stickyKnowledge: knowledge.filter(f => f.sticky).sort(sortByOrder),
+  }
+}
+
 export async function buildProseTransformPreviewContext(dataDir: string, storyId: string): Promise<AgentBlockContext> {
   const story = await getStory(dataDir, storyId)
   if (!story) throw new Error(`Story ${storyId} not found`)
 
+  const { stickyGuidelines, stickyKnowledge } = await loadStickyContextFragments(dataDir, storyId)
+
   return {
     story,
     proseFragments: [],
-    stickyGuidelines: [],
-    stickyKnowledge: [],
+    stickyGuidelines,
+    stickyKnowledge,
     stickyCharacters: [],
     guidelineShortlist: [],
     knowledgeShortlist: [],
