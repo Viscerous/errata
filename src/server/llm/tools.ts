@@ -408,13 +408,15 @@ export function createFragmentTools(
             }
             // Versioned write so the edit is captured in undo history, like the
             // single-fragment write tools.
-            await updateFragmentVersioned(
+            const updated = await updateFragmentVersioned(
               dataDir,
               storyId,
               f.id,
               { content: newContent },
               { reason: 'llm-editProse' },
             )
+            // Fragment may have been deleted between read and write
+            if (!updated) continue
             edited.push(f.id)
           }
         }
