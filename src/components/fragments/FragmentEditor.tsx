@@ -136,6 +136,9 @@ export function FragmentEditor({
     })
     if (fType === 'prose') {
       promises.push(queryClient.invalidateQueries({ queryKey: ['proseChain', storyId] }))
+      // Prose edits invalidate librarian analysis server-side — refresh the
+      // stale-analysis indicator instead of waiting for the poll interval.
+      promises.push(queryClient.invalidateQueries({ queryKey: ['librarian-analysis-index', storyId] }))
     }
     if (fragment?.id) {
       promises.push(queryClient.invalidateQueries({ queryKey: ['fragment', storyId, fragment.id] }))
@@ -208,6 +211,7 @@ export function FragmentEditor({
       queryClient.invalidateQueries({ queryKey: ['fragments-archived', storyId] })
       if (fType === 'prose') {
         queryClient.invalidateQueries({ queryKey: ['proseChain', storyId] })
+        queryClient.invalidateQueries({ queryKey: ['librarian-analysis-index', storyId] })
       }
       setSaveStatus('saved')
       if (savedStatusTimerRef.current) clearTimeout(savedStatusTimerRef.current)
