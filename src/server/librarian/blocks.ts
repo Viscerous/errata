@@ -19,7 +19,7 @@ import { contextSignalMap, selectAttentionContext } from '../llm/context-selecti
 import { numberSentences } from '../llm/segments'
 import { baseBlockContext, type AgentBlockContext } from '../agents/agent-block-context'
 import type { Fragment, StoryMeta } from '../fragments/schema'
-import { getStory, getFragment } from '../fragments/storage'
+import { getStory, getFragment, listFragments } from '../fragments/storage'
 import { getActiveProseIds } from '../fragments/prose-chain'
 import { getFragmentsByTag } from '../fragments/associations'
 import { instructionRegistry } from '../instructions'
@@ -490,6 +490,19 @@ export function createProseTransformBlocks(ctx: AgentBlockContext): ContextBlock
   })
   if (summary) blocks.push(summary)
 
+  const stickyContext = [...ctx.stickyGuidelines, ...ctx.stickyKnowledge]
+  if (stickyContext.length > 0) {
+    blocks.push({
+      id: 'sticky-fragments',
+      role: 'user',
+      content: markdownSection(2, 'Pinned Guidelines and Knowledge',
+        stickyContext.map(fragment => markdownSection(3, fragment.name, fragment.content))
+      ),
+      order: 250,
+      source: 'builtin',
+    })
+  }
+
   if (ctx.sourceContent) {
     blocks.push({
       id: 'source',
@@ -519,12 +532,31 @@ export function createProseTransformBlocks(ctx: AgentBlockContext): ContextBlock
   return blocks
 }
 
+/** Load only the pinned context needed by the single-step prose transform. */
+export async function loadStickyContextFragments(
+  dataDir: string,
+  storyId: string,
+): Promise<Pick<AgentBlockContext, 'stickyGuidelines' | 'stickyKnowledge'>> {
+  const sortByOrder = (a: Fragment, b: Fragment) => a.order - b.order || a.createdAt.localeCompare(b.createdAt)
+  const [guidelines, knowledge] = await Promise.all([
+    listFragments(dataDir, storyId, 'guideline'),
+    listFragments(dataDir, storyId, 'knowledge'),
+  ])
+  return {
+    stickyGuidelines: guidelines.filter(fragment => fragment.sticky).sort(sortByOrder),
+    stickyKnowledge: knowledge.filter(fragment => fragment.sticky).sort(sortByOrder),
+  }
+}
+
 export async function buildProseTransformPreviewContext(dataDir: string, storyId: string): Promise<AgentBlockContext> {
   const story = await getStory(dataDir, storyId)
   if (!story) throw new Error(`Story ${storyId} not found`)
 
+  const stickyContext = await loadStickyContextFragments(dataDir, storyId)
+
   return {
     ...baseBlockContext(undefined, story),
+    ...stickyContext,
     systemPromptFragments: [],
     operation: 'rewrite',
     guidance: 'Rewrite the selected span for clarity and flow while preserving the original meaning and voice.',

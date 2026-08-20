@@ -326,13 +326,13 @@ export function FragmentImportDialog({
       <FileDropDialog.Errors>{parseError}</FileDropDialog.Errors>
 
       {parsed && isSingleFragment(parsed) && (
-        <FileDropDialog.Preview>
+        <FileDropDialog.Preview className="shrink-0">
           <SingleFragmentPreview data={parsed} onClear={() => { setParsed(null); setJsonText('') }} />
         </FileDropDialog.Preview>
       )}
 
       {parsed && isBundle(parsed) && (
-        <FileDropDialog.Preview>
+        <FileDropDialog.Preview className="shrink-0">
           <BundlePreview
             data={parsed}
             selectedIndices={selectedIndices}

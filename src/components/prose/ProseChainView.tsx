@@ -967,7 +967,7 @@ export function ProseChainView({
             mentionColors={mentionColors}
             onClickMention={handleMentionClick}
             mediaById={mediaById}
-            expandThoughtsByDefault={story?.settings.expandThoughtsByDefault ?? false}
+            expandThoughtsByDefault={story?.settings.expandThoughtsByDefault ?? true}
             scrollAnchorId={hasSavedPendingGeneration && fragment.id === lastProseFragment?.id
               ? GENERATION_HANDOFF_ANCHOR
               : undefined}
@@ -1054,7 +1054,7 @@ export function ProseChainView({
                   pending={pendingGeneration}
                   streamStore={generationStreamStore}
                   isGenerating={isGenerating}
-                  defaultExpanded={story?.settings.expandThoughtsByDefault ?? false}
+                  defaultExpanded={story?.settings.expandThoughtsByDefault ?? true}
                   onBeforeThoughtsCollapse={measureGenerationAnchorTop}
                   onAfterThoughtsCollapse={restoreMeasuredGenerationAnchor}
                 />
@@ -1088,7 +1088,7 @@ export function ProseChainView({
                   mentionColors={mentionColors}
                   onClickMention={handleMentionClick}
                   mediaById={mediaById}
-                  expandThoughtsByDefault={story?.settings.expandThoughtsByDefault ?? false}
+                  expandThoughtsByDefault={story?.settings.expandThoughtsByDefault ?? true}
                   scrollAnchorId={GENERATION_HANDOFF_ANCHOR}
                 />
               </div>

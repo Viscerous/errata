@@ -1,4 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { streamText } from 'ai'
 import { createTempDir, makeTestSettings, makeTestGlobalConfig, seedTestProvider } from '../setup'
 import { createStory } from '@/server/fragments/storage'
 import { saveGlobalConfig } from '@/server/config/storage'
@@ -299,5 +300,65 @@ describe('llm client model resolution', () => {
 
     expect(runtime.topK).toBe(20)
     expect(runtime.providerOptions).toBeUndefined()
+  })
+
+  it('extracts inline <think> tags into reasoning parts for OpenAI-compatible providers', async () => {
+    await saveGlobalConfig(dataDir, makeTestGlobalConfig({
+      defaultProviderId: 'local',
+      providers: [{
+        id: 'local',
+        name: 'Local Qwen',
+        preset: 'custom',
+        baseURL: 'http://localhost:1234/v1',
+        apiKey: 'not-needed',
+        defaultModel: 'qwen3-think',
+        enabled: true,
+        customHeaders: {},
+        temperature: undefined,
+        createdAt: new Date().toISOString(),
+      }],
+    }))
+    await createStory(dataDir, makeStory())
+    const resolved = await getModel(dataDir, 'story-test')
+
+    const chunk = (content: string) => `data: ${JSON.stringify({
+      id: 'chatcmpl-1',
+      object: 'chat.completion.chunk',
+      created: 1,
+      model: 'qwen3-think',
+      choices: [{ index: 0, delta: { role: 'assistant', content }, finish_reason: null }],
+    })}\n\n`
+    const sseBody = chunk('<think>planning the ')
+      + chunk('scene</think>')
+      + chunk('Once upon a time.')
+      + `data: ${JSON.stringify({
+        id: 'chatcmpl-1',
+        object: 'chat.completion.chunk',
+        created: 1,
+        model: 'qwen3-think',
+        choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+        usage: { prompt_tokens: 1, completion_tokens: 8, total_tokens: 9 },
+      })}\n\n`
+      + 'data: [DONE]\n\n'
+
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(sseBody, {
+      status: 200,
+      headers: { 'content-type': 'text/event-stream' },
+    })))
+
+    try {
+      const result = streamText({ model: resolved.model, prompt: 'Write.' })
+      let text = ''
+      let reasoning = ''
+      for await (const part of result.fullStream) {
+        if (part.type === 'text-delta') text += part.text
+        if (part.type === 'reasoning-delta') reasoning += part.text
+      }
+      expect(text).not.toContain('<think>')
+      expect(text.trim()).toBe('Once upon a time.')
+      expect(reasoning).toContain('planning the scene')
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 })

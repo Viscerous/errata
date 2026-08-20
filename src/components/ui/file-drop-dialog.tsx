@@ -43,6 +43,15 @@ function FileDropDialogRoot({
   showCloseButton = false,
   children,
 }: FileDropDialogProps) {
+  // Partition the slot children: the Actions slot must be a direct child and
+  // is rendered as a sibling *after* the scrollable body, so the footer stays
+  // pinned no matter how tall the preview grows (#51).
+  const childArray = React.Children.toArray(children)
+  const isActions = (child: React.ReactNode) =>
+    React.isValidElement(child) && child.type === FileDropDialogActions
+  const bodyChildren = childArray.filter((child) => !isActions(child))
+  const actionChildren = childArray.filter(isActions)
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
@@ -52,13 +61,14 @@ function FileDropDialogRoot({
           contentClassName,
         )}
       >
-        <div className="px-6 pt-6 pb-4">
+        <div className="shrink-0 px-6 pt-6 pb-4">
           <p className="font-display text-xl tracking-tight">{title}</p>
           {description && <Caption className="mt-1">{description}</Caption>}
         </div>
         <div className="flex-1 overflow-y-auto min-h-0 px-5 pb-4 flex flex-col gap-3">
-          {children}
+          {bodyChildren}
         </div>
+        {actionChildren}
       </DialogContent>
     </Dialog>
   )
@@ -277,6 +287,12 @@ function FileDropDialogPreview({
 }) {
   // Intentionally flat — no card frame. Consumers wrap their own container
   // if the preview needs one (e.g. a selectable grid).
+  //
+  // Layout: `min-h-0` lets the preview shrink to the dialog body so an inner
+  // ScrollArea (`flex-1 min-h-0`) can take over scrolling. Previews *without*
+  // their own scroller should pass `className="shrink-0"` to flow at natural
+  // height and let the dialog body scroll instead — otherwise content painted
+  // past the shrunken box overlaps whatever follows.
   return <div className={cn('flex flex-col gap-2 min-h-0', className)}>{children}</div>
 }
 
@@ -302,6 +318,11 @@ function FileDropDialogErrors({
   )
 }
 
+/**
+ * Pinned footer row. Must be a *direct* child of `<FileDropDialog>` — the
+ * root hoists it out of the scrollable body so it stays reachable below
+ * arbitrarily tall previews.
+ */
 function FileDropDialogActions({
   children,
   meta,
@@ -314,10 +335,10 @@ function FileDropDialogActions({
 }) {
   return (
     <>
-      <div className="px-6">
+      <div className="shrink-0 px-6">
         <div className="h-px bg-gradient-to-r from-transparent via-border/60 to-transparent" />
       </div>
-      <DialogFooter className={cn('px-5 py-3.5 flex-row items-center', className)}>
+      <DialogFooter className={cn('shrink-0 px-5 py-3.5 flex-row items-center', className)}>
         {meta && (
           <span className="text-[0.6875rem] text-muted-foreground mr-auto tabular-nums">
             {meta}

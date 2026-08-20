@@ -130,7 +130,7 @@ export const StoryMetaSchema = z.object({
       guidedSceneSettingPrompt: z.string().optional(),
       guidedSuggestPrompt: z.string().optional(),
       disableThinking: z.boolean().default(false),
-      expandThoughtsByDefault: z.boolean().default(false),
+      expandThoughtsByDefault: z.boolean().default(true),
       // erratanet provenance. Absent for purely local stories.
       erratanet: z
         .object({
@@ -164,7 +164,7 @@ export const StoryMetaSchema = z.object({
         })
         .optional(),
     })
-    .default({ outputFormat: 'markdown', enabledPlugins: [], maxSteps: 10, modelOverrides: {}, generationMode: 'standard', clarifyBeforeGenerate: false, prewriterReasoning: 'normal', disableLibrarianAutoAnalysis: false, autoApplyLibrarianSuggestions: false, disableLibrarianDirections: false, disableLibrarianSuggestions: false, contextOrderMode: 'simple', fragmentOrder: [], customFragmentTypes: [], enabledBuiltinTools: [], contextCompact: { type: 'proseLimit', value: 10 }, disableThinking: false, expandThoughtsByDefault: false }),
+    .default({ outputFormat: 'markdown', enabledPlugins: [], maxSteps: 10, modelOverrides: {}, generationMode: 'standard', clarifyBeforeGenerate: false, prewriterReasoning: 'normal', disableLibrarianAutoAnalysis: false, autoApplyLibrarianSuggestions: false, disableLibrarianDirections: false, disableLibrarianSuggestions: false, contextOrderMode: 'simple', fragmentOrder: [], customFragmentTypes: [], enabledBuiltinTools: [], contextCompact: { type: 'proseLimit', value: 10 }, disableThinking: false, expandThoughtsByDefault: true }),
 })
 
 export type StoryMeta = z.infer<typeof StoryMetaSchema>

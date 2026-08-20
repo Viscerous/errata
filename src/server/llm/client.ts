@@ -5,7 +5,13 @@ import { getGlobalConfig } from '../config/storage'
 import { getStory } from '../fragments/storage'
 import { modelRoleRegistry } from '../agents/model-role-registry'
 import { ensureCoreAgentsRegistered } from '../agents/register-core'
-import { wrapLanguageModel, type LanguageModel, type LanguageModelMiddleware, type ToolLoopAgentSettings } from 'ai'
+import {
+  extractReasoningMiddleware,
+  wrapLanguageModel,
+  type LanguageModel,
+  type LanguageModelMiddleware,
+  type ToolLoopAgentSettings,
+} from 'ai'
 import { createLogger } from '../logging'
 import type { SamplingSettings, StoryMeta } from '../fragments/schema'
 import { isGeminiProvider, normalizeGeminiBaseURL } from '../config/provider-urls'
@@ -261,7 +267,13 @@ export async function getModel(dataDir: string, storyId?: string, opts: GetModel
       : getCachedProvider(provider.id, provider.baseURL, provider.apiKey, provider.name, provider.customHeaders).chatModel(modelId)
     const model = nativeGemini
       ? rawModel
-      : wrapLanguageModel({ model: rawModel, middleware: openAICompatibleSamplingMiddleware(providerOptionsKey) })
+      : wrapLanguageModel({
+          model: rawModel,
+          middleware: [
+            openAICompatibleSamplingMiddleware(providerOptionsKey),
+            extractReasoningMiddleware({ tagName: 'think' }),
+          ],
+        })
     // Story-level temperature takes precedence over provider-level
     const temperature = targetTemperature ?? provider.temperature
     const toReturn = {

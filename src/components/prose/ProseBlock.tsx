@@ -122,7 +122,7 @@ export const ProseBlock = memo(function ProseBlock({
   onClickMention,
   mediaById,
   scrollAnchorId,
-  expandThoughtsByDefault = false,
+  expandThoughtsByDefault = true,
 }: ProseBlockProps) {
   // isFirst/isLast are part of the interface for future use
   void isFirst

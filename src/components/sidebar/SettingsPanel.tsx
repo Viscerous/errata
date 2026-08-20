@@ -708,7 +708,7 @@ export function SettingsPanel({
             </SettingRow>
             <SettingRow label="Expand thinking by default" description="Show the model's thinking expanded while it generates, instead of collapsed">
               <Toggle
-                checked={story.settings.expandThoughtsByDefault ?? false}
+                checked={story.settings.expandThoughtsByDefault ?? true}
                 onChange={(next) => updateMutation.mutate({ expandThoughtsByDefault: next })}
                 disabled={updateMutation.isPending}
                 label="Toggle expand thinking by default"

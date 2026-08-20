@@ -40,7 +40,7 @@ export function storyRoutes(dataDir: string) {
           disableLibrarianDirections: false,
           disableLibrarianSuggestions: false,
           disableThinking: false,
-          expandThoughtsByDefault: false,
+          expandThoughtsByDefault: true,
           contextOrderMode: 'simple' as const,
           fragmentOrder: [],
           customFragmentTypes: [],
