@@ -703,7 +703,8 @@ export function SettingsPanel({
                 <NumberField
                   value={story.settings.contextCompact?.value ?? 10}
                   min={(story.settings.contextCompact?.type ?? 'proseLimit') === 'proseLimit' ? 1 : (story.settings.contextCompact?.type ?? 'proseLimit') === 'maxTokens' ? 100 : 500}
-                  max={(story.settings.contextCompact?.type ?? 'proseLimit') === 'proseLimit' ? 100 : (story.settings.contextCompact?.type ?? 'proseLimit') === 'maxTokens' ? 100000 : 500000}
+                  max={(story.settings.contextCompact?.type ?? 'proseLimit') === 'proseLimit' ? 100 : (story.settings.contextCompact?.type ?? 'proseLimit') === 'maxTokens' ? 2000000 : 500000}
+                  step={(story.settings.contextCompact?.type ?? 'proseLimit') === 'proseLimit' ? 1 : (story.settings.contextCompact?.type ?? 'proseLimit') === 'maxTokens' ? 1000 : 5000}
                   onChange={(v) => updateMutation.mutate({ contextCompact: { type: story.settings.contextCompact?.type ?? 'proseLimit', value: v } })}
                   disabled={updateMutation.isPending}
                   className={(story.settings.contextCompact?.type ?? 'proseLimit') !== 'proseLimit' ? 'w-20' : undefined}
@@ -733,6 +734,7 @@ export function SettingsPanel({
                     value={summaryCompact.maxCharacters}
                     min={100}
                     max={100000}
+                    step={1000}
                     onChange={(v) => {
                       const nextMax = Math.max(100, v)
                       updateMutation.mutate({
@@ -753,6 +755,7 @@ export function SettingsPanel({
                     value={summaryCompact.targetCharacters}
                     min={100}
                     max={summaryCompact.maxCharacters}
+                    step={1000}
                     onChange={(v) => {
                       updateMutation.mutate({
                         summaryCompact: {
