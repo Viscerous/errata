@@ -205,7 +205,7 @@ export function TavernCardImportDialog({
       )}
 
       {hasCards && (
-        <FileDropDialog.Preview>
+        <FileDropDialog.Preview className="shrink-0">
           <div className={`grid gap-3 ${cards.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>
             {cards.map((card, index) => (
               <div
