@@ -308,6 +308,40 @@ describe('Prose Transform Blocks', () => {
     expect(sel.content).toContain('Before text')
     expect(sel.content).toContain('After text')
   })
+
+  it('includes sticky-fragments block with sticky guideline and knowledge content', () => {
+    const def = agentBlockRegistry.get('librarian.prose-transform')!
+    const blocks = def.createDefaultBlocks(makeBaseContext({
+      stickyGuidelines: [makeFragment({ id: 'gl-tone01', type: 'guideline', name: 'Tone', content: 'Keep the prose gothic and moody.' })],
+      stickyKnowledge: [makeFragment({ id: 'kn-school1', type: 'knowledge', name: 'School', content: 'The academy sits on a cliff above the sea.' })],
+    }))
+    const sticky = blocks.find(b => b.id === 'sticky-fragments')
+    expect(sticky).toBeDefined()
+    expect(sticky!.content).toContain('Keep the prose gothic and moody.')
+    expect(sticky!.content).toContain('The academy sits on a cliff above the sea.')
+  })
+
+  it('omits sticky-fragments block when no sticky fragments exist', () => {
+    const def = agentBlockRegistry.get('librarian.prose-transform')!
+    const blocks = def.createDefaultBlocks(makeBaseContext({
+      knowledgeShortlist: [makeFragment({ id: 'kn-other1', type: 'knowledge', name: 'Lore', content: 'Non-sticky lore.' })],
+    }))
+    expect(blocks.find(b => b.id === 'sticky-fragments')).toBeUndefined()
+  })
+
+  it('places sticky-fragments before source and selection blocks', () => {
+    const def = agentBlockRegistry.get('librarian.prose-transform')!
+    const blocks = def.createDefaultBlocks(makeBaseContext({
+      stickyKnowledge: [makeFragment({ id: 'kn-school1', type: 'knowledge', name: 'School', content: 'Cliffside academy.' })],
+      selectedText: 'The hero walked.',
+      sourceContent: 'Full paragraph.',
+    }))
+    const stickyOrder = blocks.find(b => b.id === 'sticky-fragments')!.order
+    const sourceOrder = blocks.find(b => b.id === 'source')!.order
+    const selectionOrder = blocks.find(b => b.id === 'selection')!.order
+    expect(stickyOrder).toBeLessThan(sourceOrder)
+    expect(stickyOrder).toBeLessThan(selectionOrder)
+  })
 })
 
 describe('Character Chat Blocks', () => {

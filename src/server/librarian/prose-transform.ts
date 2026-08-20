@@ -1,5 +1,6 @@
 import { getFragment } from '../fragments/storage'
 import { createStreamingRunner } from '../agents/create-streaming-runner'
+import { loadStickyContextFragments } from './blocks'
 import { createLogger } from '../logging'
 import type { AgentStreamResult } from '../agents/stream-types'
 
@@ -50,7 +51,10 @@ export const transformProseSelection = createStreamingRunner<ProseTransformOptio
     return { sourceContent, selectedText, guidance }
   },
 
-  extraContext: async ({ opts, validated }) => ({
+  extraContext: async ({ dataDir, storyId, opts, validated }) => ({
+    // Sticky-only targeted fetch — the full buildContextState pipeline is
+    // overkill for a single-step transform with no tools to expand shortlists.
+    ...(await loadStickyContextFragments(dataDir, storyId)),
     operation: opts.operation,
     guidance: validated.guidance,
     selectedText: validated.selectedText,
