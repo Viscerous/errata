@@ -270,6 +270,10 @@ code {
 }
 
 /* ── Guilloche background ────────────────────────────── */
+/* Applied only to composited HTML boxes (the <svg> elements themselves,
+   never inner SVG <g> — see OnboardingWizard.tsx / #36). Reduced motion
+   is handled by the global prefers-reduced-motion rule at the end of
+   this file, which freezes all three guilloche animations. */
 
 @keyframes guilloche-rotate {
   from { transform: rotate(0deg); }
