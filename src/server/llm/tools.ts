@@ -15,6 +15,7 @@ import { createLogger } from '../logging'
 import type { Fragment } from '../fragments/schema'
 import { generateFragmentId } from '@/lib/fragment-ids'
 import { checkFragmentWrite, isFragmentLocked } from '../fragments/protection'
+import { reanalyzeAfterProseChange } from '../librarian/reanalyze'
 import { capitalize, pluralize } from './agents'
 
 const logger = createLogger('llm-tools')
@@ -72,6 +73,32 @@ function withToolLogging<TInput, TResult>(
       throw error
     }
   }
+}
+
+/**
+ * After an LLM write tool changes a prose fragment, invalidate its librarian
+ * analysis and schedule re-analysis (unless auto-analysis is disabled) —
+ * mirroring what the HTTP fragment routes do for manual edits. Failures are
+ * logged but never fail the tool call.
+ */
+async function scheduleProseReanalysis(
+  dataDir: string,
+  storyId: string,
+  before: Fragment,
+  after: Fragment,
+): Promise<void> {
+  if (before.type !== 'prose') return
+  const changed = before.content !== after.content
+    || before.description !== after.description
+    || before.name !== after.name
+  if (!changed) return
+  await reanalyzeAfterProseChange(dataDir, storyId, after).catch((err) => {
+    logger.error('librarian re-analysis failed after prose tool edit', {
+      storyId,
+      fragmentId: after.id,
+      error: err instanceof Error ? err.message : String(err),
+    })
+  })
 }
 
 export interface FragmentToolsOptions {
@@ -322,6 +349,7 @@ export function createFragmentTools(
         if (!updated) {
           return { error: `Fragment not found: ${fragmentId}` }
         }
+        await scheduleProseReanalysis(dataDir, storyId, fragment, updated)
         return { ok: true, id: fragmentId }
       }),
     })
@@ -355,6 +383,7 @@ export function createFragmentTools(
         if (!updated) {
           return { error: `Fragment not found: ${fragmentId}` }
         }
+        await scheduleProseReanalysis(dataDir, storyId, fragment, updated)
         return { ok: true, id: fragmentId }
       }),
     })
@@ -418,6 +447,7 @@ export function createFragmentTools(
             // Fragment may have been deleted between read and write
             if (!updated) continue
             edited.push(f.id)
+            await scheduleProseReanalysis(dataDir, storyId, f, updated)
           }
         }
         if (edited.length === 0 && skipped.length === 0) {
