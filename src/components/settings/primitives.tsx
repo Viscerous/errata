@@ -12,7 +12,7 @@
  * No em dashes in copy or comments by project convention; use commas, colons,
  * or periods.
  */
-import type { ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { CircleHelp } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useHelp } from '@/hooks/use-help'
@@ -320,15 +320,21 @@ export function SettingsSelect({
 
 /**
  * NumberField: a compact, centered numeric input for values like Max steps or
- * Context limit. Mirrors the monospace stepper styling used today. Only commits
- * values that parse and fall within min/max when those bounds are given. Greys
- * and disables when `disabled`.
+ * Context limit. Mirrors the monospace stepper styling used today. Holds a
+ * local string draft while focused so intermediate keystrokes (partial or
+ * out-of-range values, an emptied field) are never snapped back mid-typing.
+ * The draft is parsed, clamped to min/max, and committed on blur or Enter;
+ * Escape reverts to the last committed value. When the external `value` prop
+ * changes while the field is not focused, the draft resyncs to it. `step`
+ * controls the spinner increment (defaults to the browser's 1). Greys and
+ * disables when `disabled`.
  */
 export function NumberField({
   value,
   onChange,
   min,
   max,
+  step,
   disabled,
   className,
 }: {
@@ -336,21 +342,48 @@ export function NumberField({
   onChange: (v: number) => void
   min?: number
   max?: number
+  step?: number
   disabled?: boolean
   className?: string
 }) {
+  const [draft, setDraft] = useState(String(value))
+  const focusedRef = useRef(false)
+
+  useEffect(() => {
+    if (!focusedRef.current) setDraft(String(value))
+  }, [value])
+
+  const commit = () => {
+    const parsed = parseInt(draft, 10)
+    if (Number.isNaN(parsed)) {
+      setDraft(String(value))
+      return
+    }
+    let next = parsed
+    if (min !== undefined && next < min) next = min
+    if (max !== undefined && next > max) next = max
+    setDraft(String(next))
+    if (next !== value) onChange(next)
+  }
+
   return (
     <input
       type="number"
       min={min}
       max={max}
-      value={value}
-      onChange={(e) => {
-        const v = parseInt(e.target.value, 10)
-        if (Number.isNaN(v)) return
-        if (min !== undefined && v < min) return
-        if (max !== undefined && v > max) return
-        onChange(v)
+      step={step}
+      value={draft}
+      onFocus={() => {
+        focusedRef.current = true
+      }}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => {
+        focusedRef.current = false
+        commit()
+      }}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') commit()
+        if (e.key === 'Escape') setDraft(String(value))
       }}
       disabled={disabled}
       className={cn(
