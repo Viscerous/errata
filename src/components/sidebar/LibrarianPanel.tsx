@@ -651,7 +651,7 @@ function AnalysisSubLabel({ children }: { children: React.ReactNode }) {
 /**
  * A subsection holding exactly one value, laid out on its own line. Giving a
  * single datum a heading and then a one-item bullet list read as structural
- * noise: "Temporal frame" above "- forward".
+ * noise: "Scene transition" above "- continue".
  */
 function AnalysisInlineField({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -1011,10 +1011,16 @@ function AnalysisItem({
                   continuity. Re-analyze this passage to rebuild them.
                 </p>
               )}
-              <AnalysisInlineField label="Temporal frame">
-                {analysis.continuityProjection.temporalFrame.relation}
-                {analysis.continuityProjection.temporalFrame.anchor
-                  ? ` — ${analysis.continuityProjection.temporalFrame.anchor}`
+              <AnalysisInlineField label="Scene frame">
+                {analysis.continuityProjection.scene.transition}
+                {analysis.continuityProjection.scene.line
+                  ? ` — ${analysis.continuityProjection.scene.line}`
+                  : ''}
+                {analysis.continuityProjection.scene.location
+                  ? ` — ${analysis.continuityProjection.scene.location.label}`
+                  : ''}
+                {analysis.continuityProjection.scene.time
+                  ? ` — ${analysis.continuityProjection.scene.time.label}`
                   : ''}
               </AnalysisInlineField>
 
@@ -1023,7 +1029,9 @@ function AnalysisItem({
                   <AnalysisSubLabel>Current state</AnalysisSubLabel>
                   <AnalysisList items={analysis.continuityProjection.stateOperations.map((operation, i) => ({
                     key: `continuity-state-${i}`,
-                    content: `${operation.subject}: ${operation.action === 'clear' ? 'no longer current' : operation.value}`,
+                    content: operation.action === 'clear'
+                      ? `${operation.stateKey}: no longer current`
+                      : `${operation.subject.label} — ${operation.facet}${operation.slot ? `/${operation.slot}` : ''}: ${operation.value} (${operation.scope}${operation.until ? ` until ${operation.until.label}` : ''}, ${operation.certainty})`,
                   }))} />
                 </div>
               )}

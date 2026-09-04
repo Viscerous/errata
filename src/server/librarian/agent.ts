@@ -155,12 +155,15 @@ async function runLibrarianInner(
     sourceRevision: analysisSourceRevision(fragment),
     summaryUpdate: collector.summaryUpdate,
     summaryContractVersion: SUMMARY_CONTRACT_VERSION,
-    continuityProjection: collector.continuityProjection,
+    // A partial report remains inspectable, but it is not continuity truth.
+    // Omitting its projection keeps the deterministic fold atomic without
+    // discarding the useful trace, summary, or directions.
+    ...(pipeline.workflowComplete ? { continuityProjection: collector.continuityProjection } : {}),
     mentions: collector.mentions,
     candidateFragmentIds,
     candidateFragments,
     contradictions: collector.contradictions,
-    timelineEvents: timelineEventsFor(collector.events, collector.continuityProjection.temporalFrame),
+    timelineEvents: timelineEventsFor(collector.events, collector.continuityProjection.scene),
     fragmentChangeProposals: collector.fragmentChangeProposals.map((proposal) => ({
       ...proposal,
       sourceFragmentId: fragmentId,
@@ -171,7 +174,9 @@ async function runLibrarianInner(
     trace: traceEvents as LibrarianAnalysis['trace'],
   }
 
-  const autoApplySuggestions = story.settings?.autoApplyLibrarianSuggestions === true && !disableSuggestions
+  const autoApplySuggestions = pipeline.workflowComplete
+    && story.settings?.autoApplyLibrarianSuggestions === true
+    && !disableSuggestions
   if (autoApplySuggestions && analysis.fragmentChangeProposals.length > 0) {
     requestLogger.info('Auto-applying librarian suggestions', {
       proposalCount: analysis.fragmentChangeProposals.length,
@@ -235,10 +240,15 @@ async function runLibrarianInner(
     }
   }
 
+  // Commit the source-linked analysis before its derived annotations/state.
+  // A later metadata failure can leave derivable presentation data absent, but
+  // can no longer leave prose mutated without the analysis that authorized it.
+  await saveAnalysis(dataDir, storyId, analysis)
+
   // Mentions remain source annotations. Summary history lives only in the
   // source-linked analysis artifact; duplicating it into mutable prose metadata
   // creates a second, staleable authority.
-  const hasMentions = collector.mentions.length > 0
+  const hasMentions = pipeline.workflowComplete && collector.mentions.length > 0
 
   if (hasMentions) {
     const proseFragment = await getFragment(dataDir, storyId, fragmentId)
@@ -257,24 +267,19 @@ async function runLibrarianInner(
     }
   }
 
-  // Update librarian state
-  requestLogger.debug('Updating librarian state...')
-  const updatedMentions = updateRecentMentionsForFragment(
-    state.recentMentions,
-    fragmentId,
-    mentionedFragmentIds,
-  )
-
-  const updatedState = {
-    lastAnalyzedFragmentId: fragmentId,
-    recentMentions: updatedMentions,
-    timeline: updateTimelineForFragment(state.timeline, fragmentId, analysis.timelineEvents),
+  if (pipeline.workflowComplete) {
+    requestLogger.debug('Updating librarian state...')
+    const updatedMentions = updateRecentMentionsForFragment(
+      state.recentMentions,
+      fragmentId,
+      mentionedFragmentIds,
+    )
+    await saveState(dataDir, storyId, {
+      lastAnalyzedFragmentId: fragmentId,
+      recentMentions: updatedMentions,
+      timeline: updateTimelineForFragment(state.timeline, fragmentId, analysis.timelineEvents),
+    })
   }
-
-  // The source-linked analysis is the level-0 summary contribution. Context
-  // derives memory from these records; no append-log artifact is maintained.
-  await saveAnalysis(dataDir, storyId, analysis)
-  await saveState(dataDir, storyId, updatedState)
   requestLogger.info('Analysis saved', { analysisId })
 
   if (pipeline.completionError) {

@@ -3,7 +3,6 @@ import type {
   LibrarianAnalysis as SharedLibrarianAnalysis,
   LibrarianFragmentChangeProposal as SharedProposal,
   LibrarianStatusResponse,
-  StoredLibrarianState,
 } from '@/contracts/librarian'
 import type {
   LibrarianAnalysis as ClientLibrarianAnalysis,
@@ -13,7 +12,6 @@ import type {
 import type {
   LibrarianAnalysis as ServerLibrarianAnalysis,
   LibrarianFragmentChangeProposal as ServerProposal,
-  LibrarianState as ServerLibrarianState,
 } from '@/server/librarian/storage'
 
 type Equal<Left, Right> =
@@ -39,10 +37,8 @@ describe('shared librarian contracts', () => {
   })
 
   it('distinguishes stored state from the complete status response', () => {
-    const serverStoresOnlyDurableState: Equal<ServerLibrarianState, StoredLibrarianState> = true
     const clientConsumesRuntimeStatus: Equal<ClientStatusResponse, LibrarianStatusResponse> = true
 
-    expect(serverStoresOnlyDurableState).toBe(true)
     expect(clientConsumesRuntimeStatus).toBe(true)
   })
 })

@@ -1,14 +1,19 @@
+import { mkdir, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { createTempDir, makeTestSettings } from '../setup'
+import { getContentRoot } from '@/server/fragments/branches'
 import { createFragment, createStory, getFragment, updateFragment } from '@/server/fragments/storage'
 import { analysisSourceRevision } from '@/server/librarian/continuity-source'
 import {
   saveAnalysis,
+  deleteAnalysis,
   getAnalysis,
   listAnalyses,
   getState,
   saveState,
   getLatestAnalysisIdsByFragment,
+  getAnalysisIndex,
   rebuildAnalysisIndex,
   type LibrarianAnalysis,
 } from '@/server/librarian/storage'
@@ -75,6 +80,37 @@ describe('librarian storage', () => {
     it('returns null for non-existent analysis', async () => {
       const loaded = await getAnalysis(dataDir, storyId, 'nonexistent')
       expect(loaded).toBeNull()
+    })
+
+    it('rejects a non-v2 continuity projection before writing it', async () => {
+      const analysis = makeAnalysis({
+        id: 'analysis-invalid-save',
+        continuityProjection: {
+          version: 1,
+          temporalFrame: { relation: 'forward' },
+        } as never,
+      })
+
+      await expect(saveAnalysis(dataDir, storyId, analysis)).rejects.toThrow()
+      expect(await getAnalysis(dataDir, storyId, analysis.id)).toBeNull()
+    })
+
+    it('rejects a malformed continuity projection when reading storage', async () => {
+      const root = await getContentRoot(dataDir, storyId)
+      const dir = join(root, 'librarian', 'analyses')
+      await mkdir(dir, { recursive: true })
+      const analysis = makeAnalysis({ id: 'analysis-invalid-read' }) as unknown as Record<string, unknown>
+      analysis.continuityProjection = {
+        version: 2,
+        scene: { transition: 'enter-flashback', line: 'present' },
+        stateOperations: [],
+        threadOperations: [],
+        threadFocus: [],
+        knowledgeOperations: [],
+      }
+      await writeFile(join(dir, 'analysis-invalid-read.json'), JSON.stringify(analysis), 'utf-8')
+
+      await expect(getAnalysis(dataDir, storyId, 'analysis-invalid-read')).rejects.toThrow()
     })
 
     it('lists analyses sorted newest first', async () => {
@@ -175,8 +211,8 @@ describe('librarian storage', () => {
       })
       const prose = (await getFragment(dataDir, storyId, 'pr-stale'))!
       const projection = {
-        version: 1 as const,
-        temporalFrame: { relation: 'forward' as const },
+        version: 2 as const,
+        scene: { transition: 'continue' as const, line: 'present' as const },
         stateOperations: [],
         threadOperations: [],
         threadFocus: [],
@@ -218,6 +254,69 @@ describe('librarian storage', () => {
       expect(latest.get('pr-0002')).toBe('analysis-other')
     })
 
+    it('indexes the latest analysis and latest completed projection independently', async () => {
+      const projection = {
+        version: 2 as const,
+        scene: { transition: 'continue' as const },
+        stateOperations: [], threadOperations: [], threadFocus: [], knowledgeOperations: [],
+      }
+      await saveAnalysis(dataDir, storyId, makeAnalysis({
+        id: 'analysis-complete', fragmentId: 'pr-0001',
+        createdAt: '2025-01-01T00:00:00.000Z', continuityProjection: projection,
+      }))
+      await saveAnalysis(dataDir, storyId, makeAnalysis({
+        id: 'analysis-partial', fragmentId: 'pr-0001',
+        createdAt: '2025-01-02T00:00:00.000Z',
+      }))
+
+      const index = await getAnalysisIndex(dataDir, storyId)
+      expect(index?.latestByFragmentId['pr-0001']?.analysisId).toBe('analysis-partial')
+      expect(index?.latestProjectionByFragmentId['pr-0001']?.analysisId).toBe('analysis-complete')
+    })
+
+    it('rebuilds an obsolete index into the current dual-pointer shape', async () => {
+      const projection = {
+        version: 2 as const,
+        scene: { transition: 'continue' as const },
+        stateOperations: [], threadOperations: [], threadFocus: [], knowledgeOperations: [],
+      }
+      await saveAnalysis(dataDir, storyId, makeAnalysis({
+        id: 'analysis-complete', continuityProjection: projection,
+      }))
+      const root = await getContentRoot(dataDir, storyId)
+      await writeFile(join(root, 'librarian', 'index.json'), JSON.stringify({
+        version: 1,
+        updatedAt: '2025-01-01T00:00:00.000Z',
+        latestByFragmentId: { 'pr-0001': { analysisId: 'analysis-complete', createdAt: '2025-01-01T00:00:00.000Z' } },
+      }), 'utf-8')
+
+      const rebuilt = await getAnalysisIndex(dataDir, storyId)
+      expect(rebuilt?.version).toBe(2)
+      expect(rebuilt?.latestProjectionByFragmentId['pr-0001']?.analysisId).toBe('analysis-complete')
+    })
+
+    it('promotes both index pointers when the latest completed analysis is deleted', async () => {
+      const projection = {
+        version: 2 as const,
+        scene: { transition: 'continue' as const },
+        stateOperations: [], threadOperations: [], threadFocus: [], knowledgeOperations: [],
+      }
+      await saveAnalysis(dataDir, storyId, makeAnalysis({
+        id: 'analysis-older', fragmentId: 'pr-0001',
+        createdAt: '2025-01-01T00:00:00.000Z', continuityProjection: projection,
+      }))
+      await saveAnalysis(dataDir, storyId, makeAnalysis({
+        id: 'analysis-newer', fragmentId: 'pr-0001',
+        createdAt: '2025-01-02T00:00:00.000Z', continuityProjection: projection,
+      }))
+
+      expect(await deleteAnalysis(dataDir, storyId, 'analysis-newer')).toBe(true)
+
+      const index = await getAnalysisIndex(dataDir, storyId)
+      expect(index?.latestByFragmentId['pr-0001']?.analysisId).toBe('analysis-older')
+      expect(index?.latestProjectionByFragmentId['pr-0001']?.analysisId).toBe('analysis-older')
+    })
+
     it('rebuilds analysis index from analysis files', async () => {
       await saveAnalysis(dataDir, storyId, makeAnalysis({
         id: 'analysis-a',
@@ -232,6 +331,7 @@ describe('librarian storage', () => {
 
       const rebuilt = await rebuildAnalysisIndex(dataDir, storyId)
       expect(rebuilt.latestByFragmentId['pr-0001']?.analysisId).toBe('analysis-b')
+      expect(rebuilt.latestProjectionByFragmentId['pr-0001']).toBeUndefined()
 
       const latest = await getLatestAnalysisIdsByFragment(dataDir, storyId)
       expect(latest.get('pr-0001')).toBe('analysis-b')

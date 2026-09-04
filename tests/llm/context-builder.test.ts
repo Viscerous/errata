@@ -690,6 +690,49 @@ describe('context-builder', () => {
     expect(joined).not.toContain('Passage 3')
   })
 
+  it('keeps the complete continuity fold outside the bounded writer view', async () => {
+    const story = makeStory()
+    await createStory(dataDir, story)
+    const passage = makeFragment({ id: 'pr-0001', type: 'prose', content: 'Passage 1', order: 1 })
+    await createFragment(dataDir, story.id, passage)
+    await addProseSection(dataDir, story.id, passage.id)
+    const storedPassage = (await getFragment(dataDir, story.id, passage.id))!
+
+    await saveAnalysis(dataDir, story.id, {
+      id: 'la-continuity-full-fold',
+      createdAt: new Date().toISOString(),
+      fragmentId: passage.id,
+      sourceRevision: analysisSourceRevision(storedPassage),
+      summaryUpdate: '',
+      mentions: [], contradictions: [], fragmentChangeProposals: [], timelineEvents: [],
+      continuityProjection: {
+        version: 2,
+        scene: { transition: 'continue', line: 'present' },
+        stateOperations: Array.from({ length: 30 }, (_, index) => ({
+          stateKey: `condition_${index}`,
+          action: 'set' as const,
+          subject: { key: `condition_subject_${index}`, label: `Condition ${index}` },
+          facet: 'status',
+          certainty: 'explicit',
+          scope: 'cross-scene',
+          value: `Value ${index}`,
+          evidenceSegments: [1],
+          evidenceText: 'Passage 1',
+        })),
+        threadOperations: [],
+        threadFocus: [],
+        knowledgeOperations: [],
+      },
+    })
+
+    const state = await buildContextState(dataDir, story.id, 'Continue')
+
+    expect(state.continuityLedger?.currentState).toHaveLength(30)
+    expect(state.continuityView?.currentState).toHaveLength(24)
+    expect(state.continuityLedger?.currentState[0].stateKey).toBe('condition_0')
+    expect(state.continuityView?.currentState[0].stateKey).toBe('condition_6')
+  })
+
   it('excludes unscoped authored summaries from target-relative context', async () => {
     const story = makeStory()
     await createStory(dataDir, story)

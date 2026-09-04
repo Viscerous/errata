@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import type { Fragment } from '../fragments/schema'
-import type { AnalysisSourceRevision } from './continuity-types'
+import type { AnalysisSourceRevision } from '@/contracts/continuity'
 
 /** Hash only material prose fields; Librarian annotation metadata must not stale its own Analysis. */
 export function proseContentHash(fragment: Pick<Fragment, 'name' | 'description' | 'content'>): string {

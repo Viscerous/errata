@@ -33,7 +33,15 @@ export function makeTestSettings(overrides?: Partial<StorySettings>): StorySetti
 export function makeContinuityView(overrides: Partial<ContinuityView> = {}): ContinuityView {
   const source = { sourceFragmentId: 'pr-0001', analysisId: 'la-1', narrativePosition: 1 }
   return {
-    currentState: [{ ...source, stateKey: 'villain_location', subject: 'Villain location', value: 'the north tower' }],
+    currentState: [{
+      ...source,
+      stateKey: 'villain_location',
+      subject: { key: 'villain', label: 'Villain' },
+      facet: 'location',
+      certainty: 'explicit',
+      value: 'the north tower',
+      scope: 'cross-scene',
+    }],
     liveThreads: [{
       ...source,
       threadKey: 'who_sent_the_letter',

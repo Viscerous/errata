@@ -120,6 +120,13 @@ function mockStreamWithToolCalls(toolCalls: Array<{ toolName: string; args: Reco
           const output: unknown = await toolDef.execute(tc.args)
           yield { type: 'tool-result' as const, toolCallId: id, toolName: tc.toolName, output }
         }
+        if (!toolCalls.some((tc) => tc.toolName === 'finishAnalysis') && tools.finishAnalysis?.execute) {
+          const id = `call-${callId++}`
+          const input = {}
+          yield { type: 'tool-call' as const, toolCallId: id, toolName: 'finishAnalysis', input }
+          const output: unknown = await tools.finishAnalysis.execute(input)
+          yield { type: 'tool-result' as const, toolCallId: id, toolName: 'finishAnalysis', output }
+        }
         yield { type: 'finish' as const, finishReason: 'stop' }
       })(),
     }
@@ -141,6 +148,19 @@ function newFragmentProposalArgs(
 ) {
   const { action: _action, ...newFragment } = operation
   return { evidenceSegments, rationale, newFragments: [newFragment] }
+}
+
+function groundedContradiction(
+  fragmentId: string,
+  sourceSegments: number[] = [1],
+  recordSegments: number[] = [1],
+) {
+  return {
+    description: 'The accepted prose directly contradicts the cited durable record assertion.',
+    recordCorrectionReason: 'The source explicitly establishes that the record assertion was erroneous.',
+    sourceSegments,
+    conflictingEvidence: [{ fragmentId, segments: recordSegments }],
+  }
 }
 
 // Helper to set up prose chain for tests
@@ -223,6 +243,9 @@ describe('librarian agent', () => {
           yield { type: 'tool-call' as const, toolCallId: id, toolName: 'reportAnalysis', input }
           const output = tools.reportAnalysis ? await tools.reportAnalysis.execute(input) : { ok: true }
           yield { type: 'tool-result' as const, toolCallId: id, toolName: 'reportAnalysis', output }
+          const finishInput = {}
+          yield { type: 'tool-call' as const, toolCallId: 'call-finish', toolName: 'finishAnalysis', input: finishInput }
+          yield { type: 'tool-result' as const, toolCallId: 'call-finish', toolName: 'finishAnalysis', output: await tools.finishAnalysis.execute(finishInput) }
           yield { type: 'finish' as const, finishReason: 'stop' }
         })(),
       }
@@ -350,6 +373,9 @@ describe('librarian agent', () => {
             toolName: 'reportAnalysis',
             output: await tools.reportAnalysis.execute(input),
           }
+          const finishInput = {}
+          yield { type: 'tool-call' as const, toolCallId: 'call-finish', toolName: 'finishAnalysis', input: finishInput }
+          yield { type: 'tool-result' as const, toolCallId: 'call-finish', toolName: 'finishAnalysis', output: await tools.finishAnalysis.execute(finishInput) }
           yield { type: 'finish' as const, finishReason: 'stop' }
         })(),
       }
@@ -597,6 +623,9 @@ describe('librarian agent', () => {
             yield { type: 'tool-call' as const, toolCallId: 'call-directions', toolName: 'proposeDirections', input }
             yield { type: 'tool-result' as const, toolCallId: 'call-directions', toolName: 'proposeDirections', output: await tools.proposeDirections.execute(input) }
           }
+          const finishInput = {}
+          yield { type: 'tool-call' as const, toolCallId: 'call-finish', toolName: 'finishAnalysis', input: finishInput }
+          yield { type: 'tool-result' as const, toolCallId: 'call-finish', toolName: 'finishAnalysis', output: await tools.finishAnalysis.execute(finishInput) }
           yield { type: 'finish' as const, finishReason: 'stop' }
         })(),
       }
@@ -702,6 +731,65 @@ describe('librarian agent', () => {
     expect(analysis?.analyzeLanes?.observation.completion).toBe('complete')
   })
 
+  it('saves an unfinished report for inspection without advancing continuity state', async () => {
+    await createStory(dataDir, makeStory())
+    await createFragment(dataDir, storyId, makeFragment({
+      id: 'ch-0001',
+      type: 'character',
+      name: 'Alice',
+    }))
+    await createFragment(dataDir, storyId, makeFragment({
+      id: 'pr-0001',
+      content: 'Alice crossed the north hall.',
+    }))
+    await setupProseChain(dataDir, storyId, ['pr-0001'])
+
+    mockAgentStream.mockImplementation(async (
+      _args: unknown,
+      tools: Record<string, { execute: (args: unknown) => Promise<unknown> }>,
+    ) => ({
+      fullStream: (async function* () {
+        const input = {
+          summary: 'Alice crossed the north hall.',
+          mentions: [{ fragmentId: 'ch-0001', text: 'Alice' }],
+          stateOperations: [{
+            action: 'set',
+            subject: { label: 'Alice' },
+            facet: 'location',
+            value: 'north hall',
+            scope: 'cross-scene',
+            evidenceSegments: [1],
+          }],
+        }
+        yield { type: 'tool-call' as const, toolCallId: 'report', toolName: 'reportAnalysis', input }
+        yield {
+          type: 'tool-result' as const,
+          toolCallId: 'report',
+          toolName: 'reportAnalysis',
+          output: await tools.reportAnalysis.execute(input),
+        }
+        // The provider stops before calling finishAnalysis.
+        yield { type: 'finish' as const, finishReason: 'stop' }
+      })(),
+    }))
+
+    await expect(runLibrarian(dataDir, storyId, 'pr-0001')).rejects.toThrow(
+      'without a successful finishAnalysis call',
+    )
+
+    const summaries = await listAnalyses(dataDir, storyId)
+    expect(summaries).toHaveLength(1)
+    const analysis = await getAnalysis(dataDir, storyId, summaries[0].id)
+    expect(analysis?.summaryUpdate).toBe('Alice crossed the north hall.')
+    expect(analysis?.continuityProjection).toBeUndefined()
+    expect(analysis?.passes?.[0]).toMatchObject({ name: 'analyze', status: 'failed' })
+
+    const state = await getState(dataDir, storyId)
+    expect(state.lastAnalyzedFragmentId).toBeNull()
+    expect(state.timeline).toEqual([])
+    expect((await getFragment(dataDir, storyId, 'pr-0001'))?.meta.annotations).toBeUndefined()
+  })
+
   it('uses candidate fragments for memory context without recording mention annotations', async () => {
     await createStory(dataDir, makeStory())
     await createFragment(dataDir, storyId, makeFragment({
@@ -713,7 +801,7 @@ describe('librarian agent', () => {
     }))
     await createFragment(dataDir, storyId, makeFragment({
       id: 'pr-0001',
-      content: 'The captain resigned from the guard.',
+      content: 'The corrected roster proves the old record false: Alice has never been captain of the guard.',
     }))
     await setupProseChain(dataDir, storyId, ['pr-0001'])
 
@@ -721,8 +809,9 @@ describe('librarian agent', () => {
       {
         toolName: 'reportAnalysis',
         args: {
-          summary: 'The captain resigned from the guard.',
+          summary: 'The corrected roster establishes that Alice was never captain of the guard.',
           candidateFragmentIds: ['ch-0001'],
+          contradictions: [groundedContradiction('ch-0001')],
         },
       },
       {
@@ -733,8 +822,8 @@ describe('librarian agent', () => {
             fragmentId: 'ch-0001',
             field: 'content',
             segment: 1,
-            newText: 'Alice is the former captain of the guard.',
-            reason: 'The prose changes Alice role.',
+            newText: 'Alice has never been captain of the guard.',
+            reason: 'The prose explicitly corrects the old roster.',
           }],
         ),
       },
@@ -874,6 +963,9 @@ describe('librarian agent', () => {
             yield { type: 'tool-call' as const, toolCallId: 'call-observe', toolName: 'reportAnalysis', input }
             yield { type: 'tool-result' as const, toolCallId: 'call-observe', toolName: 'reportAnalysis', output: await tools.reportAnalysis.execute(input) }
           }
+          const finishInput = {}
+          yield { type: 'tool-call' as const, toolCallId: 'call-finish', toolName: 'finishAnalysis', input: finishInput }
+          yield { type: 'tool-result' as const, toolCallId: 'call-finish', toolName: 'finishAnalysis', output: await tools.finishAnalysis.execute(finishInput) }
           yield { type: 'finish' as const, finishReason: 'stop' }
         })(),
       }
@@ -951,6 +1043,9 @@ describe('librarian agent', () => {
             yield { type: 'tool-call' as const, toolCallId: 'call-observe', toolName: 'reportAnalysis', input }
             yield { type: 'tool-result' as const, toolCallId: 'call-observe', toolName: 'reportAnalysis', output: await tools.reportAnalysis.execute(input) }
           }
+          const finishInput = {}
+          yield { type: 'tool-call' as const, toolCallId: 'call-finish', toolName: 'finishAnalysis', input: finishInput }
+          yield { type: 'tool-result' as const, toolCallId: 'call-finish', toolName: 'finishAnalysis', output: await tools.finishAnalysis.execute(finishInput) }
           yield { type: 'finish' as const, finishReason: 'stop' }
         })(),
       }
@@ -1118,7 +1213,7 @@ describe('librarian agent', () => {
     expect(analysis.fragmentChangeProposals[0].sourceFragmentId).toBe('pr-0001')
   })
 
-  it('auto-applies create and update proposals', async () => {
+  it('auto-applies a new record but leaves a later correction for review', async () => {
     await createStory(dataDir, makeStory({
       settings: {
         autoApplyLibrarianSuggestions: true,
@@ -1130,7 +1225,7 @@ describe('librarian agent', () => {
     }))
     await createFragment(dataDir, storyId, makeFragment({
       id: 'pr-0002',
-      content: 'Valdris is now protected by stone sentinels.',
+      content: 'The recovered charter proves the old account false: Valdris is a young fortress guarded by stone sentinels.',
     }))
     await setupProseChain(dataDir, storyId, ['pr-0001', 'pr-0002'])
 
@@ -1168,8 +1263,9 @@ describe('librarian agent', () => {
       {
         toolName: 'reportAnalysis',
         args: {
-          summary: 'Valdris defenses were revealed.',
+          summary: 'A recovered charter corrects the old account of Valdris.',
           candidateFragmentIds: [createdId!],
+          contradictions: [groundedContradiction(createdId!)],
         },
       },
       {
@@ -1180,25 +1276,25 @@ describe('librarian agent', () => {
             fragmentId: createdId,
             field: 'content',
             segment: 1,
-            newText: 'Valdris is an ancient mountain city guarded by stone sentinels.',
+            newText: 'Valdris is a young mountain fortress guarded by stone sentinels.',
           }],
         ),
       },
     ])
 
     const second = await runLibrarian(dataDir, storyId, 'pr-0002')
-    expect(second.fragmentChangeProposals[0].accepted).toBe(true)
-    expect(second.fragmentChangeProposals[0].autoApplied).toBe(true)
-    expect(second.fragmentChangeProposals[0].appliedResults?.[0]?.target?.fragmentId).toBe(createdId)
+    expect(second.fragmentChangeProposals[0].autoApplySafe).toBe(false)
+    expect(second.fragmentChangeProposals[0].accepted).toBeUndefined()
+    expect(second.fragmentChangeProposals[0].autoApplied).toBeUndefined()
 
     const suggestionFragment = await getFragment(dataDir, storyId, createdId!)
     expect(suggestionFragment).toBeTruthy()
-    expect(suggestionFragment?.content).toContain('stone sentinels')
+    expect(suggestionFragment?.content).toContain('ancient mountain city')
     expect(suggestionFragment?.refs).toContain('pr-0001')
-    expect(suggestionFragment?.refs).toContain('pr-0002')
+    expect(suggestionFragment?.refs).not.toContain('pr-0002')
   })
 
-  it('auto-applies targeted updates to existing knowledge fragments', async () => {
+  it('holds targeted updates to existing knowledge fragments for review', async () => {
     await createStory(dataDir, makeStory({
       settings: {
         autoApplyLibrarianSuggestions: true,
@@ -1213,7 +1309,7 @@ describe('librarian agent', () => {
     }))
     await createFragment(dataDir, storyId, makeFragment({
       id: 'pr-0001',
-      content: 'Valdris is defended by sentinels made of stone.',
+      content: 'The archive proves the old record false: Valdris was never a city, but a fortress defended by stone sentinels.',
     }))
     await setupProseChain(dataDir, storyId, ['pr-0001'])
     const existingKnowledge = await getFragment(dataDir, storyId, 'kn-0001')
@@ -1223,8 +1319,9 @@ describe('librarian agent', () => {
       {
         toolName: 'reportAnalysis',
         args: {
-          summary: 'Valdris defenses were revealed.',
+          summary: 'The archive corrects the old classification of Valdris.',
           candidateFragmentIds: ['kn-0001'],
+          contradictions: [groundedContradiction('kn-0001')],
         },
       },
       {
@@ -1235,24 +1332,24 @@ describe('librarian agent', () => {
             fragmentId: 'kn-0001',
             field: 'content',
             segment: 1,
-            newText: 'Valdris is an ancient city defended by stone sentinels.',
+            newText: 'Valdris is a fortress defended by stone sentinels.',
           }],
         ),
       },
     ])
 
     const analysis = await runLibrarian(dataDir, storyId, 'pr-0001')
-    expect(analysis.fragmentChangeProposals[0].accepted).toBe(true)
-    expect(analysis.fragmentChangeProposals[0].autoApplied).toBe(true)
-    expect(analysis.fragmentChangeProposals[0].appliedResults?.[0]?.target?.fragmentId).toBe('kn-0001')
+    expect(analysis.fragmentChangeProposals[0].autoApplySafe).toBe(false)
+    expect(analysis.fragmentChangeProposals[0].accepted).toBeUndefined()
+    expect(analysis.fragmentChangeProposals[0].autoApplied).toBeUndefined()
 
     const updated = await getFragment(dataDir, storyId, 'kn-0001')
     expect(updated).toBeTruthy()
-    expect(updated?.content).toContain('stone sentinels')
-    expect(updated?.refs).toContain('pr-0001')
+    expect(updated?.content).toContain('ancient city')
+    expect(updated?.refs).not.toContain('pr-0001')
   })
 
-  it('auto-applies edits whose ordered evidence spans remain grounded', async () => {
+  it('holds grounded ordered-span edits for review', async () => {
     await createStory(dataDir, makeStory({
       settings: {
         autoApplyLibrarianSuggestions: true,
@@ -1267,7 +1364,7 @@ describe('librarian agent', () => {
     }))
     await createFragment(dataDir, storyId, makeFragment({
       id: 'pr-0001',
-      content: 'Alice resigned and became former captain of the guard.',
+      content: 'The personnel ledger proves the old record false: Alice has never served as captain of the guard.',
     }))
     await setupProseChain(dataDir, storyId, ['pr-0001'])
 
@@ -1275,8 +1372,9 @@ describe('librarian agent', () => {
       {
         toolName: 'reportAnalysis',
         args: {
-          summary: 'Alice resigned from the guard.',
+          summary: 'The personnel ledger corrects Alice\'s guard record.',
           candidateFragmentIds: ['ch-0001'],
+          contradictions: [groundedContradiction('ch-0001')],
         },
       },
       {
@@ -1287,20 +1385,21 @@ describe('librarian agent', () => {
             fragmentId: 'ch-0001',
             field: 'content',
             segment: 1,
-            newText: 'Alice is the former captain of the guard.',
-            reason: 'The prose says Alice resigned.',
+            newText: 'Alice has never served as captain of the guard.',
+            reason: 'The prose explicitly corrects her service record.',
           }],
         ),
       },
     ])
 
     const analysis = await runLibrarian(dataDir, storyId, 'pr-0001')
-    expect(analysis.fragmentChangeProposals[0].accepted).toBe(true)
-    expect(analysis.fragmentChangeProposals[0].autoApplied).toBe(true)
+    expect(analysis.fragmentChangeProposals[0].autoApplySafe).toBe(false)
+    expect(analysis.fragmentChangeProposals[0].accepted).toBeUndefined()
+    expect(analysis.fragmentChangeProposals[0].autoApplied).toBeUndefined()
 
     const updated = await getFragment(dataDir, storyId, 'ch-0001')
-    expect(updated?.content).toContain('former captain of the guard')
-    expect(updated?.refs).toContain('pr-0001')
+    expect(updated?.content).toContain('is captain of the guard')
+    expect(updated?.refs).not.toContain('pr-0001')
   })
 
   it('holds a cross-character correction for review instead of auto-applying it', async () => {
@@ -1337,6 +1436,7 @@ describe('librarian agent', () => {
             { fragmentId: 'ch-0001', text: 'Victoria' },
             { fragmentId: 'ch-0002', text: 'Thorne' },
           ],
+          contradictions: [groundedContradiction('ch-0001', [2])],
         },
       },
       {
@@ -1359,7 +1459,7 @@ describe('librarian agent', () => {
     const analysis = await runLibrarian(dataDir, storyId, 'pr-0001')
 
     expect(analysis.fragmentChangeProposals).toHaveLength(1)
-    expect(analysis.fragmentChangeProposals[0].autoApplySafe).toBe(true)
+    expect(analysis.fragmentChangeProposals[0].autoApplySafe).toBe(false)
     expect(analysis.fragmentChangeProposals[0].autoApplied).not.toBe(true)
     expect(analysis.fragmentChangeProposals[0].accepted).not.toBe(true)
     expect((await getFragment(dataDir, storyId, 'ch-0001'))?.content).toBe(victoriaContent)
@@ -1389,7 +1489,7 @@ describe('librarian agent', () => {
     }))
     await createFragment(dataDir, storyId, makeFragment({
       id: 'pr-0001',
-      content: 'Alice resigned and became former captain of the guard.',
+      content: 'The personnel ledger proves the old record false: Alice has never served as captain of the guard.',
     }))
     await setupProseChain(dataDir, storyId, ['pr-0001'])
 
@@ -1397,8 +1497,9 @@ describe('librarian agent', () => {
       {
         toolName: 'reportAnalysis',
         args: {
-          summary: 'Alice resigned from the guard.',
+          summary: 'The personnel ledger corrects Alice\'s guard record.',
           candidateFragmentIds: ['ch-0001'],
+          contradictions: [groundedContradiction('ch-0001')],
         },
       },
       {
@@ -1409,8 +1510,8 @@ describe('librarian agent', () => {
             fragmentId: 'ch-0001',
             field: 'description',
             segment: 1,
-            newText: 'Former captain of the guard at Valdris.',
-            reason: 'The prose says Alice resigned.',
+            newText: 'Never served as captain of the guard at Valdris.',
+            reason: 'The prose explicitly corrects her service record.',
           }],
         ),
       },
@@ -1425,7 +1526,7 @@ describe('librarian agent', () => {
     expect(operation).toMatchObject({
       action: 'set_fields',
       fragmentId: 'ch-0001',
-      fields: { description: 'Former captain of the guard at Valdris.' },
+      fields: { description: 'Never served as captain of the guard at Valdris.' },
     })
     // The hash pins the record it was written against, so a concurrent edit
     // makes the proposal stale rather than silently overwriting the author.
@@ -1459,14 +1560,18 @@ describe('librarian agent', () => {
     }))
     await createFragment(dataDir, storyId, makeFragment({
       id: 'pr-0001',
-      content: 'Alice resigned and became former captain of the guard.',
+      content: 'The personnel ledger proves the old record false: Alice has never served as captain of the guard.',
     }))
     await setupProseChain(dataDir, storyId, ['pr-0001'])
 
     mockStreamWithToolCalls([
       {
         toolName: 'reportAnalysis',
-        args: { summary: 'Alice resigned.', candidateFragmentIds: ['ch-0001'] },
+        args: {
+          summary: 'The personnel ledger corrects Alice\'s guard record.',
+          candidateFragmentIds: ['ch-0001'],
+          contradictions: [groundedContradiction('ch-0001')],
+        },
       },
       {
         toolName: 'proposeRecordCorrections',
@@ -1475,15 +1580,15 @@ describe('librarian agent', () => {
             fragmentId: 'ch-0001',
             field: 'content',
             segment: 1,
-            newText: 'Alice is the former captain of the guard.',
-            reason: 'She resigned.',
+            newText: 'Alice has never served as captain of the guard.',
+            reason: 'The prose explicitly corrects her service record.',
           },
           {
             fragmentId: 'ch-0001',
             field: 'description',
             segment: 1,
-            newText: 'Former captain of the guard at Valdris.',
-            reason: 'She resigned.',
+            newText: 'Never served as captain of the guard at Valdris.',
+            reason: 'The prose explicitly corrects her service record.',
           },
         ]),
       },
@@ -1498,14 +1603,14 @@ describe('librarian agent', () => {
       action: 'set_fields',
       fragmentId: 'ch-0001',
       fields: {
-        description: 'Former captain of the guard at Valdris.',
+        description: 'Never served as captain of the guard at Valdris.',
         // The untouched sentences survive the compose; only the cited span moved.
-        content: 'Alice is the former captain of the guard. She trained under Bren. She keeps the east gate.',
+        content: 'Alice has never served as captain of the guard. She trained under Bren. She keeps the east gate.',
       },
     })
   })
 
-  it('marks a proposal stale instead of leaving it pending when auto-apply validation fails', async () => {
+  it('keeps competing corrections pending without mutating the record', async () => {
     await createStory(dataDir, makeStory({
       settings: {
         autoApplyLibrarianSuggestions: true,
@@ -1520,19 +1625,19 @@ describe('librarian agent', () => {
     }))
     await createFragment(dataDir, storyId, makeFragment({
       id: 'pr-0001',
-      content: 'Alice resigned from the guard.',
+      content: 'The personnel ledger proves the old record false: Alice has never served with the guard.',
     }))
     await setupProseChain(dataDir, storyId, ['pr-0001'])
 
-    // Two proposals rewriting the same span differently: both are valid at
-    // propose time (different replacements, so no dedupe), but only the first
-    // can apply — the second must end up stale, not pending.
+    // Two proposals rewriting the same span differently remain distinct work
+    // for the author; neither gets to make the other stale by writing first.
     mockStreamWithToolCalls([
       {
         toolName: 'reportAnalysis',
         args: {
-          summary: 'Alice resigned.',
+          summary: 'The personnel ledger corrects Alice\'s guard record.',
           candidateFragmentIds: ['ch-0001'],
+          contradictions: [groundedContradiction('ch-0001')],
         },
       },
       {
@@ -1563,16 +1668,12 @@ describe('librarian agent', () => {
 
     const analysis = await runLibrarian(dataDir, storyId, 'pr-0001')
     expect(analysis.fragmentChangeProposals).toHaveLength(2)
-    expect(analysis.fragmentChangeProposals[0].accepted).toBe(true)
-    expect(analysis.fragmentChangeProposals[1].accepted).toBeUndefined()
-    expect(analysis.fragmentChangeProposals[1]).toMatchObject({
-      stale: true,
-      dismissed: true,
-    })
-    expect(analysis.fragmentChangeProposals[1].staleReason).toContain('oldText was not found')
+    expect(analysis.fragmentChangeProposals.every((proposal) => proposal.autoApplySafe === false)).toBe(true)
+    expect(analysis.fragmentChangeProposals.every((proposal) => proposal.accepted === undefined)).toBe(true)
+    expect(analysis.fragmentChangeProposals.every((proposal) => proposal.stale === undefined)).toBe(true)
 
     const updated = await getFragment(dataDir, storyId, 'ch-0001')
-    expect(updated?.content).toContain('no longer with the guard')
+    expect(updated?.content).toContain('is captain of the guard')
   })
 
   it('does not turn episodic state updates into unattended character-sheet appends', async () => {
@@ -1628,7 +1729,7 @@ describe('librarian agent', () => {
         toolName: 'reportAnalysis',
         args: {
           events: ['Hero defeated the dragon', 'Village celebration'],
-          temporalFrame: { relation: 'flashback', evidenceSegments: [1] },
+          scene: { transition: 'enter-flashback', line: 'flashback', evidenceSegments: [1] },
         },
       },
     ])
@@ -1762,8 +1863,8 @@ describe('librarian agent', () => {
     expect(analysis.summaryUpdate).toBe('Alice entered the vault.')
     expect(analysis.sourceRevision?.contentHash).toMatch(/^[a-f0-9]{64}$/)
     expect(analysis.continuityProjection).toMatchObject({
-      version: 1,
-      temporalFrame: { relation: 'uncertain' },
+      version: 2,
+      scene: { transition: 'uncertain' },
     })
   })
 

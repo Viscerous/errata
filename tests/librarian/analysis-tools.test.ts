@@ -47,6 +47,21 @@ function mockFragment(overrides: Record<string, unknown> = {}) {
   } as Fragment
 }
 
+function groundCorrectionTarget(
+  collector: ReturnType<typeof createEmptyCollector>,
+  fragmentId = 'ch-0001',
+  segments: number[] = [1],
+): void {
+  collector.contradictions.push({
+    description: 'Accepted prose directly contradicts this durable record assertion.',
+    recordCorrectionReason: 'The source explicitly corrects the earlier record assertion.',
+    fragmentIds: [fragmentId],
+    sourceSegments: [1],
+    sourceEvidenceText: 'Contradicting prose.',
+    conflictingEvidence: [{ fragmentId, segments, evidenceText: 'Conflicting record assertion.' }],
+  })
+}
+
 describe('analysis-tools', () => {
   beforeEach(() => {
     vi.mocked(getFragment).mockResolvedValue(null)
@@ -61,8 +76,8 @@ describe('analysis-tools', () => {
     expect(collector.contradictions).toEqual([])
     expect(collector.fragmentChangeProposals).toEqual([])
     expect(collector.continuityProjection).toEqual({
-      version: 1,
-      temporalFrame: { relation: 'uncertain' },
+      version: 2,
+      scene: { transition: 'uncertain' },
       stateOperations: [],
       threadOperations: [],
       threadFocus: [],
@@ -203,6 +218,7 @@ describe('analysis-tools', () => {
       return null
     })
     const collector = createEmptyCollector()
+    groundCorrectionTarget(collector)
     const tools = createAnalysisTools(collector, {
       dataDir: '/tmp',
       storyId: 'story-test',
@@ -244,6 +260,7 @@ describe('analysis-tools', () => {
       return null
     })
     const collector = createEmptyCollector()
+    groundCorrectionTarget(collector, 'ch-0001', [1, 2])
     const tools = createAnalysisTools(collector, {
       dataDir: '/tmp',
       storyId: 'story-test',
@@ -445,19 +462,19 @@ describe('analysis-tools', () => {
     expect(collector.events).toEqual(['Alice draws', 'Bob flees', 'The door bars'])
   })
 
-  it('places every event by the passage temporal frame', () => {
-    expect(timelineEventsFor(['Alice draws'], { relation: 'flashback' }))
+  it('places every event by the resulting narrative line', () => {
+    expect(timelineEventsFor(['Alice draws'], { transition: 'continue', line: 'flashback' }))
       .toEqual([{ event: 'Alice draws', position: 'before' }])
-    expect(timelineEventsFor(['Alice draws'], { relation: 'forward' }))
+    expect(timelineEventsFor(['Alice draws'], { transition: 'continue', line: 'present' }))
       .toEqual([{ event: 'Alice draws', position: 'after' }])
     // A passage that named no frame still contributes to the timeline.
-    expect(timelineEventsFor(['Alice draws'], { relation: 'uncertain' }))
+    expect(timelineEventsFor(['Alice draws'], { transition: 'uncertain', line: 'uncertain' }))
       .toEqual([{ event: 'Alice draws', position: 'after' }])
   })
 
   it('rejects a frame that claims simultaneity instead of naming the occasion', () => {
     const parsed = reportAnalysisInputSchema.safeParse({
-      temporalFrame: { relation: 'concurrent', anchor: 'during the First Address' },
+      scene: { transition: 'concurrent', line: 'present', time: { label: 'during the First Address', certainty: 'exact' } },
     })
     expect(parsed.success).toBe(false)
   })
@@ -503,12 +520,12 @@ describe('analysis-tools', () => {
 
     const result = await tools.reportAnalysis.execute!({
       summary: 'Alice enters and tells Bob about the seal.',
-      temporalFrame: { relation: 'forward' },
+      scene: { transition: 'continue', line: 'present', evidenceSegments: [1] },
       stateOperations: [
         {
           key: 'alice.location',
           action: 'set',
-          subject: 'Alice location',
+          subject: { key: 'alice_location', label: 'Alice location' }, facet: 'status',
           value: 'north hall',
           evidenceSegments: [1],
         },
@@ -516,7 +533,7 @@ describe('analysis-tools', () => {
           // Sentence 7 does not exist in a two-sentence passage.
           key: 'seal.color',
           action: 'set',
-          subject: 'Seal color',
+          subject: { key: 'seal_color', label: 'Seal color' }, facet: 'status',
           value: 'red',
           evidenceSegments: [7],
         },
@@ -542,7 +559,8 @@ describe('analysis-tools', () => {
     }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
 
     expect(result).toMatchObject({
-      ok: true,
+      ok: false,
+      needsCorrection: true,
       stateOperationCount: 1,
       threadOperationCount: 1,
       focusedThreadCount: 1,
@@ -554,7 +572,7 @@ describe('analysis-tools', () => {
     // Keys are canonicalized at ingest so near-synonym spellings collapse into
     // one reusable identity; skippedContinuity still echoes what was submitted.
     expect(collector.continuityProjection).toMatchObject({
-      temporalFrame: { relation: 'forward' },
+      scene: { transition: 'continue', line: 'present' },
       stateOperations: [{
         stateKey: 'alice_location',
         value: 'north hall',
@@ -760,7 +778,7 @@ describe('analysis-tools', () => {
       stateOperations: [{
         key: 'alice_condition',
         action: 'set',
-        subject: 'Alice',
+        subject: { key: 'alice', label: 'Alice' }, facet: 'status',
         value: 'weary',
         evidenceSegments: overCited,
       }],
@@ -895,7 +913,7 @@ describe('analysis-tools', () => {
     expect(collector.fragmentChangeProposals[0].rationale?.length).toBeLessThanOrEqual(600)
   })
 
-  it('online analysis marks an exact evidence-backed correction safe for unattended apply', async () => {
+  it('rejects an ordinary progression edit that was not reported as a canon contradiction', async () => {
     const prose = mockFragment({
       id: 'pr-0001',
       type: 'prose',
@@ -916,6 +934,84 @@ describe('analysis-tools', () => {
 
     const result = await tools.proposeRecordCorrections.execute!({
       evidenceSegments: [1],
+      corrections: [{
+        fragmentId: 'ch-0001',
+        segment: 1,
+        newText: 'Alice is the former captain of the guard.',
+      }],
+    }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
+
+    expect(result).toMatchObject({ ok: false, queuedOperationCount: 0, invalid: 1 })
+    expect((result as { skipped: Array<{ reason: string }> }).skipped[0].reason)
+      .toContain('was not cited as the conflicting side of a grounded reportAnalysis contradiction')
+    expect(collector.fragmentChangeProposals).toEqual([])
+  })
+
+  it('requires a separate record correction judgment and allows it to be revised', async () => {
+    const prose = mockFragment({ id: 'pr-0001', type: 'prose', content: 'Alice reads his thoughts.' })
+    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => {
+      if (id === 'pr-0001') return prose
+      if (id === 'ch-0001') return mockFragment({ id, content: 'Alice cannot read thoughts. She senses pulse and temperature.' })
+      return null
+    })
+    const collector = createEmptyCollector()
+    const tools = createAnalysisTools(collector, {
+      dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001',
+      numberedFragmentIds: ['ch-0001'], disableDirections: true,
+    })
+    const call = { toolCallId: 'review', messages: [], abortSignal: undefined as unknown as AbortSignal }
+    const finding = {
+      description: 'Thought reading conflicts with the explicit capability limit.',
+      fragmentIds: ['ch-0001'], sourceSegments: [1],
+      conflictingEvidence: [{ fragmentId: 'ch-0001', segments: [1] }],
+    }
+    const report = (contradiction: typeof finding & { recordCorrectionReason?: string }) => tools.reportAnalysis.execute!(
+      reportAnalysisInputSchema.parse({ summary: 'Alice appears to read thoughts.', contradictions: [contradiction] }), call,
+    )
+    await report(finding)
+    expect(collector.contradictions).toHaveLength(1)
+    const correction = {
+      evidenceSegments: [1], corrections: [{ fragmentId: 'ch-0001', segment: 1, newText: 'Alice can read thoughts.' }],
+    }
+    const rejected = await tools.proposeRecordCorrections.execute!(correction, call)
+    expect(rejected).toMatchObject({ ok: false, queuedOperationCount: 0 })
+    expect(JSON.stringify(rejected)).toContain('does not authorize changing this record')
+    expect(collector.fragmentChangeProposals).toHaveLength(0)
+
+    // The engine checks an explicit judgment, not whether prose words imply it.
+    await report({ ...finding, recordCorrectionReason: 'The author confirmed that the earlier restriction was a record error.' })
+    expect(collector.contradictions).toHaveLength(1)
+    expect(collector.contradictions[0].recordCorrectionReason).toContain('author confirmed')
+    await report(finding)
+    expect(collector.contradictions[0].recordCorrectionReason).toBeUndefined()
+    expect(await tools.proposeRecordCorrections.execute!(correction, call)).toMatchObject({ ok: false })
+    await report({ ...finding, recordCorrectionReason: 'The author confirmed that the earlier restriction was a record error.' })
+    expect(await tools.proposeRecordCorrections.execute!(correction, call)).toMatchObject({ ok: true, autoApplySafe: false })
+    expect(collector.fragmentChangeProposals).toHaveLength(1)
+  })
+
+  it('keeps an exact contradiction-backed correction for author review', async () => {
+    const prose = mockFragment({
+      id: 'pr-0001',
+      type: 'prose',
+      content: 'Alice resigned and became former captain of the guard.',
+    })
+    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => {
+      if (id === 'pr-0001') return prose
+      if (id === 'ch-0001') return mockFragment({ id, content: 'Alice is captain of the guard. She keeps the north gate.' })
+      return null
+    })
+    const collector = createEmptyCollector()
+    groundCorrectionTarget(collector)
+    const tools = createAnalysisTools(collector, {
+      dataDir: '/tmp',
+      storyId: 'story-test',
+      proseFragmentId: 'pr-0001',
+      numberedFragmentIds: ['ch-0001'],
+    })
+
+    const result = await tools.proposeRecordCorrections.execute!({
+      evidenceSegments: [1],
       rationale: 'The existing role assertion is now false and would mislead future scenes.',
       corrections: [{
         fragmentId: 'ch-0001',
@@ -925,11 +1021,11 @@ describe('analysis-tools', () => {
       }],
     }, { toolCallId: 'a', messages: [], abortSignal: undefined as unknown as AbortSignal })
 
-    expect(result).toMatchObject({ ok: true, evidenceMatched: true, autoApplySafe: true })
+    expect(result).toMatchObject({ ok: true, evidenceMatched: true, autoApplySafe: false })
     expect(collector.fragmentChangeProposals[0]).toMatchObject({
       proposalKind: 'correction',
       evidenceSegments: [1],
-      autoApplySafe: true,
+      autoApplySafe: false,
     })
   })
 
@@ -945,6 +1041,7 @@ describe('analysis-tools', () => {
       return null
     })
     const collector = createEmptyCollector()
+    groundCorrectionTarget(collector)
     const tools = createAnalysisTools(collector, {
       dataDir: '/tmp',
       storyId: 'story-test',
@@ -1039,6 +1136,7 @@ describe('analysis-tools', () => {
       return null
     })
     const collector = createEmptyCollector()
+    groundCorrectionTarget(collector)
     const tools = createAnalysisTools(collector, {
       dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001', numberedFragmentIds: ['ch-0001'],
     })
@@ -1074,6 +1172,7 @@ describe('analysis-tools', () => {
       return null
     })
     const collector = createEmptyCollector()
+    groundCorrectionTarget(collector, 'ch-0001', [2])
     const tools = createAnalysisTools(collector, {
       dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001', numberedFragmentIds: ['ch-0001'],
     })
@@ -1106,6 +1205,7 @@ describe('analysis-tools', () => {
       return null
     })
     const collector = createEmptyCollector()
+    groundCorrectionTarget(collector)
     const tools = createAnalysisTools(collector, {
       dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001', numberedFragmentIds: ['ch-0001'],
     })
@@ -1140,6 +1240,7 @@ describe('analysis-tools', () => {
       return null
     })
     const collector = createEmptyCollector()
+    groundCorrectionTarget(collector, 'ch-0001', [2])
     const tools = createAnalysisTools(collector, {
       dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001', numberedFragmentIds: ['ch-0001'],
     })
@@ -1171,6 +1272,7 @@ describe('analysis-tools', () => {
       return null
     })
     const collector = createEmptyCollector()
+    groundCorrectionTarget(collector)
     const tools = createAnalysisTools(collector, {
       dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001', numberedFragmentIds: ['ch-0001'],
     })
@@ -1205,6 +1307,7 @@ describe('analysis-tools', () => {
       return null
     })
     const collector = createEmptyCollector()
+    groundCorrectionTarget(collector)
     const tools = createAnalysisTools(collector, {
       dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001', numberedFragmentIds: ['ch-0001'],
     })
@@ -1256,6 +1359,7 @@ describe('analysis-tools', () => {
       return null
     })
     const collector = createEmptyCollector()
+    groundCorrectionTarget(collector, 'ch-0001', [3])
     const tools = createAnalysisTools(collector, {
       dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001', numberedFragmentIds: ['ch-0001'],
     })
@@ -1286,6 +1390,7 @@ describe('analysis-tools', () => {
       return null
     })
     const collector = createEmptyCollector()
+    groundCorrectionTarget(collector)
     const tools = createAnalysisTools(collector, {
       dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001',
     })
@@ -1324,6 +1429,7 @@ describe('analysis-tools', () => {
       return null
     })
     const collector = createEmptyCollector()
+    groundCorrectionTarget(collector, 'ch-0001', [1, 2, 3])
     const tools = createAnalysisTools(collector, {
       dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001', numberedFragmentIds: ['ch-0001'],
     })
@@ -1504,7 +1610,7 @@ describe('continuity keys steered by the live registry', () => {
   it('names the live keys at the point of use without making them the only legal values', () => {
     const schema = buildReportAnalysisInputSchema({ state: ['captivity_status', 'location'] })
     const stateOperation = (key: unknown) => ({
-      stateOperations: [{ key, action: 'set', subject: 'Victoria', value: 'held', evidenceSegments: [1] }],
+      stateOperations: [{ key, action: 'set', subject: { key: 'victoria', label: 'Victoria' }, facet: 'status', value: 'held', evidenceSegments: [1] }],
     })
 
     expect(stateKeyDescription({ state: ['captivity_status', 'location'] }))
@@ -1520,7 +1626,7 @@ describe('continuity keys steered by the live registry', () => {
     expect(schema.safeParse(stateOperation('')).success).toBe(true)
   })
 
-  it('lands a legacy spelling on the live key by canonicalizing rather than by refusing it', async () => {
+  it('lands a variant key spelling on the live key by canonicalizing rather than refusing it', async () => {
     const collector = createEmptyCollector()
     const prose = mockFragment({ id: 'pr-0001', type: 'prose', content: 'She is the queen. She says so.' })
     vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => {
@@ -1574,17 +1680,17 @@ describe('continuity keys steered by the live registry', () => {
       }],
       stateOperations: [{
         action: 'set',
-        subject: 'Eastern dike',
+        subject: { key: 'eastern_dike', label: 'Eastern dike' }, facet: 'status',
         value: 'holding',
         evidenceSegments: [1],
       }],
     }), { toolCallId: 'report', messages: [], abortSignal: undefined as unknown as AbortSignal })
 
     expect(collector.continuityProjection.threadOperations[0].threadKey).toBe('mpamba_dynastic_intent')
-    expect(collector.continuityProjection.stateOperations[0].stateKey).toBe('eastern_dike')
+    expect(collector.continuityProjection.stateOperations[0].stateKey).toBe('eastern_dike_status')
   })
 
-  it('reuses a unique live identity by its human label and takes focus from the operation', async () => {
+  it('uses registry addresses rather than interpreting human labels as identity', async () => {
     const collector = createEmptyCollector()
     const prose = mockFragment({
       id: 'pr-0001',
@@ -1613,14 +1719,14 @@ describe('continuity keys steered by the live registry', () => {
       await buildReportAnalysisInputSchema(continuityKeys).parseAsync({
         summary: 'The board stayed active and coordination advanced.',
         stateOperations: [{
-          action: 'set', subject: 'Medicine track clinical board', value: 'active', evidenceSegments: [1],
+          stateEntry: 1, action: 'set', subject: { label: 'Medicine track clinical board' }, facet: 'status', value: 'active', evidenceSegments: [1],
         }],
         // No threadFocus entry: advancing the thread is what puts it in view.
         threadOperations: [{
-          action: 'advance', label: 'Dutch coordination framework negotiation', relatedFragmentIds: [], evidenceSegments: [2],
+          threadEntry: 1, action: 'advance', label: 'Dutch coordination framework negotiation', relatedFragmentIds: [], evidenceSegments: [2],
         }],
         knowledgeOperations: [{
-          characterId: 'ch-0001', action: 'correct', fact: 'The board remained active.', evidenceSegments: [3],
+          knowledgeEntry: 1, characterId: 'ch-0001', action: 'correct', fact: 'The board remained active.', evidenceSegments: [3],
         }],
       }),
       { toolCallId: 'report', messages: [], abortSignal: undefined as unknown as AbortSignal },
@@ -1637,6 +1743,31 @@ describe('continuity keys steered by the live registry', () => {
     })
     expect(collector.continuityProjection.knowledgeOperations[0].knowledgeKey)
       .toBe('alice_corrected_fact')
+  })
+
+  it('does not reuse a live identity merely because new wording normalizes to its key', async () => {
+    const collector = createEmptyCollector()
+    const prose = mockFragment({ id: 'pr-0001', type: 'prose', content: 'Dutch coordination advanced.' })
+    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => id === 'pr-0001' ? prose : null)
+    const continuityKeys = {
+      thread: [{ index: 1, key: 'dutch_coordination', label: 'Dutch coordination' }],
+    }
+    const tools = createAnalysisTools(collector, {
+      dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001', continuityKeys,
+    })
+
+    const result = await tools.reportAnalysis.execute!(
+      await buildReportAnalysisInputSchema(continuityKeys).parseAsync({
+        summary: 'Dutch coordination advanced.',
+        threadOperations: [{
+          action: 'open', label: 'Dutch coordination', relatedFragmentIds: [], evidenceSegments: [1],
+        }],
+      }),
+      { toolCallId: 'report', messages: [], abortSignal: undefined as unknown as AbortSignal },
+    )
+
+    expect(collector.continuityProjection.threadOperations).toEqual([])
+    expect(JSON.stringify(result)).toContain('code does not infer identity from matching human wording')
   })
 
   it('bounds a derived identity while keeping a stable hash suffix', async () => {
@@ -1680,7 +1811,7 @@ describe('continuity keys steered by the live registry', () => {
 
     const result = await tools.reportAnalysis.execute!(await reportAnalysisInputSchema.parseAsync({
       summary: 'The old question had ended.',
-      stateOperations: [{ action: 'clear', subject: 'Eastern dike status', evidenceSegments: [1] }],
+      stateOperations: [{ action: 'clear', subject: { key: 'eastern_dike_status', label: 'Eastern dike status' }, facet: 'status', evidenceSegments: [1] }],
       threadOperations: [{
         action: 'resolve', label: 'Who damaged the dike?', relatedFragmentIds: [], evidenceSegments: [1],
       }],
@@ -1726,11 +1857,11 @@ describe('continuity keys steered by the live registry', () => {
       await buildReportAnalysisInputSchema(continuityKeys).parseAsync({
         summary: 'The ledger question reopened and the vow was kept.',
         threadOperations: [
-          { entry: 1, action: 'advance', relatedFragmentIds: [], evidenceSegments: [2] },
-          { entry: 2, action: 'resolve', relatedFragmentIds: [], evidenceSegments: [3] },
+          { threadEntry: 1, action: 'advance', relatedFragmentIds: [], evidenceSegments: [2] },
+          { threadEntry: 2, action: 'resolve', relatedFragmentIds: [], evidenceSegments: [3] },
         ],
         // Only the thread this passage never touched needs stating.
-        threadFocus: [{ entry: 3, visibility: 'background' }],
+        threadFocus: [{ threadEntry: 3, visibility: 'background' }],
       }),
       { toolCallId: 'report', messages: [], abortSignal: undefined as unknown as AbortSignal },
     )
@@ -1804,15 +1935,15 @@ describe('continuity keys steered by the live registry', () => {
     await tools.reportAnalysis.execute!(
       await buildReportAnalysisInputSchema(continuityKeys).parseAsync({
         summary: 'Alice arrived and asked about the seal.',
-        temporalFrame: { relation: 'flashback', anchor: 'years earlier', evidenceSegments: [1] },
+        scene: { transition: 'enter-flashback', line: 'flashback', time: { label: 'years earlier', certainty: 'approximate' }, evidenceSegments: [1] },
         stateOperations: [{
-          key: 'alice_location', action: 'set', subject: 'Alice location', value: 'north hall', evidenceSegments: [1],
+          key: 'alice_location', action: 'set', subject: { key: 'alice_location', label: 'Alice location' }, facet: 'status', value: 'north hall', evidenceSegments: [1],
         }],
         threadOperations: [{
           key: 'broken_seal', action: 'open', label: 'Why the seal was broken',
           note: 'Asked aloud', relatedFragmentIds: [], visibility: 'foreground', evidenceSegments: [2],
         }],
-        threadFocus: [{ entry: 1, visibility: 'background' }],
+        threadFocus: [{ threadEntry: 1, visibility: 'background' }],
         knowledgeOperations: [{
           characterId: 'ch-0002', key: 'seal_broken', action: 'learn',
           fact: 'The seal is broken.', acquisition: 'told', evidenceSegments: [3],
@@ -1822,7 +1953,7 @@ describe('continuity keys steered by the live registry', () => {
     )
 
     const declared: Record<string, string[]> = {
-      stateOperations: ['stateKey', 'action', 'subject', 'value', 'evidenceSegments', 'evidenceText'],
+      stateOperations: ['stateKey', 'action', 'subject', 'facet', 'slot', 'value', 'certainty', 'scope', 'until', 'evidenceSegments', 'evidenceText'],
       threadOperations: ['threadKey', 'action', 'label', 'note', 'relatedFragmentIds', 'evidenceSegments', 'evidenceText'],
       threadFocus: ['threadKey', 'visibility'],
       knowledgeOperations: ['knowledgeKey', 'characterId', 'action', 'fact', 'acquisition', 'evidenceSegments', 'evidenceText'],
@@ -1834,9 +1965,8 @@ describe('continuity keys steered by the live registry', () => {
         expect(Object.keys(record).filter((field) => !allowed.includes(field))).toEqual([])
       }
     }
-    // The frame resolves a citation the same way, so it leaked the same way.
-    const frameFields = ['relation', 'anchor', 'evidenceSegments', 'evidenceText']
-    expect(Object.keys(collector.continuityProjection.temporalFrame).filter((f) => !frameFields.includes(f)))
+    const frameFields = ['transition', 'line', 'location', 'time', 'elapsed', 'evidenceSegments', 'evidenceText']
+    expect(Object.keys(collector.continuityProjection.scene).filter((f) => !frameFields.includes(f)))
       .toEqual([])
   })
 
@@ -1852,8 +1982,8 @@ describe('continuity keys steered by the live registry', () => {
     const result = await tools.reportAnalysis.execute!(
       await buildReportAnalysisInputSchema(continuityKeys).parseAsync({
         summary: 'The ledger question was answered.',
-        threadOperations: [{ entry: 1, action: 'resolve', relatedFragmentIds: [], evidenceSegments: [1] }],
-        threadFocus: [{ entry: 1, visibility: 'foreground' }],
+        threadOperations: [{ threadEntry: 1, action: 'resolve', relatedFragmentIds: [], evidenceSegments: [1] }],
+        threadFocus: [{ threadEntry: 1, visibility: 'foreground' }],
       }),
       { toolCallId: 'report', messages: [], abortSignal: undefined as unknown as AbortSignal },
     )
@@ -1875,7 +2005,7 @@ describe('continuity keys steered by the live registry', () => {
     await tools.reportAnalysis.execute!(await reportAnalysisInputSchema.parseAsync({
       summary: 'Alice arrived.',
       stateOperations: [{
-        key: 'Alice.Location', action: 'set', subject: 'Alice location', value: 'north hall', evidenceSegments: [1],
+        key: 'Alice.Location', action: 'set', subject: { key: 'alice_location', label: 'Alice location' }, facet: 'status', value: 'north hall', evidenceSegments: [1],
       }],
     }), { toolCallId: 'report', messages: [], abortSignal: undefined as unknown as AbortSignal })
 
@@ -1925,7 +2055,13 @@ describe('continuity keys steered by the live registry', () => {
     const tools = createAnalysisTools(collector, {
       dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001',
       continuityKeys: {
-        state: [{ index: 1, key: 'eastern_works_gap', label: 'Eastern works gap' }],
+        state: [{
+          index: 1,
+          key: 'eastern_works_gap',
+          label: 'Eastern works — status',
+          subject: { key: 'eastern_works', label: 'Eastern works' },
+          facet: 'status',
+        }],
         thread: [
           { index: 1, key: 'first_address_outcome', label: 'How the Address lands' },
           { index: 2, key: 'participation_commitments', label: 'What participation commits to' },
@@ -1935,12 +2071,19 @@ describe('continuity keys steered by the live registry', () => {
 
     await tools.reportAnalysis.execute!(await reportAnalysisInputSchema.parseAsync({
       summary: 'The dike closed.',
-      stateOperations: [{ entry: 1, action: 'clear', subject: 'Eastern works gap', evidenceSegments: [1] }],
-      threadOperations: [{ entry: 2, action: 'resolve', relatedFragmentIds: [], evidenceSegments: [2] }],
+      // The entry is the identity; repeating its subject and facet is neither
+      // necessary nor useful.
+      stateOperations: [{ stateEntry: 1, action: 'set', value: 'closed', scope: 'cross-scene', evidenceSegments: [1] }],
+      threadOperations: [{ threadEntry: 2, action: 'resolve', relatedFragmentIds: [], evidenceSegments: [2] }],
     }), { toolCallId: 'entry', messages: [], abortSignal: undefined as unknown as AbortSignal })
 
-    expect(collector.continuityProjection.stateOperations.map((operation) => operation.stateKey))
-      .toEqual(['eastern_works_gap'])
+    expect(collector.continuityProjection.stateOperations).toMatchObject([{
+      stateKey: 'eastern_works_gap',
+      subject: { key: 'eastern_works', label: 'Eastern works' },
+      facet: 'status',
+      value: 'closed',
+      scope: 'cross-scene',
+    }])
     expect(collector.continuityProjection.threadOperations.map((operation) => operation.threadKey))
       .toEqual(['participation_commitments'])
   })
@@ -1971,7 +2114,7 @@ describe('continuity keys steered by the live registry', () => {
     // The sound operation still lands; only the orphan is reported back.
     expect(collector.continuityProjection.threadOperations.map((operation) => operation.threadKey))
       .toEqual(['first_address_outcome'])
-    expect(report).toMatchObject({ ok: true })
+    expect(report).toMatchObject({ ok: false, needsCorrection: true })
     expect(JSON.stringify(report)).toContain('No thread identity is tracked under eastern_works_completion')
     // The reply names the numbers it could have pointed at instead.
     expect(JSON.stringify(report)).toContain('[1] first_address_outcome')
@@ -2038,20 +2181,22 @@ describe('continuity keys steered by the live registry', () => {
     await call({
       summary: 'He claims her line.',
       stateOperations: [
-        { key: 'eastern_dike_status', action: 'set', subject: 'Eastern dike', value: 'holding', evidenceSegments: [1] },
-        { key: 'succession_claim', action: 'set', subject: 'Succession', value: 'contested', evidenceSegments: [1] },
+        { key: 'eastern_dike_status', action: 'set', subject: { key: 'eastern_dike', label: 'Eastern dike' }, facet: 'status', value: 'holding', evidenceSegments: [1] },
+        { key: 'succession_claim', action: 'set', subject: { key: 'succession', label: 'Succession' }, facet: 'status', value: 'contested', evidenceSegments: [1] },
       ],
     })
     await call({
       summary: 'He claims her line.',
       stateOperations: [
-        { key: 'eastern_dike_status', action: 'set', subject: 'Eastern dike', value: 'breached', evidenceSegments: [2] },
+        { key: 'eastern_dike_status', action: 'set', subject: { key: 'eastern_dike', label: 'Eastern dike' }, facet: 'status', value: 'breached', evidenceSegments: [2] },
       ],
     })
 
-    const byKey = new Map(collector.continuityProjection.stateOperations.map((operation) => [operation.stateKey, operation]))
-    expect(byKey.get('eastern_dike_status')?.value).toBe('breached')
-    expect(byKey.get('succession_claim')?.value).toBe('contested')
+    const byKey = new Map(collector.continuityProjection.stateOperations
+      .filter((operation) => operation.action === 'set')
+      .map((operation) => [operation.stateKey, operation.value]))
+    expect(byKey.get('eastern_dike_status')).toBe('breached')
+    expect(byKey.get('succession_claim')).toBe('contested')
   })
 
   it('does not let an empty retry erase the whole continuity projection', async () => {
@@ -2078,6 +2223,125 @@ describe('continuity keys steered by the live registry', () => {
     expect(collector.continuityProjection.threadOperations[0].threadKey).toBe('mpamba_dynastic_intent')
   })
 
+  it('retains an uncertain scene update when it carries changed frame data', async () => {
+    const collector = createEmptyCollector()
+    const prose = mockFragment({ id: 'pr-0001', type: 'prose', content: 'They reached the north hall.' })
+    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => id === 'pr-0001' ? prose : null)
+    const tools = createAnalysisTools(collector, {
+      dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001', disableDirections: true,
+    })
+    const execute = async (input: Record<string, unknown>) => tools.reportAnalysis.execute!(
+      await reportAnalysisInputSchema.parseAsync(input),
+      { toolCallId: 'report', messages: [], abortSignal: undefined as unknown as AbortSignal },
+    )
+
+    await execute({ summary: 'They travelled onward.', scene: { transition: 'continue' } })
+    const result = await execute({
+      summary: 'They reached the north hall.',
+      scene: {
+        transition: 'uncertain',
+        location: { key: 'north_hall', label: 'North hall' },
+        evidenceSegments: [1],
+      },
+    })
+
+    expect(result).toMatchObject({ ok: true })
+    expect(collector.continuityProjection.scene).toMatchObject({
+      transition: 'uncertain',
+      location: { key: 'north_hall', label: 'North hall' },
+      evidenceSegments: [1],
+    })
+  })
+
+  it('requires evidence when a report establishes the narrative line', async () => {
+    const collector = createEmptyCollector()
+    const prose = mockFragment({ id: 'pr-0001', type: 'prose', content: 'Years earlier, the hall stood empty.' })
+    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => id === 'pr-0001' ? prose : null)
+    const tools = createAnalysisTools(collector, {
+      dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001', disableDirections: true,
+    })
+
+    const result = await tools.reportAnalysis.execute!(await reportAnalysisInputSchema.parseAsync({
+      summary: 'The narrative moved into the past.',
+      scene: { transition: 'continue', line: 'flashback' },
+    }), { toolCallId: 'report', messages: [], abortSignal: undefined as unknown as AbortSignal })
+
+    expect(result).toMatchObject({ ok: false, needsCorrection: true })
+    expect(JSON.stringify(result)).toContain('No supporting sentence was cited')
+  })
+
+  it('retains rejected continuity on omission and withdraws it with an explicit empty lane', async () => {
+    const collector = createEmptyCollector()
+    const prose = mockFragment({ id: 'pr-0001', type: 'prose', content: 'The audience ended.' })
+    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => id === 'pr-0001' ? prose : null)
+    const continuityKeys = {
+      state: [{
+        index: 8,
+        key: 'secunda_arousal',
+        label: 'Secunda — arousal',
+        subject: { key: 'secunda', label: 'Secunda' },
+        facet: 'arousal',
+      }],
+    }
+    const tools = createAnalysisTools(collector, {
+      dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001',
+      continuityKeys, disableDirections: true,
+    })
+    const call = async (input: Record<string, unknown>) => tools.reportAnalysis.execute!(
+      await buildReportAnalysisInputSchema(continuityKeys).parseAsync({ summary: 'The audience ended.', ...input }),
+      { toolCallId: 'report', messages: [], abortSignal: undefined as unknown as AbortSignal },
+    )
+
+    const rejected = await call({
+      threadOperations: [{ key: 'nonexistent_thread', action: 'resolve', evidenceSegments: [1] }],
+      // This is the real Gemma failure shape: a state registry number was put
+      // into the thread-focus lane, where that number has no meaning.
+      threadFocus: [{ threadEntry: 8, visibility: 'foreground' }],
+    })
+    expect(rejected).toMatchObject({ ok: false, needsCorrection: true })
+
+    const omitted = await call({})
+    expect(omitted).toMatchObject({ ok: false, needsCorrection: true })
+
+    const withdrawn = await call({ threadOperations: [], threadFocus: [] })
+    expect(withdrawn).toMatchObject({ ok: true })
+    expect(withdrawn).not.toHaveProperty('skippedContinuity')
+    expect(collector.continuityProjection.threadOperations).toEqual([])
+    expect(collector.continuityProjection.threadFocus).toEqual([])
+
+    const finish = await tools.finishAnalysis.execute!({}, {
+      toolCallId: 'finish', messages: [], abortSignal: undefined as unknown as AbortSignal,
+    })
+    expect(finish).toMatchObject({ ok: true })
+  })
+
+  it('derives a new state identity from the subject label and facet once', async () => {
+    const collector = createEmptyCollector()
+    const prose = mockFragment({ id: 'pr-0001', type: 'prose', content: 'Secunda relaxed.' })
+    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => id === 'pr-0001' ? prose : null)
+    const tools = createAnalysisTools(collector, {
+      dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001', disableDirections: true,
+    })
+
+    await tools.reportAnalysis.execute!(await reportAnalysisInputSchema.parseAsync({
+      summary: 'Secunda relaxed.',
+      stateOperations: [{
+        action: 'set',
+        subject: { label: 'Secunda' },
+        facet: 'arousal',
+        value: 'relaxed',
+        evidenceSegments: [1],
+      }],
+    }), { toolCallId: 'report', messages: [], abortSignal: undefined as unknown as AbortSignal })
+
+    expect(collector.continuityProjection.stateOperations).toMatchObject([{
+      stateKey: 'secunda_arousal',
+      subject: { key: 'secunda', label: 'Secunda' },
+      facet: 'arousal',
+      value: 'relaxed',
+    }])
+  })
+
   // Qwen first omitted every state key, then supplied deliberate keys while
   // keeping the same citations. The correction must rename those identities,
   // not leave the derived drafts beside them as duplicate state.
@@ -2101,8 +2365,8 @@ describe('continuity keys steered by the live registry', () => {
     await call({
       summary: 'The dike held.',
       stateOperations: [
-        { action: 'set', subject: 'Eastern Works seaward dike', value: 'holding', evidenceSegments: [1] },
-        { action: 'set', subject: "Principia's diplomatic posture", value: 'engaging', evidenceSegments: [2] },
+        { action: 'set', subject: { key: 'eastern_works_seaward_dike', label: 'Eastern Works seaward dike' }, facet: 'status', value: 'holding', evidenceSegments: [1] },
+        { action: 'set', subject: { key: 'principia', label: "Principia's diplomatic posture" }, facet: 'status', value: 'engaging', evidenceSegments: [2] },
       ],
       knowledgeOperations: [{
         characterId: 'ch-0001', action: 'learn', fact: 'The hall accepted the proof.', evidenceSegments: [2],
@@ -2111,8 +2375,8 @@ describe('continuity keys steered by the live registry', () => {
     await call({
       summary: 'The dike held.',
       stateOperations: [
-        { key: 'eastern_channel_closure', action: 'set', subject: 'eastern channel', value: 'holding', evidenceSegments: [1] },
-        { key: 'principia_diplomatic_stance', action: 'set', subject: 'Principia', value: 'engaging', evidenceSegments: [2] },
+        { key: 'eastern_channel_closure', action: 'set', subject: { key: 'eastern_channel', label: 'eastern channel' }, facet: 'status', value: 'holding', evidenceSegments: [1] },
+        { key: 'principia_diplomatic_stance', action: 'set', subject: { key: 'principia', label: 'Principia' }, facet: 'status', value: 'engaging', evidenceSegments: [2] },
       ],
       knowledgeOperations: [{
         characterId: 'ch-0001', key: 'hall_acceptance', action: 'learn', fact: 'The hall accepted the proof.', evidenceSegments: [2],
@@ -2196,8 +2460,8 @@ describe('continuity keys steered by the live registry', () => {
     )
     const keylessCreations = {
       stateOperations: [
-        { action: 'set', subject: 'Eastern Works seaward dike', value: 'closed', evidenceSegments: [4] },
-        { action: 'set', subject: "Clinical director's examination", value: 'complete', evidenceSegments: [29, 30, 31, 32, 33, 34] },
+        { action: 'set', subject: { key: 'eastern_works_seaward_dike', label: 'Eastern Works seaward dike' }, facet: 'status', value: 'closed', evidenceSegments: [4] },
+        { action: 'set', subject: { label: 'Clinical director' }, facet: 'examination_status', value: 'complete', evidenceSegments: [29, 30, 31, 32, 33, 34] },
       ],
       knowledgeOperations: [{
         characterId: 'ch-0001',
@@ -2224,8 +2488,8 @@ describe('continuity keys steered by the live registry', () => {
     })
 
     expect(collector.continuityProjection.stateOperations.map((operation) => operation.stateKey)).toEqual([
-      'eastern_works_seaward_dike',
-      'clinical_director_s_examination',
+      'eastern_works_seaward_dike_status',
+      'clinical_director_examination_status',
     ])
     expect(collector.continuityProjection.threadOperations.map((operation) => operation.threadKey)).toEqual([
       'eastern_works_aftermath',

@@ -50,6 +50,8 @@ export interface LibrarianPassRecord {
 
 export interface LibrarianContradiction {
   description: string
+  /** Explicit justification for changing the record rather than reviewing the prose. */
+  recordCorrectionReason?: string
   fragmentIds: string[]
   /** User-reviewed findings remain historical but no longer count as active. */
   dismissed?: boolean
@@ -139,6 +141,8 @@ export interface LibrarianAnalysisSummary {
   timelineEventCount: number
   directionsCount: number
   hasTrace?: boolean
+  /** Whether this completed analysis can contribute to the continuity fold. */
+  hasContinuityProjection: boolean
   /** Source prose changed after this analysis, so its continuity is not folded. */
   continuityStale?: boolean
 }

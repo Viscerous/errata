@@ -7,15 +7,22 @@ import {
 } from './storage'
 import { proseContentHash } from './continuity-source'
 import { continuityKeyLabel, normalizeContinuityKey, scopedContinuityIdentity } from '@/lib/continuity-keys'
-import type { ContinuityRegistry, RegistryEntry, TemporalFrame } from './continuity-types'
+import type {
+  ContinuityRegistry,
+  NarrativeTime,
+  RegistryEntry,
+  SceneLocation,
+  StateScope,
+  StateSubject,
+} from '@/contracts/continuity'
 
 const MAX_CURRENT_STATE = 24
 const MAX_KNOWLEDGE_PER_CHARACTER = 16
 /**
  * Threads only leave this list when resolved or abandoned, so an unbounded list
  * grows for the life of the story. It is not just a rendering concern: the live
- * registry becomes a closed enum in the analysis tool schema, so every extra
- * key costs prompt budget on the model least able to spare it.
+ * registry is rendered into the analyst prompt, so every extra key still costs
+ * context budget on the model least able to spare it.
  */
 const MAX_LIVE_THREADS = 24
 const MAX_CACHE_ENTRIES = 32
@@ -28,8 +35,19 @@ interface ProjectionSource {
 
 export interface CurrentStateEntry extends ProjectionSource {
   stateKey: string
-  subject: string
+  subject: StateSubject
+  facet: string
+  slot?: string
   value: string
+  certainty: 'explicit' | 'implied'
+  scope: StateScope
+  until?: NarrativeTime
+}
+
+export interface SceneFrame extends ProjectionSource {
+  line: 'present' | 'flashback' | 'flash-forward'
+  location?: SceneLocation
+  time?: NarrativeTime
 }
 
 export interface LiveThreadEntry extends ProjectionSource {
@@ -47,11 +65,24 @@ export interface CharacterKnowledgeEntry extends ProjectionSource {
   acquisition: 'witnessed' | 'told' | 'inferred' | 'other'
 }
 
+/**
+ * The complete branch-local result of folding source-current projections.
+ * This is program memory, not prompt memory, so it has no prompt-budget caps.
+ */
+export interface ContinuityLedger {
+  currentState: CurrentStateEntry[]
+  liveThreads: LiveThreadEntry[]
+  characterKnowledge: CharacterKnowledgeEntry[]
+  currentScene?: SceneFrame
+  staleProjectionCount: number
+}
+
+/** A reader-bounded projection of the complete branch-local ledger. */
 export interface ContinuityView {
   currentState: CurrentStateEntry[]
   liveThreads: LiveThreadEntry[]
   characterKnowledge: CharacterKnowledgeEntry[]
-  temporalFrame?: TemporalFrame
+  currentScene?: SceneFrame
   staleProjectionCount: number
 }
 
@@ -63,7 +94,7 @@ interface LoadedAnalysis {
   projectionIsCurrent: boolean
 }
 
-const viewCache = new Map<string, { signature: string; view: ContinuityView | undefined }>()
+const ledgerCache = new Map<string, { signature: string; ledger: ContinuityLedger | undefined }>()
 
 /**
  * Only the fields the fold consumes, memoized per analysis ID.
@@ -108,21 +139,21 @@ async function loadProjection(
   return entry
 }
 
-function cloneView(view: ContinuityView | undefined): ContinuityView | undefined {
-  return view ? structuredClone(view) : undefined
+function cloneLedger(ledger: ContinuityLedger | undefined): ContinuityLedger | undefined {
+  return ledger ? structuredClone(ledger) : undefined
 }
 
 function takeLatest<T>(items: T[], maxItems: number): T[] {
   return items.slice(-maxItems)
 }
 
-function cacheSet(key: string, signature: string, view: ContinuityView | undefined): void {
-  viewCache.delete(key)
-  viewCache.set(key, { signature, view })
-  while (viewCache.size > MAX_CACHE_ENTRIES) {
-    const oldest = viewCache.keys().next().value
+function cacheSet(key: string, signature: string, ledger: ContinuityLedger | undefined): void {
+  ledgerCache.delete(key)
+  ledgerCache.set(key, { signature, ledger })
+  while (ledgerCache.size > MAX_CACHE_ENTRIES) {
+    const oldest = ledgerCache.keys().next().value
     if (typeof oldest !== 'string') break
-    viewCache.delete(oldest)
+    ledgerCache.delete(oldest)
   }
 }
 
@@ -134,42 +165,29 @@ function sourceOf(item: LoadedAnalysis): ProjectionSource {
   }
 }
 
-/**
- * Only a passage that explicitly leaves the present is off the present line.
- * `uncertain` is the schema default, so treating it as a departure meant an
- * analysis that simply never determined a frame had every state operation it
- * reported silently discarded — making no claim about time is not the same as
- * claiming to have stepped out of it.
- */
-function isPresentLine(frame: TemporalFrame): boolean {
-  return frame.relation !== 'flashback' && frame.relation !== 'flash-forward'
-}
-
-/**
- * `forward` and `uncertain` tell a reader of the prose nothing it does not
- * already show, so the frame is worth surfacing only when the passage left the
- * present or named the occasion it sits in.
- */
-function hasTemporalSignal(frame: TemporalFrame | undefined): frame is TemporalFrame {
-  return frame !== undefined && (!isPresentLine(frame) || Boolean(frame.anchor))
+function hasSceneSignal(frame: SceneFrame | undefined): frame is SceneFrame {
+  return frame !== undefined && (
+    frame.line !== 'present'
+    || Boolean(frame.location)
+    || Boolean(frame.time)
+  )
 }
 
 function projectionCurrent(projection: CachedProjection, fragment: Fragment): boolean {
-  if (!projection.sourceRevision) return true
-  return projection.sourceRevision.contentHash === proseContentHash(fragment)
+  return projection.sourceRevision?.contentHash === proseContentHash(fragment)
 }
 
 /**
  * Deterministically folds the latest source-current Analysis projections on the
- * active branch. Legacy event/state-change prose and scene rosters remain in old
- * Analysis files but are intentionally not part of this Writer-facing view.
+ * active branch. Narrative events and scene rosters have their own consumers;
+ * this fold reads only the first-class continuity projection.
  */
-export async function buildContinuityView(params: {
+export async function buildContinuityLedger(params: {
   dataDir: string
   storyId: string
   activeProseFragments: Fragment[]
   analysisIndex?: LibrarianAnalysisIndex | null
-}): Promise<ContinuityView | undefined> {
+}): Promise<ContinuityLedger | undefined> {
   const index = 'analysisIndex' in params
     ? params.analysisIndex
     : await getAnalysisIndex(params.dataDir, params.storyId)
@@ -179,20 +197,19 @@ export async function buildContinuityView(params: {
     params.activeProseFragments.map((fragment) => [fragment.id, proseContentHash(fragment)]),
   )
   const signature = [
-    index.updatedAt,
     ...params.activeProseFragments.map((fragment) => (
-      `${fragment.id}:${fragmentHashes.get(fragment.id)}:${index.latestByFragmentId[fragment.id]?.analysisId ?? ''}`
+      `${fragment.id}:${fragmentHashes.get(fragment.id)}:${index.latestProjectionByFragmentId[fragment.id]?.analysisId ?? ''}`
     )),
   ].join('|')
   const cacheKey = `${params.dataDir}\u0000${params.storyId}`
-  const cached = viewCache.get(cacheKey)
-  if (cached?.signature === signature) return cloneView(cached.view)
+  const cached = ledgerCache.get(cacheKey)
+  if (cached?.signature === signature) return cloneLedger(cached.ledger)
 
   const sources = params.activeProseFragments
     .map((source, indexInChain) => ({
       source,
       narrativePosition: indexInChain + 1,
-      analysisId: index.latestByFragmentId[source.id]?.analysisId,
+      analysisId: index.latestProjectionByFragmentId[source.id]?.analysisId,
     }))
     .filter((item): item is typeof item & { analysisId: string } => typeof item.analysisId === 'string')
 
@@ -208,64 +225,122 @@ export async function buildContinuityView(params: {
     }
   }))).filter((item): item is LoadedAnalysis => item !== null)
 
-  const currentState = new Map<string, CurrentStateEntry>()
+  type SceneCursor = { frame?: SceneFrame; state: Map<string, CurrentStateEntry> }
+  let cursor: SceneCursor = { state: new Map() }
+  const suspended: SceneCursor[] = []
   const liveThreads = new Map<string, LiveThreadEntry>()
   const characterKnowledge = new Map<string, CharacterKnowledgeEntry>()
-  let latestThreadFocus = new Map<string, 'foreground' | 'background'>()
-  let temporalFrame: TemporalFrame | undefined
+  const threadVisibility = new Map<string, LiveThreadEntry['visibility']>()
   let staleProjectionCount = 0
 
   for (const item of loaded) {
     const source = sourceOf(item)
-    if (item.projection.sourceRevision && !item.projectionIsCurrent) {
+    if (!item.projectionIsCurrent) {
       staleProjectionCount += 1
       continue
     }
 
-    // Staleness was settled above: a projection without a `sourceRevision` is
-    // legacy and counts as current, so the only thing left to check is whether
-    // there is a projection at all.
     const projection = item.projection.continuityProjection
     if (!projection) continue
-    temporalFrame = projection.temporalFrame
-    // A thread omitted from a snapshot is dormant; an analysis that supplied no
-    // snapshot at all asserted nothing about focus, so the last real one stands.
-    // Conflating the two lets any analysis that reported no focus silently
-    // empty the Writer's unresolved-continuity section.
-    if (projection.threadFocus.length > 0) {
-      latestThreadFocus = new Map(
-        projection.threadFocus.map((focus) => [normalizeContinuityKey(focus.threadKey), focus.visibility]),
-      )
+    const scene = projection.scene
+    const transition = scene.transition === 'uncertain' ? 'continue' : scene.transition
+    if (transition === 'enter-flashback' || transition === 'enter-flash-forward') {
+      suspended.push(cursor)
+      cursor = { state: new Map() }
+    } else if (transition === 'return') {
+      cursor = suspended.pop() ?? { state: new Map() }
     }
 
-    if (isPresentLine(projection.temporalFrame)) {
-      for (const operation of projection.stateOperations) {
-        // Keys are normalized on the fold as well as at ingest so projections
-        // written before normalization do not fork the registry.
-        const stateKey = normalizeContinuityKey(operation.stateKey)
-        if (operation.action === 'clear') {
-          currentState.delete(stateKey)
-          continue
-        }
-        if (!operation.value) continue
-        // Re-setting an existing key must move it to the end: the cap below
-        // keeps the most recently *updated* entries, not the earliest created.
-        currentState.delete(stateKey)
-        currentState.set(stateKey, {
-          ...source,
-          stateKey,
-          subject: operation.subject,
-          value: operation.value,
-        })
+    if (transition === 'cut') {
+      for (const [key, entry] of cursor.state) {
+        if (entry.scope === 'scene') cursor.state.delete(key)
+      }
+    }
+    const impliedLine = transition === 'enter-flashback'
+      ? 'flashback'
+      : transition === 'enter-flash-forward'
+        ? 'flash-forward'
+        : undefined
+    const line = transition === 'return'
+      ? cursor.frame?.line ?? 'present'
+      : impliedLine ?? (scene.line && scene.line !== 'uncertain' ? scene.line : cursor.frame?.line ?? 'present')
+    const priorFrame = cursor.frame
+    let resultingTime = scene.time ?? priorFrame?.time
+    if (!scene.time && transition === 'advance' && scene.elapsed && priorFrame?.time) {
+      const advanceBound = (value: string | undefined, seconds: number | undefined): string | undefined => {
+        if (!value || seconds === undefined) return undefined
+        const instant = Date.parse(value)
+        return Number.isFinite(instant) ? new Date(instant + seconds * 1000).toISOString() : undefined
+      }
+      const earliest = advanceBound(priorFrame.time.earliest, scene.elapsed.minimumSeconds)
+      const latest = advanceBound(
+        priorFrame.time.latest ?? priorFrame.time.earliest,
+        scene.elapsed.maximumSeconds ?? scene.elapsed.minimumSeconds,
+      )
+      resultingTime = {
+        ...priorFrame.time,
+        label: `${scene.elapsed.label} after ${priorFrame.time.label}`,
+        ...(earliest ? { earliest } : {}),
+        ...(latest ? { latest } : {}),
+        ...((earliest || latest) ? { certainty: earliest === latest ? 'exact' : 'bounded' as const } : {}),
+      }
+    }
+    cursor.frame = {
+      ...source,
+      line,
+      ...(scene.location ? { location: scene.location } : priorFrame?.location ? { location: priorFrame.location } : {}),
+      ...(resultingTime ? { time: resultingTime } : {}),
+    }
+
+    // Time expiry is deliberately conservative. Human labels and unresolved
+    // calendars never trigger deletion; only a current lower bound strictly
+    // beyond a deadline upper bound proves that an assertion expired.
+    const currentEarliest = cursor.frame.time?.earliest
+      ? Date.parse(cursor.frame.time.earliest)
+      : Number.NaN
+    if (Number.isFinite(currentEarliest)) {
+      for (const [key, entry] of cursor.state) {
+        if (!entry.until) continue
+        const deadline = entry.until.latest ?? entry.until.earliest
+        const deadlineLatest = deadline ? Date.parse(deadline) : Number.NaN
+        if (Number.isFinite(deadlineLatest) && currentEarliest > deadlineLatest) cursor.state.delete(key)
       }
     }
 
+    // Prominence is a sparse update, not a snapshot. Omission retains the prior
+    // value; dormant is explicit, so an empty model report cannot silently hide
+    // every unresolved thread from the Writer.
+    for (const focus of projection.threadFocus) {
+      threadVisibility.set(normalizeContinuityKey(focus.threadKey), focus.visibility)
+    }
+
+    for (const operation of projection.stateOperations) {
+      const stateKey = normalizeContinuityKey(operation.stateKey)
+      if (operation.action === 'clear') {
+        cursor.state.delete(stateKey)
+        continue
+      }
+      cursor.state.delete(stateKey)
+      cursor.state.set(stateKey, {
+        ...source,
+        stateKey,
+        subject: operation.subject,
+        facet: operation.facet,
+        ...(operation.slot ? { slot: operation.slot } : {}),
+        value: operation.value,
+        certainty: operation.certainty,
+        scope: operation.scope,
+        ...(operation.until ? { until: operation.until } : {}),
+      })
+    }
+
     // Narrative threads are reader-facing continuity and can be opened or
-    // resolved by any temporal frame. Their focus remains a separate snapshot.
+    // resolved by any scene. Their prominence remains a separate sparse delta.
     for (const operation of projection.threadOperations) {
       const threadKey = normalizeContinuityKey(operation.threadKey)
       if (operation.action === 'resolve' || operation.action === 'abandon') {
         liveThreads.delete(threadKey)
+        threadVisibility.delete(threadKey)
         continue
       }
       const existing = liveThreads.get(threadKey)
@@ -282,7 +357,7 @@ export async function buildContinuityView(params: {
       })
     }
 
-    if (projection.temporalFrame.relation !== 'flash-forward') {
+    if (cursor.frame.line !== 'flash-forward') {
       for (const operation of projection.knowledgeOperations) {
         const key = scopedContinuityIdentity(operation.knowledgeKey, operation.characterId)
         if (operation.action === 'forget') {
@@ -304,43 +379,64 @@ export async function buildContinuityView(params: {
 
   const allThreads: LiveThreadEntry[] = [...liveThreads.values()].map((thread) => ({
     ...thread,
-    visibility: latestThreadFocus.get(thread.threadKey) ?? ('dormant' as const),
+    visibility: threadVisibility.get(thread.threadKey) ?? ('dormant' as const),
   }))
-  // A thread the latest passage still has in view outranks an older dormant one
-  // regardless of when it was last touched, so cap the dormant tail rather than
-  // the list as a whole. Insertion order is recency of update either way.
-  const focused = allThreads.filter((thread) => thread.visibility !== 'dormant')
+  const ledger: ContinuityLedger | undefined = (
+    cursor.state.size > 0
+    || allThreads.length > 0
+    || characterKnowledge.size > 0
+    || hasSceneSignal(cursor.frame)
+  ) ? {
+      currentState: [...cursor.state.values()],
+      liveThreads: allThreads,
+      characterKnowledge: [...characterKnowledge.values()],
+      currentScene: cursor.frame,
+      staleProjectionCount,
+    } : undefined
+
+  cacheSet(cacheKey, signature, cloneLedger(ledger))
+  return ledger
+}
+
+/**
+ * Project the complete ledger into the bounded shape supplied to prompt readers.
+ * Selection is deliberately mechanical. Semantic relevance belongs to an LLM
+ * reader, never to lexical matching hidden in program code.
+ */
+export function projectContinuityView(
+  ledger: ContinuityLedger | undefined,
+): ContinuityView | undefined {
+  if (!ledger) return undefined
+  const currentState = takeLatest(ledger.currentState, MAX_CURRENT_STATE)
+
+  // A focused thread always survives; fill the remainder from the recent
+  // dormant tail. Insertion order is recency of update.
+  const focusedThreads = ledger.liveThreads.filter((thread) => thread.visibility !== 'dormant')
+  const dormantThreads = ledger.liveThreads.filter((thread) => thread.visibility === 'dormant')
   const retainedDormant = new Set(takeLatest(
-    allThreads.filter((thread) => thread.visibility === 'dormant'),
-    Math.max(MAX_LIVE_THREADS - focused.length, 0),
+    dormantThreads,
+    Math.max(MAX_LIVE_THREADS - focusedThreads.length, 0),
   ))
-  const threads = allThreads.length <= MAX_LIVE_THREADS
-    ? allThreads
-    : allThreads.filter((thread) => thread.visibility !== 'dormant' || retainedDormant.has(thread))
+  const liveThreads = ledger.liveThreads.length <= MAX_LIVE_THREADS
+    ? ledger.liveThreads
+    : ledger.liveThreads.filter((thread) => thread.visibility !== 'dormant' || retainedDormant.has(thread))
 
   // Per-character rather than overall: one talkative character must not crowd
   // the rest out of the registry the analyst reuses keys from.
   const knowledgeByCharacterId = new Map<string, CharacterKnowledgeEntry[]>()
-  for (const entry of characterKnowledge.values()) {
+  for (const entry of ledger.characterKnowledge) {
     knowledgeByCharacterId.set(entry.characterId, [...(knowledgeByCharacterId.get(entry.characterId) ?? []), entry])
   }
-  const knowledge = [...knowledgeByCharacterId.values()]
+  const characterKnowledge = [...knowledgeByCharacterId.values()]
     .flatMap((entries) => takeLatest(entries, MAX_KNOWLEDGE_PER_CHARACTER))
-  const view: ContinuityView | undefined = (
-    currentState.size > 0
-    || threads.length > 0
-    || knowledge.length > 0
-    || hasTemporalSignal(temporalFrame)
-  ) ? {
-      currentState: takeLatest([...currentState.values()], MAX_CURRENT_STATE),
-      liveThreads: threads,
-      characterKnowledge: knowledge,
-      temporalFrame,
-      staleProjectionCount,
-    } : undefined
 
-  cacheSet(cacheKey, signature, cloneView(view))
-  return view
+  return {
+    currentState,
+    liveThreads,
+    characterKnowledge,
+    currentScene: ledger.currentScene,
+    staleProjectionCount: ledger.staleProjectionCount,
+  }
 }
 
 /**
@@ -437,6 +533,8 @@ const AUTHORIAL_PRESENTATION_COPY: Record<AuthorialPresentation, AuthorialPresen
  */
 export interface ContinuitySource {
   continuityView?: ContinuityView
+  /** Complete fold for readers that need identity access beyond prompt values. */
+  continuityLedger?: ContinuityLedger
   stickyCharacters?: Array<{ id: string; name?: string }>
   recentCharacters?: Array<{ id: string; name?: string }>
   characterCatalog?: Array<{ id: string; name?: string }>
@@ -547,7 +645,7 @@ export function renderContinuity(source: ContinuitySource, reader: ContinuityRea
   }
   if (!view) return null
   if (presentation === 'registry') {
-    return renderContinuityRegistry(source)
+    return renderContinuityRegistry(source, reader === 'librarian.chat')
   }
   return renderAuthorialContinuity(
     source,
@@ -569,14 +667,21 @@ function renderAuthorialContinuity(
     `This is authorial, source-linked memory from accepted prose. ${copy.introduction} Information in this view is not automatically known by every character.`,
   ]
 
-  if (hasTemporalSignal(view.temporalFrame)) {
-    const departure = isPresentLine(view.temporalFrame) ? [] : [view.temporalFrame.relation]
-    parts.push(`### Current temporal frame\n- ${[...departure, view.temporalFrame.anchor].filter(Boolean).join(' — ')}`)
+  if (hasSceneSignal(view.currentScene)) {
+    const frame = view.currentScene
+    parts.push([
+      '### Current scene frame',
+      `- Narrative line: ${frame.line}`,
+      ...(frame.location ? [`- Location: ${frame.location.label}`] : []),
+      ...(frame.time ? [`- Time: ${frame.time.label} (${frame.time.certainty})`] : []),
+    ].join('\n'))
   }
   if (view.currentState.length > 0) {
     parts.push([
-      '### Current durable state',
-      ...view.currentState.map((item) => `- ${item.subject}: ${item.value}`),
+      '### Current narrative state',
+      ...view.currentState.map((item) => (
+        `- ${item.subject.label} — ${item.facet}${item.slot ? `/${item.slot}` : ''}: ${item.value}`
+      )),
     ].join('\n'))
   }
 
@@ -638,30 +743,47 @@ function renderSelfAwareness(view: ContinuityView | undefined, characterId: stri
  * same thing on both sides — knowledge is filtered by character scope here, and
  * a second derivation would silently number it differently.
  */
-export function continuityRegistry(source: ContinuitySource): ContinuityRegistry {
+export function continuityRegistry(
+  source: ContinuitySource,
+  options: { includeAllDetails?: boolean } = {},
+): ContinuityRegistry {
   const view = source.continuityView
-  if (!view) return { state: [], thread: [], knowledge: [] }
+  const ledger = source.continuityLedger ?? view
+  if (!ledger) return { state: [], thread: [], knowledge: [] }
   const characterIds = charactersInScope(source, 'passage-candidates')
-  const knowers = characterLabels(source, view.characterKnowledge.map((entry) => entry.characterId))
+  const knowers = characterLabels(source, ledger.characterKnowledge.map((entry) => entry.characterId))
+  const detailedState = new Set(view?.currentState.map((entry) => entry.stateKey) ?? [])
+  const detailedThreads = new Set(view?.liveThreads.map((entry) => entry.threadKey) ?? [])
+  const detailedKnowledge = new Set(
+    view?.characterKnowledge.map((entry) => scopedContinuityIdentity(entry.knowledgeKey, entry.characterId)) ?? [],
+  )
   return {
-    state: view.currentState.map((item, index) => ({
+    state: ledger.currentState.map((item, index) => ({
       index: index + 1,
       key: item.stateKey,
-      label: item.subject,
-      detail: item.value,
+      label: `${item.subject.label} — ${item.facet}${item.slot ? `/${item.slot}` : ''}`,
+      ...(options.includeAllDetails || detailedState.has(item.stateKey) ? { detail: item.value } : {}),
+      subject: item.subject,
+      facet: item.facet,
+      ...(item.slot ? { slot: item.slot } : {}),
     })),
-    thread: view.liveThreads.map((thread, index) => ({
+    thread: ledger.liveThreads.map((thread, index) => ({
       index: index + 1,
       key: thread.threadKey,
       label: thread.label,
-      detail: thread.note ? `${thread.visibility} — ${thread.note}` : thread.visibility,
+      detail: options.includeAllDetails || detailedThreads.has(thread.threadKey)
+        ? (thread.note ? `${thread.visibility} — ${thread.note}` : thread.visibility)
+        : thread.visibility,
     })),
-    knowledge: view.characterKnowledge
+    knowledge: ledger.characterKnowledge
       .filter((entry) => characterIds.has(entry.characterId))
       .map((entry, index) => ({
         index: index + 1,
         key: entry.knowledgeKey,
-        label: entry.fact,
+        label: options.includeAllDetails
+          || detailedKnowledge.has(scopedContinuityIdentity(entry.knowledgeKey, entry.characterId))
+          ? entry.fact
+          : continuityKeyLabel(entry.knowledgeKey),
         detail: `known by ${knowers.get(entry.characterId)} (${entry.characterId})`,
         scope: entry.characterId,
       })),
@@ -669,8 +791,8 @@ export function continuityRegistry(source: ContinuitySource): ContinuityRegistry
 }
 
 /** Full keyed registry for the Librarian, including dormant unresolved threads. */
-function renderContinuityRegistry(source: ContinuitySource): string {
-  const registry = continuityRegistry(source)
+function renderContinuityRegistry(source: ContinuitySource, includeAllDetails: boolean): string {
+  const registry = continuityRegistry(source, { includeAllDetails })
   const section = (heading: string, entries: RegistryEntry[], guidance?: string): string | null => (
     entries.length === 0 ? null : [
       heading,
@@ -682,7 +804,7 @@ function renderContinuityRegistry(source: ContinuitySource): string {
   )
   return [
     '## Continuity Registry Before This Passage',
-    'These are the identities that already exist. Point at one by its number to change it; only something genuinely new gets a fresh key. Thread omission means dormancy, never resolution; resolve or abandon only with explicit source evidence.',
+    'These are all identities that already exist in the branch-local ledger. Recent entries include their current value; older entries may be identity-only to keep this index compact. Point at one by its number to change it; only something genuinely new gets a fresh key. Thread omission retains prior prominence; set dormant explicitly to leave immediate context. Resolve or abandon only with explicit source evidence.',
     section('### Current state', registry.state),
     section('### Live threads', registry.thread),
     section(

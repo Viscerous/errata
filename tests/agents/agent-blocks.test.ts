@@ -163,8 +163,11 @@ describe('Librarian Analyze Blocks', () => {
           analysisId: 'la-1',
           narrativePosition: 1,
           stateKey: 'alice.location',
-          subject: 'Alice location',
+          subject: { key: 'alice', label: 'Alice' },
+          facet: 'location',
+          certainty: 'explicit',
           value: 'north gate',
+          scope: 'cross-scene',
         }],
         liveThreads: [{
           sourceFragmentId: 'pr-0001',
@@ -176,15 +179,14 @@ describe('Librarian Analyze Blocks', () => {
           visibility: 'dormant',
         }],
         characterKnowledge: [],
-        temporalFrame: { relation: 'forward' },
         staleProjectionCount: 0,
       },
     }))
 
     const memory = blocks.find((block) => block.id === 'continuity-memory')
-    expect(memory?.content).toContain('alice.location | Alice location | north gate')
+    expect(memory?.content).toContain('alice.location | Alice — location | north gate')
     expect(memory?.content).toContain('missing-key | The missing key | dormant')
-    expect(memory?.content).toContain('Thread omission means dormancy, never resolution')
+    expect(memory?.content).toContain('Thread omission retains prior prominence')
   })
 
   it('renders recent-context characters in full and drops them from the catalog', () => {
@@ -548,12 +550,14 @@ describe('Continuity reaches the agents that decide what happens next', () => {
       analysisId: 'la-1',
       narrativePosition: 1,
       stateKey: 'alice_location',
-      subject: 'Alice location',
+      subject: { key: 'alice', label: 'Alice' },
+      facet: 'location',
+      certainty: 'explicit',
       value: 'north gate',
+      scope: 'cross-scene',
     }],
     liveThreads: [],
     characterKnowledge: [],
-    temporalFrame: { relation: 'forward' },
   })
 
   it('renders a continuity block for the writer, the planner, and directions', () => {
@@ -562,7 +566,7 @@ describe('Continuity reaches the agents that decide what happens next', () => {
       const blocks = def.createDefaultBlocks(makeBaseContext({ continuityView: viewFixture }))
       const block = blocks.find((b) => b.id === 'continuity-observations')
       expect(block, `${agentName} should render continuity`).toBeDefined()
-      expect(block!.content).toContain('Alice location: north gate')
+      expect(block!.content).toContain('Alice — location: north gate')
     }
   })
 
@@ -597,16 +601,14 @@ describe('Librarian Analyze Prompt', () => {
   it('reports named character references', () => {
     const prompt = buildAnalyzeSystemPrompt()
     expect(prompt).toContain('direct names, nicknames, titles, roles')
-    expect(prompt).toContain('let it remain dormant indefinitely')
+    expect(prompt).toContain('allow dormant threads to remain unresolved indefinitely')
     expect(prompt).toContain('cite, never retype')
     expect(prompt).toContain('2. Scan the new prose against the provided context')
     expect(prompt).toContain('resolvedFragments')
     expect(prompt).toContain('4. Call **proposeDirections**')
     expect(prompt).toContain('5. Finally, call **finishAnalysis**')
     expect(prompt).toContain('candidateFragmentIds')
-    // The two questions are named against each other, because asking only what
-    // the passage mentions left records it invalidated without ever naming.
-    expect(prompt).toContain('which existing records this passage has made inaccurate')
+    expect(prompt).toContain('directly contradicts any durable assertion')
     expect(prompt).toContain('If a surface term is ambiguous')
     expect(prompt).not.toContain('final assistant text')
     expect(prompt).not.toContain('Analysis complete')

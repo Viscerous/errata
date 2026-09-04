@@ -80,6 +80,8 @@ export interface LibrarianPipelineResult {
   finishReason: string
   stepCount: number
   analyzeLanes: LibrarianAnalyzeLaneStatus
+  /** True only after finishAnalysis accepted the complete workflow. */
+  workflowComplete: boolean
   /** Set when the observation was recoverable but a required/started tail did not finish. */
   completionError?: string
 }
@@ -182,9 +184,7 @@ function analyzeLaneStatus(args: {
 }): LibrarianAnalyzeLaneStatus {
   const proposalToolNames = new Set(['proposeRecordCorrections', 'proposeNewRecords'])
   const proposalCalls = args.toolCalls.filter((call) => proposalToolNames.has(call.toolName))
-  const finishSucceeded = args.toolCalls.some((call) =>
-    call.toolName === 'finishAnalysis' && booleanToolResultField(call.result, 'ok') !== false
-  )
+  const finishSucceeded = toolCallSucceeded(args.toolCalls, 'finishAnalysis')
   const proposalIncomplete = args.passFailed
     ? proposalCalls.length > 0 || args.collector.fragmentChangeProposals.length > 0
     : lastToolResultFailed(proposalCalls, proposalToolNames) && !finishSucceeded
@@ -232,7 +232,15 @@ interface OnlinePassOutcome {
   stepCount?: number
   finishReason?: string
   toolCalls: OnlineToolCall[]
+  workflowComplete: boolean
   error?: unknown
+}
+
+function toolCallSucceeded(
+  toolCalls: Array<{ toolName: string; result: unknown }>,
+  toolName: string,
+): boolean {
+  return toolCalls.some((call) => call.toolName === toolName && booleanToolResultField(call.result, 'ok') === true)
 }
 
 function registerFullContextFragments(
@@ -352,6 +360,7 @@ async function runOnlineAnalyzePass(
       { providerId, configuredModelId: modelId, servedModelId: result.servedModelId },
     )
     const toolCallNames = result.toolCalls.map((call) => call.toolName)
+    const workflowComplete = toolCallSucceeded(result.toolCalls, 'finishAnalysis')
     const proposalToolNames = new Set(['proposeRecordCorrections', 'proposeNewRecords'])
     const proposalToolResults = result.toolCalls
       .filter((call) => proposalToolNames.has(call.toolName))
@@ -373,6 +382,7 @@ async function runOnlineAnalyzePass(
       proposalInvalidOperationCount: proposalToolResults.reduce<number>((sum, result) => sum + numericToolResultField(result, 'invalid'), 0),
       directionToolCallCount: toolCallNames.filter((name) => name === 'proposeDirections').length,
       finishToolCallCount: toolCallNames.filter((name) => name === 'finishAnalysis').length,
+      workflowComplete,
       attentionCandidateIds: context.attentionCandidateIds,
       initialCandidateFragments: initialCandidates,
       proposalCount: collector.fragmentChangeProposals.length,
@@ -395,14 +405,16 @@ async function runOnlineAnalyzePass(
       stepCount: result.stepCount,
       finishReason: result.finishReason,
       toolCalls: result.toolCalls,
+      workflowComplete,
       pass: passRecord({
         name: 'analyze',
-        status: 'complete',
+        status: workflowComplete ? 'complete' : 'failed',
         startedAt,
         durationMs,
         modelId: servedModelId,
         stepCount: result.stepCount,
         finishReason: result.finishReason,
+        ...(!workflowComplete ? { error: 'Analyze ended without a successful finishAnalysis call' } : {}),
         diagnostics,
       }),
     }
@@ -435,6 +447,7 @@ async function runOnlineAnalyzePass(
     return {
       fullText: '',
       toolCalls: [],
+      workflowComplete: false,
       error,
       pass: passRecord({
         name: 'analyze',
@@ -466,12 +479,9 @@ export async function runLibrarianPipeline(input: LibrarianPipelineInput): Promi
   )
   passes.push(analyzeOutcome.pass)
   const passFailed = analyzeOutcome.pass.status === 'failed'
-  const observationComplete = collector.summaryUpdate.trim().length > 0
-  if (passFailed && !observationComplete) {
+  const observationPresent = collector.summaryUpdate.trim().length > 0
+  if (!observationPresent) {
     if (analyzeOutcome.error instanceof Error) throw analyzeOutcome.error
-    throw new Error(analyzeOutcome.pass.error ?? 'Online analysis failed')
-  }
-  if (!observationComplete) {
     throw new Error('Analyze ended without completing the required observation lane')
   }
 
@@ -481,15 +491,17 @@ export async function runLibrarianPipeline(input: LibrarianPipelineInput): Promi
     disableSuggestions,
     toolCalls: analyzeOutcome.toolCalls,
     passFailed,
-    observationComplete,
+    observationComplete: observationPresent,
   })
   let completionError: string | undefined
-  if (passFailed) {
+  if (analyzeOutcome.error instanceof Error) {
     completionError = analyzeOutcome.pass.error ?? 'Analyze stopped after completing its observation lane'
   } else if (analyzeLanes.directions.completion === 'incomplete') {
     completionError = 'Analyze ended without completing automatic directions required by the story setting'
   } else if (analyzeLanes.recordMaintenance.completion === 'incomplete') {
     completionError = 'Analyze ended with an unresolved record-maintenance attempt'
+  } else if (passFailed) {
+    completionError = analyzeOutcome.pass.error ?? 'Analyze stopped without successfully finishing'
   }
 
   const mentionedFragmentIds = [...new Set(collector.mentions.map(m => m.fragmentId))]
@@ -529,6 +541,7 @@ export async function runLibrarianPipeline(input: LibrarianPipelineInput): Promi
     finishReason: analyzeOutcome.finishReason ?? 'unknown',
     stepCount: analyzeOutcome.stepCount ?? 0,
     analyzeLanes,
+    workflowComplete: analyzeOutcome.workflowComplete,
     ...(completionError ? { completionError } : {}),
   }
 }

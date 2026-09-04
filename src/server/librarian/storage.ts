@@ -7,6 +7,7 @@ import { proseContentHash } from './continuity-source'
 import { generateConversationId } from '@/lib/fragment-ids'
 import { writeJsonAtomic } from '../fs-utils'
 import { withKeyLock } from '../async-lock'
+import { ContinuityProjectionSchema } from '@/contracts/continuity'
 import type {
   LibrarianAnalysis,
   LibrarianAnalysisSummary,
@@ -90,18 +91,18 @@ export function selectLatestAnalysesByFragment(
   return latest
 }
 
-/** Compatibility name for the on-disk state shape. */
-export type LibrarianState = StoredLibrarianState
-
 export interface LibrarianAnalysisIndexEntry {
   analysisId: string
   createdAt: string
 }
 
 export interface LibrarianAnalysisIndex {
-  version: 1
+  version: 2
   updatedAt: string
+  /** Latest analysis artifact, including inspectable partial runs. */
   latestByFragmentId: Record<string, LibrarianAnalysisIndexEntry>
+  /** Latest completed projection; partial reruns never displace this pointer. */
+  latestProjectionByFragmentId: Record<string, LibrarianAnalysisIndexEntry>
   appliedSummarySequence?: string[]
 }
 
@@ -192,9 +193,10 @@ function shouldReplaceIndexEntry(
 
 function defaultAnalysisIndex(): LibrarianAnalysisIndex {
   return {
-    version: 1,
+    version: 2,
     updatedAt: new Date().toISOString(),
     latestByFragmentId: {},
+    latestProjectionByFragmentId: {},
   }
 }
 
@@ -216,10 +218,14 @@ export async function getAnalysisIndex(
   if (!existsSync(path)) return null
   const raw = await readFile(path, 'utf-8')
   const parsed = JSON.parse(raw) as Partial<LibrarianAnalysisIndex>
+  if (parsed.version !== 2 || !parsed.latestProjectionByFragmentId) {
+    return rebuildAnalysisIndex(dataDir, storyId)
+  }
   return {
-    version: 1,
+    version: 2,
     updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : new Date().toISOString(),
     latestByFragmentId: parsed.latestByFragmentId ?? {},
+    latestProjectionByFragmentId: parsed.latestProjectionByFragmentId,
     appliedSummarySequence: Array.isArray(parsed.appliedSummarySequence) ? parsed.appliedSummarySequence : undefined,
   }
 }
@@ -237,9 +243,15 @@ export async function rebuildAnalysisIndex(
 ): Promise<LibrarianAnalysisIndex> {
   const summaries = await listAnalyses(dataDir, storyId)
   const latest = selectLatestAnalysesByFragment(summaries)
+  const latestProjections = selectLatestAnalysesByFragment(
+    summaries.filter((summary) => summary.hasContinuityProjection),
+  )
   const rebuilt: LibrarianAnalysisIndex = defaultAnalysisIndex()
   for (const [fragmentId, summary] of latest.entries()) {
     rebuilt.latestByFragmentId[fragmentId] = analysisSummaryToIndexEntry(summary)
+  }
+  for (const [fragmentId, summary] of latestProjections.entries()) {
+    rebuilt.latestProjectionByFragmentId[fragmentId] = analysisSummaryToIndexEntry(summary)
   }
   rebuilt.updatedAt = new Date().toISOString()
   await saveAnalysisIndex(dataDir, storyId, rebuilt)
@@ -254,8 +266,10 @@ export async function clearAnalysisIndexEntry(
   await withIndexLock(storyId, async () => {
     const index = await getAnalysisIndex(dataDir, storyId)
     if (!index) return
-    if (!(fragmentId in index.latestByFragmentId)) return
+    if (!(fragmentId in index.latestByFragmentId)
+      && !(fragmentId in index.latestProjectionByFragmentId)) return
     delete index.latestByFragmentId[fragmentId]
+    delete index.latestProjectionByFragmentId[fragmentId]
     index.updatedAt = new Date().toISOString()
     await saveAnalysisIndex(dataDir, storyId, index)
   })
@@ -279,14 +293,15 @@ export async function saveAnalysis(
   storyId: string,
   analysis: LibrarianAnalysis,
 ): Promise<void> {
+  const normalized = normalizeAnalysis(analysis as unknown as Record<string, unknown>)
   const dir = await analysesDir(dataDir, storyId)
   await mkdir(dir, { recursive: true })
   const path = await analysisPath(dataDir, storyId, analysis.id)
   await writeJsonAtomic(
     path,
-    analysis,
+    normalized,
   )
-  cacheAnalysisRead(path, Promise.resolve(cloneAnalysis(analysis)))
+  cacheAnalysisRead(path, Promise.resolve(cloneAnalysis(normalized)))
 
   // Index read-modify-write must be serialized: concurrent saves would each read
   // the same index and the later write would drop the earlier entry.
@@ -297,6 +312,15 @@ export async function saveAnalysis(
       currentIndex.latestByFragmentId[analysis.fragmentId] = {
         analysisId: analysis.id,
         createdAt: analysis.createdAt,
+      }
+    }
+    if (normalized.continuityProjection) {
+      const previousProjection = currentIndex.latestProjectionByFragmentId[analysis.fragmentId]
+      if (shouldReplaceIndexEntry(previousProjection, { createdAt: analysis.createdAt, analysisId: analysis.id })) {
+        currentIndex.latestProjectionByFragmentId[analysis.fragmentId] = {
+          analysisId: analysis.id,
+          createdAt: analysis.createdAt,
+        }
       }
     }
     currentIndex.updatedAt = new Date().toISOString()
@@ -332,10 +356,13 @@ export async function getAnalysis(
 
 function normalizeAnalysis(data: Record<string, unknown>): LibrarianAnalysis {
   const analysis = data as unknown as LibrarianAnalysis
-  if (!analysis.fragmentChangeProposals) {
-    analysis.fragmentChangeProposals = []
+  return {
+    ...analysis,
+    fragmentChangeProposals: analysis.fragmentChangeProposals ?? [],
+    ...(analysis.continuityProjection !== undefined
+      ? { continuityProjection: ContinuityProjectionSchema.parse(analysis.continuityProjection) }
+      : {}),
   }
-  return analysis
 }
 
 export async function deleteAnalysis(
@@ -353,16 +380,30 @@ export async function deleteAnalysis(
   await unlink(path)
   analysisReadCache.delete(path)
 
-  // Clean up index entry if it points to this analysis
+  // If either pointer named the deleted artifact, promote the next eligible
+  // artifact instead of leaving the fragment unindexed until a full rebuild.
   await withIndexLock(storyId, async () => {
     const index = await getAnalysisIndex(dataDir, storyId)
     if (index) {
-      const entry = index.latestByFragmentId[analysis.fragmentId]
-      if (entry && entry.analysisId === analysisId) {
-        delete index.latestByFragmentId[analysis.fragmentId]
-        index.updatedAt = new Date().toISOString()
-        await saveAnalysisIndex(dataDir, storyId, index)
+      const latestWasDeleted = index.latestByFragmentId[analysis.fragmentId]?.analysisId === analysisId
+      const projectionWasDeleted = index.latestProjectionByFragmentId[analysis.fragmentId]?.analysisId === analysisId
+      if (!latestWasDeleted && !projectionWasDeleted) return
+
+      const remaining = (await listAnalyses(dataDir, storyId))
+        .filter((summary) => summary.fragmentId === analysis.fragmentId)
+      const latest = selectLatestAnalysesByFragment(remaining).get(analysis.fragmentId)
+      const latestProjection = selectLatestAnalysesByFragment(
+        remaining.filter((summary) => summary.hasContinuityProjection),
+      ).get(analysis.fragmentId)
+      if (latest) index.latestByFragmentId[analysis.fragmentId] = analysisSummaryToIndexEntry(latest)
+      else delete index.latestByFragmentId[analysis.fragmentId]
+      if (latestProjection) {
+        index.latestProjectionByFragmentId[analysis.fragmentId] = analysisSummaryToIndexEntry(latestProjection)
+      } else {
+        delete index.latestProjectionByFragmentId[analysis.fragmentId]
       }
+      index.updatedAt = new Date().toISOString()
+      await saveAnalysisIndex(dataDir, storyId, index)
     }
   })
 
@@ -410,6 +451,7 @@ async function readAnalysisSummary(path: string): Promise<CachedAnalysisSummary>
       timelineEventCount: analysis.timelineEvents.length,
       directionsCount: analysis.directions?.length ?? 0,
       hasTrace: !!analysis.trace?.length,
+      hasContinuityProjection: analysis.continuityProjection !== undefined,
     },
     projectionContentHash: analysis.sourceRevision && analysis.continuityProjection
       ? analysis.sourceRevision.contentHash

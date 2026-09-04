@@ -22,7 +22,13 @@ import {
 } from './fragment-context-blocks'
 import { collectRecentContextSignals } from './context-selection'
 import { fragmentTagPattern } from './fragment-tag'
-import { buildContinuityView, renderContinuity, type ContinuityView } from '../librarian/continuity-view'
+import {
+  buildContinuityLedger,
+  projectContinuityView,
+  renderContinuity,
+  type ContinuityLedger,
+  type ContinuityView,
+} from '../librarian/continuity-view'
 import {
   buildSummaryProjection,
   renderSummaryProjection,
@@ -91,6 +97,8 @@ export interface ContextBuildState {
   recentCustomFragments?: CustomFragmentGroup[]
   /** Source-linked observations older than the raw prose window. */
   continuityView?: ContinuityView
+  /** Complete fold retained outside prompt-budget projections. */
+  continuityLedger?: ContinuityLedger
   /** Source-current chronological memory older than the raw prose window. */
   summaryProjection?: SummaryProjection
   authorInput?: string
@@ -353,8 +361,8 @@ export async function buildContextState(
   // Both derived views consume the same analysis index. Read it once so a cold
   // context build does not perform duplicate filesystem work before rendering.
   const analysisIndex = await getAnalysisIndex(dataDir, storyId)
-  const [continuityView, summaryProjection] = await Promise.all([
-    buildContinuityView({
+  const [continuityLedger, summaryProjection] = await Promise.all([
+    buildContinuityLedger({
       dataDir,
       storyId,
       activeProseFragments: sortedProse,
@@ -371,8 +379,9 @@ export async function buildContextState(
           targetRelative: Boolean(proseBeforeFragmentId),
           analysisIndex,
           activeProseSegmentKeys: sortedProse.map((fragment) => proseSegmentById.get(fragment.id) ?? '0'),
-        }),
+      }),
   ])
+  const continuityView = projectContinuityView(continuityLedger)
   if (summaryProjection?.omittedBefore) {
     // Projection marks the branch-scoped demand; releasing it here also covers
     // an idle Context Preview, where no later Analyze transition would do so.
@@ -423,6 +432,7 @@ export async function buildContextState(
     recentCharacters,
     recentKnowledge,
     recentCustomFragments,
+    continuityLedger,
     continuityView,
     summaryProjection,
     guidelineCatalog: nonStickyGuidelines,
@@ -442,6 +452,7 @@ export async function buildContextState(
     recentKnowledge: recentKnowledge.length,
     recentCustomFragments: recentCustomFragments.reduce((sum, group) => sum + group.fragments.length, 0),
     continuityState: continuityView?.currentState.length ?? 0,
+    continuityStateStored: continuityLedger?.currentState.length ?? 0,
     continuityThreads: continuityView?.liveThreads.length ?? 0,
     continuityKnowledge: continuityView?.characterKnowledge.length ?? 0,
     guidelineCatalog: nonStickyGuidelines.length,
