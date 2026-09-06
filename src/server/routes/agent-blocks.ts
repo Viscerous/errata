@@ -12,6 +12,8 @@ import { compileBlocks, expandMessagesFragmentTags } from '../llm/context-builde
 import { describeToolSurface } from '../llm/tool-surface'
 import { describeAnalyzeToolStages } from '../librarian/analyze-stages'
 import { getModel } from '../llm/client'
+import { getProvider } from '../config/storage'
+import { advertisedModelContextWindow } from '../config/model-capabilities'
 import { applyBlockConfig } from '../blocks/apply'
 import { createScriptHelpers } from '../blocks/script-context'
 import { pluginRegistry } from '../plugins/registry'
@@ -198,13 +200,35 @@ export function agentBlockRoutes(dataDir: string) {
       const config = await getAgentBlockConfig(dataDir, params.storyId, params.agentName)
       // Allow ?modelId= to preview model-specific instruction overrides
       const modelId = (query as Record<string, string | undefined>).modelId
+      let contextWindowPromise: Promise<number | undefined> = Promise.resolve(undefined)
       if (modelId) {
         previewCtx.modelId = modelId
+        try {
+          const resolved = await getModel(dataDir, params.storyId, { role: params.agentName })
+          if (resolved.providerId) {
+            const provider = await getProvider(dataDir, resolved.providerId)
+            if (provider) {
+              contextWindowPromise = advertisedModelContextWindow(provider, modelId, { timeoutMs: 1_500 })
+                .catch(() => undefined)
+            }
+          }
+        } catch {
+          // The prompt remains previewable without capacity metadata.
+        }
       } else {
         // Auto-resolve from the agent name (used as the model role key)
         try {
           const resolved = await getModel(dataDir, params.storyId, { role: params.agentName })
-          if (resolved.modelId) previewCtx.modelId = resolved.modelId
+          if (resolved.modelId) {
+            previewCtx.modelId = resolved.modelId
+            if (resolved.providerId) {
+              const provider = await getProvider(dataDir, resolved.providerId)
+              if (provider) {
+                contextWindowPromise = advertisedModelContextWindow(provider, resolved.modelId, { timeoutMs: 1_500 })
+                  .catch(() => undefined)
+              }
+            }
+          }
         } catch {
           // If model resolution fails (no provider configured), leave modelId unset
         }
@@ -242,6 +266,7 @@ export function agentBlockRoutes(dataDir: string) {
       const messageCharacters = previewMessages.reduce((sum, message) => sum + message.content.length, 0)
       const toolCharacters = tools.reduce((sum, tool) => sum + (tool.enabled ? tool.characters : 0), 0)
       const estimatedCharacters = messageCharacters + toolCharacters
+      const contextWindowTokens = await contextWindowPromise
       const enabledToolSurfaces = new Map(
         tools.filter((tool) => tool.enabled).map((tool) => [tool.name, tool]),
       )
@@ -269,6 +294,8 @@ export function agentBlockRoutes(dataDir: string) {
         toolCharacters,
         estimatedCharacters,
         estimatedTokens: Math.ceil(estimatedCharacters / 4),
+        modelId: previewCtx.modelId,
+        contextWindowTokens,
         toolStages,
       }
     }), { detail: { summary: 'Preview compiled agent context' } })

@@ -1122,6 +1122,7 @@ function AgentBlockEditor({ storyId, agentName, agents, onBack }: AgentBlockEdit
               blocks={previewData.blocks}
               tools={previewData.tools}
               toolStages={previewData.toolStages}
+              contextWindowTokens={previewData.contextWindowTokens}
               className="border-t border-border/30"
             />
           ) : null}

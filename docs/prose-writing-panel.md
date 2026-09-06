@@ -120,7 +120,10 @@ composer’s **Context** action compiles a live receipt showing
 the request payload proportions and largest sources, ordered blocks with
 per-block size, exact compiled messages, and each tool's description plus
 serialized input schema. Message, tool, and combined token estimates make
-schema-heavy agents visible instead of counting prompt text alone. Block IDs stay
+schema-heavy agents visible instead of counting prompt text alone. When the
+backend advertises the selected model's context window, the preview reports
+estimated occupancy and remaining output space without changing or rejecting
+the request. Block IDs stay
 in structured editor metadata and are never serialized into model text. In
 prewriter stories it labels the preview as the prewriter’s source
 context because the final brief does not exist until generation runs.

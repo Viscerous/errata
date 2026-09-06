@@ -1,5 +1,5 @@
 import { apiFetch } from './client'
-import type { DiscoveredProvider, GlobalConfigSafe } from './types'
+import type { DiscoveredProvider, GlobalConfigSafe, ProviderModelInfo } from './types'
 
 export const config = {
   getProviders: () =>
@@ -20,9 +20,9 @@ export const config = {
       body: JSON.stringify({ providerId }),
     }),
   listModels: (providerId: string) =>
-    apiFetch<{ models: Array<{ id: string; owned_by?: string; isFree?: boolean }>; error?: string }>(`/config/providers/${providerId}/models`),
+    apiFetch<{ models: ProviderModelInfo[]; error?: string }>(`/config/providers/${providerId}/models`),
   testModels: (data: { baseURL: string; apiKey: string; preset?: string; customHeaders?: Record<string, string> }) =>
-    apiFetch<{ models: Array<{ id: string; owned_by?: string; isFree?: boolean }>; error?: string }>('/config/test-models', { method: 'POST', body: JSON.stringify(data) }),
+    apiFetch<{ models: ProviderModelInfo[]; error?: string }>('/config/test-models', { method: 'POST', body: JSON.stringify(data) }),
   /** Test a saved provider with its stored key. The destination is the stored one. */
   testStoredProvider: (providerId: string, data: { model?: string } = {}) =>
     apiFetch<{ ok: boolean; reply?: string; error?: string }>(`/config/providers/${providerId}/test-connection`, { method: 'POST', body: JSON.stringify(data) }),

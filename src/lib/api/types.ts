@@ -4,7 +4,8 @@ import type {
   BlockConfig,
 } from '@/contracts/block-config'
 import type { Fragment as StoryFragment, SamplingSettings } from '@/contracts/story'
-import type { PresetId } from '@/contracts/providers'
+import type { PresetId, ProviderModelInfo } from '@/contracts/providers'
+export type { ProviderModelInfo } from '@/contracts/providers'
 export type {
   AgentBlockConfig,
   BlockConfig,
@@ -176,6 +177,9 @@ export interface ProviderConfigSafe {
 export interface GenerationContextPreview {
   inputMode: 'direct' | 'play'
   pipeline: 'standard' | 'prewriter'
+  modelId?: string
+  /** Total context advertised by the selected model; informational only. */
+  contextWindowTokens?: number
   estimatedCharacters: number
   estimatedTokens: number
   messageCharacters: number
@@ -204,7 +208,7 @@ export interface DiscoveredProvider {
   preset: PresetId
   name: string
   baseURL: string
-  models: string[]
+  models: ProviderModelInfo[]
   status: 'available' | 'unavailable'
   error?: string
 }
@@ -279,6 +283,9 @@ export interface BlockPreviewResponse {
   blockCount: number
   estimatedCharacters: number
   estimatedTokens: number
+  modelId?: string
+  /** Total context advertised by the selected model; informational only. */
+  contextWindowTokens?: number
   messageCharacters: number
   toolCharacters: number
   /** Tools sent to the model via the SDK schema, with disabledTools applied. */

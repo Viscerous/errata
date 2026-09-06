@@ -50,12 +50,17 @@ describe('local provider discovery', () => {
       timeoutMs: 100,
     })
 
-    expect(requested).toHaveLength(5)
+    expect(requested).toEqual(expect.arrayContaining([
+      'http://127.0.0.1:11434/v1/models',
+      'http://127.0.0.1:11434/api/ps',
+      'http://127.0.0.1:1234/v1/models',
+      'http://127.0.0.1:1234/api/v1/models',
+    ]))
     expect(result.find(provider => provider.preset === 'ollama')).toMatchObject({
-      status: 'available', models: ['qwen3:8b'],
+      status: 'available', models: [{ id: 'qwen3:8b' }],
     })
     expect(result.find(provider => provider.preset === 'koboldcpp')).toMatchObject({
-      status: 'unavailable', error: 'connection refused',
+      status: 'unavailable', error: 'Failed to fetch models: connection refused',
     })
     expect(result.filter(provider => provider.status === 'available')).toHaveLength(4)
   })

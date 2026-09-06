@@ -1,13 +1,14 @@
 import { readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { PROVIDER_PRESETS, type PresetId } from '@/contracts/providers'
+import { PROVIDER_PRESETS, type PresetId, type ProviderModelInfo } from '@/contracts/providers'
+import { fetchProviderModels } from './model-capabilities'
 
 export interface DiscoveredProvider {
   preset: PresetId
   name: string
   baseURL: string
-  models: string[]
+  models: ProviderModelInfo[]
   status: 'available' | 'unavailable'
   error?: string
 }
@@ -79,36 +80,20 @@ export async function localProviderCandidates(deps: DiscoveryDependencies = {}):
   return [...candidates].map(([preset, baseURL]) => ({ preset, baseURL }))
 }
 
-function modelIds(value: unknown): string[] {
-  if (!value || typeof value !== 'object') return []
-  const body = value as { data?: unknown; models?: unknown }
-  const rows = Array.isArray(body.data) ? body.data : Array.isArray(body.models) ? body.models : []
-  return [...new Set(rows.flatMap((row) => {
-    if (typeof row === 'string') return [row]
-    if (!row || typeof row !== 'object') return []
-    const model = row as Record<string, unknown>
-    const id = model.id ?? model.name ?? model.model
-    return typeof id === 'string' && id.trim() ? [id] : []
-  }))].sort((a, b) => a.localeCompare(b))
-}
-
 async function probeCandidate(
   candidate: { preset: PresetId; baseURL: string },
   fetchImpl: typeof globalThis.fetch,
   timeoutMs: number,
 ): Promise<DiscoveredProvider> {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), timeoutMs)
   try {
-    const response = await fetchImpl(`${candidate.baseURL.replace(/\/+$/, '')}/models`, {
-      headers: { Authorization: 'Bearer local' },
-      signal: controller.signal,
-    })
-    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+    const { models } = await fetchProviderModels({
+      ...candidate,
+      apiKey: 'local',
+    }, { fetch: fetchImpl, timeoutMs })
     return {
       ...candidate,
       name: PROVIDER_PRESETS[candidate.preset].name,
-      models: modelIds(await response.json()),
+      models,
       status: 'available',
     }
   } catch (error) {
@@ -117,10 +102,10 @@ async function probeCandidate(
       name: PROVIDER_PRESETS[candidate.preset].name,
       models: [],
       status: 'unavailable',
-      error: error instanceof Error && error.name === 'AbortError' ? 'Timed out' : error instanceof Error ? error.message : 'Unavailable',
+      error: error instanceof Error && (error.name === 'AbortError' || /abort/i.test(error.message))
+        ? 'Timed out'
+        : error instanceof Error ? error.message : 'Unavailable',
     }
-  } finally {
-    clearTimeout(timer)
   }
 }
 
@@ -130,4 +115,3 @@ export async function discoverLocalProviders(deps: DiscoveryDependencies = {}): 
   const fetchImpl = deps.fetch ?? globalThis.fetch
   return Promise.all(candidates.map(candidate => probeCandidate(candidate, fetchImpl, deps.timeoutMs ?? 1_500)))
 }
-

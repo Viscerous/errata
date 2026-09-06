@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 import { api } from '@/lib/api'
+import { modelOptionLabel } from '@/lib/model-capabilities'
 
 interface ModelSelectProps {
   providerId: string | null
@@ -73,7 +74,7 @@ export function ModelSelect({ providerId, value, onChange, disabled, defaultLabe
       >
         <option value="">{isLoading ? 'Loading\u2026' : defaultLabel}</option>
         {models.map((m) => (
-          <option key={m.id} value={m.id}>{m.id}{m.isFree ? ' (free)' : ''}</option>
+          <option key={m.id} value={m.id}>{modelOptionLabel(m)}</option>
         ))}
       </select>
       {hasModels && (

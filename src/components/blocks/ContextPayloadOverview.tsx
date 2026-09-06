@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import { buildContextPayloadBreakdown } from '@/lib/context-payload'
+import { formatContextWindow } from '@/lib/model-capabilities'
 
 interface ContextPayloadOverviewProps {
   messages: Array<{ role: string; content: string }>
@@ -14,6 +15,7 @@ interface ContextPayloadOverviewProps {
     conditional: boolean
     toolNames: string[]
   }>
+  contextWindowTokens?: number
   className?: string
 }
 
@@ -24,7 +26,7 @@ const partColors: Record<string, string> = {
   tool: 'bg-amber-400/70',
 }
 
-export function ContextPayloadOverview({ messages, blocks, tools, toolStages, className }: ContextPayloadOverviewProps) {
+export function ContextPayloadOverview({ messages, blocks, tools, toolStages, contextWindowTokens, className }: ContextPayloadOverviewProps) {
   const [selectedStageId, setSelectedStageId] = useState(toolStages?.[0]?.id)
   const selectedStage = toolStages?.find((stage) => stage.id === selectedStageId) ?? toolStages?.[0]
   const breakdown = useMemo(() => buildContextPayloadBreakdown({
@@ -34,6 +36,9 @@ export function ContextPayloadOverview({ messages, blocks, tools, toolStages, cl
     activeToolNames: selectedStage?.toolNames,
   }), [messages, blocks, tools, selectedStage])
   const largestCharacters = breakdown.largestSources[0]?.characters ?? 1
+  const contextUsage = contextWindowTokens
+    ? Math.round((breakdown.estimatedTokens / contextWindowTokens) * 100)
+    : null
 
   return (
     <section className={cn('rounded-lg border border-border/30 bg-muted/[0.06] p-3', className)} data-component-id="context-payload-overview">
@@ -79,6 +84,27 @@ export function ContextPayloadOverview({ messages, blocks, tools, toolStages, cl
       )}
       {selectedStage && (
         <p className="mt-1.5 text-[0.5625rem] leading-relaxed text-muted-foreground">{selectedStage.description}</p>
+      )}
+
+      {contextWindowTokens && contextUsage !== null && (
+        <div className="mt-3">
+          <div className="flex items-baseline justify-between gap-3 text-[0.5625rem] text-muted-foreground">
+            <span>
+              Estimated prompt · {contextUsage}% of {formatContextWindow(contextWindowTokens)} advertised context
+            </span>
+            <span className="shrink-0 tabular-nums">
+              {contextUsage <= 100
+                ? `~${Math.max(0, contextWindowTokens - breakdown.estimatedTokens).toLocaleString()} left for output`
+                : `~${(breakdown.estimatedTokens - contextWindowTokens).toLocaleString()} over`}
+            </span>
+          </div>
+          <div className="mt-1 h-1 overflow-hidden rounded-full bg-muted/30">
+            <div
+              className={cn('h-full rounded-full', contextUsage > 100 ? 'bg-amber-400/75' : 'bg-primary/55')}
+              style={{ width: `${Math.min(100, contextUsage)}%` }}
+            />
+          </div>
+        </div>
       )}
 
       {breakdown.estimatedCharacters > 0 && (

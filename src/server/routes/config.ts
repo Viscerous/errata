@@ -11,6 +11,7 @@ import {
 } from '../config/storage'
 import { ProviderConfigSchema } from '../config/schema'
 import { isGeminiProvider, normalizeGeminiBaseURL } from '../config/provider-urls'
+import { fetchProviderModels } from '../config/model-capabilities'
 import {
   createOpenRouterOAuthAuthorizationUrl,
   ensureOpenRouterOAuthCallbackBridge,
@@ -18,93 +19,8 @@ import {
 } from '../openrouter-oauth-callback'
 import { discoverLocalProviders } from '../config/provider-discovery'
 
-const OPENROUTER_FREE_MODEL_ID = 'openrouter/free'
-
 function maskConfigProviders<T extends { providers: Array<{ apiKey: string }> }>(config: T): T {
   return { ...config, providers: maskProviders(config.providers) }
-}
-
-function isOpenRouterProvider(provider: { preset?: string; baseURL: string }) {
-  return provider.preset === 'openrouter' || provider.baseURL.includes('openrouter.ai')
-}
-
-async function fetchProviderModels(provider: {
-  preset?: string
-  baseURL: string
-  apiKey: string
-  customHeaders?: Record<string, string>
-}) {
-  if (isGeminiProvider(provider)) {
-    const base = normalizeGeminiBaseURL(provider.baseURL)
-    const res = await fetch(`${base}/models`, {
-      headers: {
-        'x-goog-api-key': provider.apiKey,
-        ...(provider.customHeaders ?? {}),
-      },
-    })
-    if (!res.ok) {
-      const text = await res.text().catch(() => res.statusText)
-      return { models: [], error: `Failed to fetch models: ${res.status} ${text}` }
-    }
-    const json = await res.json() as {
-      models?: Array<{ name?: string; supportedGenerationMethods?: string[] }>
-    }
-    const models = (json.models ?? [])
-      .filter(model => model.name && model.supportedGenerationMethods?.includes('generateContent'))
-      .map(model => ({
-        id: model.name!.replace(/^models\//, ''),
-        owned_by: 'google',
-        isFree: false,
-      }))
-      .sort((a, b) => a.id.localeCompare(b.id))
-    return { models }
-  }
-
-  const base = provider.baseURL.replace(/\/+$/, '')
-
-  const url = /\/v\d+$/.test(base) ? `${base}/models` : `${base}/v1/models`
-  const res = await fetch(url, {
-    headers: {
-      'Authorization': `Bearer ${provider.apiKey}`,
-      ...(provider.customHeaders ?? {}),
-    },
-  })
-  if (!res.ok) {
-    const text = await res.text().catch(() => res.statusText)
-    return { models: [], error: `Failed to fetch models: ${res.status} ${text}` }
-  }
-  const json = await res.json() as { data?: Array<{ id: string; owned_by?: string; pricing?: { prompt?: string; completion?: string } }> }
-  return { models: normalizeModels(json.data ?? [], provider) }
-}
-
-function isFreeModel(model: { id: string; pricing?: { prompt?: string; completion?: string } }) {
-  return model.id === OPENROUTER_FREE_MODEL_ID
-    || model.id.endsWith(':free')
-    || (model.pricing?.prompt === '0' && model.pricing?.completion === '0')
-}
-
-function normalizeModels(
-  rawModels: Array<{ id: string; owned_by?: string; pricing?: { prompt?: string; completion?: string } }>,
-  provider: { preset?: string; baseURL: string },
-) {
-  const models = rawModels.map((m) => ({
-    id: m.id,
-    owned_by: m.owned_by,
-    isFree: isFreeModel(m),
-  }))
-
-  if (isOpenRouterProvider(provider) && !models.some((m) => m.id === OPENROUTER_FREE_MODEL_ID)) {
-    models.push({ id: OPENROUTER_FREE_MODEL_ID, owned_by: 'openrouter', isFree: true })
-  }
-
-  models.sort((a, b) => {
-    if (a.id === OPENROUTER_FREE_MODEL_ID) return -1
-    if (b.id === OPENROUTER_FREE_MODEL_ID) return 1
-    if (a.isFree !== b.isFree) return a.isFree ? -1 : 1
-    return a.id.localeCompare(b.id)
-  })
-
-  return models
 }
 
 interface TestableProvider {

@@ -84,6 +84,7 @@ export function ContextPreviewDialog({ storyId, input, inputMode, disabled }: Co
                 messages={preview.data.messages}
                 blocks={preview.data.blocks}
                 tools={preview.data.tools}
+                contextWindowTokens={preview.data.contextWindowTokens}
               />
 
               <section className="space-y-2">

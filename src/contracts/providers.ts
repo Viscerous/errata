@@ -1,5 +1,13 @@
 export type ProviderKind = 'cloud' | 'local' | 'custom'
 
+export interface ProviderModelInfo {
+  id: string
+  owned_by?: string
+  isFree?: boolean
+  /** Advertised total context window. Absent when the backend does not state one. */
+  contextWindow?: number
+}
+
 export interface ProviderPresetDefinition {
   name: string
   baseURL: string
@@ -100,4 +108,3 @@ export function providerPresetEntries() {
 export function isPresetId(value: string): value is PresetId {
   return value in PROVIDER_PRESETS
 }
-

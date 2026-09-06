@@ -19,7 +19,8 @@ import {
 } from 'lucide-react'
 import { Hint, Caption } from '@/components/ui/prose-text'
 import { Wizard } from '@/components/ui/wizard'
-import { PROVIDER_PRESETS, providerPresetEntries, type PresetId } from '@/contracts/providers'
+import { PROVIDER_PRESETS, providerPresetEntries, type PresetId, type ProviderModelInfo } from '@/contracts/providers'
+import { modelOptionLabel } from '@/lib/model-capabilities'
 
 // ── Guilloche background ─────────────────────────────
 
@@ -609,7 +610,7 @@ function ProviderSetupStep({
   const [defaultModel, setDefaultModel] = useState<string>(card.defaultModel)
   const [name, setName] = useState<string>(card.name || '')
 
-  const [fetchedModels, setFetchedModels] = useState<Array<{ id: string; owned_by?: string }>>([])
+  const [fetchedModels, setFetchedModels] = useState<ProviderModelInfo[]>([])
   const [fetchingModels, setFetchingModels] = useState(false)
   const [fetchError, setFetchError] = useState<string | null>(null)
   const [useCustomModel, setUseCustomModel] = useState(preset === 'custom')
@@ -634,9 +635,9 @@ function ProviderSetupStep({
   useEffect(() => {
     if (!detectedProvider) return
     setBaseURL(detectedProvider.baseURL)
-    setFetchedModels(detectedProvider.models.map(id => ({ id })))
+    setFetchedModels(detectedProvider.models)
     if (detectedProvider.models.length > 0) {
-      setDefaultModel(current => current || detectedProvider.models[0])
+      setDefaultModel(current => current || detectedProvider.models[0].id)
       setUseCustomModel(false)
     }
   }, [detectedProvider])
@@ -830,8 +831,7 @@ function ProviderSetupStep({
                 )}
                 {fetchedModels.map((m) => (
                   <option key={m.id} value={m.id}>
-                    {m.id}
-                    {m.owned_by ? ` (${m.owned_by})` : ''}
+                    {modelOptionLabel(m)}
                   </option>
                 ))}
               </select>

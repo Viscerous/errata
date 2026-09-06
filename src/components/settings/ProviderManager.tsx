@@ -1,12 +1,13 @@
 import { useCallback, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { api, type DiscoveredProvider, type ProviderConfigSafe } from '@/lib/api'
+import { api, type DiscoveredProvider, type ProviderConfigSafe, type ProviderModelInfo } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Plus, Trash2, Star, Pencil, RefreshCw, Loader2, X, ArrowLeft, Minus, Zap, Copy, KeyRound, Server } from 'lucide-react'
 import { EmptyHint, Hint } from '@/components/ui/prose-text'
 import { randomToken } from '@/lib/client-ids'
 import { PROVIDER_PRESETS, providerPresetEntries, type PresetId } from '@/contracts/providers'
+import { modelOptionLabel } from '@/lib/model-capabilities'
 import {
   Panel,
   PanelActions,
@@ -29,7 +30,7 @@ interface FormState {
   temperature: string // stored as string for input; '' means unset
 }
 
-type ModelOption = { id: string; owned_by?: string; isFree?: boolean }
+type ModelOption = ProviderModelInfo
 
 const defaultPreset = PROVIDER_PRESETS.deepseek
 const emptyForm: FormState = {
@@ -155,11 +156,11 @@ export function ProviderPanel({ onClose }: { onClose: () => void }) {
       name: provider.name,
       baseURL: provider.baseURL,
       apiKey: '',
-      defaultModel: provider.models[0] ?? preset.defaultModel,
+      defaultModel: provider.models[0]?.id ?? preset.defaultModel,
       customHeaders: [],
       temperature: '',
     })
-    setFetchedModels(provider.models.map(id => ({ id })))
+    setFetchedModels(provider.models)
     setFetchError(null)
     setUseCustomModel(provider.models.length === 0)
     setOauthStatus(null)
@@ -515,7 +516,7 @@ export function ProviderPanel({ onClose }: { onClose: () => void }) {
                     )}
                     {fetchedModels.map((m) => (
                       <option key={m.id} value={m.id}>
-                        {m.id}{m.isFree ? ' (free)' : m.owned_by ? ` (${m.owned_by})` : ''}
+                        {modelOptionLabel(m)}
                       </option>
                     ))}
                   </select>

@@ -28,6 +28,7 @@ interface BlockContentViewProps {
     estimatedCharacters: number
     estimatedTokens: number
   }>
+  contextWindowTokens?: number
   className?: string
 }
 
@@ -68,7 +69,7 @@ function parseBlockSegments(messages: Array<{ role: string; content: string }>) 
   }))
 }
 
-export function BlockContentView({ messages, blocks, tools, toolStages, className }: BlockContentViewProps) {
+export function BlockContentView({ messages, blocks, tools, toolStages, contextWindowTokens, className }: BlockContentViewProps) {
   const [activeBlockId, setActiveBlockId] = useState<string | null>(null)
   const contentRef = useRef<HTMLDivElement>(null)
 
@@ -152,6 +153,7 @@ export function BlockContentView({ messages, blocks, tools, toolStages, classNam
             blocks={segments}
             tools={tools}
             toolStages={toolStages}
+            contextWindowTokens={contextWindowTokens}
             className="mb-3"
           />
           {segments.map((seg) => (

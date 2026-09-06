@@ -6,6 +6,8 @@ import type { DirectionProposalResult } from '../directions/suggest'
 import { runGeneration } from '../generation/run-generation'
 import { compileGenerationWriterContext } from '../llm/compile-generation-writer-context'
 import { getModel } from '../llm/client'
+import { getProvider } from '../config/storage'
+import { advertisedModelContextWindow } from '../config/model-capabilities'
 import { pluginRegistry } from '../plugins/registry'
 import { describeToolSurface } from '../llm/tool-surface'
 
@@ -52,9 +54,17 @@ export function generationRoutes(dataDir: string) {
       const inputMode = body.inputMode ?? story.settings.authorInputMode ?? 'direct'
       const enabledPlugins = pluginRegistry.getEnabled(story.settings.enabledPlugins)
       let modelId: string | undefined
+      let contextWindowPromise: Promise<number | undefined> = Promise.resolve(undefined)
       try {
         const resolved = await getModel(dataDir, params.storyId, { role: 'generation.writer' })
         modelId = resolved.modelId || undefined
+        if (resolved.providerId && modelId) {
+          const provider = await getProvider(dataDir, resolved.providerId)
+          if (provider) {
+            contextWindowPromise = advertisedModelContextWindow(provider, modelId, { timeoutMs: 1_500 })
+              .catch(() => undefined)
+          }
+        }
       } catch {
         // Context remains previewable before the author configures a provider.
       }
@@ -73,10 +83,13 @@ export function generationRoutes(dataDir: string) {
       )
       const toolCharacters = tools.reduce((sum, tool) => sum + tool.characters, 0)
       const estimatedCharacters = messageCharacters + toolCharacters
+      const contextWindowTokens = await contextWindowPromise
 
       return {
         inputMode,
         pipeline: story.settings.generationMode ?? 'standard',
+        modelId,
+        contextWindowTokens,
         estimatedCharacters,
         estimatedTokens: Math.ceil(estimatedCharacters / 4),
         messageCharacters,
