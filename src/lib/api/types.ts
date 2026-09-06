@@ -4,6 +4,7 @@ import type {
   BlockConfig,
 } from '@/contracts/block-config'
 import type { Fragment as StoryFragment, SamplingSettings } from '@/contracts/story'
+import type { PresetId } from '@/contracts/providers'
 export type {
   AgentBlockConfig,
   BlockConfig,
@@ -172,6 +173,42 @@ export interface ProviderConfigSafe {
   createdAt: string
 }
 
+export interface GenerationContextPreview {
+  inputMode: 'direct' | 'play'
+  pipeline: 'standard' | 'prewriter'
+  estimatedCharacters: number
+  estimatedTokens: number
+  messageCharacters: number
+  toolCharacters: number
+  blocks: Array<{
+    id: string
+    name: string
+    role: 'system' | 'user'
+    source: string
+    content: string
+    characters: number
+    estimatedTokens: number
+  }>
+  messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>
+  tools: Array<{
+    name: string
+    description: string
+    schema: string
+    characters: number
+    estimatedTokens: number
+  }>
+  caveat: string | null
+}
+
+export interface DiscoveredProvider {
+  preset: PresetId
+  name: string
+  baseURL: string
+  models: string[]
+  status: 'available' | 'unavailable'
+  error?: string
+}
+
 export interface GlobalConfigSafe {
   providers: ProviderConfigSafe[]
   defaultProviderId: string | null
@@ -181,6 +218,7 @@ export interface GenerationLog {
   id: string
   createdAt: string
   input: string
+  inputMode?: 'direct' | 'play'
   messages: Array<{ role: string; content: string }>
   toolCalls: Array<{ toolName: string; args: Record<string, unknown>; result: unknown }>
   generatedText: string
@@ -237,10 +275,32 @@ export interface BlocksResponse {
 
 export interface BlockPreviewResponse {
   messages: Array<{ role: string; content: string }>
-  blocks: Array<{ id: string; name: string; role: string }>
+  blocks: Array<{ id: string; name: string; role: string; content: string }>
   blockCount: number
+  estimatedCharacters: number
+  estimatedTokens: number
+  messageCharacters: number
+  toolCharacters: number
   /** Tools sent to the model via the SDK schema, with disabledTools applied. */
-  tools: Array<{ name: string; description: string; enabled: boolean }>
+  tools: Array<{
+    name: string
+    description: string
+    schema: string
+    characters: number
+    estimatedTokens: number
+    enabled: boolean
+  }>
+  /** Per-request tool surfaces for agents whose tool loop is staged. */
+  toolStages: Array<{
+    id: 'observation' | 'inspection' | 'follow-up'
+    label: string
+    description: string
+    conditional: boolean
+    toolNames: string[]
+    toolCharacters: number
+    estimatedCharacters: number
+    estimatedTokens: number
+  }>
 }
 
 // Agent Block types

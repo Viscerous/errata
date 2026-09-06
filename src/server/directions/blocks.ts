@@ -1,7 +1,6 @@
 import { STORY_SUMMARY_PLACEHOLDER, type ContextBlock } from '../llm/context-builder'
 import {
   buildFragmentContextLanes,
-  canReadFragments,
   fragmentCatalogBlock,
   fragmentFullContextBlocksBySource,
   isBuiltinContextFragmentType,
@@ -17,7 +16,7 @@ import {
   buildBasePreviewContext,
 } from '../agents/block-helpers'
 
-export const DIRECTIONS_SYSTEM_PROMPT = `You are a story development editor. Propose distinct, compelling directions the narrative could take next. Give each direction a short evocative title, a brief description, and a detailed instruction prompt a prose writer could follow directly.`
+export const DIRECTIONS_SYSTEM_PROMPT = `You are a story development editor. Propose distinct, story-specific possibilities that follow from the supplied context without prematurely settling character choices or unresolved questions.`
 
 export function createDirectionsSuggestBlocks(ctx: AgentBlockContext): ContextBlock[] {
   const blocks: ContextBlock[] = []
@@ -83,7 +82,6 @@ export function createDirectionsSuggestBlocks(ctx: AgentBlockContext): ContextBl
       order: 250,
       heading: 'Also In This Story',
       scope: 'available',
-      canReadFragments: canReadFragments(ctx),
     })
     if (catalog) blocks.push(catalog)
   }

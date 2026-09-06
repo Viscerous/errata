@@ -23,6 +23,24 @@ describe('config routes', () => {
     await cleanup()
   })
 
+  it('stores a keyless local provider connection', async () => {
+    const res = await app.fetch(new Request('http://localhost/api/config/providers', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Ollama',
+        preset: 'ollama',
+        baseURL: 'http://127.0.0.1:11434/v1',
+        apiKey: '',
+        defaultModel: 'qwen3:8b',
+      }),
+    }))
+
+    expect(res.status).toBe(200)
+    const body = await res.json() as { providers: Array<{ name: string; preset: string; apiKey: string }> }
+    expect(body.providers[0]).toMatchObject({ name: 'Ollama', preset: 'ollama', apiKey: '' })
+  })
+
   it('exchanges an OpenRouter OAuth code and stores a free-router provider', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ key: 'or-oauth-key' }), {
       status: 200,

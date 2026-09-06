@@ -252,8 +252,8 @@ describe('prewriter', () => {
       // Instructions should be a system block
       const instructions = blocks.find((b) => b.id === 'instructions')!
       expect(instructions.role).toBe('system')
-      expect(instructions.content).toContain('writing planner')
-      expect(instructions.content).toContain('WRITING BRIEF')
+      expect(instructions.content).toContain('Plan the next passage')
+      expect(instructions.content).toContain('writing brief')
 
       // full-context and planning-request should be user blocks
       const fullContext = blocks.find((b) => b.id === 'full-context')!
@@ -265,7 +265,7 @@ describe('prewriter', () => {
   })
 
   describe('createWriterBriefBlocks', () => {
-    it('creates stripped context with only instructions, tools, prose, and writing-brief', () => {
+    it('creates stripped context with only instructions, prose, and writing-brief', () => {
       const proseFragments = [
         makeFragment({ id: 'pr-0001', content: 'The rain fell softly.' }),
         makeFragment({ id: 'pr-0002', content: 'She opened the door.' }),
@@ -276,14 +276,9 @@ describe('prewriter', () => {
 
       const ids = blocks.map((b) => b.id)
       expect(ids).toContain('instructions')
-      expect(ids).toContain('tools')
+      expect(ids).not.toContain('tools')
       expect(ids).toContain('prose-recent')
       expect(ids).toContain('writing-brief')
-
-      // The tools block carries usage policy only — no enumerated catalog.
-      const tools = blocks.find((b) => b.id === 'tools')!
-      expect(tools.content).not.toContain('getCharacter')
-      expect(tools.content).not.toContain('## Available Tools')
 
       // Should NOT contain any of the full context blocks
       expect(ids).not.toContain('story-info')
@@ -297,7 +292,7 @@ describe('prewriter', () => {
 
       // Instructions should mention the writing brief
       const instructions = blocks.find((b) => b.id === 'instructions')!
-      expect(instructions.content).toContain('WRITING BRIEF')
+      expect(instructions.content).toContain('writing brief')
 
       // Prose should contain the fragment content
       const prose = blocks.find((b) => b.id === 'prose-recent')!
@@ -317,11 +312,18 @@ describe('prewriter', () => {
       expect(writingBrief.content).toBe('## Writing Brief\n\nFocus on dialogue.')
     })
 
-    it('always includes a policy-only tools block', () => {
-      const blocks = createWriterBriefBlocks([], 'A brief.')
-      const tools = blocks.find((b) => b.id === 'tools')!
-      expect(tools).toBeDefined()
-      expect(tools.content).not.toContain('## Available Tools')
+    it('preserves an author story turn verbatim beside the prewriter brief', () => {
+      const turn = 'I step closer. "Tell me the truth," I say.'
+      const blocks = createWriterBriefBlocks([], 'Keep the exchange tense.', undefined, turn)
+      const storyTurn = blocks.find((block) => block.id === 'author-story-turn')!
+      const contract = blocks.find((block) => block.id === 'play-output-contract')!
+
+      expect(storyTurn.role).toBe('user')
+      expect(storyTurn.content).toContain(turn)
+      expect(storyTurn.content).toContain('<author-story-turn>')
+      expect(contract.role).toBe('system')
+      expect(contract.content).toContain('Return only new prose that follows it.')
+      expect(storyTurn.order).toBeGreaterThan(blocks.find((block) => block.id === 'writing-brief')!.order)
     })
 
     it('omits prose block when no prose fragments provided', () => {
@@ -624,7 +626,7 @@ describe('prewriter', () => {
         ? prewriterUserMsg1.content
         : prewriterUserMsg1?.content?.map((p: any) => p.text).join('') ?? ''
 
-      expect(prewriterText1).toContain('CONTINUE')
+      expect(prewriterText1).toContain('## Author Request')
 
       // Regenerate mode
       callCount = 0
@@ -730,7 +732,8 @@ describe('prewriter', () => {
       // The author direction should appear via planning-request, not via author-input
       expect(prewriterText).not.toContain('[@block=author-input]')
       // planning-request should still carry the direction
-      expect(prewriterText).toContain('CONTINUE')
+      expect(prewriterText).toContain('## Author Request')
+      expect(prewriterText).toContain('Continue the story')
     })
 
     it('writer system instructions and tools do not leak into prewriter context', async () => {
@@ -762,7 +765,7 @@ describe('prewriter', () => {
       expect(prewriterText).not.toContain('Your task is to write prose that continues')
       expect(prewriterText).not.toContain('Use these tools to retrieve details about characters')
       // The planner's OWN instruction is still present.
-      expect(prewriterText).toContain('writing planner')
+      expect(prewriterText).toContain('Plan the next passage')
     })
 
     it('prewriter custom blocks do not leak into writer context', async () => {
@@ -840,8 +843,9 @@ describe('prewriter', () => {
       expect(prewriterConfig.tools).not.toHaveProperty('readFragments')
       expect(writerConfig.tools).toHaveProperty('readFragments')
       const prewriterPrompt = streamMessagesText(0)
-      expect(prewriterPrompt).toContain('[@block=full-context:fragment-catalog]')
-      expect(prewriterPrompt).toContain('You cannot open these rows')
+      expect(prewriterPrompt).not.toContain('[@block=')
+      expect(prewriterPrompt).toContain('## Fragment Catalog')
+      expect(prewriterPrompt).toContain('Summary rows: `id` | name | summary')
       expect(prewriterPrompt).not.toContain('[user]\n')
     })
 

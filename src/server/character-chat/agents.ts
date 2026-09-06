@@ -5,7 +5,7 @@ import { modelRoleRegistry } from '../agents/model-role-registry'
 import { instructionRegistry } from '../instructions'
 import type { AgentDefinition } from '../agents/types'
 import { characterChat } from './chat'
-import { createCharacterChatBlocks, buildCharacterChatPreviewContext } from './blocks'
+import { CHARACTER_CHAT_SYSTEM_PROMPT, createCharacterChatBlocks, buildCharacterChatPreviewContext } from './blocks'
 
 const PersonaModeSchema = z.union([
   z.object({ type: z.literal('character'), characterId: z.string() }),
@@ -46,14 +46,7 @@ export function registerCharacterChatAgents(): void {
   if (registered) return
 
   // Register instruction defaults
-  instructionRegistry.registerDefault('character-chat.system', 'You are roleplaying as the character described under "## Character" in the conversation context. Stay in character at all times.')
-  instructionRegistry.registerDefault('character-chat.instructions', [
-    '1. Respond as that character would, using their voice, mannerisms, and knowledge.',
-    '2. Treat only the character sheet and the explicit "What You Know" list as memory. Do not infer knowledge from authorial story material or other characters.',
-    '3. When asked about events beyond your knowledge, respond with the character\'s genuine uncertainty.',
-    '4. Stay in character; break the fourth wall only if the character would.',
-    '5. Keep responses natural and conversational.',
-  ].join('\n'))
+  instructionRegistry.registerDefault('character-chat.system', CHARACTER_CHAT_SYSTEM_PROMPT)
   instructionRegistry.registerDefault('character-chat.persona.character', 'You are speaking with {{personaName}}. {{personaDescription}}')
   instructionRegistry.registerDefault('character-chat.persona.stranger', 'You are speaking with a stranger you have just met. You do not know who they are.')
   instructionRegistry.registerDefault('character-chat.persona.custom', 'You are speaking with someone described as: {{prompt}}')

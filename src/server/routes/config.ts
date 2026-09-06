@@ -16,6 +16,7 @@ import {
   ensureOpenRouterOAuthCallbackBridge,
   exchangeAndSaveOpenRouterOAuthCode,
 } from '../openrouter-oauth-callback'
+import { discoverLocalProviders } from '../config/provider-discovery'
 
 const OPENROUTER_FREE_MODEL_ID = 'openrouter/free'
 
@@ -171,6 +172,12 @@ export function configRoutes(dataDir: string) {
       return getGlobalConfigSafe(dataDir)
     }, {
       detail: { summary: 'Get global config with masked API keys' },
+    })
+
+    .get('/config/discover-local', async () => ({
+      providers: await discoverLocalProviders(),
+    }), {
+      detail: { summary: 'Probe known local model servers on loopback' },
     })
 
     .post('/config/providers', async ({ body }) => {

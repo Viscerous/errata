@@ -263,7 +263,7 @@ const coercedStringArray = z.array(coercedStringItem).max(200).default([])
 export const MAX_CITED_SEGMENTS = 8
 
 const proseCitationSchema = z.array(z.number().int().positive()).default([])
-  .describe(`Sentence numbers from the New Prose Fragment that show this. Cite the fewest that carry it; only the first ${MAX_CITED_SEGMENTS} are kept.`)
+  .describe(`New-prose sentence numbers; cite only those needed (first ${MAX_CITED_SEGMENTS} kept).`)
 
 /** Conditional maintenance lanes may be abandoned after a failed attempt. */
 const skippedToolNameSchema = z.enum(['proposeRecordCorrections', 'proposeNewRecords'])
@@ -276,17 +276,17 @@ const sceneSchema = z.object({
   transition: z.enum([
     'continue', 'advance', 'cut', 'enter-flashback', 'enter-flash-forward', 'return', 'uncertain',
   ]).default('uncertain')
-    .describe('What this passage does to the scene cursor. A cut starts another scene on the same narrative line; enter-flashback/enter-flash-forward opens an overlay; return resumes the suspended frame.'),
+    .describe('Scene relation: cut starts a new scene on the same line; enter opens a time overlay; return resumes it.'),
   line: z.enum(['present', 'flashback', 'flash-forward', 'uncertain']).optional()
-    .describe('The resulting narrative line only when this passage changes or establishes it. Omit it when continuing the established line.'),
+    .describe('Resulting narrative line when established or changed; otherwise omit.'),
   location: SceneLocationInputSchema.optional()
-    .describe('The resulting place only when this passage changes or first establishes it. Omit an unchanged inherited location.'),
+    .describe('Resulting place when established or changed; otherwise omit.'),
   time: NarrativeTimeInputSchema.optional()
-    .describe('The resulting story time only when this passage changes or first establishes it. Omit unchanged inherited time.'),
+    .describe('Resulting story time when established or changed; otherwise omit.'),
   elapsed: NarrativeDurationInputSchema.optional()
-    .describe('Elapsed story time for advance. One generation never implies a duration by itself.'),
+    .describe('Elapsed story time for advance; never infer it from passage length.'),
   evidenceSegments: proseCitationSchema
-    .describe('Sentence numbers carrying the scene, place, or time transition, when the prose gives one.'),
+    .describe('Sentence numbers establishing the scene, place, or time change.'),
 }).default({ transition: 'uncertain', evidenceSegments: [] })
 
 type SceneInput = z.infer<typeof sceneSchema>
@@ -407,12 +407,12 @@ function continuityKeyFields(
   // rewrite the tool block on every analysis and cost the prompt cache.
   const unique = [...new Set((existing ?? []).map((entry) => entry.key))].sort()
   const reuse = unique.length > 0
-    ? ` Reuse one of these exactly when the passage changes something already tracked: ${unique.slice(0, MAX_STEERED_REGISTRY_KEYS).join(', ')}.`
+    ? ` Reuse when applicable: ${unique.slice(0, MAX_STEERED_REGISTRY_KEYS).join(', ')}.`
     : ''
   return registryAddressFields(
     entryField,
-    `The numbered registry entry this operation changes, taken from the Continuity Registry. Cite it whenever the passage changes something already tracked; omit it only when a ${creationAction} introduces something genuinely new.`,
-    `The ${noun}, when you are not citing an entry number.${reuse} For a genuinely new identity introduced by a ${creationAction} operation, omit both and the engine will derive one. If you coin a key, use snake_case naming the thing itself, such as ${example}; never include a character or fragment ID.`,
+    `Existing Continuity Registry entry changed here; omit only when ${creationAction} creates a new one.`,
+    `Existing ${noun} key when no entry number is used.${reuse} For a new identity, omit both fields to derive a key; if supplied, use snake_case without IDs (for example ${example}).`,
   )
 }
 
@@ -423,16 +423,16 @@ function stateOperationSchemaFor(registry: ContinuityRegistry) {
     subject: z.object({
       label: z.string().trim().min(1).max(160),
       fragmentId: FragmentIdSchema.optional(),
-    }).optional().describe('Required only for a genuinely new set. Give its plain label and optional record ID; the engine derives the structural key. An existing stateEntry already supplies the complete subject.'),
+    }).optional().describe('Subject label and optional record ID, only for a new set.'),
     facet: z.string().trim().min(1).max(100).optional()
-      .describe('Required only for a new set. One stable question, such as location (where?), attire (wearing what?), or injury (what condition?). Existing entries supply it. Keep values about that question; separate independently changing conditions and avoid catch-all status.'),
+      .describe('One stable question for a new set, such as location, attire, or injury; avoid catch-all status.'),
     slot: z.string().trim().min(1).max(100).optional()
-      .describe('Only when one subject can carry several simultaneous values of this facet, such as left_wrist under injury.'),
+      .describe('Optional sub-key when a facet can hold simultaneous values, such as left_wrist injury.'),
     value: z.string().trim().max(300).optional(),
     certainty: z.enum(['explicit', 'implied']).default('explicit')
-      .describe('Whether accepted prose states the condition directly or establishes it by a necessary implication.'),
+      .describe('Whether the prose states this directly or by necessary implication.'),
     scope: z.enum(['scene', 'cross-scene']).default('scene')
-      .describe('Use scene normally. Use cross-scene only when this condition must still constrain writing after a scene cut.'),
+      .describe('Use cross-scene only when the condition must survive a scene cut.'),
     until: NarrativeTimeInputSchema.optional()
       .describe('Optional story-time expiry for a cross-scene condition.'),
     evidenceSegments: proseCitationSchema,
@@ -444,13 +444,13 @@ function threadOperationSchemaFor(registry: ContinuityRegistry) {
     ...continuityKeyFields(registry.thread, 'threadEntry', 'unresolved question', 'who_betrayed_the_house', 'open'),
     action: z.enum(['open', 'advance', 'resolve', 'abandon']),
     label: z.string().trim().max(240).optional()
-      .describe('Optional plain-language phrasing of the question. Omit it and the key is used.'),
+      .describe('Optional plain-language question; defaults to the key.'),
     note: z.string().trim().max(300).optional(),
     relatedFragmentIds: z.array(FragmentIdSchema).max(40).default([]),
     // A thread this passage acted on is in view by the acting; carrying that
     // here removes the whole reason to restate the operation in threadFocus.
     visibility: z.enum(['foreground', 'background']).optional()
-      .describe('How present this thread is after the passage. Defaults to foreground for open and advance; ignored for resolve and abandon.'),
+      .describe('Prominence after the passage; open and advance default to foreground.'),
     evidenceSegments: proseCitationSchema,
   })
 }
@@ -468,11 +468,11 @@ function threadOperationSchemaFor(registry: ContinuityRegistry) {
 const threadFocusSchema = z.object({
   ...registryAddressFields(
     'threadEntry',
-    'The numbered Continuity Registry entry for a still-relevant thread this passage did not act on.',
-    'That thread\'s key, when you are not citing an entry number. It must already be open; focus cannot introduce a thread.',
+    'Existing Continuity Registry thread this passage did not act on.',
+    'Existing open thread key when no entry number is used; focus cannot create a thread.',
   ),
   visibility: z.enum(['foreground', 'background', 'dormant'])
-    .describe('Set dormant when an existing thread should leave the immediate writing context without being resolved.'),
+    .describe('Set dormant to remove an unresolved thread from immediate writing context.'),
 })
 
 function knowledgeOperationSchemaFor(registry: ContinuityRegistry) {
@@ -481,7 +481,7 @@ function knowledgeOperationSchemaFor(registry: ContinuityRegistry) {
     ...continuityKeyFields(registry.knowledge, 'knowledgeEntry', 'fact identity', 'queen_identity', 'learn'),
     action: z.enum(['learn', 'correct', 'forget']),
     fact: z.string().trim().max(400).optional()
-      .describe('Worth remembering beyond recent prose. Preserve who said or inferred it and when it applied: "She told him she wanted X during the examination", not "She wants X". Attribute interpretations as beliefs; never generalize willingness from an expression. Omit knowledge dependent on a capability contradicted by the records.'),
+      .describe('Durable character-specific learning. Preserve source, inference, and temporal limits; do not turn expressions into general willingness.'),
     acquisition: z.enum(['witnessed', 'told', 'inferred', 'other']).default('other'),
     evidenceSegments: proseCitationSchema,
   })
@@ -493,38 +493,38 @@ export function buildReportAnalysisInputSchema(input: ContinuityKeyRegistry = {}
     // Accept verbosity here and normalize it in execute. Rejecting the entire
     // structured report for an overlong summary makes reasoning models retain
     // a large failed tool call and regenerate every otherwise-valid field.
-    summary: z.string().default('').describe('A concise retrospective record of what had happened in the new prose fragment, written as past history rather than a scene to continue — a paragraph or two, at most 1200 characters. Longer input is shortened by the server.'),
+    summary: z.string().default('').describe('Concise retrospective summary of the new prose, as past history (max 1200 characters kept).'),
     events: coercedStringArray
-      .describe('What happened, one short statement each — the few that matter, at most 8 are kept. These become the story timeline; `scene` places them, so do not restate when they happened.'),
+      .describe('A few short events for the timeline; scene metadata supplies when (first 8 kept).'),
     mentions: z.array(mentionInputSchema).max(150).default([])
-      .describe('Distinct mentions of listed fragments in the new prose — at most one entry per fragment/text pair; a single mention highlights every occurrence of that text. Use exact prose text; never a bare pronoun.'),
+      .describe('Distinct listed-fragment mentions using exact prose text, never bare pronouns.'),
     candidateFragmentIds: z.array(FragmentIdSchema).max(120).default([])
-      .describe('Existing fragment IDs to return in full, even when the prose never names them. Two kinds: durable-memory candidates, and records this passage has made inaccurate. Your context lists every record with its description — use those to find the ones tied to whatever changed here.'),
+      .describe('Existing record IDs needing full text for durable-memory or contradiction review.'),
     contradictions: z.array(z.object({
       description: z.string().describe('What the contradiction is'),
       recordCorrectionReason: z.string().trim().min(1).max(500).optional()
-        .describe('Only when evidence establishes the reusable record itself is wrong: explain why that record should change. Omit for a prose error or unresolved conflict. A conflicting generated assertion alone does not authorize changing a capability, consent, knowledge, or authority constraint.'),
+        .describe('Why evidence proves the reusable record is wrong; omit for prose errors or unresolved conflicts.'),
       fragmentIds: z.array(FragmentIdSchema).default([])
-        .describe('IDs of the reusable fragments involved. A grounded finding must also provide conflictingEvidence.'),
+        .describe('Reusable record IDs involved; grounded findings also need conflictingEvidence.'),
       sourceSegments: proseCitationSchema
         .describe('Sentence numbers in the new prose carrying the conflicting assertion.'),
       conflictingEvidence: z.array(z.object({
         fragmentId: FragmentIdSchema,
         segments: z.array(z.number().int().positive()).default([])
-          .describe(`Sentence numbers in that record carrying the incompatible claim; only the first ${MAX_CITED_SEGMENTS} are kept.`),
+          .describe(`Record sentence numbers carrying the incompatible claim (first ${MAX_CITED_SEGMENTS} kept).`),
       })).max(8).default([])
-        .describe('The reusable non-prose records this conflicts with, cited by sentence. State changes across successive prose are not contradictions.'),
+        .describe('Conflicting reusable records cited by sentence; ordinary state changes are not contradictions.'),
     })).max(32).default([]),
     scene: sceneSchema.optional()
-      .describe('Changed scene fields. Omit this lane on a narrow retry to retain its earlier accepted data; send only {transition:"uncertain"} to withdraw a rejected scene claim.'),
+      .describe('Changed scene fields. On retry omit to retain; send transition uncertain to withdraw.'),
     stateOperations: z.array(stateOperationSchemaFor(registry)).max(80).optional()
-      .describe('Keyed conditions worth retaining after this prose leaves the recent window. Existing stateEntry values already supply state identity. A later set supersedes the prior value directly; clear only when the condition ends without replacement. Scene is the normal scope; choose cross-scene only when the condition must constrain a later scene. Omit this lane on a narrow retry to retain earlier data; send [] to withdraw its rejected operations.'),
+      .describe('Persistent conditions: set replaces, clear ends; use scene scope unless it must survive a cut. On retry omit to retain, [] to withdraw.'),
     threadOperations: z.array(threadOperationSchemaFor(registry)).max(80).optional()
-      .describe('Explicit lifecycle changes for unresolved narrative questions. Resolve completed questions, never repurpose a key. Omission retains prior prominence; set dormant through threadFocus explicitly. Omit this lane on a narrow retry to retain earlier data; send [] to withdraw its rejected operations.'),
+      .describe('Lifecycle changes for unresolved questions; never repurpose keys. On retry omit to retain, [] to withdraw.'),
     threadFocus: z.array(threadFocusSchema).max(80).optional()
-      .describe('Sparse prominence updates for threads this passage did NOT act on. Do not repeat threadOperations here — those carry their own visibility. Omission retains a thread\'s prior prominence; set dormant explicitly when it should leave the immediate writing context without being resolved. Omit this lane on a narrow retry to retain earlier data; send [] to withdraw its rejected focus entries.'),
+      .describe('Prominence changes for untouched threads only; do not repeat threadOperations. On retry omit to retain, [] to withdraw.'),
     knowledgeOperations: z.array(knowledgeOperationSchemaFor(registry)).max(120).optional()
-      .describe('Useful learning established for a specific character, including attributed inferences with their limits. Preserve the occasion of temporary disclosures; omit current desires, feelings, unsupported opinions, and reader-only information. Omit this lane on a narrow retry to retain earlier data; send [] to withdraw its rejected operations.'),
+      .describe('Durable character-specific learning, with attributed and temporal limits. On retry omit to retain, [] to withdraw.'),
   })
 }
 
@@ -1125,7 +1125,7 @@ function mergeContinuityProjection(
 }
 
 const proposalEvidenceSchema = z.array(z.number().int().positive()).default([])
-  .describe(`Sentence numbers from the New Prose Fragment that establish this change; only the first ${MAX_CITED_SEGMENTS} are kept.`)
+  .describe(`New-prose sentence numbers establishing the proposal (first ${MAX_CITED_SEGMENTS} kept).`)
 
 /**
  * A correction names the sentence it replaces rather than reproducing it.
@@ -1144,7 +1144,7 @@ const correctionProposalItemSchema = z.object({
   segment: z.number().int().positive()
     .describe('The numbered sentence in that fragment to replace.'),
   newText: z.string().trim().min(1).max(MAX_CORRECTION_SPAN_CHARS)
-    .describe('The corrected sentence: exactly one sentence, replacing exactly that one. Write the sentence alone, without its [number]. Restate only that assertion; do not summarize the scene.'),
+    .describe('One corrected replacement sentence, without its number or scene recap.'),
   reason: z.string().max(500).optional(),
 })
 
@@ -1161,24 +1161,24 @@ const MAX_PROPOSAL_RATIONALE_CHARS = 600
 
 export const librarianRecordCorrectionsInputSchema = z.object({
   title: z.string().optional()
-    .describe(`Optional proposal title. Aim for at most ${MAX_PROPOSAL_TITLE_CHARS} characters; longer input is shortened by the server.`),
+    .describe(`Optional title (aim for ${MAX_PROPOSAL_TITLE_CHARS} characters; longer text is shortened).`),
   evidenceSegments: proposalEvidenceSchema
-    .describe('Sentence numbers from the New Prose Fragment that establish this change. Required on the first attempt; a retry may omit them because the tool retains the last grounded citation.'),
+    .describe('Required on the first attempt; retained for retries.'),
   rationale: z.string().trim().optional()
-    .describe(`Optional shared rationale. Aim for at most ${MAX_PROPOSAL_RATIONALE_CHARS} characters; longer input is shortened by the server.`),
+    .describe(`Optional shared rationale (aim for ${MAX_PROPOSAL_RATIONALE_CHARS} characters).`),
   corrections: z.array(correctionProposalItemSchema).max(4).default([])
-    .describe('Localized replacements for record assertions cited in reportAnalysis contradictions with recordCorrectionReason explaining why the record is wrong. Leave prose errors and unresolved conflicts for review; ordinary progression belongs in continuity state.'),
+    .describe('Localized record corrections grounded by reportAnalysis; not prose errors or unresolved conflicts.'),
 })
 
 export const librarianNewRecordsInputSchema = z.object({
   title: z.string().optional()
-    .describe(`Optional proposal title. Aim for at most ${MAX_PROPOSAL_TITLE_CHARS} characters; longer input is shortened by the server.`),
+    .describe(`Optional title (aim for ${MAX_PROPOSAL_TITLE_CHARS} characters; longer text is shortened).`),
   evidenceSegments: proposalEvidenceSchema
-    .describe('Sentence numbers from the New Prose Fragment that establish this change. Required on the first attempt; a retry may omit them because the tool retains the last grounded citation.'),
+    .describe('Required on the first attempt; retained for retries.'),
   rationale: z.string().trim().optional()
-    .describe(`Optional shared rationale. Aim for at most ${MAX_PROPOSAL_RATIONALE_CHARS} characters; longer input is shortened by the server.`),
+    .describe(`Optional shared rationale (aim for ${MAX_PROPOSAL_RATIONALE_CHARS} characters).`),
   newFragments: z.array(newFragmentProposalItemSchema).max(4).default([])
-    .describe('Genuinely new reusable named records. Do not create event logs, current-condition notes, scene details, or duplicates.'),
+    .describe('New reusable named records; not event logs, current conditions, scene details, or duplicates.'),
 })
 
 /**
@@ -1199,7 +1199,7 @@ export const librarianFinishAnalysisInputSchema = z.object({
       toolName: skippedToolNameSchema,
       reason: z.string().trim().min(1).optional(),
     }),
-  ])).default([]).describe('Lanes you are abandoning: the tool name on its own, or {toolName, reason} to say why. A lane you left failing needs the reason. A lane you never needed does not have to be listed.'),
+  ])).default([]).describe('Unfinished proposal lanes being abandoned; include a reason after a failed call.'),
 })
 
 type AnalysisProposalSkipped = Skipped<{
@@ -1420,7 +1420,7 @@ export function createAnalysisTools(
 
   if (opts?.includeReportTool !== false) {
     tools.reportAnalysis = tool({
-      description: 'Report the prose analysis in one batch: summary, events, mentions, scene transition/frame, keyed state changes, thread lifecycle/focus, explicit character knowledge changes, and contradictions. Call once with everything you found. If a later step proves the report wrong or incomplete, call it again with the corrected set: the newest summary replaces the prior one, continuity entries it restates supersede their prior versions, and omitted lanes plus events, mentions, candidates, and contradictions are retained. To withdraw a rejected continuity operation that should not exist, explicitly send [] for its lane; use {transition:"uncertain"} to withdraw a rejected scene claim.',
+      description: 'Report all prose findings in one batch. On retry, supplied values update the report and omitted data is retained; send [] to withdraw a continuity lane or an uncertain scene to withdraw its claim.',
       inputSchema: buildReportAnalysisInputSchema(opts?.continuityKeys ?? {}),
       execute: async (input: ReportAnalysisInput) => {
         const {
@@ -1920,7 +1920,7 @@ export function createAnalysisTools(
     }
 
     tools.proposeRecordCorrections = tool({
-      description: 'Propose an author-reviewed record correction only when a grounded reportAnalysis finding includes recordCorrectionReason establishing why that record is wrong. A prose error or unresolved conflict remains a finding, without rewriting the record. Name the cited sentence and corrected wording. Eligible corrections are queued individually and never written unattended.',
+      description: 'Queue author-reviewed corrections for reusable records proven wrong by a grounded reportAnalysis finding. Do not rewrite prose or unresolved conflicts.',
       inputSchema: librarianRecordCorrectionsInputSchema,
       execute: async ({ title, evidenceSegments = [], rationale, corrections = [] }) => {
         const record = <T extends { ok: boolean; invalid?: number }>(result: T) => recordProposalOutcome('proposeRecordCorrections', result)
@@ -2116,7 +2116,7 @@ export function createAnalysisTools(
     })
 
     tools.proposeNewRecords = tool({
-      description: 'Create genuinely new reusable named story records established by accepted prose. Do not use this for events, temporary conditions, unnamed scenery, or psychological state.',
+      description: 'Queue new reusable named records established by the prose; not events, temporary conditions, unnamed scenery, or feelings.',
       inputSchema: librarianNewRecordsInputSchema,
       execute: async ({ title, evidenceSegments = [], rationale, newFragments = [] }) => {
         const record = <T extends { ok: boolean; invalid?: number }>(result: T) => recordProposalOutcome('proposeNewRecords', result)
@@ -2147,7 +2147,7 @@ export function createAnalysisTools(
 
   if (!opts?.disableDirections) {
     tools.proposeDirections = tool({
-      description: 'Required when available: suggest 3-5 possible directions the story could go next, informed by the records reportAnalysis returned.',
+      description: 'Required when available: suggest 3-5 next directions informed by the completed analysis.',
       inputSchema: z.object({
         directions: z.array(suggestionDirectionSchema).min(3).max(5),
       }),
@@ -2161,7 +2161,7 @@ export function createAnalysisTools(
 
   if (opts?.includeFinishTool !== false) {
     tools.finishAnalysis = tool({
-      description: 'Signal that the online analysis pass has completed all useful report, proposal, and direction tool calls. This does not record story data; it only ends the tool loop.',
+      description: 'End the analysis after required calls succeed and any failed proposal lane is retried or abandoned.',
       inputSchema: librarianFinishAnalysisInputSchema,
       execute: async ({ skipped = [] }) => {
         const abandoned = skipped.map((entry) => (

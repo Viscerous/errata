@@ -32,6 +32,7 @@ export function storyRoutes(dataDir: string) {
           enabledPlugins: [],
           maxSteps: 10,
           modelOverrides: {},
+          authorInputMode: 'direct' as const,
           generationMode: 'standard' as const,
           clarifyBeforeGenerate: false,
           prewriterReasoning: 'normal' as const,
@@ -150,6 +151,7 @@ export function storyRoutes(dataDir: string) {
         // Legacy fields (kept for backward compat with older clients)
         ...(body.providerId !== undefined ? { providerId: body.providerId } : {}),
         ...(body.modelId !== undefined ? { modelId: body.modelId } : {}),
+        ...(body.authorInputMode !== undefined ? { authorInputMode: body.authorInputMode } : {}),
         ...(body.generationMode !== undefined ? { generationMode: body.generationMode } : {}),
         ...(body.clarifyBeforeGenerate !== undefined ? { clarifyBeforeGenerate: body.clarifyBeforeGenerate } : {}),
         ...(body.prewriterReasoning !== undefined ? { prewriterReasoning: body.prewriterReasoning } : {}),
@@ -203,6 +205,7 @@ export function storyRoutes(dataDir: string) {
         // Legacy fields (backward compat)
         providerId: t.Optional(t.Union([t.String(), t.Null()])),
         modelId: t.Optional(t.Union([t.String(), t.Null()])),
+        authorInputMode: t.Optional(t.Union([t.Literal('direct'), t.Literal('play')])),
         generationMode: t.Optional(t.Union([t.Literal('standard'), t.Literal('prewriter')])),
         clarifyBeforeGenerate: t.Optional(t.Boolean()),
         prewriterReasoning: t.Optional(t.Union([t.Literal('short'), t.Literal('normal'), t.Literal('extensive')])),

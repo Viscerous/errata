@@ -72,7 +72,9 @@ character-only special case.
   [Context Blocks](context-blocks.md#content-tiering)), because proposals can
   target all three fields and must see the current value of each.
 - `reportAnalysis` records mentions as **annotation-only** data (who appears, for prose
-  highlighting); it no longer returns bodies.
+  highlighting). Candidate IDs may resolve previously unseen record bodies into
+  the tool result so the next step can inspect numbered assertions without a
+  separate read round trip.
 - `readFragments` is the **backstop** for an appearing fragment not in the
   forwarded set.
 
@@ -157,14 +159,24 @@ The current policy is semantic first, with no numeric context caps chosen yet:
   source.
 - **Fragment routing** remains a bounded supporting job for deeper or historical
   work. Routine online analysis does not block on a synchronous router fallback.
-- **Online analysis uses one adaptive tool loop.** `reportAnalysis` is required
-  before `finishAnalysis`, but reporting does not force a fresh Analyze
-  invocation. Its normalized result returns newly resolved numbered records in
-  the same tool history; another model step happens only when the tool workflow
-  needs one. A repeated `readFragments` request for an available record returns
-  its ID under `alreadyAvailable` instead of echoing the body again. Pass
-  diagnostics retain usage for each model step as well as the aggregate, making
-  both total work and the largest individual request visible.
+- **Online analysis uses one staged adaptive tool loop.** The compiled story
+  context and conversation stay in one agent run, while the tool schemas
+  exposed to each model request change with the workflow. The first request sees only
+  `reportAnalysis`. A settled report retires that large schema and exposes the
+  smaller follow-up surface for directions, maintenance, and completion. If the
+  report resolves previously unseen numbered records, one conditional inspection
+  stage keeps both surfaces available so a newly grounded contradiction can be
+  reported. Failed reports remain in the observation stage for a focused retry.
+  This staging does not add an orchestration round trip; it removes irrelevant
+  schemas from requests the existing tool loop already makes. A repeated
+  `readFragments` request for an available record returns its ID under
+  `alreadyAvailable` instead of echoing the body again. Pass diagnostics retain
+  usage, active tool names, and wall time for each model step as well as the
+  aggregate, making both total work and the largest individual request visible.
+  Because changing tool schemas may also change a provider's prompt-cache
+  prefix, the latency benefit is treated as measurable rather than assumed;
+  these diagnostics are the basis for comparing providers and deciding whether
+  any backend should retain a stable tool surface.
 - **Automatic directions** remain a required lane in the adaptive loop when
   enabled. When disabled, their tool and instructions are absent.
   `reportAnalysis` loads every referenced fragment to validate its ID and makes

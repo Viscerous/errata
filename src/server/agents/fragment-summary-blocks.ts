@@ -2,7 +2,6 @@ import type { Fragment } from '../fragments/schema'
 import type { ContextBlock } from '../llm/context-builder'
 import {
   buildFragmentContextLanes,
-  canReadFragments,
   findFragmentContextLane,
   fragmentCatalogBlock,
   fragmentContextBlock,
@@ -86,7 +85,6 @@ export function pinnedFragmentCatalogBlocks(
     order: 303,
     heading: 'Pinned Fragment Catalog',
     scope: 'pinned',
-    canReadFragments: canReadFragments(ctx),
   })
   return block ? [block] : []
 }
@@ -143,7 +141,6 @@ export function fragmentSummaryCatalogBlocks(
     id: 'fragment-catalog',
     sections,
     order: 303,
-    canReadFragments: canReadFragments(ctx),
   })
   return block ? [block] : []
 }
@@ -160,7 +157,6 @@ export function allCharactersCatalogBlock(ctx: AgentBlockContext): ContextBlock 
     mode: 'summary-index',
     scope: 'all',
     order: 350,
-    canReadFragments: canReadFragments(ctx),
   })
 }
 
@@ -178,7 +174,6 @@ export function availableFragmentCatalogBlocks(ctx: AgentBlockContext, options: 
     id: 'fragment-catalog',
     sections,
     order: 400,
-    canReadFragments: canReadFragments(ctx),
   })
   return block ? [block] : []
 }

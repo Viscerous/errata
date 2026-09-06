@@ -233,7 +233,7 @@ describe('librarian agent', () => {
       expect(opts?.instructions).toContain('Never drop custom system fragments.')
       if (tools.proposeRecordCorrections) {
         expect(opts?.instructions).toContain('**proposeRecordCorrections**')
-        expect(opts?.instructions).toContain('allowed fragment types (characters, knowledge, locations)')
+        expect(opts?.instructions).toContain('new reusable named records in these types: characters, knowledge, locations')
       }
 
       return {

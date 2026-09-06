@@ -44,11 +44,13 @@ import { createLogger } from '../logging'
 import type { Fragment } from '../fragments/schema'
 import { getBranchesIndex, isBranchDeleting, withBranch } from '../fragments/branches'
 import { assessGenerationForCommit } from './output-validation'
+import { composeGeneratedProse, stripAuthorTurnEcho, type AuthorInputMode } from '@/contracts/generation'
 
 const logger = createLogger('generation')
 
 export interface GenerationInput {
   input: string
+  inputMode?: AuthorInputMode
   runId?: string
   branchId?: string
   saveResult?: boolean
@@ -113,6 +115,9 @@ export async function runGeneration(
   abortController.signal.throwIfAborted()
 
   const mode = body.mode ?? 'generate'
+  const inputMode: AuthorInputMode = mode === 'generate'
+    ? body.inputMode ?? story.settings.authorInputMode ?? 'direct'
+    : 'direct'
   const librarianConfig = await getAgentBlockConfig(dataDir, storyId, 'librarian.analyze')
   const disableLibrarianAutoAnalysis = (story.settings.disableLibrarianAutoAnalysis ?? false) || (librarianConfig.disableAutoAnalysis ?? false)
   const modeLabel = mode === 'regenerate'
@@ -157,8 +162,9 @@ export async function runGeneration(
     ? {
         excludeFragmentId: existingFragment.id,
         proseBeforeFragmentId: existingFragment.id,
+        authorInputMode: inputMode,
       }
-    : {}
+    : { authorInputMode: inputMode }
   let ctxState = await buildContextState(dataDir, storyId, effectiveInput, buildContextOpts)
   abortController.signal.throwIfAborted()
   const contextFragments = {
@@ -211,23 +217,14 @@ export async function runGeneration(
   requestLogger.info('Tools prepared', { toolCount: Object.keys(tools).length })
 
   const isPrewriterMode = story.settings.generationMode === 'prewriter'
-  const prewriterConfig = isPrewriterMode
-    ? await getAgentBlockConfig(dataDir, storyId, 'generation.prewriter')
-    : undefined
-  const prewriterDisabledTools = new Set(prewriterConfig?.disabledTools ?? [])
-  const contextToolNames = isPrewriterMode
-    ? Object.keys(allTools).filter((name) => !prewriterDisabledTools.has(name))
-    : Object.keys(tools)
-
-  // Blocks whose wording depends on the toolset need the resolved list, not a
-  // guess: an author who disables readFragments here must not still be told by
-  // the catalog to call it.
-  ctxState = { ...ctxState, enabledTools: contextToolNames }
 
   const scriptContext = { ...ctxState, ...createScriptHelpers(dataDir, storyId) }
   let blocks = createDefaultBlocks(ctxState)
   blocks = await applyBlockConfig(blocks, agentConfig, scriptContext)
   blocks = await runBeforeBlocks(enabledPlugins, blocks)
+  // Retain the complete Writer surface for the documented empty-brief fallback.
+  // The prewriter projection below intentionally strips several of these blocks.
+  const directWriterFallbackBlocks = blocks
 
   // In prewriter mode, strip writer-only blocks from the context that gets
   // dumped into the prewriter's full-context block. The prewriter has its own
@@ -271,7 +268,7 @@ export async function runGeneration(
   let prewriterLogMessages: Array<{ role: string; content: string }> | undefined
   let prewriterDirections: Array<{ pacing: string; title: string; description: string; instruction: string }> | undefined
   let prewriterToolCalls: ToolCallLog[] = []
-  let logMessages = messages // messages saved to generation log — updated to writer context in prewriter mode
+  let logMessages = messages // exact model-visible text; updated to writer context in prewriter mode
   let writerContextBlocks = blocks
   // In prewriter mode the fragment surfaces are presented to the planner, not
   // the writer, so provenance has to be recorded from this set too.
@@ -330,6 +327,7 @@ export async function runGeneration(
               contextBlocks: blocks,
               blockContext: { ...ctxState, systemPromptFragments: [] },
               authorInput: effectiveInput,
+              inputMode,
               mode,
               tools: allTools,
               maxSteps: prewriterMaxSteps,
@@ -395,7 +393,12 @@ export async function runGeneration(
             // knowledge AND no brief — strictly worse than the full context.
             // Fall back to the full context (writerMessages already === modelMessages).
             if (prewriterResult.brief.trim()) {
-              const writerBlocks = createWriterBriefBlocks(ctxState.proseFragments, prewriterResult.brief, resolvedModelId)
+              const writerBlocks = createWriterBriefBlocks(
+                ctxState.proseFragments,
+                prewriterResult.brief,
+                resolvedModelId,
+                inputMode === 'play' ? body.input : undefined,
+              )
               let finalWriterBlocks = await applyBlockConfig(writerBlocks, agentConfig, scriptContext)
               finalWriterBlocks = await runBeforeBlocks(enabledPlugins, finalWriterBlocks)
               writerContextBlocks = finalWriterBlocks
@@ -406,6 +409,12 @@ export async function runGeneration(
               logMessages = writerCompiled
             } else {
               requestLogger.warn('Prewriter produced an empty brief; falling back to full context for the writer')
+              writerContextBlocks = directWriterFallbackBlocks
+              let fallbackCompiled = compileBlocks(directWriterFallbackBlocks)
+              fallbackCompiled = await expandMessagesFragmentTags(fallbackCompiled, dataDir, storyId)
+              fallbackCompiled = await runBeforeGeneration(enabledPlugins, fallbackCompiled)
+              writerMessages = addCacheBreakpoints(fallbackCompiled)
+              logMessages = fallbackCompiled
             }
           } finally {
             prewriterRun.finish(
@@ -475,7 +484,10 @@ export async function runGeneration(
         }
       }
 
-      const commitAssessment = assessGenerationForCommit(fullText, lastFinishReason)
+      const generatedContinuation = inputMode === 'play'
+        ? stripAuthorTurnEcho(body.input, fullText)
+        : fullText
+      const commitAssessment = assessGenerationForCommit(generatedContinuation, lastFinishReason)
 
       // Keep rejected attempts inspectable, but never turn them into prose or
       // launch downstream analysis. This is intentionally before plugin hooks:
@@ -501,12 +513,13 @@ export async function runGeneration(
             id: logId,
             createdAt: now,
             input: body.input,
+            inputMode,
             messages: logMessages.map((m) => ({
               role: String(m.role),
               content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
             })),
             toolCalls,
-            generatedText: fullText,
+            generatedText: generatedContinuation,
             fragmentId: null,
             model: servedModelId,
             sampling: samplingDiagnostics(runtime),
@@ -545,18 +558,26 @@ export async function runGeneration(
       if (body.saveResult && !runError && !abortController.signal.aborted && commitAssessment.accepted) {
         try {
           const durationMs = Date.now() - startTime
-          requestLogger.info('LLM generation completed', { durationMs, textLength: fullText.length })
+          requestLogger.info('LLM generation completed', {
+            durationMs,
+            textLength: generatedContinuation.length,
+          })
 
           requestLogger.info('Tool calls extracted', { toolCallCount: toolCalls.length })
 
           // Run afterGeneration hooks
           const genResult = await runAfterGeneration(enabledPlugins, {
-            text: fullText,
+            text: generatedContinuation,
             fragmentId: (mode === 'regenerate' || mode === 'refine') ? body.fragmentId! : null,
             toolCalls,
           })
           abortController.signal.throwIfAborted()
           requestLogger.info('AfterGeneration hooks completed')
+
+          // In Play, the author's input is manuscript rather than an instruction.
+          // Commit it atomically with the generated continuation so a failed or
+          // cancelled run never leaves a half-turn in the story.
+          const committedText = composeGeneratedProse(body.input, genResult.text, inputMode)
 
           const now = new Date().toISOString()
           let savedFragmentId: string
@@ -581,7 +602,7 @@ export async function runGeneration(
             type: 'prose',
             name: proseFragmentName,
             description: body.input.slice(0, 250),
-            content: genResult.text,
+            content: committedText,
             tags: isRegenOrRefine ? [...existingFragment!.tags] : [],
             refs: isRegenOrRefine ? [...existingFragment!.refs] : [],
             sticky: isRegenOrRefine ? existingFragment!.sticky : false,
@@ -592,6 +613,7 @@ export async function runGeneration(
             meta: {
               ...inheritedMeta,
               generatedFrom: body.input,
+              generatedFromMode: inputMode,
               ...(isRegenOrRefine ? {
                 generationMode: mode,
                 previousFragmentId: existingFragment!.id,
@@ -659,6 +681,7 @@ export async function runGeneration(
             id: logId,
             createdAt: now,
             input: body.input,
+            inputMode,
             messages: logMessages.map((m) => ({
               role: String(m.role),
               content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content),

@@ -4,14 +4,18 @@ import { render, fireEvent, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { proposeDirections } = vi.hoisted(() => ({ proposeDirections: vi.fn() }))
+const { proposeDirections, generateAndSave, getStory } = vi.hoisted(() => ({
+  proposeDirections: vi.fn(),
+  generateAndSave: vi.fn(),
+  getStory: vi.fn(),
+}))
 
 vi.mock('@/lib/api', () => ({
   api: {
     generation: {
       proposeDirections,
       cancel: vi.fn(),
-      generateAndSave: vi.fn().mockResolvedValue({ text: '', fragmentId: 'pr-new' }),
+      generateAndSave,
     },
     librarian: {
       getStatus: vi.fn().mockResolvedValue({ runStatus: 'idle' }),
@@ -19,7 +23,7 @@ vi.mock('@/lib/api', () => ({
       getAnalysis: vi.fn(),
     },
     branches: { list: vi.fn().mockResolvedValue({ activeBranchId: 'br-test' }) },
-    stories: { get: vi.fn().mockResolvedValue(null) },
+    stories: { get: getStory },
     config: { getProviders: vi.fn().mockResolvedValue(null) },
     fragments: { create: vi.fn() },
     proseChain: { addSection: vi.fn() },
@@ -100,6 +104,8 @@ describe('direction card activation', () => {
   beforeEach(() => {
     onGenerationStart = vi.fn()
     proposeDirections.mockResolvedValue({ suggestions: [DIRECTION] })
+    generateAndSave.mockResolvedValue(new ReadableStream({ start: controller => controller.close() }))
+    getStory.mockResolvedValue(null)
     localStorage.setItem('errata:generation-mode', 'guided')
     vi.stubGlobal('matchMedia', (query: string) => ({
       matches: false,
@@ -130,7 +136,7 @@ describe('direction card activation', () => {
     press(body())
     press(body())
 
-    expect(onGenerationStart).toHaveBeenCalledWith(DIRECTION.instruction)
+    expect(onGenerationStart).toHaveBeenCalledWith(DIRECTION.instruction, 'direct')
   })
 
   it('still commits in one press when hover opened the card first', async () => {
@@ -140,7 +146,34 @@ describe('direction card activation', () => {
     expect(drawer(container)).toContain('grid-rows-[1fr]')
     press(body(), 'mouse')
 
-    expect(onGenerationStart).toHaveBeenCalledWith(DIRECTION.instruction)
+    expect(onGenerationStart).toHaveBeenCalledWith(DIRECTION.instruction, 'direct')
+  })
+
+  it('sends an explicit play contract for action and dialogue input', async () => {
+    localStorage.setItem('errata:generation-mode', 'primary')
+    getStory.mockResolvedValue({ settings: { authorInputMode: 'play', modelOverrides: {} } })
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(React.createElement(
+      QueryClientProvider,
+      { client },
+      React.createElement(TooltipProvider, null, React.createElement(InlineGenerationInput, {
+        storyId: 'story-test',
+        isGenerating: false,
+        latestFragmentId: 'frag-head',
+        onGenerationStart,
+        onGenerationStream: () => undefined,
+        onGenerationComplete: () => undefined,
+        onGenerationError: () => undefined,
+      })),
+    ))
+
+    const turn = 'I open the door. "Hello?"'
+    fireEvent.change(await screen.findByPlaceholderText('What do you do or say next?'), { target: { value: turn } })
+    fireEvent.click(document.querySelector('[data-component-id="inline-generation-submit"]')!)
+
+    await waitFor(() => expect(generateAndSave).toHaveBeenCalled())
+    expect(generateAndSave.mock.calls[0][3]).toMatchObject({ inputMode: 'play' })
+    expect(screen.queryByText('Direct')).toBeNull()
   })
 
   it('commits on Enter for a keyboard user, whose focus was its own interaction', async () => {
@@ -150,7 +183,7 @@ describe('direction card activation', () => {
     fireEvent.focus(body())
     fireEvent.click(body())
 
-    expect(onGenerationStart).toHaveBeenCalledWith(DIRECTION.instruction)
+    expect(onGenerationStart).toHaveBeenCalledWith(DIRECTION.instruction, 'direct')
   })
 
   it('does not let a touch on a hybrid device skip the expand step', async () => {
@@ -165,7 +198,7 @@ describe('direction card activation', () => {
     press(body())
     expect(onGenerationStart).not.toHaveBeenCalled()
     press(body())
-    expect(onGenerationStart).toHaveBeenCalledWith(DIRECTION.instruction)
+    expect(onGenerationStart).toHaveBeenCalledWith(DIRECTION.instruction, 'direct')
   })
 
   it('does not treat a pen touching the screen as a hover', async () => {
@@ -190,7 +223,7 @@ describe('direction card activation', () => {
       .find(el => el.className.includes('whitespace-normal'))!
     press(expanded)
 
-    expect(onGenerationStart).toHaveBeenCalledWith(DIRECTION.instruction)
+    expect(onGenerationStart).toHaveBeenCalledWith(DIRECTION.instruction, 'direct')
   })
 
   it('focuses the editable direction inside the press that asked for it', async () => {

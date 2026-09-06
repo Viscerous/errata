@@ -9,20 +9,15 @@ import { instructionRegistry } from '../instructions'
 import { buildBasePreviewContext } from '../agents/block-helpers'
 import { renderContinuity } from '../librarian/continuity-view'
 
+export const CHARACTER_CHAT_SYSTEM_PROMPT = `Roleplay the character supplied under "Character". Respond in their voice and manner, using only their character sheet and explicit character-awareness context as memory. When asked about anything they have not learned, answer with genuine uncertainty. Stay natural and in character; break the fourth wall only if the character would.`
+
 export function createCharacterChatBlocks(ctx: AgentBlockContext): ContextBlock[] {
   const blocks: ContextBlock[] = []
-  const characterName = ctx.character?.name ?? 'the character'
-  const systemTemplate = instructionRegistry.resolve('character-chat.system', ctx.modelId)
-  const instructionsTemplate = instructionRegistry.resolve('character-chat.instructions', ctx.modelId)
 
   blocks.push({
     id: 'instructions',
     role: 'system',
-    content: [
-      systemTemplate.replace(/\{\{characterName\}\}/g, characterName),
-      '',
-      instructionsTemplate.replace(/\{\{characterName\}\}/g, characterName),
-    ].join('\n'),
+    content: instructionRegistry.resolve('character-chat.system', ctx.modelId),
     order: 100,
     source: 'builtin',
   })

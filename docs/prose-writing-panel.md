@@ -92,22 +92,46 @@ Prose blocks automatically italicize quoted dialogue for visual distinction. Thi
 
 ## Generation Abort
 
-Generation can be aborted mid-stream. The `InlineGenerationInput` component provides a pause button during active generation. The abort signal is propagated from the client through `AbortController` to the server stream. Any text produced before the abort is saved as a partial prose fragment.
+Generation can be aborted mid-stream. The `InlineGenerationInput` component provides a stop button during active generation. The abort signal is propagated from the client through `AbortController` to the server stream. Incomplete output is discarded. In Play, this also means the author's typed turn remains in the composer instead of becoming a half-committed manuscript turn.
 
-## Guided Mode
+## Writing Relationship and Composer Modes
 
-The inline generation input supports three modes:
+Each story has a primary writing relationship selected under **Settings > Generation**:
 
-- **Freeform** — standard text input for custom author directions.
+- **Play** — the author's actions, dialogue, and stated facts are canonical
+  manuscript prose. On a successful generation, the exact turn and generated
+  continuation are committed atomically as one passage. It therefore appears in
+  future context, branches, summaries, and story exports.
+- **Assistant** (shown as **Direct** in the composer) — the input is an
+  instruction describing what the next passage should do. It remains prompt-only
+  and is not included in the manuscript or exports. This is the former Freeform
+  behavior.
+
+The relationship is story-level rather than a casual per-turn switch. The
+composer also exposes two auxiliary surfaces:
+
 - **Guided** — displays direction suggestion cards from the librarian's latest analysis. Clicking a card fills the generation input with its instruction. A refresh button requests new suggestions on demand.
-- **Compose** — bypasses generation and lets you write a new prose section directly into the chain.
+- **Write** — bypasses generation and lets you write a new prose section directly into the chain (formerly Compose).
+
+Play and Direct remain explicit request contracts (`inputMode: "play" | "direct"`),
+not prompt-shape guesses. Guided actions are always directions, even in a Play
+story. The selected contract is stored with generation provenance. The
+composer’s **Context** action compiles a live receipt showing
+the ordered blocks with per-block size, exact compiled messages, and each tool's
+description plus serialized input schema. Message, tool, and combined token
+estimates make schema-heavy agents visible instead of counting prompt text alone. Block IDs stay
+in structured editor metadata and are never serialized into model text. In
+prewriter stories it labels the preview as the prewriter’s source
+context because the final brief does not exist until generation runs.
 
 Guided mode also includes quick actions for:
 
 - **Continue** — advance the plot naturally
 - **Scene-setting** — focus on atmosphere and character moments
 
-Mode preference is persisted in `localStorage`.
+The selected auxiliary composer surface is persisted in `localStorage`; the
+Play/Assistant relationship is persisted in story settings and travels with
+story archives.
 
 ## Inline Prose Actions
 

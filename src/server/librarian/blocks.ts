@@ -6,7 +6,6 @@ import {
 } from '../llm/context-builder'
 import {
   buildFragmentContextLanes,
-  canReadFragments,
   customContextFragmentTypes,
   fragmentCatalogBlock,
   fragmentFullContextBlocksBySource,
@@ -24,7 +23,6 @@ import { getActiveProseIds } from '../fragments/prose-chain'
 import { getFragmentsByTag } from '../fragments/associations'
 import { instructionRegistry } from '../instructions'
 import { renderSummaryProjection } from './summary-projection'
-import { OPERATION_GUIDANCE } from '../fragments/change-operations'
 import {
   instructionsBlock,
   systemFragmentsBlock,
@@ -84,11 +82,7 @@ export function buildAnalyzeSystemPrompt(opts?: {
   enabledTools?: Iterable<string>;
   customFragmentTypes?: Array<{ type: string; name: string }>;
 }): string {
-  // An explicit, ordered procedure: it keeps the step-by-step robustness of a
-  // checklist while leaving each tool's parameters to its schema (no catalog to
-  // drift). Steps for disabled tools are omitted and the rest are worded as an
-  // ordered sequence, so the final enabled action is semantically terminal
-  // without adding a separate "say nothing" instruction.
+  // Keep workflow here and field-level contracts in the tool schemas.
   const disabledTools = new Set(opts?.disabledTools ?? [])
   const enabledTools = opts?.enabledTools ? new Set(opts.enabledTools) : null
   const hasTool = (toolName: string): boolean => enabledTools
@@ -102,27 +96,14 @@ export function buildAnalyzeSystemPrompt(opts?: {
   const canFinish = hasTool('finishAnalysis')
   const actions: string[] = []
 
-  // Its own step, deliberately: buried mid-paragraph in the reportAnalysis step
-  // this instruction gets ignored and only the record the passage already names
-  // comes back. It also comes *before* reporting, so the one batched call
-  // carries the ripple IDs instead of needing a second round trip to add them.
-  if (canReport) {
-    actions.push('work out whether this passage directly contradicts any durable assertion in an existing reusable record, before you report anything. Ordinary story progression and current conditions are continuity, not canon contradictions. Your context lists every record as `id | name | desc`; use those descriptions to find records whose durable assertions may truly conflict, collect their IDs, and pass them as candidateFragmentIds in the next step so their full text comes back numbered for exact comparison.')
-  }
-
   if (canReport) {
     actions.push([
-      'scan the new prose against the provided context and call **reportAnalysis** with your findings. Keep each memory lane distinct: events describe what happened; state preserves conditions; threads track unresolved questions; knowledge records what a particular character learned.',
-      'Scene: report only changed or newly established frame fields, with citations. Preserve approximate time; never infer elapsed minutes from passage length.',
-      'State: retain conditions useful beyond recent prose. Each subject/facet/slot answers one stable question (location: where? attire: wearing what?). Reuse registry entries and keep replacements about that question. Separate independently changing conditions; avoid catch-all status. Use scene scope normally, cross-scene only for conditions that must survive a cut. Set replaces a value; clear ends it. Omit momentary poses, sensations, and completed actions.',
-      'Knowledge: retain useful learning with attribution and temporal limits. "She told him she wanted X during the examination" does not mean "She wants X". An interpretation remains the character\'s belief; an expression never establishes general willingness. Current feelings belong in state if worth retaining.',
-      'Threads: one key per unresolved question, resolved only when answered. Omission retains prominence; set dormant explicitly and allow dormant threads to remain unresolved indefinitely. Operations carry visibility; focus updates untouched threads.',
-      'Contradictions: compare newly asserted capabilities, knowledge transfers, consent, and authority against explicit record limits. Sensing physiology alone does not imply thought access. Changed behavior can be progression; violating an established limit needs evidence that the rule changed. Cite both incompatible assertions without assuming which is wrong. Flag unresolved conflicts and omit disputed state or knowledge. Supply recordCorrectionReason only if evidence establishes why the record itself is wrong; generated disagreement alone is insufficient.',
-      'Mentions: direct names, nicknames, titles, roles, or distinctive terms, copied exactly; pronouns alone do not identify a record. If a surface term is ambiguous, include identifying context.',
-      'Use numbered evidence: cite, never retype. Records returned under resolvedFragments are already available for subsequent work. On retry, repair only rejected or incomplete items; accepted data is retained. Follow the tool feedback to withdraw mistaken claims.',
-    ].join('\n\n'))
+      'call **reportAnalysis** with the passage findings. Before the call, inspect catalog descriptions for reusable records whose durable assertions may directly conflict and include their IDs as candidateFragmentIds; ordinary progression and current conditions are not canon contradictions. If the result supplies newly resolved records, amend the report only when inspecting them changes a finding.',
+      'Cite the numbered prose instead of retyping evidence. Keep events, persistent state, unresolved threads, and character-specific knowledge distinct. Attribute beliefs and temporary disclosures; do not turn an expression into general willingness. Mentions require a direct name, title, role, nickname, or distinctive term rather than a pronoun.',
+      'Use one stable state question per facet, keep independently changing conditions separate, and let dormant threads remain unresolved. On retry, follow tool feedback and repair only rejected or incomplete data.',
+    ].join(' '))
   } else {
-    actions.push('scan the new prose against the provided context. The reportAnalysis tool is disabled, so do not invent a replacement reporting tool.')
+    actions.push('review the new prose against the supplied context without inventing a replacement reporting tool.')
   }
 
   if (canSuggest) {
@@ -130,16 +111,16 @@ export function buildAnalyzeSystemPrompt(opts?: {
     const typeNamesList = ['characters', 'knowledge', ...customTypes.map(t => t.name.toLowerCase())].join(', ')
     const proposalActions: string[] = []
     if (canCorrectRecords) {
-      proposalActions.push('Use **proposeRecordCorrections** only for a numbered record sentence cited in a grounded finding with recordCorrectionReason establishing that the record itself is wrong. Leave prose errors and unresolved conflicts for review. Replace only the assertion; never summarize the scene. Corrections remain pending for author review. Read missing records before editing; never count sentences yourself.')
+      proposalActions.push('Use **proposeRecordCorrections** only for a numbered record sentence grounded by reportAnalysis; leave prose errors and unresolved conflicts for review.')
     }
     if (canCreateRecords) {
-      proposalActions.push(`Use **proposeNewRecords** only for genuinely new reusable named records in the allowed fragment types (${typeNamesList}). Cite the sentence numbers that establish it. A temporary scene label, unnamed scenery, episode recap, current condition, feeling, or interpretation is not a reusable record.`)
+      proposalActions.push(`Use **proposeNewRecords** only for new reusable named records in these types: ${typeNamesList}.`)
     }
-    proposalActions.push('These tools are optional. Omit unneeded calls. If a call partly succeeds, retry only rejected items; abandon an unfinished attempt through the finish tool with a reason.')
+    proposalActions.push('Both proposal tools are optional; retry only rejected items from a partial call.')
     actions.push(proposalActions.join(' '))
   }
   if (canSuggestDirections) {
-    actions.push('call **proposeDirections** with next directions for the story. This lane is required whenever the tool is available; when automatic directions are disabled, the tool and this instruction are both absent. Offer scene intents rather than conclusions: do not turn interpretation, temporary emotion, or an implied protagonist decision into settled psychology or canon.')
+    actions.push('call **proposeDirections** with distinct next-scene intents, without turning an interpretation or temporary emotion into settled canon.')
   }
   if (canFinish) {
     actions.push('call **finishAnalysis** upon completion of all steps.')
@@ -153,11 +134,11 @@ export function buildAnalyzeSystemPrompt(opts?: {
   const numbered = steps.map((s, i) => `${i + 1}. ${s}`).join('\n')
 
   return `
-You are the Librarian: you keep the records of an ongoing story accurate and its continuity intact. Analyze the new prose fragment against the story context provided.
+You are the Librarian. Keep the ongoing story's records accurate by analyzing the new prose against the supplied context. Tools are exposed by stage; use the tools available in the current request, then continue with newly available follow-up tools.
 
 ## Steps
 
-Work through these steps in order:
+Work in order:
 ${numbered}
 `
 }
@@ -310,8 +291,6 @@ export function createLibrarianAnalyzeBlocks(ctx: AgentBlockContext): ContextBlo
       fragments: lane.catalog,
     })),
     order: 390,
-    editable: true,
-    canReadFragments: canReadFragments(ctx),
   }))
 
   if (ctx.newProse) {
@@ -362,32 +341,11 @@ export async function buildAnalyzePreviewContext(dataDir: string, storyId: strin
 
 // ─── Librarian Chat ───
 
-export const CHAT_SYSTEM_PROMPT = `
-You are the Librarian, the author's story continuity assistant. Answer the author's questions and edit story fragments through tools.
+export const CHAT_SYSTEM_PROMPT = `You are the Librarian, the author's story continuity assistant. Answer questions and make only edits the author requests.
 
-## Reading
+The prompt contains summaries, not every fragment's full text. Read the relevant fragments before relying on details or rewriting a whole field; use readContinuity only for current state, unresolved threads, or character knowledge. Survey first for broad changes, then batch related reads or edits.
 
-- Your context holds the story summary and fragment summaries (IDs, names, descriptions) — the full content stays on disk. Use **readFragments** to batch-read full content before relying on details or making whole-field rewrites.
-- Folded current state, unresolved threads, and character knowledge stay out of the default prompt. Use **readContinuity** when the author's request actually concerns continuity.
-- For sweeping requests (e.g., "update all characters to reflect the time skip"), survey first with **listFragments**, **findFragments**, and **readFragments**, then edit in one batch.
-
-## Editing
-
-Edits apply immediately, so make them only when the author asked for the change.
-
-- Prose edits: **editProse** — it scans active prose automatically, applies exact diffs, and returns them.
-- Character, guideline, knowledge, summary, or custom fragments: **editFragments**. ${OPERATION_GUIDANCE} A whole-field rewrite must contain the complete final field text from the fragment you read.
-- New fragments: **editFragments** with create_fragment operations and plain fragment names; the system assigns IDs.
-- Keep fragment descriptions within the 250 character limit.
-
-## Conduct
-
-- Batch related reads and edits into one tool call.
-- Ask a clarifying question when the request is ambiguous.
-- After editing, tell the author what changed and why — they can undo it.
-- For specialist workflows use **invokeAgent**; for generation debugging use **inspectRun**.
-
-`
+Use editProse for active prose and editFragments for story records. Use invokeAgent for its specialist workflows and inspectRun for generation debugging. Ask when a consequential request is ambiguous. After editing, briefly explain what changed and why.`
 
 export function createLibrarianChatBlocks(ctx: AgentBlockContext): ContextBlock[] {
   const blocks: ContextBlock[] = []
@@ -425,22 +383,9 @@ export async function buildChatPreviewContext(dataDir: string, storyId: string):
 
 // ─── Librarian Refine ───
 
-export const REFINE_SYSTEM_PROMPT = `You are a story editor refining a single fragment of an ongoing story. Improve the target fragment based on the story context. Your scope is character, guideline, knowledge, and custom fragments only — prose fragments stay untouched, and archiving requires an explicit request from the author.
+export const REFINE_SYSTEM_PROMPT = `Refine the supplied non-prose story fragment according to the author's instructions and the provided story evidence. When no instructions are given, improve consistency, clarity, and depth while preserving established facts, voice, and style.
 
-## Instructions
-
-1. Analyze the complete target snapshot and story context provided: prose, summary, continuity, and other fragments. Its baseHash is included with the target.
-2. Batch-read any additional records you genuinely need with **readFragments**.
-3. Use **editFragments** to apply your edits. ${OPERATION_GUIDANCE}
-4. Explain what you changed and why in your text response.
-
-## Guidelines for Refinement
-
-- When the author gives specific instructions, follow them precisely.
-- When no instructions are given, improve the fragment for consistency, clarity, and depth based on story events.
-- Preserve the fragment's existing voice and style unless asked otherwise.
-- Keep descriptions within the 250 character limit.
-- For set_fields, include baseHash and write each changed field as the complete final value. Prefer localized operations for specific sentences, paragraphs, insertions, or end appends.`
+Read additional records only when needed, then apply the change with editFragments. Do not edit prose or archive the target unless explicitly requested. Briefly explain what changed and why.`
 
 export function createLibrarianRefineBlocks(ctx: AgentBlockContext): ContextBlock[] {
   return compactBlocks([
@@ -578,37 +523,9 @@ export async function buildProseTransformPreviewContext(dataDir: string, storyId
 
 // ─── Optimize Character ───
 
-export const OPTIMIZE_CHARACTER_SYSTEM_PROMPT = `You are a character development specialist. Rewrite the target character fragment so it has genuine depth, causality, and texture, following the methodology below.
+export const OPTIMIZE_CHARACTER_SYSTEM_PROMPT = `Deepen the supplied character without replacing established facts or voice. Turn bare traits into causal chains connecting physiology, social formation, and psychology to present behavior. Prefer tensions, trajectories, emotional logic, and grounded contrasts over adjective lists; treat archetypes and cultural references as seeds rather than definitions.
 
-## Methodology
-
-**Causality over traits.** Every trait must have a WHY — upbringing, trauma, formative events. "Brave" becomes "reckless courage born from watching her mother die doing nothing." Traits without cause are lumber on the ground; traits with cause are architecture.
-
-**Egri's three dimensions.** A complete character lives across three layers:
-- Physiological: Body, appearance, health, mannerisms shaped by physicality. "Because he is tall, he's used to ducking through doors and looking down at people, which makes him feel subconsciously dominant."
-- Sociological: Class, education, culture, family, profession — the soil the person grew in. Being a nerd from Detroit dictates taste in cars and music. The environment shapes vocabulary, values, and blind spots.
-- Psychological: Drives, fears, moral code, coping mechanisms — the engine that makes choices. A character who is "kind" but grew up "poor and bullied" will be kind in a very specific, perhaps defensive or over-compensatory way.
-
-**Friction and tension.** Internal contradictions make characters feel alive. A pacifist with a violent temper. A healer who enjoys others' pain. Someone who forces a bubbly personality to hide deep discomfort with emotional closeness. The mask versus the truth creates ongoing dramatic potential.
-
-**Vectors, not adjectives.** Express traits as trajectories with momentum — "becoming disillusioned with authority" rather than "rebellious." Characters are in motion, not frozen snapshots. Write the launch pad the story builds from.
-
-**Irrational choices.** Real people make decisions rooted in emotion, trauma, pride — not optimal strategy. Document the emotional logic behind bad decisions. A man who hates a specific band because one album reminds him of a terrible restaurant job — people are irrational like that, and those reasons create texture.
-
-**Contrast.** Unexpected combinations that create texture — gentle giant, eloquent thug, cowardly genius. The gap between expectation and reality is where interesting writing lives. Multiple dimensions make a character more stable, not less.
-
-**References as sprinkles.** Archetypes, real-world references, and cultural touchstones are starting points, never destinations. "Columbo-like disarming manner" is a seed that orients the reader, not a character definition. Use musicians instead of specific songs, directors instead of every movie — unless a specific reference carries causal weight.
-
-## Instructions
-
-1. Analyze the complete target character snapshot provided; its baseHash is included with the target.
-2. Read older relevant prose using readFragments or readProseChain only when the provided recent prose is insufficient to understand how the character actually behaves in the story — not just how they're described on paper.
-3. Analyze gaps between the current fragment and the methodology above. Where are there bare adjectives without cause? Where is friction missing? Which of Egri's dimensions are underdeveloped?
-4. Rewrite the character fragment with depth and causality. Build the ramp of how this person grew up and why they think the way they do. Preserve existing voice and any details that already have depth — improve, don't replace what works.
-5. Use editFragments with set_fields and the baseHash to apply the rewrite. Write the full final character sheet as the content field. Keep descriptions within the 250 character limit.
-6. Explain what you changed and why — which dimensions you developed, what friction you introduced, what causal chains you built.
-
-Your scope is the character fragment alone: deepen it, leave prose fragments untouched, and keep it active (archiving is out of scope).`
+Use the target snapshot and story evidence. Read older prose only when the recent context cannot show how the character behaves. Rewrite the complete character content with editFragments and its baseHash, leaving prose and archive state untouched. Briefly explain the dimensions and causal links you strengthened.`
 
 export function createOptimizeCharacterBlocks(ctx: AgentBlockContext): ContextBlock[] {
   return compactBlocks([

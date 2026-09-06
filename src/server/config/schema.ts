@@ -1,52 +1,13 @@
 import { z } from 'zod/v4'
-
-export const PROVIDER_PRESETS = {
-  deepseek: {
-    name: 'DeepSeek',
-    baseURL: 'https://api.deepseek.com',
-    defaultModel: 'deepseek-v4-flash',
-    models: ['deepseek-v4-flash', 'deepseek-v4-pro'],
-  },
-  openai: {
-    name: 'OpenAI',
-    baseURL: 'https://api.openai.com/v1',
-    defaultModel: 'gpt-4o',
-  },
-  anthropic: {
-    name: 'Anthropic',
-    baseURL: 'https://api.anthropic.com/v1',
-    defaultModel: 'claude-sonnet-4-5-20250929',
-  },
-  gemini: {
-    name: 'Google Gemini',
-    baseURL: 'https://generativelanguage.googleapis.com/v1beta',
-    defaultModel: 'gemini-3.5-flash',
-  },
-  openrouter: {
-    name: 'OpenRouter',
-    baseURL: 'https://openrouter.ai/api/v1',
-    defaultModel: 'deepseek/deepseek-chat-v3-0324',
-  },
-  zai: {
-    name: 'Z.AI',
-    baseURL: 'https://api.z.ai/api/paas/v4',
-    defaultModel: 'glm-5',
-  },
-  custom: {
-    name: 'Custom',
-    baseURL: '',
-    defaultModel: '',
-  },
-} as const
-
-export type PresetId = keyof typeof PROVIDER_PRESETS
+export { PROVIDER_PRESETS, type PresetId } from '@/contracts/providers'
 
 export const ProviderConfigSchema = z.object({
   id: z.string(),
   name: z.string().min(1),
   preset: z.string().default('custom'),
   baseURL: z.string().url(),
-  apiKey: z.string().min(1),
+  // Local OpenAI-compatible servers commonly require no credential.
+  apiKey: z.string(),
   defaultModel: z.string().min(1),
   enabled: z.boolean().default(true),
   customHeaders: z.record(z.string(), z.string()).optional().default({}),

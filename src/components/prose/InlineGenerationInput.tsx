@@ -12,6 +12,8 @@ import type { SuggestionDirection, ClarifyQuestion, Clarification } from '@/lib/
 import { QuestionCard } from '@/components/generation/QuestionCard'
 import { generateRunId } from '@/lib/client-ids'
 import { mergeDirectionSuggestions } from './direction-suggestions'
+import { composeGeneratedProse, type AuthorInputMode } from '@/contracts/generation'
+import { ContextPreviewDialog } from '@/components/generation/ContextPreviewDialog'
 
 // A round high enough that the server withholds the ask tool and must write —
 // used by "Skip & write" to proceed without answering.
@@ -24,7 +26,7 @@ export type ThoughtStep =
   | { type: 'tool-result'; id: string; toolName: string; result: unknown }
   | { type: 'phase'; phase: string }
 
-type InputMode = 'freeform' | 'guided' | 'compose'
+type InputMode = 'primary' | 'guided' | 'compose'
 
 interface InlineGenerationInputProps {
   storyId: string
@@ -36,7 +38,7 @@ interface InlineGenerationInputProps {
    * the timeline advances, they're hidden.
    */
   latestFragmentId?: string
-  onGenerationStart: (prompt: string) => void
+  onGenerationStart: (prompt: string, inputMode: AuthorInputMode) => void
   onGenerationStream: (text: string) => void
   onGenerationThoughts?: (steps: ThoughtStep[]) => void
   onGenerationComplete: () => void
@@ -65,13 +67,14 @@ export function InlineGenerationInput({
   const [isComposing, setIsComposing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [isFocused, setIsFocused] = useState(false)
+  const [inputModeOverride, setInputModeOverride] = useState<AuthorInputMode | null>(null)
   const [pendingQuestions, setPendingQuestions] = useState<ClarifyQuestion[] | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const composeTextareaRef = useRef<HTMLTextAreaElement>(null)
   const abortRef = useRef<AbortController | null>(null)
   const runIdRef = useRef<string | null>(null)
   // In-flight generation context, preserved across the clarify round trip.
-  const genCtxRef = useRef<{ input: string; clarifications: Clarification[]; round: number }>({ input: '', clarifications: [], round: 0 })
+  const genCtxRef = useRef<{ input: string; inputMode: AuthorInputMode; clarifications: Clarification[]; round: number }>({ input: '', inputMode: 'direct', clarifications: [], round: 0 })
 
   useEffect(() => () => {
     const controller = abortRef.current
@@ -86,9 +89,11 @@ export function InlineGenerationInput({
     try {
       const stored = localStorage.getItem(STORAGE_KEY)
       if (stored === 'guided' || stored === 'compose') return stored
-      return 'freeform'
+      // `freeform`, `direct`, and `play` were per-turn composer modes. The
+      // primary contract now belongs to the story instead.
+      return 'primary'
     } catch {
-      return 'freeform'
+      return 'primary'
     }
   })
 
@@ -191,6 +196,7 @@ export function InlineGenerationInput({
 
   const handleModeChange = (newMode: InputMode) => {
     setMode(newMode)
+    if (newMode === 'primary') setInputModeOverride(null)
     try { localStorage.setItem(STORAGE_KEY, newMode) } catch {}
   }
 
@@ -203,6 +209,8 @@ export function InlineGenerationInput({
     queryKey: ['global-config'],
     queryFn: () => api.config.getProviders(),
   })
+  const storyInputMode: AuthorInputMode = story?.settings.authorInputMode ?? 'direct'
+  const effectiveInputMode = inputModeOverride ?? storyInputMode
   const providerMutation = useMutation({
     mutationFn: (data: { providerId: string | null; modelId: string | null }) => {
       const overrides = story?.settings.modelOverrides ?? {}
@@ -232,14 +240,14 @@ export function InlineGenerationInput({
 
   const prewriterDirectionsRef = useRef<SuggestionDirection[] | null>(null)
 
-  const handleGenerateWithInput = useCallback(async (generationInput: string, clarifications: Clarification[] = [], round = 0) => {
+  const handleGenerateWithInput = useCallback(async (generationInput: string, inputMode: AuthorInputMode = 'direct', clarifications: Clarification[] = [], round = 0) => {
     if (!generationInput.trim() || isGenerating) return
 
-    onGenerationStart(generationInput)
+    onGenerationStart(generationInput, inputMode)
     setError(null)
     setPendingQuestions(null)
     prewriterDirectionsRef.current = null
-    genCtxRef.current = { input: generationInput, clarifications, round }
+    genCtxRef.current = { input: generationInput, inputMode, clarifications, round }
 
     const ac = new AbortController()
     abortRef.current = ac
@@ -263,6 +271,7 @@ export function InlineGenerationInput({
         ...(clarifications.length || round > 0 ? { clarifications, clarifyRound: round } : {}),
         runId,
         branchId,
+        inputMode,
       }
       const stream = await api.generation.generateAndSave(storyId, generationInput, ac.signal, opts)
 
@@ -334,7 +343,9 @@ export function InlineGenerationInput({
           const stepsSnapshot = thoughtsDirty ? [...thoughtSteps] : null
           thoughtsDirty = false
           requestAnimationFrame(() => {
-            onGenerationStream(textSnapshot)
+            onGenerationStream(textSnapshot
+              ? composeGeneratedProse(generationInput, textSnapshot, inputMode)
+              : '')
             if (stepsSnapshot) onGenerationThoughts?.(stepsSnapshot)
             rafScheduled = false
           })
@@ -342,7 +353,9 @@ export function InlineGenerationInput({
       }
 
       // Final flush
-      onGenerationStream(accumulatedText)
+      onGenerationStream(accumulatedText
+        ? composeGeneratedProse(generationInput, accumulatedText, inputMode)
+        : '')
       if (thoughtSteps.length > 0) onGenerationThoughts?.([...thoughtSteps])
 
       // The prewriter asked clarifying questions instead of writing — surface
@@ -380,6 +393,7 @@ export function InlineGenerationInput({
       }
 
       setInput('')
+      setInputModeOverride(null)
       onGenerationComplete()
     } catch (err) {
       // User-initiated abort — not an error
@@ -396,19 +410,19 @@ export function InlineGenerationInput({
   }, [storyId, branchId, latestFragmentId, isGenerating, onGenerationStart, onGenerationStream, onGenerationThoughts, onGenerationComplete, onGenerationError, queryClient])
 
   const handleGenerate = () => {
-    handleGenerateWithInput(input)
+    handleGenerateWithInput(input, effectiveInputMode)
   }
 
   const handleAnswers = useCallback((answers: Clarification[]) => {
-    const { input: gi, clarifications, round } = genCtxRef.current
+    const { input: gi, inputMode, clarifications, round } = genCtxRef.current
     setPendingQuestions(null)
-    handleGenerateWithInput(gi, [...clarifications, ...answers], round + 1)
+    handleGenerateWithInput(gi, inputMode, [...clarifications, ...answers], round + 1)
   }, [handleGenerateWithInput])
 
   const handleSkipQuestions = useCallback(() => {
-    const { input: gi, clarifications } = genCtxRef.current
+    const { input: gi, inputMode, clarifications } = genCtxRef.current
     setPendingQuestions(null)
-    handleGenerateWithInput(gi, clarifications, FORCE_PROCEED_ROUND)
+    handleGenerateWithInput(gi, inputMode, clarifications, FORCE_PROCEED_ROUND)
   }, [handleGenerateWithInput])
 
   const handleStop = () => {
@@ -508,7 +522,7 @@ export function InlineGenerationInput({
       <div
         className={cn(
           'relative rounded-xl border transition-all duration-300 shadow-lg bg-card',
-          (mode === 'freeform' || mode === 'compose') && isFocused
+          (mode === 'primary' || mode === 'compose') && isFocused
             ? 'border-primary/25 shadow-[0_0_0_1px_var(--primary)/8%,0_4px_16px_-2px_var(--primary)/6%]'
             : 'border-border/30 hover:border-border/50',
         )}
@@ -517,15 +531,21 @@ export function InlineGenerationInput({
         <div className="flex items-center gap-0.5 px-3 pt-2.5 pb-1">
           <button
             type="button"
-            onClick={() => handleModeChange('freeform')}
+            onClick={() => handleModeChange('primary')}
+            aria-label={storyInputMode === 'play' ? 'Write a canonical Play turn' : 'Direct the writing assistant'}
+            title={storyInputMode === 'play'
+              ? 'Story setting: your input becomes manuscript prose and is included in exports'
+              : 'Story setting: your input directs the assistant and stays out of the manuscript'}
             className={cn(
               'px-2.5 py-1 text-[0.6875rem] font-sans rounded-md transition-all duration-200',
-              mode === 'freeform'
+              mode === 'primary'
                 ? 'text-foreground/80 bg-muted/60 font-medium'
                 : 'text-muted-foreground hover:text-foreground/60 hover:bg-muted/30',
             )}
           >
-            Freeform
+            {inputModeOverride === 'direct' && storyInputMode === 'play'
+              ? 'Direction draft'
+              : storyInputMode === 'play' ? 'Play' : 'Direct'}
           </button>
           <button
             type="button"
@@ -542,6 +562,8 @@ export function InlineGenerationInput({
           <button
             type="button"
             onClick={() => handleModeChange('compose')}
+            aria-label="Write prose directly"
+            title="Add your prose to the story without generation"
             className={cn(
               'px-2.5 py-1 text-[0.6875rem] font-sans rounded-md transition-all duration-200',
               mode === 'compose'
@@ -549,12 +571,12 @@ export function InlineGenerationInput({
                 : 'text-muted-foreground hover:text-foreground/60 hover:bg-muted/30',
             )}
           >
-            Compose
+            Write
           </button>
         </div>
 
-        {/* Freeform mode — original textarea */}
-        {mode === 'freeform' && (
+        {/* The story owns whether this primary composer is Play or Direct. */}
+        {mode === 'primary' && (
           <textarea
             ref={textareaRef}
             data-component-id="inline-generation-input"
@@ -562,7 +584,7 @@ export function InlineGenerationInput({
             onChange={(e) => setInput(e.target.value)}
             onFocus={() => setIsFocused(true)}
             onBlur={() => setIsFocused(false)}
-            placeholder="What happens next..."
+            placeholder={effectiveInputMode === 'play' ? 'What do you do or say next?' : 'What should happen next?'}
             rows={1}
             className="w-full resize-none bg-transparent border-none outline-none px-4 pt-1.5 pb-2 font-prose text-[0.9375rem] leading-relaxed text-foreground placeholder:text-muted-foreground placeholder:italic disabled:opacity-40"
             style={{ minHeight: '44px', maxHeight: '200px', overflowY: 'auto', scrollbarWidth: 'none' }}
@@ -758,7 +780,11 @@ export function InlineGenerationInput({
                                   // the task.
                                   flushSync(() => {
                                     setInput(s.instruction)
-                                    handleModeChange('freeform')
+                                    // A suggested direction stays an instruction even
+                                    // when the story's primary contract is Play.
+                                    setInputModeOverride('direct')
+                                    setMode('primary')
+                                    try { localStorage.setItem(STORAGE_KEY, 'primary') } catch {}
                                   })
                                   const el = textareaRef.current
                                   el?.focus()
@@ -829,6 +855,14 @@ export function InlineGenerationInput({
         <div className="flex items-center justify-between px-3 pb-2.5 pt-0.5">
           {/* Left: Model selector + Follow toggle (hidden in compose mode) */}
           <div className="flex items-center gap-2">
+            {mode === 'primary' && (
+              <ContextPreviewDialog
+                storyId={storyId}
+                input={input}
+                inputMode={effectiveInputMode}
+                disabled={isGenerating}
+              />
+            )}
             {mode !== 'compose' && globalConfig && (
               <div className="relative group/model">
                 <select
@@ -874,7 +908,7 @@ export function InlineGenerationInput({
 
           {/* Right: Write/Stop/Add button + shortcut hint */}
           <div className="flex items-center gap-2.5">
-            {(mode === 'freeform' || mode === 'compose') && !isGenerating && !isComposing && (
+            {(mode === 'primary' || mode === 'compose') && !isGenerating && !isComposing && (
               <span className="text-[0.625rem] text-muted-foreground font-sans select-none hidden sm:inline">
                 Ctrl+Enter
               </span>
@@ -890,7 +924,7 @@ export function InlineGenerationInput({
                 <span className="size-1.5 bg-destructive rounded-[2px]" />
                 Stop
               </Button>
-            ) : mode === 'freeform' ? (
+            ) : mode === 'primary' ? (
               <Button
                 size="sm"
                 className="h-7 text-xs gap-1.5 rounded-lg font-medium"

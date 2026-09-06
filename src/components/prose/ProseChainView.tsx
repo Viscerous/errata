@@ -18,6 +18,7 @@ import { formatDialogue } from '@/lib/fragment-mentions'
 import { onActiveBranchChanged, invalidateStoryContent } from '@/lib/branch-cache'
 import { qk, q, useActiveBranchId } from '@/lib/query-keys'
 import { createGenerationStreamStore, EMPTY_STREAM_SNAPSHOT, type GenerationStreamStore } from './generation-stream-store'
+import type { AuthorInputMode } from '@/contracts/generation'
 
 interface ProseChainViewProps {
   storyId: string
@@ -35,6 +36,7 @@ const GENERATION_HANDOFF_ANCHOR = 'generation-handoff'
 interface PendingGenerationMeta {
   id: number
   prompt: string
+  inputMode: AuthorInputMode
   fragmentCountBefore: number
 }
 
@@ -118,7 +120,7 @@ function PendingGenerationBlock({
 
   return (
     <div className="relative mb-6 animate-in fade-in slide-in-from-bottom-2 duration-300" data-component-id="prose-streaming-block">
-      {pending.prompt && (
+      {pending.prompt && pending.inputMode !== 'play' && (
         <div className="mb-3 -mt-2 flex items-start gap-2.5">
           <div className="w-0.5 min-h-[1.25rem] rounded-full bg-primary/20 shrink-0 mt-0.5" />
           <Caption size="sm" className="font-display italic truncate text-muted-foreground/60 select-none">
@@ -1106,7 +1108,7 @@ export function ProseChainView({
               storyId={storyId}
               isGenerating={isGenerating}
               latestFragmentId={lastProseFragment?.id}
-              onGenerationStart={(prompt) => {
+              onGenerationStart={(prompt, inputMode) => {
                 followRef.current = true
                 generationAnchorTopRef.current = null
                 generationStreamStore.reset()
@@ -1114,6 +1116,7 @@ export function ProseChainView({
                 setPendingGeneration({
                   id: nextGenerationIdRef.current++,
                   prompt,
+                  inputMode,
                   fragmentCountBefore: orderedProseFragments.length,
                 })
               }}
@@ -1144,7 +1147,7 @@ export function ProseChainView({
             storyId={storyId}
             fragments={outlineFragments}
             activeIndex={activeIndex}
-            open={outlineOpen ?? true}
+            open={outlineOpen ?? false}
             onJump={scrollToIndex}
           />
         </div>

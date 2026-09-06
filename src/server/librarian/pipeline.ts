@@ -32,8 +32,10 @@ import {
   runToolLoopPass,
   ToolLoopPassError,
   type ToolLoopPassArgs,
+  type ToolLoopPrepareStep,
   type ToolLoopStepUsage,
 } from './tool-runner'
+import { selectAnalyzeToolStage } from './analyze-stages'
 
 type LibrarianRuntime = Awaited<ReturnType<typeof resolveAgentRuntime>>
 
@@ -57,6 +59,7 @@ interface RunCompiledPassArgs {
   terminalRequiresToolName?: string
   abortSignal?: AbortSignal
   idleTimeoutMs?: number
+  prepareStep?: ToolLoopPrepareStep
 }
 
 export interface LibrarianPipelineInput {
@@ -118,6 +121,7 @@ async function runCompiledToolPass(args: RunCompiledPassArgs): Promise<{
     terminalRequiresToolName: args.terminalRequiresToolName,
     abortSignal: args.abortSignal,
     idleTimeoutMs: args.idleTimeoutMs,
+    prepareStep: args.prepareStep,
   })
 }
 
@@ -274,6 +278,8 @@ function completedStepUsageDiagnostics(stepUsages: ToolLoopStepUsage[]): Array<R
       stepNumber: step.stepNumber,
       finishReason: step.finishReason,
       ...(step.servedModelId ? { modelId: step.servedModelId } : {}),
+      ...(step.activeTools ? { activeTools: step.activeTools } : {}),
+      ...(step.durationMs !== undefined ? { durationMs: step.durationMs } : {}),
       ...(usage ? { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens } : {}),
     }
   })
@@ -351,6 +357,9 @@ async function runOnlineAnalyzePass(
         : undefined,
       abortSignal,
       idleTimeoutMs,
+      prepareStep: ({ steps }) => ({
+        activeTools: selectAnalyzeToolStage(Object.keys(compiled.tools), steps).activeTools,
+      }),
     })
     const { modelId: servedModelId, usage } = await resolveAndReportServedUsage(
       dataDir,

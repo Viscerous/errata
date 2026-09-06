@@ -4,6 +4,7 @@ import type { ActivityStreamEvent } from '../agents/activity-stream'
 import { servedModelIdFromResponse } from '../llm/served-models'
 
 type ToolLoopAgentSettings = ConstructorParameters<typeof ToolLoopAgent>[0]
+export type ToolLoopPrepareStep = NonNullable<ToolLoopAgentSettings['prepareStep']>
 
 /** Zero disables the watchdog; callers may opt in when a provider needs one. */
 export const DEFAULT_TOOL_LOOP_IDLE_TIMEOUT_MS = 0
@@ -24,6 +25,7 @@ export interface ToolLoopPassArgs {
   terminalRequiresToolName?: string
   abortSignal?: AbortSignal
   idleTimeoutMs?: number
+  prepareStep?: ToolLoopPrepareStep
 }
 
 export interface ToolLoopPassResult {
@@ -42,6 +44,10 @@ export interface ToolLoopStepUsage {
   finishReason: string
   usage: unknown
   servedModelId?: string
+  /** Tool schemas exposed for this request when the loop uses staged tools. */
+  activeTools?: string[]
+  /** Wall time for the request and its tool execution, when staged timing is available. */
+  durationMs?: number
 }
 
 /** Carries usage from completed steps when a later request in the loop fails. */
@@ -96,6 +102,8 @@ function linkedAbortController(parent?: AbortSignal): { controller: AbortControl
 
 export async function runToolLoopPass(args: ToolLoopPassArgs): Promise<ToolLoopPassResult> {
   const stepUsages: ToolLoopStepUsage[] = []
+  const activeToolsByStep = new Map<number, string[]>()
+  const stepStartedAt = new Map<number, number>()
   const agent = new ToolLoopAgent({
     model: args.model,
     instructions: args.instructions,
@@ -109,12 +117,27 @@ export async function runToolLoopPass(args: ToolLoopPassArgs): Promise<ToolLoopP
     topK: args.topK,
     providerOptions: args.providerOptions,
     maxOutputTokens: args.maxOutputTokens,
+    prepareStep: args.prepareStep
+      ? async (options) => {
+          stepStartedAt.set(options.stepNumber, Date.now())
+          const prepared = await args.prepareStep!(options)
+          if (prepared?.activeTools) {
+            activeToolsByStep.set(options.stepNumber, prepared.activeTools.map(String))
+          }
+          return prepared
+        }
+      : undefined,
     onStepFinish: (event) => {
+      const startedAt = stepStartedAt.get(event.stepNumber)
       stepUsages.push({
         stepNumber: event.stepNumber,
         finishReason: event.finishReason,
         usage: event.usage,
         servedModelId: servedModelIdFromResponse(event.response),
+        ...(activeToolsByStep.has(event.stepNumber)
+          ? { activeTools: activeToolsByStep.get(event.stepNumber) }
+          : {}),
+        ...(startedAt !== undefined ? { durationMs: Date.now() - startedAt } : {}),
       })
     },
   })

@@ -5,7 +5,6 @@ import { getActiveProseIds, findSectionIndex } from '../fragments/prose-chain'
 import { type Fragment, type StoryMeta } from '../fragments/schema'
 import {
   buildFragmentContextLanes,
-  canReadFragments,
   customContextFragmentTypes,
   findFragmentContextLane,
   fragmentCatalogBlock,
@@ -37,10 +36,10 @@ import {
 import { getAnalysisIndex } from '../librarian/storage'
 import { queueSummaryRollupMaintenance } from '../librarian/summary-rollup-maintenance'
 import type { ModelMessage } from 'ai'
+import type { AuthorInputMode } from '@/contracts/generation'
 
 export {
   buildFragmentContextLanes,
-  canReadFragments,
   customContextFragmentTypes,
   findFragmentContextLane,
   fragmentCatalogBlock,
@@ -102,20 +101,16 @@ export interface ContextBuildState {
   /** Source-current chronological memory older than the raw prose window. */
   summaryProjection?: SummaryProjection
   authorInput?: string
+  /** Whether authorInput directs the writer or is itself a canonical story turn. */
+  authorInputMode?: AuthorInputMode
   modelId?: string
-  /**
-   * Tool names the model will actually be offered, for blocks whose wording
-   * depends on them — a catalog telling a reader to expand a row is wrong if it
-   * cannot. Lives here rather than on AgentBlockContext alone because the Writer
-   * renders straight from this state, same as `modelId`. Undefined means the
-   * caller did not say; see `canReadFragments`.
-   */
-  enabledTools?: string[]
 }
 
 export interface ContextMessage {
   role: 'system' | 'user' | 'assistant'
   content: string
+  /** Stable leading content that may receive a provider cache breakpoint. */
+  cacheablePrefix?: string
 }
 
 export interface ContextBlock {
@@ -178,6 +173,8 @@ export interface BuildContextOptions {
   proseBeforeFragmentId?: string
   /** Exclude story summary from context */
   excludeStorySummary?: boolean
+  /** Semantic contract for authorInput. Defaults to the legacy `direct` mode. */
+  authorInputMode?: AuthorInputMode
 }
 
 /**
@@ -245,6 +242,7 @@ export async function buildContextState(
     excludeFragmentId,
     proseBeforeFragmentId,
     excludeStorySummary,
+    authorInputMode = 'direct',
   } = opts
   const requestLogger = logger.child({ storyId })
   requestLogger.info('Building context state...')
@@ -440,6 +438,7 @@ export async function buildContextState(
     characterCatalog,
     customFragmentCatalogs,
     authorInput,
+    authorInputMode,
   }
 
   requestLogger.info('Context state built', {
@@ -534,6 +533,7 @@ export function createDefaultBlocks(state: ContextBuildState): ContextBlock[] {
     story,
     proseFragments,
     authorInput = '',
+    authorInputMode = 'direct',
   } = state
 
   const contextOrderMode = story.settings.contextOrderMode ?? 'simple'
@@ -561,15 +561,15 @@ export function createDefaultBlocks(state: ContextBuildState): ContextBlock[] {
     source: 'builtin',
   })
 
-  // Tools reach the model via the SDK schema, so this block holds usage policy
-  // only — never a catalog that could drift from the enabled tools.
-  blocks.push({
-    id: 'tools',
-    role: 'system',
-    content: instructionRegistry.resolve('generation.tools-suffix', state.modelId),
-    order: 200,
-    source: 'builtin',
-  })
+  if (authorInputMode === 'play') {
+    blocks.push({
+      id: 'play-output-contract',
+      role: 'system',
+      content: instructionRegistry.resolve('generation.play-continuation', state.modelId),
+      order: 150,
+      source: 'builtin',
+    })
+  }
 
   if (systemPlaced.length > 0) {
     pushFragmentBlock(fragmentFullContextBlock({
@@ -651,13 +651,12 @@ export function createDefaultBlocks(state: ContextBuildState): ContextBlock[] {
         .map((entry) => ({ type: entry.type, label: entry.label, fragments: entry.available })),
     ],
     order: 330,
-    canReadFragments: canReadFragments(state),
   }))
 
   {
     const prose = proseWindowBlock(proseFragments, {
       order: 500,
-      newStoryGuidance: 'Establish the opening scene — setting, tone, and any initial characters — based on the author\'s direction below.',
+      newStoryGuidance: 'Write the opening from the author input below.',
     })
     if (prose) blocks.push(prose)
   }
@@ -666,10 +665,17 @@ export function createDefaultBlocks(state: ContextBuildState): ContextBlock[] {
   // (empty input) leaves the model to continue from the prose without a dangling
   // instruction label.
   if (authorInput.trim()) {
+    const isStoryTurn = authorInputMode === 'play'
     blocks.push({
       id: 'author-input',
       role: 'user',
-      content: markdownSection(2, 'Author Direction', authorInput),
+      content: isStoryTurn
+        ? markdownSection(
+            2,
+            'Author Story Turn',
+            `<author-story-turn>\n${authorInput}\n</author-story-turn>`,
+          )
+        : markdownSection(2, 'Author Direction', authorInput),
       order: 600,
       source: 'builtin',
     })
@@ -678,20 +684,10 @@ export function createDefaultBlocks(state: ContextBuildState): ContextBlock[] {
   return blocks
 }
 
-/**
- * Compiles context blocks into LLM messages.
- * Groups blocks by role, sorts by order, prepends [@block=id] markers,
- * and joins with blank-line separators.
- */
-export function compileBlocks(blocks: ContextBlock[]): ContextMessage[] {
-  const renderBlock = (b: ContextBlock): string => {
-    if (b.name && b.name !== b.id) {
-      const slug = b.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
-      return `[@block=${slug} src=${b.id}]\n${b.content}`
-    }
-    return `[@block=${b.id}]\n${b.content}`
-  }
+const VOLATILE_USER_BLOCK_IDS = new Set(['author-input', 'writing-brief', 'planning-request'])
 
+/** Compile ordered blocks into cohesive model-facing messages. */
+export function compileBlocks(blocks: ContextBlock[]): ContextMessage[] {
   const systemBlocks = blocks.filter(b => b.role === 'system').sort((a, b) => a.order - b.order)
   const userBlocks = blocks.filter(b => b.role === 'user').sort((a, b) => a.order - b.order)
 
@@ -700,14 +696,19 @@ export function compileBlocks(blocks: ContextBlock[]): ContextMessage[] {
   if (systemBlocks.length > 0) {
     messages.push({
       role: 'system',
-      content: systemBlocks.map(renderBlock).join('\n\n'),
+      content: systemBlocks.map(block => block.content).join('\n\n'),
     })
   }
 
   if (userBlocks.length > 0) {
+    const volatileIndex = userBlocks.findIndex(block => VOLATILE_USER_BLOCK_IDS.has(block.id))
+    const cacheablePrefix = volatileIndex > 0
+      ? userBlocks.slice(0, volatileIndex).map(block => block.content).join('\n\n')
+      : undefined
     messages.push({
       role: 'user',
-      content: userBlocks.map(renderBlock).join('\n\n'),
+      content: userBlocks.map(block => block.content).join('\n\n'),
+      ...(cacheablePrefix ? { cacheablePrefix } : {}),
     })
   }
 
@@ -847,6 +848,9 @@ export async function expandMessagesFragmentTags(
     messages.map(async (msg) => ({
       ...msg,
       content: await expandFragmentTags(msg.content, dataDir, storyId),
+      ...(msg.cacheablePrefix
+        ? { cacheablePrefix: await expandFragmentTags(msg.cacheablePrefix, dataDir, storyId) }
+        : {}),
     })),
   )
 }
@@ -856,9 +860,8 @@ export async function expandMessagesFragmentTags(
  *
  * - System message: adds providerOptions with Anthropic cache control so the
  *   entire system prompt is treated as a cacheable prefix.
- * - User message: splits at the [@block=author-input] marker into two TextParts.
- *   The stable prefix (story info, fragments, catalogs, summary, prose) gets
- *   cache control; the volatile suffix (author input) does not.
+ * - User message: uses compileBlocks' structural cacheablePrefix hint. The
+ *   stable story context gets cache control; the volatile request does not.
  * - Other messages: passed through unchanged.
  *
  * This is backward-compatible — providers that don't support cache control
@@ -875,28 +878,12 @@ export function addCacheBreakpoints(messages: ContextMessage[]): ModelMessage[] 
     }
 
     if (msg.role === 'user') {
-      const marker = '[@block=author-input]'
-      let splitIndex = msg.content.indexOf(marker)
-
-      // Prewriter writer-brief context has no author-input block — the brief is
-      // the volatile tail and the recent prose before it is the stable, cacheable
-      // prefix. Split there so the prose prefix still gets a cache breakpoint.
-      if (splitIndex === -1) {
-        splitIndex = msg.content.indexOf('[@block=writing-brief]')
-      }
-
-      // The prewriter prompt has a stable full-context prefix and a volatile
-      // planning request suffix.
-      if (splitIndex === -1) {
-        splitIndex = msg.content.indexOf('[@block=planning-request]')
-      }
-
-      if (splitIndex === -1) {
+      const stablePrefix = msg.cacheablePrefix
+      if (!stablePrefix || !msg.content.startsWith(stablePrefix)) {
         return { role: 'user', content: msg.content }
       }
 
-      const stablePrefix = msg.content.slice(0, splitIndex).trimEnd()
-      const volatileSuffix = msg.content.slice(splitIndex)
+      const volatileSuffix = msg.content.slice(stablePrefix.length)
 
       return {
         role: 'user',
@@ -915,6 +902,9 @@ export function addCacheBreakpoints(messages: ContextMessage[]): ModelMessage[] 
     }
 
     // Assistant or other roles: pass through
-    return { role: msg.role, content: msg.content } as ModelMessage
+    return {
+      role: msg.role,
+      content: msg.content,
+    } as ModelMessage
   })
 }

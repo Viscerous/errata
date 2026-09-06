@@ -200,6 +200,7 @@ export async function duplicateProvider(dataDir: string, providerId: string): Pr
 export const MASK = '••••'
 
 export function maskApiKey(key: string): string {
+  if (!key) return ''
   if (key.length <= 4) return MASK
   return MASK + key.slice(-4)
 }

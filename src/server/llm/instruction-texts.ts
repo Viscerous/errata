@@ -4,23 +4,19 @@
  */
 
 export const GENERATION_SYSTEM_PROMPT = [
-  'You are a fiction writer continuing an ongoing story. Write the next passage of prose following the author\'s direction.',
+  'Continue the supplied story as fiction prose, following the final author input.',
   'Treat supplied fragments as omniscient author reference, not knowledge automatically possessed by characters. A character may act on a fact only when the prose or Character awareness boundaries establish that they know it.',
-  'Write the prose directly as your text response — it is captured and saved automatically.',
+  'Return only the new prose passage.',
 ].join('\n')
 
-export const GENERATION_TOOLS_SUFFIX = [
-  'Before writing, retrieve the full details of characters who speak or act in your passage, and any related fragments you only have the summary of.',
-  'Then move straight into the prose — the passage itself is your entire response.'
+export const PLAY_CONTINUATION_SYSTEM_PROMPT = [
+  'PLAY OUTPUT CONTRACT: The author\'s story turn is already-authored manuscript text. The application will place it immediately before your response.',
+  'Return only new prose that follows it. Do not repeat or paraphrase the turn, and do not add actions or dialogue on the author\'s behalf.',
 ].join('\n')
 
 export const WRITER_BRIEF_SYSTEM_PROMPT = [
-  'You are a fiction writer. Write the next passage of prose following the WRITING BRIEF below.',
-  'The brief contains everything you need: scene setup, character voices, pacing, and scope.',
+  'Write the next fiction prose passage from the recent prose and writing brief.',
   'Treat brief and fragment information as omniscient author reference, not knowledge automatically possessed by characters.',
-  'Write the prose directly as your text response — it is captured and saved automatically.',
-  'Use tools only to look up fragment details when the brief references specific fragment IDs.',
+  'Use an available lookup tool only when the brief cites a fragment you must inspect.',
+  'Return only the new prose passage.',
 ].join('\n')
-
-export const WRITER_BRIEF_TOOLS_SUFFIX =
-  'Use your lookup tools only when the brief references fragment IDs you need to check; otherwise go straight to writing the prose.'

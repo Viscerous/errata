@@ -1106,6 +1106,15 @@ function AgentBlockEditor({ storyId, agentName, agents, onBack }: AgentBlockEdit
                 </Badge>
               )}
             </DialogTitle>
+            {previewData && (
+              <div className="flex flex-wrap gap-2 pt-1 text-[0.625rem] text-muted-foreground">
+                <Badge variant="outline" className="font-normal">
+                  ~{previewData.estimatedTokens.toLocaleString()} {previewData.toolStages.length > 0 ? 'maximum' : 'total'} tokens
+                </Badge>
+                <Badge variant="outline" className="font-normal">messages ~{Math.ceil(previewData.messageCharacters / 4).toLocaleString()}</Badge>
+                <Badge variant="outline" className="font-normal">tools {previewData.toolStages.length > 0 ? 'maximum ' : ''}~{Math.ceil(previewData.toolCharacters / 4).toLocaleString()}</Badge>
+              </div>
+            )}
           </DialogHeader>
 
           {previewLoading ? (
@@ -1121,6 +1130,7 @@ function AgentBlockEditor({ storyId, agentName, agents, onBack }: AgentBlockEdit
               messages={previewData.messages}
               blocks={previewData.blocks}
               tools={previewData.tools}
+              toolStages={previewData.toolStages}
               className="border-t border-border/30"
             />
           ) : null}

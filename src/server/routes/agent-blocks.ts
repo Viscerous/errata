@@ -9,6 +9,8 @@ import { listActiveAgents, requestAgentCancellation } from '../agents/active-reg
 import { createActivitySSE } from '../agents/activity-stream'
 import { encodeStream } from './encode-stream'
 import { compileBlocks, expandMessagesFragmentTags } from '../llm/context-builder'
+import { describeToolSurface } from '../llm/tool-surface'
+import { describeAnalyzeToolStages } from '../librarian/analyze-stages'
 import { getModel } from '../llm/client'
 import { applyBlockConfig } from '../blocks/apply'
 import { createScriptHelpers } from '../blocks/script-context'
@@ -215,30 +217,60 @@ export function agentBlockRoutes(dataDir: string) {
       })
       let messages = compileBlocks(blocks)
       messages = await expandMessagesFragmentTags(messages, dataDir, params.storyId)
+      const previewMessages = messages.map(message => ({ role: message.role, content: message.content }))
       const blocksMeta = blocks
         .sort((a, b) => {
           if (a.role !== b.role) return a.role === 'system' ? -1 : 1
           return a.order - b.order
         })
-        .map(b => ({ id: b.id, name: b.name ?? b.id, role: b.role }))
+        .map(b => ({ id: b.id, name: b.name ?? b.id, role: b.role, content: b.content }))
 
       // The actual tools sent to the model (with disabledTools applied), built
       // from the same factories the handler uses so the preview can't drift.
-      let tools: Array<{ name: string; description: string; enabled: boolean }> = []
+      let tools: Array<Awaited<ReturnType<typeof describeToolSurface>> & { enabled: boolean }> = []
       if (resolvedTools) {
         const disabled = new Set(config.disabledTools ?? [])
         // Preserve the toolset's declaration order - it reflects the agent's
         // workflow (e.g. report tools, then edit tools, then suggest tools) -
         // rather than re-sorting alphabetically.
-        tools = Object.entries(resolvedTools)
-          .map(([name, t]) => ({
-            name,
-            description: (t as { description?: string }).description ?? '',
-            enabled: !disabled.has(name),
-          }))
+        tools = await Promise.all(Object.entries(resolvedTools).map(async ([name, tool]) => ({
+          ...await describeToolSurface(name, tool),
+          enabled: !disabled.has(name),
+        })))
       }
 
-      return { messages, blocks: blocksMeta, blockCount: blocks.length, tools }
+      const messageCharacters = previewMessages.reduce((sum, message) => sum + message.content.length, 0)
+      const toolCharacters = tools.reduce((sum, tool) => sum + (tool.enabled ? tool.characters : 0), 0)
+      const estimatedCharacters = messageCharacters + toolCharacters
+      const enabledToolSurfaces = new Map(
+        tools.filter((tool) => tool.enabled).map((tool) => [tool.name, tool]),
+      )
+      const toolStages = params.agentName === 'librarian.analyze'
+        ? describeAnalyzeToolStages([...enabledToolSurfaces.keys()]).map((stage) => {
+            const stageToolCharacters = stage.toolNames.reduce(
+              (sum, name) => sum + (enabledToolSurfaces.get(name)?.characters ?? 0),
+              0,
+            )
+            const stageCharacters = messageCharacters + stageToolCharacters
+            return {
+              ...stage,
+              toolCharacters: stageToolCharacters,
+              estimatedCharacters: stageCharacters,
+              estimatedTokens: Math.ceil(stageCharacters / 4),
+            }
+          })
+        : []
+      return {
+        messages: previewMessages,
+        blocks: blocksMeta,
+        blockCount: blocks.length,
+        tools,
+        messageCharacters,
+        toolCharacters,
+        estimatedCharacters,
+        estimatedTokens: Math.ceil(estimatedCharacters / 4),
+        toolStages,
+      }
     }), { detail: { summary: 'Preview compiled agent context' } })
 
     // Create custom block

@@ -4,7 +4,6 @@ import { buildBasePreviewContext } from '../agents/block-helpers'
 import { instructionRegistry } from '../instructions'
 import {
   buildFragmentContextLanes,
-  canReadFragments,
   fragmentCatalogBlock,
   fragmentFullContextBlocksBySource,
   proseWindowBlock,
@@ -40,24 +39,11 @@ function writerOwnedContext(ctx: AgentBlockContext): AgentBlockContext {
   }
 }
 
-export const STORY_SETUP_SYSTEM_PROMPT = `You are Errata's story setup collaborator. Help a writer discover and shape a story through an open-ended conversation.
+export const STORY_SETUP_SYSTEM_PROMPT = `Collaborate with the writer to discover and shape a story from whatever they bring, including an incomplete idea. Build on their answers instead of following a fixed questionnaire. Ask one focused question at a time; offer a few concrete possibilities only when useful.
 
-The writer may arrive with a premise, a character, a scene, a genre, an image, a mood, an existing draft, or no clear idea at all. Meet them where they are. Ask one focused question at a time. You may ask two only when they are tightly related and easy to answer together.
+Track seven concerns: starting point; premise or emotional center; central characters; goal, opposition, and stakes; setting and essential world rules; viewpoint, tense, voice, and tone; and what the opening passage should accomplish. Mark a concern partial when a meaningful decision remains, then ask about the highest-value missing or partial point.
 
-Build on what the writer actually says. Do not march through a fixed questionnaire or insist on filling categories. Explore the premise, emotional center, central characters, setting, tension, voice, and possible beginning only when each is useful to this particular story. Offer a small number of concrete possibilities when the writer is stuck, while leaving room for their own answer.
-
-Use this checklist to guide the conversation:
-- Starting point: what the writer already has, however incomplete.
-- What it is about: the premise, dramatic question, or emotional center.
-- Characters: the central people or story actors and what matters about them.
-- Goal and stakes: what is wanted, what pushes back, and why it matters.
-- Setting: the place, time, atmosphere, and essential world rules.
-- Voice and tone: viewpoint, tense, style, mood, and pacing when relevant.
-- Opening direction: where the story begins and what the first passage should accomplish.
-
-Mark a checklist entry partial when there is a useful clue but an important decision remains. After updating the checklist, ask about the most useful missing or partial entry. Do not mention the tool call.
-
-Keep each response concise, usually two to four sentences. Do not expose fragment mechanics. The writer can open the story at any point, so help them notice important ambiguity without delaying them for completeness.`
+Keep replies concise and conversational. Do not mention tools or fragment mechanics, and do not delay the writer until every concern is complete.`
 
 export function createStorySetupBlocks(ctx: AgentBlockContext): ContextBlock[] {
   const existingStory = ctx.story.name !== 'New Story' || Boolean(ctx.story.description.trim())
@@ -66,7 +52,7 @@ export function createStorySetupBlocks(ctx: AgentBlockContext): ContextBlock[] {
 
   const setupFragments = ctx.storySetupFragments ?? []
   const existingFragments = setupFragments.length > 0
-    ? `\n\nExisting story setup fragments follow. The writer is returning to refine the story. Preserve each storySetupKey and include the complete set in updateStorySetup unless the writer explicitly replaces an idea.\n\n${setupFragments.map(fragment => [
+    ? `\n\nExisting story setup fragments:\n\n${setupFragments.map(fragment => [
       `### ${fragment.name}`,
       `storySetupKey: ${fragment.meta.storySetupKey}`,
       `type: ${fragment.type}`,
@@ -76,9 +62,9 @@ export function createStorySetupBlocks(ctx: AgentBlockContext): ContextBlock[] {
     : ''
 
   const toolPolicy = ctx.storySetupReadOnly
-    ? '\n\nThis is a read-only assessment turn. Before responding, call updateStorySetup exactly once with only the seven checklist entries in the listed order. The server supplies existing setup fragments; do not send story or fragments. Do not propose or save story or fragment changes. Only continue after updateStorySetup succeeds.'
-    : '\n\nBefore every conversational response, call updateStorySetup exactly once with all seven checklist entries in the listed order. Omit story until there is enough information for a useful working title and description; after that, include the latest name and description on every call. The fragments array must be the complete current set of setup fragments, not only changes from the previous turn. Create or revise guideline, knowledge, character, and prose fragments as soon as the conversation supports them. Give every fragment a short lowercase key made of letters, numbers, and hyphens, and keep it unchanged when revising or renaming the fragment. Keep uncertainty visible instead of inventing a major decision. Only continue after updateStorySetup succeeds.'
-  const materialPolicy = '\n\nThe existing writer-owned context blocks and fragment catalog are read-only reference material. Use them to assess checklist coverage and avoid questions the story has already answered. Do not copy them into the fragments array or assign them storySetupKey values.'
+    ? '\n\nThis is a read-only assessment. Before replying, call updateStorySetup once with the seven checklist entries in order and no story or fragment changes.'
+    : '\n\nBefore each reply, call updateStorySetup once with the complete checklist and current setup-fragment snapshot. Preserve existing fragment keys, add supported material promptly, and retain uncertainty rather than inventing decisions. Include the working title and description once they are useful.'
+  const materialPolicy = '\n\nTreat the writer-owned context below as read-only evidence for checklist coverage. Do not copy it into the setup-fragment snapshot.'
   const blocks: ContextBlock[] = [{
     id: 'story-setup-instructions',
     role: 'system',
@@ -112,7 +98,6 @@ export function createStorySetupBlocks(ctx: AgentBlockContext): ContextBlock[] {
       fragments: lane.catalog,
     })),
     order: 220,
-    canReadFragments: canReadFragments(ctx),
   })
   if (catalog) blocks.push(catalog)
 

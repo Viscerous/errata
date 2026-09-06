@@ -90,6 +90,32 @@ describe('Story API routes', () => {
     expect(await res.json()).toEqual({ error: 'Story not found' })
   })
 
+  it('POST /api/stories/:id/generation-context-preview uses the live play contract', async () => {
+    const created = await (await apiJson('/stories', story)).json()
+    const turn = 'I raise the lantern. "Who is there?"'
+    const res = await apiJson(`/stories/${created.id}/generation-context-preview`, {
+      input: turn,
+      inputMode: 'play',
+    })
+
+    expect(res.status).toBe(200)
+    const data = await res.json()
+    expect(data.inputMode).toBe('play')
+    expect(data.estimatedTokens).toBeGreaterThan(0)
+    expect(data.messageCharacters).toBeGreaterThan(0)
+    expect(data.toolCharacters).toBeGreaterThan(0)
+    expect(data.tools.every((tool: { schema: string }) => tool.schema.length > 0)).toBe(true)
+    const authorBlock = data.blocks.find((block: { id: string }) => block.id === 'author-input')
+    expect(authorBlock.content).toContain('## Author Story Turn')
+    expect(authorBlock.content).toContain(turn)
+    expect(authorBlock.estimatedTokens).toBeGreaterThan(0)
+    expect(data.messages.some((message: { content: string }) => message.content.includes(turn))).toBe(true)
+    expect(data.messages.every((message: { content: string }) => !message.content.includes('[@block='))).toBe(true)
+    expect(data.tools).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: 'readFragments', description: expect.any(String) }),
+    ]))
+  })
+
   it('PUT /api/stories/:id updates a story', async () => {
     const created = await (await apiJson('/stories', story)).json()
     const res = await apiJson(
@@ -113,6 +139,24 @@ describe('Story API routes', () => {
     expect(res.status).toBe(200)
     const data = await res.json()
     expect(data.settings.disableLibrarianAutoAnalysis).toBe(true)
+  })
+
+  it('PATCH /api/stories/:id/settings persists the story-level author input contract', async () => {
+    const created = await (await apiJson('/stories', story)).json()
+    const res = await apiJson(
+      `/stories/${created.id}/settings`,
+      { authorInputMode: 'play' },
+      'PATCH',
+    )
+
+    expect(res.status).toBe(200)
+    expect((await res.json()).settings.authorInputMode).toBe('play')
+
+    const preview = await apiJson(`/stories/${created.id}/generation-context-preview`, {
+      input: 'I step into the rain.',
+    })
+    expect(preview.status).toBe(200)
+    expect((await preview.json()).inputMode).toBe('play')
   })
 
   it('PATCH /api/stories/:id/settings persists per-agent sampling overrides', async () => {

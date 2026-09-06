@@ -1,25 +1,23 @@
 import { useCallback, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { api, type ProviderConfigSafe } from '@/lib/api'
+import { api, type DiscoveredProvider, type ProviderConfigSafe } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Plus, Trash2, Star, Pencil, RefreshCw, Loader2, X, ArrowLeft, Minus, Zap, Copy, KeyRound } from 'lucide-react'
+import { Plus, Trash2, Star, Pencil, RefreshCw, Loader2, X, ArrowLeft, Minus, Zap, Copy, KeyRound, Server } from 'lucide-react'
 import { EmptyHint, Hint } from '@/components/ui/prose-text'
 import { randomToken } from '@/lib/client-ids'
+import { PROVIDER_PRESETS, providerPresetEntries, type PresetId } from '@/contracts/providers'
+import {
+  Panel,
+  PanelActions,
+  PanelDescription,
+  PanelFooter,
+  PanelHeader,
+  PanelHeaderText,
+  PanelTitle,
+} from '@/components/ui/panel'
 
-const PRESETS = {
-  deepseek: { name: 'DeepSeek', baseURL: 'https://api.deepseek.com', defaultModel: 'deepseek-v4-flash', models: ['deepseek-v4-flash', 'deepseek-v4-pro'] },
-  openai: { name: 'OpenAI', baseURL: 'https://api.openai.com/v1', defaultModel: 'gpt-5.2' },
-  anthropic: { name: 'Anthropic', baseURL: 'https://api.anthropic.com/v1', defaultModel: 'claude-opus-4-6' },
-  gemini: { name: 'Google Gemini', baseURL: 'https://generativelanguage.googleapis.com/v1beta', defaultModel: 'gemini-3.5-flash', models: ['gemini-3.5-flash', 'gemini-3.1-pro-preview', 'gemini-2.5-flash'] },
-  kimi: { name: 'Kimi', baseURL: 'https://api.moonshot.ai/v1', defaultModel: 'kimi-k2.5' },
-  'kimi-code': { name: 'Kimi Code', baseURL: 'https://api.kimi.com/coding/v1', defaultModel: 'kimi-for-coding' },
-  openrouter: { name: 'OpenRouter', baseURL: 'https://openrouter.ai/api/v1', defaultModel: 'deepseek/deepseek-chat-v3-0324' },
-  zai: { name: 'Z.AI', baseURL: 'https://api.z.ai/api/paas/v4', defaultModel: 'glm-5' },
-  custom: { name: '', baseURL: '', defaultModel: '' },
-} as const
-
-type PresetKey = keyof typeof PRESETS
+type PresetKey = PresetId
 
 interface FormState {
   preset: PresetKey
@@ -33,7 +31,16 @@ interface FormState {
 
 type ModelOption = { id: string; owned_by?: string; isFree?: boolean }
 
-const emptyForm: FormState = { preset: 'deepseek', name: 'DeepSeek', baseURL: 'https://api.deepseek.com', apiKey: '', defaultModel: 'deepseek-v4-flash', customHeaders: [], temperature: '' }
+const defaultPreset = PROVIDER_PRESETS.deepseek
+const emptyForm: FormState = {
+  preset: 'deepseek',
+  name: defaultPreset.name,
+  baseURL: defaultPreset.baseURL,
+  apiKey: '',
+  defaultModel: defaultPreset.defaultModel,
+  customHeaders: [],
+  temperature: '',
+}
 
 /**
  * Compact provider list for the settings sidebar.
@@ -91,6 +98,13 @@ export function ProviderPanel({ onClose }: { onClose: () => void }) {
     queryFn: () => api.config.getProviders(),
   })
 
+  const discovery = useQuery({
+    queryKey: ['provider-discovery'],
+    queryFn: () => api.config.discoverLocal(),
+    staleTime: 10_000,
+    refetchOnMount: 'always',
+  })
+
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['global-config'] })
 
   const closeForm = useCallback(() => {
@@ -130,6 +144,24 @@ export function ProviderPanel({ onClose }: { onClose: () => void }) {
     setFetchedModels([])
     setFetchError(null)
     setUseCustomModel(false)
+    setOauthStatus(null)
+  }
+
+  const openDiscovered = (provider: DiscoveredProvider) => {
+    const preset = PROVIDER_PRESETS[provider.preset]
+    setEditingId(null)
+    setForm({
+      preset: provider.preset,
+      name: provider.name,
+      baseURL: provider.baseURL,
+      apiKey: '',
+      defaultModel: provider.models[0] ?? preset.defaultModel,
+      customHeaders: [],
+      temperature: '',
+    })
+    setFetchedModels(provider.models.map(id => ({ id })))
+    setFetchError(null)
+    setUseCustomModel(provider.models.length === 0)
     setOauthStatus(null)
   }
 
@@ -181,8 +213,16 @@ export function ProviderPanel({ onClose }: { onClose: () => void }) {
 
   const handlePresetChange = (preset: PresetKey) => {
     if (!form) return
-    const p = PRESETS[preset]
-    setForm({ preset, name: p.name || form.name, baseURL: p.baseURL || form.baseURL, apiKey: form.apiKey, defaultModel: p.defaultModel || form.defaultModel, customHeaders: form.customHeaders, temperature: form.temperature })
+    const p = PROVIDER_PRESETS[preset]
+    setForm({
+      preset,
+      name: p.name || form.name,
+      baseURL: p.baseURL || form.baseURL,
+      apiKey: form.apiKey,
+      defaultModel: p.defaultModel || form.defaultModel,
+      customHeaders: Object.entries(p.customHeaders).map(([key, value]) => ({ key, value, _id: randomToken() })),
+      temperature: form.temperature,
+    })
     setFetchedModels([])
     setFetchError(null)
   }
@@ -231,9 +271,10 @@ export function ProviderPanel({ onClose }: { onClose: () => void }) {
     // screen to test with. The stored key is pinned to its stored host and cannot
     // be aimed at the edited settings, so that case tests what is saved — and the
     // result says so, rather than reporting a pass for settings the user changed.
+    const requiresApiKey = PROVIDER_PRESETS[form.preset]?.requiresApiKey ?? false
     const useStored = !form.apiKey && !!editingId
-    if (!useStored && (!form.baseURL || !form.apiKey)) {
-      setTestResult({ ok: false, error: 'Base URL and API Key are required' })
+    if (!useStored && (!form.baseURL || (requiresApiKey && !form.apiKey))) {
+      setTestResult({ ok: false, error: requiresApiKey ? 'Base URL and API Key are required' : 'Base URL is required' })
       return
     }
     setTesting(true)
@@ -290,33 +331,37 @@ export function ProviderPanel({ onClose }: { onClose: () => void }) {
 
   const providers = config?.providers ?? []
   const defaultId = config?.defaultProviderId ?? null
+  const configuredURLs = new Set(providers.map(provider => provider.baseURL.replace(/\/+$/, '').toLowerCase()))
+  const discoveredProviders = (discovery.data?.providers ?? [])
+    .filter(provider => provider.status === 'available')
+    .filter(provider => !configuredURLs.has(provider.baseURL.replace(/\/+$/, '').toLowerCase()))
   const isSaving = addMutation.isPending || updateMutation.isPending
-  const canSubmit = form && (editingId
-    ? form.name && form.baseURL && form.defaultModel
-    : form.name && form.baseURL && form.apiKey && form.defaultModel)
+  const canSubmit = form && form.name && form.baseURL && form.defaultModel
+    && (editingId || !PROVIDER_PRESETS[form.preset].requiresApiKey || form.apiKey)
 
   const inputClass = "w-full h-9 px-3 text-sm text-foreground bg-muted/30 border border-border/50 rounded-md focus:border-primary/30 focus:outline-none"
   const labelClass = "text-xs font-medium text-muted-foreground mb-1.5 block"
 
   return (
-    <div className="flex flex-col h-full" data-cuelume-surface="bloom" data-component-id="provider-panel-root">
-      {/* Header */}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-border/50">
+    <Panel data-cuelume-surface="bloom" data-component-id="provider-panel-root">
+      <PanelHeader>
         <div className="flex items-center gap-2">
           {form && (
             <Button size="icon" variant="ghost" className="size-7 text-muted-foreground" onClick={closeForm} data-component-id="provider-panel-back">
               <ArrowLeft className="size-4" />
             </Button>
           )}
-          <h2 className="font-display text-lg">Providers</h2>
-          <span className="text-[0.625rem] text-muted-foreground uppercase tracking-wider">
-            {form ? (editingId ? 'Edit' : 'Add New') : 'LLM Configuration'}
-          </span>
+          <PanelHeaderText>
+            <PanelTitle>Providers</PanelTitle>
+            <PanelDescription>{form ? (editingId ? 'Edit connection' : 'Add connection') : 'Models and LLM connections'}</PanelDescription>
+          </PanelHeaderText>
         </div>
-        <Button size="icon" variant="ghost" className="size-7 text-muted-foreground" onClick={onClose} data-component-id="provider-panel-close">
-          <X className="size-4" />
-        </Button>
-      </div>
+        <PanelActions>
+          <Button size="icon" variant="ghost" className="size-7 text-muted-foreground" onClick={onClose} aria-label="Close providers" data-component-id="provider-panel-close">
+            <X className="size-4" />
+          </Button>
+        </PanelActions>
+      </PanelHeader>
 
       {form ? (
         /* ─── Add / Edit Form ─── */
@@ -352,15 +397,9 @@ export function ProviderPanel({ onClose }: { onClose: () => void }) {
                   className={inputClass}
                   data-component-id="provider-form-preset"
                 >
-                  <option value="deepseek">DeepSeek</option>
-                  <option value="openai">OpenAI</option>
-                  <option value="anthropic">Anthropic</option>
-                  <option value="gemini">Google Gemini</option>
-                  <option value="kimi">Kimi</option>
-                  <option value="kimi-code">Kimi Code</option>
-                  <option value="openrouter">OpenRouter</option>
-                  <option value="zai">Z.AI</option>
-                  <option value="custom">Custom</option>
+                  {providerPresetEntries().map(([id, preset]) => (
+                    <option key={id} value={id}>{preset.name}</option>
+                  ))}
                 </select>
               </div>
             )}
@@ -389,13 +428,19 @@ export function ProviderPanel({ onClose }: { onClose: () => void }) {
 
             {/* API Key */}
             <div>
-              <label className={labelClass}>API Key</label>
+              <label className={labelClass}>
+                API Key{PROVIDER_PRESETS[form.preset].requiresApiKey ? '' : ' (optional)'}
+              </label>
               <input
                 type="password"
                 value={form.apiKey}
                 onChange={(e) => setForm({ ...form, apiKey: e.target.value })}
                 className={inputClass}
-                placeholder={editingId ? 'Leave blank to keep current key' : 'Enter API key'}
+                placeholder={editingId
+                  ? 'Leave blank to keep current key'
+                  : PROVIDER_PRESETS[form.preset].requiresApiKey
+                    ? 'Enter API key'
+                    : 'Leave blank for a keyless local server'}
               />
             </div>
 
@@ -495,7 +540,7 @@ export function ProviderPanel({ onClose }: { onClose: () => void }) {
                 </Button>
               </div>
               {(() => {
-                const suggested = (PRESETS[form.preset as keyof typeof PRESETS] as { models?: readonly string[] } | undefined)?.models ?? []
+                const suggested = (PROVIDER_PRESETS[form.preset] as { models?: readonly string[] }).models ?? []
                 return suggested.length > 0 ? (
                   <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
                     <span className="text-[0.625rem] uppercase tracking-wider text-muted-foreground mr-0.5">Suggested</span>
@@ -599,6 +644,47 @@ export function ProviderPanel({ onClose }: { onClose: () => void }) {
         /* ─── Provider List ─── */
         <ScrollArea className="flex-1">
           <div className="max-w-2xl mx-auto p-6 space-y-2">
+            <div className="mb-6 rounded-lg border border-border/30 bg-muted/10 p-4">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-medium">Found on this machine</p>
+                  <Hint>Known local model servers are probed on loopback only.</Hint>
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  className="h-8 gap-1.5 text-xs"
+                  onClick={() => discovery.refetch()}
+                  disabled={discovery.isFetching}
+                >
+                  <RefreshCw className={`size-3 ${discovery.isFetching ? 'animate-spin' : ''}`} />
+                  Refresh
+                </Button>
+              </div>
+              {discovery.isFetching && !discovery.data ? (
+                <Hint>Checking Ollama, LM Studio, llama.cpp, KoboldCpp, and oMLX…</Hint>
+              ) : discoveredProviders.length > 0 ? (
+                <div className="space-y-2">
+                  {discoveredProviders.map(provider => (
+                    <div key={`${provider.preset}:${provider.baseURL}`} className="flex items-center gap-3 rounded-md border border-border/30 bg-background/60 px-3 py-2.5">
+                      <Server className="size-4 shrink-0 text-primary/70" />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium">{provider.name}</p>
+                        <p className="truncate text-xs text-muted-foreground">
+                          {provider.models.length > 0 ? `${provider.models.length} model${provider.models.length === 1 ? '' : 's'}` : 'Server available'} · {provider.baseURL}
+                        </p>
+                      </div>
+                      <Button type="button" size="sm" variant="outline" className="h-8" onClick={() => openDiscovered(provider)}>
+                        Use
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <Hint>No unconfigured local servers are answering right now.</Hint>
+              )}
+            </div>
             {providers.length === 0 && (
               <div className="text-center py-12">
                 <EmptyHint size="sm" className="mb-4">No providers configured.</EmptyHint>
@@ -661,7 +747,7 @@ export function ProviderPanel({ onClose }: { onClose: () => void }) {
       )}
 
       {/* Creator */}
-      <div className="px-6 py-3 border-t border-border/30 text-center">
+      <PanelFooter className="justify-center">
         <span className="text-[0.625rem] text-muted-foreground">
           built by{' '}
           <a
@@ -673,8 +759,8 @@ export function ProviderPanel({ onClose }: { onClose: () => void }) {
             Tealios
           </a>
         </span>
-      </div>
-    </div>
+      </PanelFooter>
+    </Panel>
   )
 }
 

@@ -23,14 +23,13 @@ The singleton `instructionRegistry` is exported from `src/server/instructions/in
 
 All registered keys grouped by module:
 
-### Generation (5)
+### Generation (4)
 
 | Key | Registered in | Description |
 |---|---|---|
 | `generation.system` | `src/server/llm/agents.ts` | Main writer system prompt |
-| `generation.tools-suffix` | `src/server/llm/agents.ts` | Appended after tool descriptions in writer context |
 | `generation.writer-brief.system` | `src/server/llm/agents.ts` | Writer system prompt when receiving a prewriter brief |
-| `generation.writer-brief.tools-suffix` | `src/server/llm/agents.ts` | Tool suffix for brief-mode writer |
+| `generation.play-continuation` | `src/server/llm/agents.ts` | Continuation-only contract for Play input |
 | `generation.prewriter.system` | `src/server/llm/agents.ts` | Prewriter agent system prompt |
 
 ### Librarian (5)
@@ -43,12 +42,11 @@ All registered keys grouped by module:
 | `librarian.optimize-character.system` | `src/server/librarian/agents.ts` | Character optimization system prompt (depth methodology) |
 | `librarian.prose-transform.system` | `src/server/librarian/agents.ts` | Prose selection transform system prompt |
 
-### Character Chat (5)
+### Character Chat (4)
 
 | Key | Registered in | Description |
 |---|---|---|
-| `character-chat.system` | `src/server/character-chat/agents.ts` | Character chat system prompt (uses `{{characterName}}`) |
-| `character-chat.instructions` | `src/server/character-chat/agents.ts` | Roleplay behavior instructions |
+| `character-chat.system` | `src/server/character-chat/agents.ts` | Complete character chat roleplay contract |
 | `character-chat.persona.character` | `src/server/character-chat/agents.ts` | Named character persona (uses `{{personaName}}`, `{{personaDescription}}`) |
 | `character-chat.persona.stranger` | `src/server/character-chat/agents.ts` | Anonymous stranger persona |
 | `character-chat.persona.custom` | `src/server/character-chat/agents.ts` | Custom persona (uses `{{prompt}}`) |
@@ -59,6 +57,12 @@ All registered keys grouped by module:
 |---|---|---|
 | `directions.system` | `src/server/directions/agents.ts` | Direction suggestion system prompt |
 | `directions.suggest-template` | `src/server/directions/agents.ts` | Suggest prompt template |
+
+### Story setup (1)
+
+| Key | Registered in | Description |
+|---|---|---|
+| `story-setup.system` | `src/server/story-setup/agents.ts` | Conversational story discovery prompt |
 
 ### Chapters (1)
 
@@ -80,10 +84,9 @@ Some instruction keys contain `{{placeholder}}` markers that are substituted at 
 
 | Key | Variables | Substituted in |
 |---|---|---|
-| `character-chat.system` | `{{characterName}}` | `src/server/character-chat/chat.ts` |
 | `character-chat.persona.character` | `{{personaName}}`, `{{personaDescription}}` | `src/server/character-chat/chat.ts` |
 | `character-chat.persona.custom` | `{{prompt}}` | `src/server/character-chat/chat.ts` |
-| `directions.suggest-template` | (varies by caller) | `src/server/directions/suggest.ts` |
+| `directions.suggest-template` | `{{count}}` | `src/server/directions/suggest.ts` |
 
 ## Integration
 

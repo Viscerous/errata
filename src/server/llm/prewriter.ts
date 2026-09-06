@@ -14,48 +14,20 @@ import type { TokenUsage, ToolCallLog } from './generation-logs'
 import { resolveAndReportServedUsage } from './usage-normalizer'
 import { servedModelIdFromResponse } from './served-models'
 import { createLogger } from '../logging'
+import type { AuthorInputMode } from '@/contracts/generation'
 
 const logger = createLogger('prewriter')
 
-export const PREWRITER_INSTRUCTIONS = `You are a writing planner. Analyze the full story context and the author's direction,
-then produce a focused WRITING BRIEF for the writer — a separate prose model.
+export const PREWRITER_INSTRUCTIONS = `Plan the next passage for a separate fiction writer. Use the supplied story context and author request; do not write the passage yourself.
 
-The writer sees exactly two things: the most recent prose (for continuity) and your brief.
-Character fragments, guidelines, knowledge, and the story summary all stay with you.
-Everything the writer needs must be in your brief.
+Produce a concise, self-contained writing brief covering:
+- the immediate starting point and passage objective;
+- active characters' current motives, emotions, and distinctive voices;
+- pacing and the exact stopping point;
+- only the continuity facts, style, and point-of-view constraints needed now;
+- any boundary the passage must respect.
 
-## Writing Brief Requirements
-
-Your brief must include:
-
-1. **SCENE SETUP**: Where are we? Who is present? What just happened?
-2. **OBJECTIVE**: What should this passage accomplish? (1-2 sentences)
-3. **CHARACTER VOICES**: For each character active in this scene, a detailed voice profile distilled from their character fragment:
-   - How they speak (vocabulary level, sentence patterns, verbal tics, accent cues)
-   - Personality in action (how their traits manifest in dialogue and behavior)
-   - Emotional state right now and what's driving it
-   - What they want in this scene and how they'll pursue it
-   - Example dialogue line that captures their voice in this moment
-   *This section carries everything the writer will ever know about these characters.*
-4. **PACING**: How much story time this passage covers and where it ends. Be specific: "End when X happens" or "End mid-conversation after Y."
-5. **KEY DETAILS**: Specific facts, names, places from knowledge/guidelines to reference.
-6. **TONE & STYLE**: Emotional register, prose style, POV constraints.
-7. **SCOPE LIMITS**: Boundaries the writer must respect, stated as positive constraints:
-   - "Keep the conflict unresolved in this passage"
-   - "Stay within the current time frame"
-   - "Keep the cast to the characters named above"
-
-Be direct and specific. The Reasoning Length guidance below sets how long and how deeply to plan — follow it for the brief's length and level of detail. Spend the most space on **CHARACTER VOICES** — the writer depends entirely on your character direction to capture each character faithfully.
-
-## Next Directions
-
-After writing the brief, call the proposeDirections tool with exactly 3 pacing options for the NEXT passage:
-
-1. **LINGER** — A direction that stays in the current moment. Deepen the atmosphere, explore character interiority, or develop the emotional texture of the scene without advancing the plot.
-2. **CONTINUE** — A direction that advances the scene meaningfully but leaves the current plot thread unresolved. Move toward the next beat but leave it open.
-3. **END** — A direction that brings the current scene or plot section to a natural conclusion. Resolve the active tension and transition to what comes next.
-
-Anchor each direction in this specific story moment rather than generic advice.`
+After the brief, call proposeDirections exactly once with three story-specific options for the following passage: LINGER in the current moment, CONTINUE the active thread, and END the current scene or section.`
 
 export interface PrewriterDirection {
   pacing: 'linger' | 'continue' | 'end'
@@ -76,37 +48,13 @@ export type PrewriterReasoning = 'short' | 'normal' | 'extensive'
  * the prewriter's tool-step budget so 'short' is genuinely faster.
  */
 export const PREWRITER_REASONING_DIRECTIVES: Record<PrewriterReasoning, string> = {
-  short: `## Reasoning Length: SHORT — favor speed
-Move fast. Do NOT deliberate at length or chase optional tool lookups — decide
-from the context you already have. Write a tight, skimmable brief of roughly
-300 words. Give voice notes only for characters who actually speak in this
-scene, a line or two each. Getting the writer moving quickly matters more than
-exhaustive coverage.`,
-  normal: `## Reasoning Length: NORMAL — balanced
-Plan thoughtfully but efficiently. Aim for a brief of around 800 words. Cover
-the active characters' voices well without exhausting every detail.`,
-  extensive: `## Reasoning Length: EXTENSIVE — favor depth
-Reason thoroughly before committing. Weigh subtext, character interiority, and
-alternative beats, and look things up when it genuinely helps. Write a detailed
-brief (1200–1800 words is fine). Give every active character a rich voice
-profile with an example line, and think carefully about pacing and exactly
-where this passage should end.`,
+  short: 'Keep the brief near 200 words. Use only immediately relevant context and avoid optional lookups.',
+  normal: 'Keep the brief near 500 words. Cover active character voices and continuity without exhaustive background.',
+  extensive: 'Use up to 1,000 words when useful. Examine subtext, character interiority, alternative beats, and the stopping point in depth.',
 }
 
 /** Appended to the prewriter prompt when clarify-before-generate is enabled. */
-export const CLARIFY_INSTRUCTIONS = `## Clarifying Questions
-
-Before writing the brief, judge whether the author's direction is genuinely
-ambiguous — missing intent, unclear POV or which character acts, undefined
-stakes, or a fork you cannot resolve from context.
-
-- If everything you need is clear, DO NOT ask. Proceed straight to the brief.
-- If you genuinely need input, call the askClarifyingQuestions tool with up to 4 focused
-  questions. For each question, supply 2-4 concrete options when you can
-  enumerate the likely answers; omit options for open-ended questions.
-- If you call askClarifyingQuestions, STOP — do not also write a brief or call
-  proposeDirections. The author will answer and you will be re-invoked.
-- Never re-ask anything the author has already answered.`
+export const CLARIFY_INSTRUCTIONS = `If the author request has an important ambiguity the story context cannot resolve, call askClarifyingQuestions with up to four focused questions and then stop. Offer concrete options when useful. Otherwise write the brief immediately, and never repeat an answered question.`
 
 export interface ClarifyQuestionOption {
   label: string
@@ -162,6 +110,7 @@ export interface RunPrewriterArgs {
   contextBlocks: ContextBlock[]
   blockContext?: AgentBlockContext
   authorInput: string
+  inputMode?: AuthorInputMode
   mode: 'generate' | 'regenerate' | 'refine'
   tools?: ToolSet
   maxSteps?: number
@@ -201,7 +150,7 @@ export interface PrewriterResult {
  * that the writer will use instead of the full context.
  */
 export async function runPrewriter(args: RunPrewriterArgs): Promise<PrewriterResult> {
-  const { dataDir, storyId, story, contextBlocks, authorInput, mode, tools, maxSteps = 3, abortSignal, onEvent, clarifyEnabled = false, clarifications = [], round = 0, reasoning = 'normal' } = args
+  const { dataDir, storyId, story, contextBlocks, authorInput, inputMode = 'direct', mode, tools, maxSteps = 3, abortSignal, onEvent, clarifyEnabled = false, clarifications = [], round = 0, reasoning = 'normal' } = args
   const requestLogger = logger.child({ storyId })
   const canAskQuestions = clarifyEnabled && round < MAX_CLARIFY_ROUNDS
 
@@ -249,9 +198,14 @@ export async function runPrewriter(args: RunPrewriterArgs): Promise<PrewriterRes
     ]
   })
 
-  // Update planning-request based on mode
+  // Update planning-request based on operation and the author's input contract.
+  // A story turn stays verbatim here and is also sent verbatim to the writer;
+  // the brief may interpret its consequences but cannot replace it.
+  const generationRequest = inputMode === 'play'
+    ? `## Author Story Turn\n\nThis is canonical manuscript text. Plan from its endpoint.\n\n<author-story-turn>\n${authorInput}\n</author-story-turn>`
+    : `## Author Request\n\n${authorInput}`
   const modePrompts: Record<string, string> = {
-    generate: `The author wants to CONTINUE the story. Their direction: ${authorInput}\n\nCreate a writing brief for this continuation.`,
+    generate: generationRequest,
     regenerate: `The author wants to REGENERATE the latest passage. Their direction: ${authorInput}\n\nCreate a writing brief for an alternative version of the most recent prose.`,
     refine: `The author wants to REFINE/EDIT the latest passage. Their direction: ${authorInput}\n\nCreate a writing brief that addresses the author's refinement request while maintaining continuity.`,
   }
@@ -536,6 +490,7 @@ export function createWriterBriefBlocks(
   proseFragments: Fragment[],
   brief: string,
   modelId?: string,
+  authorStoryTurn?: string,
 ): ContextBlock[] {
   const blocks: ContextBlock[] = []
   const normalizedBrief = brief
@@ -551,19 +506,10 @@ export function createWriterBriefBlocks(
     source: 'builtin',
   })
 
-  // Tools reach the model via the SDK schema; this block holds usage policy only.
-  blocks.push({
-    id: 'tools',
-    role: 'system' as const,
-    content: instructionRegistry.resolve('generation.writer-brief.tools-suffix', modelId),
-    order: 200,
-    source: 'builtin',
-  })
-
   {
     const prose = proseWindowBlock(proseFragments, {
       order: 100,
-      newStoryGuidance: 'Establish the opening scene — setting, tone, and any initial characters — based on the writing brief below.',
+      newStoryGuidance: 'Write the opening from the brief below.',
     })
     if (prose) blocks.push(prose)
   }
@@ -575,6 +521,26 @@ export function createWriterBriefBlocks(
     order: 200,
     source: 'builtin',
   })
+
+  if (authorStoryTurn?.trim()) {
+    blocks.push({
+      id: 'play-output-contract',
+      role: 'system' as const,
+      content: instructionRegistry.resolve('generation.play-continuation', modelId),
+      order: 150,
+      source: 'builtin',
+    })
+  }
+
+  if (authorStoryTurn?.trim()) {
+    blocks.push({
+      id: 'author-story-turn',
+      role: 'user' as const,
+      content: `## Author Story Turn\n\n<author-story-turn>\n${authorStoryTurn}\n</author-story-turn>`,
+      order: 300,
+      source: 'builtin',
+    })
+  }
 
   return blocks
 }

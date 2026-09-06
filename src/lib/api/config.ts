@@ -1,9 +1,11 @@
 import { apiFetch } from './client'
-import type { GlobalConfigSafe } from './types'
+import type { DiscoveredProvider, GlobalConfigSafe } from './types'
 
 export const config = {
   getProviders: () =>
     apiFetch<GlobalConfigSafe>('/config/providers'),
+  discoverLocal: () =>
+    apiFetch<{ providers: DiscoveredProvider[] }>('/config/discover-local'),
   addProvider: (data: { name: string; preset?: string; baseURL: string; apiKey: string; defaultModel: string; customHeaders?: Record<string, string>; temperature?: number }) =>
     apiFetch<GlobalConfigSafe>('/config/providers', { method: 'POST', body: JSON.stringify(data) }),
   updateProvider: (providerId: string, data: { name?: string; baseURL?: string; apiKey?: string; defaultModel?: string; enabled?: boolean; customHeaders?: Record<string, string>; temperature?: number }) =>

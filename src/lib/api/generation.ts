@@ -1,5 +1,6 @@
 import { fetchEventStream } from './client'
-import type { GenerationLogSummary, GenerationLog, SuggestionDirection, Clarification } from './types'
+import type { GenerationContextPreview, GenerationLogSummary, GenerationLog, SuggestionDirection, Clarification } from './types'
+import type { AuthorInputMode } from '@/contracts/generation'
 
 /** Optional clarify-before-generate answers carried into a (re)generation request. */
 export interface ClarifyOpts {
@@ -10,6 +11,7 @@ export interface ClarifyOpts {
 export interface GenerationRequestOpts extends ClarifyOpts {
   runId?: string
   branchId?: string
+  inputMode?: AuthorInputMode
 }
 
 export function clarifyBody(opts?: ClarifyOpts): Record<string, unknown> {
@@ -27,10 +29,16 @@ function generationRequestBody(opts?: GenerationRequestOpts): Record<string, unk
     ...clarifyBody(opts),
     ...(opts?.runId ? { runId: opts.runId } : {}),
     ...(opts?.branchId ? { branchId: opts.branchId } : {}),
+    ...(opts?.inputMode ? { inputMode: opts.inputMode } : {}),
   }
 }
 
 export const generation = {
+  previewContext: (storyId: string, input: string, inputMode: AuthorInputMode) =>
+    apiFetch<GenerationContextPreview>(`/stories/${storyId}/generation-context-preview`, {
+      method: 'POST',
+      body: JSON.stringify({ input, inputMode }),
+    }),
   /** Stream prose generation (returns ReadableStream of ChatEvent) */
   stream: (storyId: string, input: string, signal?: AbortSignal, opts?: GenerationRequestOpts) =>
     fetchEventStream(`/stories/${storyId}/generate`, { input, saveResult: false, ...generationRequestBody(opts) }, signal),

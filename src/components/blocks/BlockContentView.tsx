@@ -7,16 +7,33 @@ import { EmptyHint } from '@/components/ui/prose-text'
 
 interface BlockContentViewProps {
   messages: Array<{ role: string; content: string }>
-  blocks?: Array<{ id: string; name: string; role: string }>
+  blocks?: Array<{ id: string; name: string; role: string; content?: string }>
   /** Tools sent to the model via the SDK schema (shown as a dedicated section). */
-  tools?: Array<{ name: string; description: string; enabled: boolean }>
+  tools?: Array<{
+    name: string
+    description: string
+    schema: string
+    characters: number
+    estimatedTokens: number
+    enabled: boolean
+  }>
+  toolStages?: Array<{
+    id: string
+    label: string
+    description: string
+    conditional: boolean
+    toolNames: string[]
+    toolCharacters: number
+    estimatedCharacters: number
+    estimatedTokens: number
+  }>
   className?: string
 }
 
 const TOOLS_BLOCK_ID = '__tools__'
 
 /**
- * Parse compiled messages into per-block segments using [@block=...] markers.
+ * Parse historical compiled messages that used [@block=...] markers.
  * Supports both formats:
  *   [@block=id]              — builtin blocks
  *   [@block=slug src=id]     — named blocks (custom blocks with human-readable names)
@@ -40,14 +57,23 @@ function parseBlockSegments(messages: Array<{ role: string; content: string }>) 
     }
   }
 
-  return segments
+  if (segments.length > 0) return segments
+
+  return messages.map((message, index) => ({
+    id: `message-${index}`,
+    name: `${message.role} message`,
+    role: message.role,
+    content: message.content,
+  }))
 }
 
-export function BlockContentView({ messages, blocks, tools, className }: BlockContentViewProps) {
+export function BlockContentView({ messages, blocks, tools, toolStages, className }: BlockContentViewProps) {
   const [activeBlockId, setActiveBlockId] = useState<string | null>(null)
   const contentRef = useRef<HTMLDivElement>(null)
 
-  const segments = useMemo(() => parseBlockSegments(messages), [messages])
+  const segments = useMemo(() => blocks?.every(block => block.content !== undefined)
+    ? blocks.map(block => ({ ...block, content: block.content ?? '' }))
+    : parseBlockSegments(messages), [blocks, messages])
   const hasTools = (tools?.length ?? 0) > 0
   const enabledToolCount = useMemo(() => tools?.filter((t) => t.enabled).length ?? 0, [tools])
 
@@ -176,9 +202,40 @@ export function BlockContentView({ messages, blocks, tools, className }: BlockCo
               </div>
 
               <div className="p-3 space-y-2">
+                {(toolStages?.length ?? 0) > 0 && (
+                  <div className="mb-3 grid gap-2 sm:grid-cols-3">
+                    {toolStages!.map((stage) => (
+                      <div key={stage.id} className="rounded border border-border/20 bg-muted/5 p-2">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[0.625rem] font-medium text-foreground/85">{stage.label}</span>
+                          {stage.conditional && (
+                            <Badge
+                              variant="outline"
+                              className="h-3.5 border-transparent bg-muted/30 px-1 text-[0.5rem] font-normal text-muted-foreground"
+                            >
+                              when needed
+                            </Badge>
+                          )}
+                          <span className="ml-auto text-[0.5625rem] tabular-nums text-muted-foreground">
+                            ~{stage.estimatedTokens.toLocaleString()} total
+                          </span>
+                        </div>
+                        <p className="mt-1 text-[0.5625rem] leading-relaxed text-muted-foreground">
+                          {stage.description}
+                        </p>
+                        <div className="mt-1.5 flex items-center gap-2 text-[0.5rem] text-muted-foreground/70">
+                          <p className="min-w-0 flex-1 truncate font-mono" title={stage.toolNames.join(', ')}>
+                            {stage.toolNames.join(' · ') || 'No tools'}
+                          </p>
+                          <span className="shrink-0 tabular-nums">tools ~{Math.ceil(stage.toolCharacters / 4).toLocaleString()}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 {tools!.map((t) => (
-                  <div key={t.name} className={cn('flex flex-col gap-0.5', !t.enabled && 'opacity-45')}>
-                    <div className="flex items-center gap-2">
+                  <details key={t.name} className={cn('rounded border border-border/20 px-2 py-1.5', !t.enabled && 'opacity-45')}>
+                    <summary className="flex cursor-pointer list-none items-center gap-2">
                       <code className={cn('text-[0.6875rem] font-mono text-foreground/90', !t.enabled && 'line-through')}>
                         {t.name}
                       </code>
@@ -190,11 +247,19 @@ export function BlockContentView({ messages, blocks, tools, className }: BlockCo
                           disabled
                         </Badge>
                       )}
-                    </div>
+                      <span className="ml-auto text-[0.5625rem] tabular-nums text-muted-foreground">
+                        ~{t.estimatedTokens.toLocaleString()} tokens
+                      </span>
+                    </summary>
                     {t.description && (
-                      <p className="text-[0.625rem] text-muted-foreground leading-relaxed">{t.description}</p>
+                      <p className="mt-1 text-[0.625rem] text-muted-foreground leading-relaxed">{t.description}</p>
                     )}
-                  </div>
+                    {t.schema && (
+                      <pre className="mt-2 max-h-[300px] overflow-auto whitespace-pre-wrap border-t border-border/20 pt-2 font-mono text-[0.625rem] leading-relaxed text-muted-foreground">
+                        {t.schema}
+                      </pre>
+                    )}
+                  </details>
                 ))}
               </div>
             </div>

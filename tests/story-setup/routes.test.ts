@@ -88,7 +88,7 @@ describe('story setup routes', () => {
     expect(response.status).toBe(200)
     expect(await response.text()).toContain('What are you starting with')
     expect(mockAgentCtor).toHaveBeenCalledWith(expect.objectContaining({
-      instructions: expect.stringMatching(/one focused question at a time[\s\S]*Starting point[\s\S]*Opening direction/),
+      instructions: expect.stringMatching(/one focused question at a time[\s\S]*starting point[\s\S]*opening passage/),
       tools: expect.objectContaining({
         updateStorySetup: expect.anything(),
       }),
@@ -191,7 +191,7 @@ describe('story setup routes', () => {
 
     expect(response.status).toBe(200)
     expect(mockAgentCtor).toHaveBeenCalledWith(expect.objectContaining({
-      instructions: expect.stringMatching(/writer-owned context blocks[\s\S]*read-only/),
+      instructions: expect.stringMatching(/writer-owned context[\s\S]*read-only/),
     }))
     expect(mockAgentStream).toHaveBeenCalledWith(expect.objectContaining({
       messages: expect.arrayContaining([

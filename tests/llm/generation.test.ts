@@ -11,6 +11,7 @@ import { saveAgentBlockConfig } from '@/server/agents/agent-block-storage'
 import { listAgentRuns, clearAgentRuns } from '@/server/agents/traces'
 import { clearPending, getPendingCount } from '@/server/librarian/scheduler'
 import type { StoryMeta, Fragment } from '@/server/fragments/schema'
+import { stripAuthorTurnEcho } from '@/contracts/generation'
 
 const { mockAgentCtor, mockAgentStream } = vi.hoisted(() => ({
   mockAgentCtor: vi.fn(),
@@ -42,6 +43,13 @@ vi.mock('@/server/agents', async (importOriginal) => {
 })
 
 import { createApp } from '@/server/api'
+
+describe('Play turn joining', () => {
+  it('removes only a complete echoed turn', () => {
+    expect(stripAuthorTurnEcho('I wait.', 'I wait.\n\nThe door opens.')).toBe('The door opens.')
+    expect(stripAuthorTurnEcho('I', 'It starts to rain.')).toBe('It starts to rain.')
+  })
+})
 
 function makeStory(settingsOverrides?: Partial<StoryMeta['settings']>): StoryMeta {
   const now = new Date().toISOString()
@@ -336,17 +344,13 @@ describe('generation endpoint', () => {
     expect(systemText).not.toContain('You are a fiction writer continuing an ongoing story. Write the next passage of prose following the author\'s direction.')
   })
 
-  it('POST /stories/:storyId/generate applies writer instruction prepend and append from agent config', async () => {
+  it('POST /stories/:storyId/generate applies writer instruction prepend from agent config', async () => {
     await saveAgentBlockConfig(dataDir, storyId, 'generation.writer', {
       customBlocks: [],
       overrides: {
         instructions: {
           contentMode: 'prepend',
           customContent: 'BEGIN WITH SPARE, CLIPPED SENTENCES.',
-        },
-        tools: {
-          contentMode: 'append',
-          customContent: 'Do not call tools unless continuity depends on it.',
         },
       },
       blockOrder: [],
@@ -371,7 +375,7 @@ describe('generation endpoint', () => {
     const callArgs = mockAgentStream.mock.calls[0][0] as any
     const systemText = extractMessageText(callArgs.messages, 'system')
     expect(systemText).toContain('BEGIN WITH SPARE, CLIPPED SENTENCES.')
-    expect(systemText).toContain('Do not call tools unless continuity depends on it.')
+    expect(systemText).not.toContain('[@block=')
   })
 
   it('POST /stories/:storyId/generate passes resolved sampling settings to the writer agent', async () => {
@@ -529,6 +533,58 @@ describe('generation endpoint', () => {
     expect(fragments.length).toBe(1)
     expect(fragments[0].content).toBe('The dragon roared.')
     expect(fragments[0].type).toBe('prose')
+  })
+
+  it('commits a successful Play turn and continuation as one canonical passage', async () => {
+    const story = makeStory({ authorInputMode: 'play' })
+    await updateStory(dataDir, story)
+    const authorTurn = 'I test the old brass key. "Please work."'
+    mockAgentStream.mockResolvedValue(
+      // Completion-oriented models sometimes replay the final input before
+      // continuing. The stored passage must still contain one authored turn.
+      createMockStreamResult(`${authorTurn}\n\nThe lock gives way with a soft click.`) as any,
+    )
+
+    const res = await api(`/stories/${storyId}/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ input: authorTurn, saveResult: true }),
+    })
+
+    expect(res.status).toBe(200)
+    await res.text()
+    await new Promise((resolve) => setTimeout(resolve, 100))
+
+    const fragments = await listFragments(dataDir, storyId, 'prose')
+    expect(fragments).toHaveLength(1)
+    expect(fragments[0].content).toBe(`${authorTurn}\n\nThe lock gives way with a soft click.`)
+    expect(fragments[0].meta).toMatchObject({
+      generatedFrom: authorTurn,
+      generatedFromMode: 'play',
+    })
+
+    const { listGenerationLogs, getGenerationLog } = await import('@/server/llm/generation-logs')
+    const [summary] = await listGenerationLogs(dataDir, storyId)
+    const log = await getGenerationLog(dataDir, storyId, summary.id)
+    expect(log).toMatchObject({
+      generatedText: 'The lock gives way with a soft click.',
+    })
+  })
+
+  it('rejects a Play response that only echoes the authored turn', async () => {
+    await updateStory(dataDir, makeStory({ authorInputMode: 'play' }))
+    const authorTurn = 'I close the ledger and stand.'
+    mockAgentStream.mockResolvedValue(createMockStreamResult(authorTurn) as any)
+
+    const res = await api(`/stories/${storyId}/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ input: authorTurn, saveResult: true }),
+    })
+
+    expect(res.status).toBe(200)
+    expect(await res.text()).toContain('"code":"empty_output"')
+    expect(await listFragments(dataDir, storyId, 'prose')).toHaveLength(0)
   })
 
   it('POST /stories/:storyId/generate schedules librarian analysis by default after save', async () => {

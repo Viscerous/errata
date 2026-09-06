@@ -15,14 +15,7 @@ export type { SuggestionDirection } from './schema'
 
 const logger = createLogger('directions-suggest')
 
-export const DEFAULT_SUGGEST_PROMPT = `Based on everything in the story so far, suggest exactly {{count}} possible directions the story could go next as a JSON array. Each element must have:
-- "title": a short evocative title (3-6 words)
-- "description": 1-2 sentences describing this direction
-- "instruction": a detailed writing prompt (2-3 sentences) that could be given to a writer to produce this continuation
-
-Consider a mix of: advancing the main plot, exploring character relationships, introducing tension or conflict, quiet character moments, and unexpected developments. Make each suggestion meaningfully different from the others.
-
-Respond with **only** the raw JSON array — your entire response must parse as JSON.`
+export const DEFAULT_SUGGEST_PROMPT = `Return exactly {{count}} meaningfully different directions as a raw JSON array. Each item must contain "title" (3-6 evocative words), "description" (1-2 sentences), and "instruction" (a concrete 2-3 sentence prompt for the prose writer). Vary the narrative purpose across plot, relationship, tension, quiet development, or surprise where the story supports it. Return no text outside the JSON array.`
 
 export interface DirectionProposalInput {
   count?: number

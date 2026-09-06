@@ -61,6 +61,21 @@ describe('Context previews preserve agent access boundaries', () => {
     expect(prompt).not.toContain('readFragments')
     expect(preview.tools).toEqual([])
   })
+
+  it('shows the real staged Librarian Analyze tool surfaces', async () => {
+    const storyId = await createStory()
+    const preview = await (await api(`/stories/${storyId}/agent-blocks/librarian.analyze/preview`)).json()
+
+    expect(preview.toolStages.map((stage: { id: string }) => stage.id))
+      .toEqual(['observation', 'inspection', 'follow-up'])
+    const observation = preview.toolStages.find((stage: { id: string }) => stage.id === 'observation')
+    const inspection = preview.toolStages.find((stage: { id: string }) => stage.id === 'inspection')
+    const followUp = preview.toolStages.find((stage: { id: string }) => stage.id === 'follow-up')
+    expect(observation.toolNames).toEqual(['reportAnalysis'])
+    expect(observation.estimatedTokens).toBeLessThan(inspection.estimatedTokens)
+    expect(followUp.estimatedTokens).toBeLessThan(inspection.estimatedTokens)
+    expect(inspection.conditional).toBe(true)
+  })
 })
 
 describe('Per-agent config export/import routes', () => {

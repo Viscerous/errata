@@ -643,6 +643,22 @@ export function SettingsPanel({
         <SectionHeading label="Generation" helpTopic="generation#overview" />
         <div className="space-y-3">
           <SettingsGroup title="Workflow" description="How prose generation runs and what the model is allowed to do.">
+            <SettingRow
+              label="Writing relationship"
+              description={(story.settings.authorInputMode ?? 'direct') === 'play'
+                ? 'Your primary input is story prose. A successful turn is saved verbatim before the continuation and included in exports.'
+                : 'Your primary input directs the assistant and is not included in the manuscript or exports.'}
+            >
+              <SegmentedControl
+                value={(story.settings.authorInputMode ?? 'direct') as 'direct' | 'play'}
+                options={[
+                  { value: 'direct' as const, label: 'Assistant' },
+                  { value: 'play' as const, label: 'Play' },
+                ]}
+                onChange={(v) => updateMutation.mutate({ authorInputMode: v })}
+                disabled={updateMutation.isPending}
+              />
+            </SettingRow>
             <SettingRow label="Generation mode" description="How prose generation is handled">
               <SegmentedControl
                 value={(story.settings.generationMode ?? 'standard') as 'standard' | 'prewriter'}

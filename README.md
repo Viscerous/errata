@@ -53,7 +53,7 @@ bun install
 bun run dev
 ```
 
-Open `http://localhost:7739`. Configure an LLM provider in the onboarding wizard or Settings > Providers.
+Open `http://localhost:7739`. Configure an LLM provider in the onboarding wizard or Settings > Providers. Errata probes known Ollama, LM Studio, llama.cpp, KoboldCpp, and oMLX loopback endpoints concurrently; detected servers can be added without an API key. Discovery never scans the LAN.
 
 ## Development
 

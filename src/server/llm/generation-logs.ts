@@ -4,6 +4,7 @@ import { existsSync } from 'node:fs'
 import { getContentRoot } from '../fragments/branches'
 import { writeJsonAtomic } from '../fs-utils'
 import type { SamplingSettings } from '../fragments/schema'
+import type { AuthorInputMode } from '@/contracts/generation'
 
 export interface ToolCallLog {
   toolName: string
@@ -20,6 +21,7 @@ export interface GenerationLog {
   id: string
   createdAt: string
   input: string
+  inputMode?: AuthorInputMode
   messages: Array<{ role: string; content: string }>
   toolCalls: ToolCallLog[]
   generatedText: string

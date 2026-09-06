@@ -149,7 +149,7 @@ describe('Librarian Analyze Blocks', () => {
     const catalog = blocks.find(b => b.id === 'fragment-catalog')
     expect(catalog).toBeDefined()
     expect(catalog!.content).toContain('## Fragment Catalog')
-    expect(catalog!.content).toContain('one-line catalog row, not the full fragment')
+    expect(catalog!.content).toContain('Summary rows: `id` | name | summary')
     expect(catalog!.content).toContain('### Characters')
     expect(catalog!.content).toContain('Hero')
   })
@@ -433,7 +433,7 @@ describe('Librarian Chat Blocks', () => {
     const catalog = blocks.find(b => b.id === 'fragment-catalog')
     expect(catalog).toBeDefined()
     expect(catalog!.content).toContain('## Fragment Catalog')
-    expect(catalog!.content).toContain('one-line catalog row, not the full fragment')
+    expect(catalog!.content).toContain('Summary rows: `id` | name | summary')
     expect(catalog!.content).not.toContain('| ID | Name | Description |')
     expect(catalog!.content).toContain('### Guidelines')
     expect(catalog!.content).toContain('`gl-stick1` | Tone (pinned) | Keep it dark')
@@ -462,7 +462,7 @@ describe('Librarian Refine Blocks', () => {
     expect(ids).toContain('instructions')
     expect(ids).toContain('story-info')
     const instructions = blocks.find(b => b.id === 'instructions')!
-    expect(instructions.content).toContain('complete target snapshot')
+    expect(instructions.content).toContain('supplied non-prose story fragment')
     expect(instructions.content).not.toContain('getCharacter')
   })
 
@@ -526,7 +526,7 @@ describe('Librarian Refine Blocks', () => {
     const catalog = blocks.find(b => b.id === 'fragment-pinned-catalog')
     expect(catalog).toBeDefined()
     expect(catalog!.content).toContain('## Pinned Fragment Catalog')
-    expect(catalog!.content).toContain('one-line catalog row, not the full fragment')
+    expect(catalog!.content).toContain('Summary rows: `id` | name | summary')
     expect(catalog!.content).toContain('### Guidelines')
     expect(catalog!.content).toContain('`gl-pin01` | Tone | Keep the prose sharp')
     expect(catalog!.content).toContain('### Knowledge')
@@ -600,37 +600,36 @@ describe('Continuity reaches the agents that decide what happens next', () => {
 describe('Librarian Analyze Prompt', () => {
   it('reports named character references', () => {
     const prompt = buildAnalyzeSystemPrompt()
-    expect(prompt).toContain('direct names, nicknames, titles, roles')
-    expect(prompt).toContain('allow dormant threads to remain unresolved indefinitely')
-    expect(prompt).toContain('cite, never retype')
-    expect(prompt).toContain('2. Scan the new prose against the provided context')
-    expect(prompt).toContain('resolvedFragments')
-    expect(prompt).toContain('4. Call **proposeDirections**')
-    expect(prompt).toContain('5. Finally, call **finishAnalysis**')
+    expect(prompt).toContain('direct name, title, role, nickname, or distinctive term')
+    expect(prompt).toContain('let dormant threads remain unresolved')
+    expect(prompt).toContain('Cite the numbered prose instead of retyping evidence')
+    expect(prompt).toContain('1. Call **reportAnalysis**')
+    expect(prompt).toContain('3. Call **proposeDirections**')
+    expect(prompt).toContain('4. Finally, call **finishAnalysis**')
     expect(prompt).toContain('candidateFragmentIds')
-    expect(prompt).toContain('directly contradicts any durable assertion')
-    expect(prompt).toContain('If a surface term is ambiguous')
+    expect(prompt).toContain('durable assertions may directly conflict')
+    expect(prompt).toContain('ordinary progression and current conditions are not canon contradictions')
     expect(prompt).not.toContain('final assistant text')
     expect(prompt).not.toContain('Analysis complete')
   })
 
   it('makes the last enabled analyze action explicit without naming disabled tools', () => {
     const noDirections = buildAnalyzeSystemPrompt({ disableDirections: true })
-    expect(noDirections).toContain('3. Use **proposeRecordCorrections**')
-    expect(noDirections).toContain('4. Finally, call **finishAnalysis**')
+    expect(noDirections).toContain('2. Use **proposeRecordCorrections**')
+    expect(noDirections).toContain('3. Finally, call **finishAnalysis**')
     expect(noDirections).not.toContain('proposeDirections')
 
     const noSuggestions = buildAnalyzeSystemPrompt({ disableSuggestions: true })
-    expect(noSuggestions).toContain('3. Call **proposeDirections**')
-    expect(noSuggestions).toContain('4. Finally, call **finishAnalysis**')
+    expect(noSuggestions).toContain('2. Call **proposeDirections**')
+    expect(noSuggestions).toContain('3. Finally, call **finishAnalysis**')
     expect(noSuggestions).not.toContain('proposeRecordCorrections')
     expect(noSuggestions).not.toContain('proposeNewRecords')
 
     const noOptionalTools = buildAnalyzeSystemPrompt({
       disabledTools: ['proposeDirections', 'proposeRecordCorrections', 'proposeNewRecords'],
     })
-    expect(noOptionalTools).toContain('2. Scan the new prose')
-    expect(noOptionalTools).toContain('3. Finally, call **finishAnalysis**')
+    expect(noOptionalTools).toContain('1. Call **reportAnalysis**')
+    expect(noOptionalTools).toContain('2. Finally, call **finishAnalysis**')
     expect(noOptionalTools).not.toContain('proposeDirections')
     expect(noOptionalTools).not.toContain('proposeRecordCorrections')
     expect(noOptionalTools).not.toContain('proposeNewRecords')
@@ -638,7 +637,7 @@ describe('Librarian Analyze Prompt', () => {
     const noFinishTool = buildAnalyzeSystemPrompt({
       disabledTools: ['proposeDirections', 'proposeRecordCorrections', 'proposeNewRecords', 'finishAnalysis'],
     })
-    expect(noFinishTool).toContain('2. Finally, scan the new prose')
+    expect(noFinishTool).toContain('1. Finally, call **reportAnalysis**')
     expect(noFinishTool).not.toContain('finishAnalysis')
   })
 
@@ -665,11 +664,12 @@ describe('Librarian Analyze Prompt', () => {
 })
 
 describe('Librarian Optimize Character Blocks', () => {
-  it('uses the generic readFragments tool in instructions', () => {
+  it('uses the supplied character and reads older prose only when needed', () => {
     const def = agentBlockRegistry.get('librarian.optimize-character')!
     const blocks = def.createDefaultBlocks(makeBaseContext())
     const instructions = blocks.find(b => b.id === 'instructions')!
-    expect(instructions.content).toContain('complete target character snapshot')
+    expect(instructions.content).toContain('supplied character')
+    expect(instructions.content).toContain('Read older prose only when')
     expect(instructions.content).not.toContain('getCharacter')
   })
 
@@ -842,9 +842,9 @@ describe('Directions Blocks', () => {
     expect(catalog!.content).toContain('Optional place')
     // Names, not bodies: the catalog is a reach, not a second full-context lane.
     expect(catalog!.content).not.toContain('Catalog row full lore')
-    // A toolless agent told to call readFragments either fabricates or stalls.
+    // Catalog syntax describes the data without duplicating tool policy.
     expect(catalog!.content).not.toContain('readFragments')
-    expect(catalog!.content).toContain('You cannot open these rows')
+    expect(catalog!.content).toContain('Summary rows: `id` | name | summary')
     // Fragments already presented in full are not repeated as rows.
     expect(catalog!.content).not.toContain('loc-recent')
     expect(catalog!.content).not.toContain('loc-sticky')

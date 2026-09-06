@@ -15,8 +15,6 @@ import {
   buildContext,
   buildContextState,
   assembleMessages,
-  canReadFragments,
-  fragmentCatalogContent,
   createDefaultBlocks,
   compileBlocks,
   addCacheBreakpoints,
@@ -573,7 +571,7 @@ describe('context-builder', () => {
     const catalog = findBlock(blocks, 'fragment-catalog')
     expect(catalog).toBeDefined()
     expect(catalog!.content).toContain('## Fragment Catalog')
-    expect(catalog!.content).toContain('one-line catalog row, not the full fragment')
+    expect(catalog!.content).toContain('Summary rows: `id` | name | summary')
     expect(catalog!.content).toContain('### Locations')
     expect(catalog!.content).toContain('loc-0002')
     expect(catalog!.content).toContain('A dangerous crossing')
@@ -586,21 +584,19 @@ describe('context-builder', () => {
     })
   })
 
-  it('carries tool usage policy without enumerating a tool catalog', async () => {
+  it('does not repeat tool schemas in the writer system prompt', async () => {
     const story = makeStory()
     await createStory(dataDir, story)
 
     const messages = await buildContext(dataDir, story.id, 'Continue')
     const sysMsg = messages.find((m) => m.role === 'system')!
 
-    // Tool names/descriptions are delivered via the SDK schema, so the system
-    // message holds only usage policy — never a catalog that could drift from
-    // the agent's actually-enabled tools.
+    // Tool names and descriptions are already delivered via the SDK schema.
     expect(sysMsg.content).not.toContain('getCharacter')
     expect(sysMsg.content).not.toContain('listCharacters')
     expect(sysMsg.content).not.toContain('listFragmentTypes')
-    expect(sysMsg.content).toContain('retrieve the full details')
-    expect(sysMsg.content).toContain('fiction writer')
+    expect(sysMsg.content).not.toContain('retrieve the full details')
+    expect(sysMsg.content).toContain('Continue the supplied story')
   })
 
   it('includes only prose before target fragment when proseBeforeFragmentId is set', async () => {
@@ -882,42 +878,6 @@ describe('context-builder', () => {
   })
 })
 
-/**
- * A catalog row tells its reader how to expand it, and that sentence is only
- * correct if it matches the reader's toolset. Three states, not two: a call site
- * that never said is not the same claim as an agent that has no tools.
- */
-describe('catalog expansion note', () => {
-  const sections = [{ type: 'character', label: 'Characters', fragments: [makeFragment({ id: 'ch-a', type: 'character', name: 'Alice', description: 'A person' })] }]
-
-  it('reads a silent call site as able to read, so no existing prompt changes', () => {
-    expect(canReadFragments({})).toBeUndefined()
-    expect(fragmentCatalogContent(sections, { canReadFragments: canReadFragments({}) }))
-      .toContain('Use readFragments')
-  })
-
-  it('tells an agent with no tools that a row is all it gets', () => {
-    expect(canReadFragments({ enabledTools: [] })).toBe(false)
-    const content = fragmentCatalogContent(sections, { canReadFragments: canReadFragments({ enabledTools: [] }) })
-    expect(content).not.toContain('readFragments')
-    expect(content).toContain('You cannot open these rows')
-  })
-
-  // An author disabling readFragments on an agent that otherwise has tools is
-  // the same situation as a toolless agent, and must read the same way.
-  it('follows the resolved toolset, not merely the presence of some tool', () => {
-    expect(canReadFragments({ enabledTools: ['listFragments', 'readProseChain'] })).toBe(false)
-    expect(canReadFragments({ enabledTools: ['readFragments'] })).toBe(true)
-    expect(fragmentCatalogContent(sections, { canReadFragments: canReadFragments({ enabledTools: ['listFragments'] }) }))
-      .toContain('You cannot open these rows')
-  })
-
-  it('keeps the editing wording for a reader that both reads and edits', () => {
-    expect(fragmentCatalogContent(sections, { editable: true, canReadFragments: true }))
-      .toContain('Read full fragments with readFragments before editing')
-  })
-})
-
 describe('context blocks', () => {
   let dataDir: string
   let cleanup: () => Promise<void>
@@ -946,10 +906,29 @@ describe('context blocks', () => {
 
       const ids = blocks.map(b => b.id)
       expect(ids).toContain('instructions')
-      expect(ids).toContain('tools')
+      expect(ids).not.toContain('tools')
       expect(ids).toContain('story-info')
       expect(ids).not.toContain('summary')
       expect(ids).toContain('author-input')
+    })
+
+    it('frames play input as a canonical story turn without changing its text', async () => {
+      const story = makeStory()
+      await createStory(dataDir, story)
+      const turn = 'I put down the lantern. "We should wait here," I say.'
+
+      const state = await buildContextState(dataDir, story.id, turn, { authorInputMode: 'play' })
+      const blocks = createDefaultBlocks(state)
+      const block = blocks.find(candidate => candidate.id === 'author-input')!
+      const contract = blocks.find(candidate => candidate.id === 'play-output-contract')!
+
+      expect(block.content).toContain('## Author Story Turn')
+      expect(block.content).toContain('<author-story-turn>')
+      expect(block.content).toContain(turn)
+      expect(block.content).not.toContain('## Author Direction')
+      expect(contract.role).toBe('system')
+      expect(contract.content).toContain('Return only new prose that follows it.')
+      expect(contract.content).toContain('Do not repeat or paraphrase the turn')
     })
 
     it('assigns correct roles to blocks', async () => {
@@ -963,7 +942,7 @@ describe('context blocks', () => {
       const userIds = blocks.filter(b => b.role === 'user').map(b => b.id)
 
       expect(systemIds).toContain('instructions')
-      expect(systemIds).toContain('tools')
+      expect(systemIds).not.toContain('tools')
       expect(userIds).toContain('story-info')
       expect(userIds).toContain('author-input')
     })
@@ -1024,7 +1003,7 @@ describe('context blocks', () => {
       const catalog = findBlock(blocks, 'fragment-catalog')
       expect(catalog).toBeDefined()
       expect(catalog!.content).toContain('## Fragment Catalog')
-      expect(catalog!.content).toContain('one-line catalog row, not the full fragment')
+      expect(catalog!.content).toContain('Summary rows: `id` | name | summary')
       expect(catalog!.content).toContain('### Guidelines')
       expect(catalog!.content).toContain('### Knowledge')
       expect(catalog!.content).toContain('gl-0001')
@@ -1065,18 +1044,18 @@ describe('context blocks', () => {
       const messages = compileBlocks(blocks)
       expect(messages).toHaveLength(2)
       expect(messages[0].role).toBe('system')
-      expect(messages[0].content).toBe('[@block=a]\nSystem A')
+      expect(messages[0].content).toBe('System A')
       expect(messages[1].role).toBe('user')
-      expect(messages[1].content).toBe('[@block=b]\nUser B')
+      expect(messages[1].content).toBe('User B')
     })
 
-    it('prepends [@block=id] marker to each block', () => {
+    it('does not serialize internal block identity into model text', () => {
       const blocks: ContextBlock[] = [
-        { id: 'my-block', role: 'user', content: 'Hello', order: 100, source: 'builtin' },
+        { id: 'my-block', name: 'My Secret Block Name', role: 'user', content: 'Hello', order: 100, source: 'builtin' },
       ]
 
       const messages = compileBlocks(blocks)
-      expect(messages[0].content).toBe('[@block=my-block]\nHello')
+      expect(messages[0].content).toBe('Hello')
     })
 
     it('sorts blocks by order and separates with blank lines', () => {
@@ -1089,8 +1068,22 @@ describe('context blocks', () => {
       const messages = compileBlocks(blocks)
       expect(messages).toHaveLength(1)
       expect(messages[0].content).toBe(
-        '[@block=a]\nFirst\n\n[@block=b]\nSecond\n\n[@block=c]\nThird',
+        'First\n\nSecond\n\nThird',
       )
+    })
+
+    it('records a structural cache prefix before volatile input', () => {
+      const messages = compileBlocks([
+        { id: 'story-info', role: 'user', content: 'Story', order: 100, source: 'builtin' },
+        { id: 'prose-recent', role: 'user', content: 'Prose', order: 500, source: 'builtin' },
+        { id: 'author-input', role: 'user', content: 'Direction', order: 600, source: 'builtin' },
+      ])
+
+      expect(messages[0]).toEqual({
+        role: 'user',
+        content: 'Story\n\nProse\n\nDirection',
+        cacheablePrefix: 'Story\n\nProse',
+      })
     })
 
     it('omits role when no blocks of that role exist', () => {
@@ -1175,7 +1168,7 @@ describe('context blocks', () => {
   })
 
   describe('fidelity', () => {
-    it('assembleMessages matches compileBlocks(createDefaultBlocks(...))', async () => {
+    it('assembleMessages is the direct compiled block output', async () => {
       const story = makeStory()
       await createStory(dataDir, story)
 
@@ -1204,7 +1197,7 @@ describe('context blocks', () => {
       const fromAssemble = assembleMessages(state)
       const fromBlocks = compileBlocks(createDefaultBlocks(state))
 
-      expect(fromBlocks).toEqual(fromAssemble)
+      expect(fromAssemble).toEqual(fromBlocks)
     })
   })
 
@@ -1224,11 +1217,12 @@ describe('context blocks', () => {
       })
     })
 
-    it('splits user message at author-input marker', () => {
+    it('splits a user message at its structural cacheable prefix', () => {
       const messages: ContextMessage[] = [
         {
           role: 'user',
-          content: '[@block=story-info]\n## Story: Test\n\n[@block=author-input]\nThe author wants the following to happen next: Continue',
+          content: '## Story: Test\n\nThe author wants the following to happen next: Continue',
+          cacheablePrefix: '## Story: Test',
         },
       ]
 
@@ -1243,19 +1237,19 @@ describe('context blocks', () => {
 
       // Stable prefix has cache control
       expect(parts[0].type).toBe('text')
-      expect(parts[0].text).toBe('[@block=story-info]\n## Story: Test')
+      expect(parts[0].text).toBe('## Story: Test')
       expect(parts[0].providerOptions).toEqual({
         anthropic: { cacheControl: { type: 'ephemeral' } },
       })
 
       // Volatile suffix has no cache control
       expect(parts[1].type).toBe('text')
-      expect(parts[1].text).toContain('[@block=author-input]')
+      expect(parts[1].text).toMatch(/^\n\n/)
       expect(parts[1].text).toContain('Continue')
       expect(parts[1].providerOptions).toBeUndefined()
     })
 
-    it('falls back to single string when author-input marker not found', () => {
+    it('falls back to a single string without a usable cacheable prefix', () => {
       const messages: ContextMessage[] = [
         { role: 'user', content: 'Some content without marker' },
       ]
@@ -1284,7 +1278,8 @@ describe('context blocks', () => {
         { role: 'system', content: 'System instructions here.' },
         {
           role: 'user',
-          content: '[@block=story-info]\nStory info\n\n[@block=prose]\nSome prose\n\n[@block=author-input]\nThe author wants the following to happen next: Write more',
+          content: 'Story info\n\nSome prose\n\nThe author wants the following to happen next: Write more',
+          cacheablePrefix: 'Story info\n\nSome prose',
         },
       ]
 

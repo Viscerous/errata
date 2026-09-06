@@ -104,11 +104,11 @@ function StoryEditorPage() {
   const [timelineBarVisible, setTimelineBarVisible] = useTimelineBar()
   const OUTLINE_OPEN_KEY = 'errata:passages-panel-open'
   const [outlineOpen, setOutlineOpen] = useState(() => {
-    if (typeof window === 'undefined') return true
+    if (typeof window === 'undefined') return false
     const saved = localStorage.getItem(OUTLINE_OPEN_KEY)
     if (saved === '0') return false
     if (saved === '1') return true
-    return true
+    return false
   })
   useEffect(() => {
     if (typeof window === 'undefined') return

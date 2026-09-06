@@ -4,6 +4,9 @@ import { invokeAgent } from '../agents/runner'
 import { createLogger } from '../logging'
 import type { DirectionProposalResult } from '../directions/suggest'
 import { runGeneration } from '../generation/run-generation'
+import { compileGenerationWriterContext } from '../llm/compile-generation-writer-context'
+import { pluginRegistry } from '../plugins/registry'
+import { describeToolSurface } from '../llm/tool-surface'
 
 export function generationRoutes(dataDir: string) {
   const logger = createLogger('api:generation', { dataDir })
@@ -38,6 +41,64 @@ export function generationRoutes(dataDir: string) {
       }),
       detail: { summary: 'Get AI-generated story direction suggestions' },
     })
+    .post('/stories/:storyId/generation-context-preview', async ({ params, body, set }) => {
+      const story = await getStory(dataDir, params.storyId)
+      if (!story) {
+        set.status = 404
+        return { error: 'Story not found' }
+      }
+
+      const inputMode = body.inputMode ?? story.settings.authorInputMode ?? 'direct'
+      const enabledPlugins = pluginRegistry.getEnabled(story.settings.enabledPlugins)
+      const compiled = await compileGenerationWriterContext({
+        dataDir,
+        storyId: params.storyId,
+        authorInput: body.input,
+        enabledPlugins,
+        contextOptions: { authorInputMode: inputMode },
+      })
+      const messages = compiled.messages.map(message => ({ role: message.role, content: message.content }))
+      const messageCharacters = messages.reduce((sum, message) => sum + message.content.length, 0)
+      const tools = await Promise.all(
+        Object.entries(compiled.tools).map(([name, tool]) => describeToolSurface(name, tool)),
+      )
+      const toolCharacters = tools.reduce((sum, tool) => sum + tool.characters, 0)
+      const estimatedCharacters = messageCharacters + toolCharacters
+
+      return {
+        inputMode,
+        pipeline: story.settings.generationMode ?? 'standard',
+        estimatedCharacters,
+        estimatedTokens: Math.ceil(estimatedCharacters / 4),
+        messageCharacters,
+        toolCharacters,
+        blocks: compiled.blocks
+          .slice()
+          .sort((left, right) => left.role === right.role
+            ? left.order - right.order
+            : left.role === 'system' ? -1 : 1)
+          .map(block => ({
+            id: block.id,
+            name: block.name ?? block.id,
+            role: block.role,
+            source: block.source,
+            content: block.content,
+            characters: block.content.length,
+            estimatedTokens: Math.ceil(block.content.length / 4),
+          })),
+        messages,
+        tools,
+        caveat: story.settings.generationMode === 'prewriter'
+          ? 'This is the source context assembled before the prewriter creates its brief. The final writer will receive recent prose, that brief, and any canonical Play turn.'
+          : null,
+      }
+    }, {
+      body: t.Object({
+        input: t.String(),
+        inputMode: t.Optional(t.Union([t.Literal('direct'), t.Literal('play')])),
+      }),
+      detail: { summary: 'Preview the next prose generation context' },
+    })
     .post('/stories/:storyId/generate', async ({ params, body, set }) => {
       const result = await runGeneration(dataDir, params.storyId, body)
       if (!result.ok) {
@@ -52,6 +113,7 @@ export function generationRoutes(dataDir: string) {
     }, {
       body: t.Object({
         input: t.String(),
+        inputMode: t.Optional(t.Union([t.Literal('direct'), t.Literal('play')])),
         runId: t.Optional(t.String()),
         branchId: t.Optional(t.String()),
         saveResult: t.Optional(t.Boolean()),

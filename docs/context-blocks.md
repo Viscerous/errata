@@ -15,7 +15,7 @@ buildContextState() → beforeContext hooks → createDefaultBlocks() → applyB
 3. **`createDefaultBlocks()`** converts the state into an array of `ContextBlock` objects.
 4. **`applyBlockConfig()`** applies the user's block configuration — custom blocks, content overrides, reordering, and disabling.
 5. **`beforeBlocks`** hooks let plugins manipulate individual blocks (replace instructions, inject sections, reorder).
-6. **`compileBlocks()`** prepends `[@block=id]` markers, groups blocks by role, sorts by order, and joins into `ContextMessage[]`.
+6. **`compileBlocks()`** groups blocks by role, sorts by order, and joins their content into `ContextMessage[]` without serializing block metadata.
 7. **`expandMessagesFragmentTags()`** expands fragment reference tags inside compiled message content.
 8. **`beforeGeneration`** hooks operate on the final message strings.
 
@@ -24,40 +24,21 @@ buildContextState() → beforeContext hooks → createDefaultBlocks() → applyB
 ```ts
 interface ContextBlock {
   id: string                    // 'instructions', 'tools', 'prose', etc.
-  name?: string                 // optional human-readable name (used in block markers)
+  name?: string                 // optional human-readable name for configuration and previews
   role: 'system' | 'user'      // which LLM message this block belongs to
-  content: string               // text content (no [@block] marker — added by compileBlocks)
+  content: string               // exact model-facing text for this block
   order: number                 // sort key within role group
   source: 'builtin' | string   // 'builtin' for core blocks, plugin name for custom
 }
 ```
 
-## Source Markers
+## Compilation metadata
 
-`compileBlocks()` automatically prepends a `[@block=...]` marker to each block's content during compilation. Block content itself should **not** include the marker. Blocks are separated by blank lines in the compiled output.
+Block identity remains in the `ContextBlock[]` used by configuration, previews, and provenance; it is never embedded in model text. Blocks are separated by blank lines in the compiled output.
 
-Two marker formats are used:
+`compileBlocks()` also records the stable part of a user message as an internal `cacheablePrefix` when an `author-input`, `writing-brief`, or `planning-request` block follows it. Providers that support prompt caching may cache that prefix. The hint is structural metadata, not text sent to the model, and is ignored safely if a later plugin rewrites the prefix.
 
-- `[@block=id]` — for blocks where `name` is absent or matches `id` (most builtin blocks)
-- `[@block=slug src=id]` — for named blocks where `name` differs from `id`; `slug` is a lowercased, dash-separated version of the name
-
-```
-[@block=instructions]
-You are a fiction writer continuing an ongoing story...
-
-[@block=tools]
-## Available Tools
-...
-
-[@block=my-style-guide src=cb-a1b2c3]
-Write in present tense, third person limited.
-```
-
-Other marker types used within block content:
-
-- `[@plugin=name]` — plugin-contributed tool descriptions
-
-Block *content* carries no markers beyond these. Grouped fragment context uses a consistent hierarchy: `##` for the block, `###` for the fragment type or group, and `####` for each full fragment sheet. Headings are separated from the next heading or body by one blank line. Catalog entries are not headings; they are plain `` `id` | name | desc `` rows. Full literary renders keep ids off the page, while editing agents use `renderFullFragmentSheet` for id-bearing `####` headings.
+Grouped fragment context uses a consistent hierarchy: `##` for the block, `###` for the fragment type or group, and `####` for each full fragment sheet. Headings are separated from the next heading or body by one blank line. Catalog entries are not headings; they are plain `` `id` | name | desc `` rows. Full literary renders keep ids off the page, while editing agents use `renderFullFragmentSheet` for id-bearing `####` headings.
 
 ## Default Blocks
 
@@ -66,7 +47,6 @@ Block *content* carries no markers beyond these. Grouped fragment context uses a
 | Block ID | Role | Order | Content |
 |---|---|---|---|
 | `instructions` | system | 100 | Writing assistant instructions |
-| `tools` | system | 200 | Tool usage guidance |
 | `system-fragments` | system | 300 | System-placed sticky fragments |
 | `story-info` | user | 100 | Story name + description |
 | `user-fragments` | user | 200 | User-placed sticky fragments |
@@ -199,8 +179,8 @@ When multiple plugins define `beforeBlocks`, they run in sequence (order determi
 
 1. Separates blocks into `system` and `user` groups by `role`.
 2. Sorts each group by `order` (stable sort).
-3. Prepends `[@block=...]` marker to each block's content (see [Source Markers](#source-markers)).
-4. Joins rendered blocks with `\n\n` (blank line separator) within each group.
+3. Joins block content with `\n\n` (blank line separator) within each group.
+4. Records a structural cacheable prefix before volatile author/planner input when present.
 5. Returns one message per non-empty role group.
 
 ```ts
@@ -208,8 +188,8 @@ import { compileBlocks } from '@/server/llm/context-builder'
 
 const messages = compileBlocks(blocks)
 // [
-//   { role: 'system', content: '[@block=instructions]\n...\n\n[@block=tools]\n...' },
-//   { role: 'user', content: '[@block=story-info]\n...\n\n[@block=prose]\n...' },
+//   { role: 'system', content: 'You are a fiction writer...\n\n...' },
+//   { role: 'user', content: '## Story\n...\n\n## Recent Prose\n...' },
 // ]
 ```
 
@@ -420,7 +400,7 @@ Storage functions for per-agent configs live in `src/server/agents/agent-block-s
 
 ## UI: Agent Block Editor
 
-The Agents panel is in the sidebar under **Management**. Pick an agent to open its block editor. It shows model settings, agent-specific toggles, tool toggles, and a unified list of prompt blocks (builtin + custom), merged and sorted by role then order.
+The Agents panel is in the sidebar under **Management**. Pick an agent to open its block editor. It shows model settings, agent-specific toggles, tool toggles, and a unified list of prompt blocks (builtin + custom), merged and sorted by role then order. Its context preview reports message, tool-schema, and combined size estimates and lets each exact serialized tool schema be inspected. For staged agents such as Librarian Analyze, it also shows the initial, conditional inspection, and follow-up surfaces separately; the maximum is not presented as though every request receives every tool.
 
 ### Block list
 
@@ -469,10 +449,6 @@ Block config is applied **before** plugin `beforeBlocks` hooks. This means:
 If a plugin and user config both try to modify the same block, the user config runs first (content override), then the plugin hook runs on the result.
 
 ## Common Recipes
-
-### Disable the tool listing
-
-If your story doesn't need the LLM to use tools, disable the `tools` block to save context space.
 
 ### Override instructions for a specific genre
 

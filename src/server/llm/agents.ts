@@ -6,9 +6,8 @@ import { coreReadToolNames, createFragmentTools } from './tools'
 import { createPrewriterBlocks, buildPrewriterPreviewContext, createWriterBriefBlocks, PREWRITER_INSTRUCTIONS } from './prewriter'
 import {
   GENERATION_SYSTEM_PROMPT,
-  GENERATION_TOOLS_SUFFIX,
   WRITER_BRIEF_SYSTEM_PROMPT,
-  WRITER_BRIEF_TOOLS_SUFFIX,
+  PLAY_CONTINUATION_SYSTEM_PROMPT,
 } from './instruction-texts'
 
 export function capitalize(s: string): string {
@@ -51,9 +50,8 @@ export function registerGenerationBlocks(): void {
 
   // Register instruction defaults
   instructionRegistry.registerDefault('generation.system', GENERATION_SYSTEM_PROMPT)
-  instructionRegistry.registerDefault('generation.tools-suffix', GENERATION_TOOLS_SUFFIX)
   instructionRegistry.registerDefault('generation.writer-brief.system', WRITER_BRIEF_SYSTEM_PROMPT)
-  instructionRegistry.registerDefault('generation.writer-brief.tools-suffix', WRITER_BRIEF_TOOLS_SUFFIX)
+  instructionRegistry.registerDefault('generation.play-continuation', PLAY_CONTINUATION_SYSTEM_PROMPT)
   instructionRegistry.registerDefault('generation.prewriter.system', PREWRITER_INSTRUCTIONS)
 
   agentBlockRegistry.register({

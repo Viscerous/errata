@@ -1,5 +1,6 @@
 import { apiFetch } from './client'
 import type { CustomFragmentType, StoryMeta } from './types'
+import type { AuthorInputMode } from '@/contracts/generation'
 
 export const settings = {
   update: (storyId: string, data: {
@@ -10,6 +11,7 @@ export const settings = {
     // Legacy fields (backward compat)
     providerId?: string | null
     modelId?: string | null
+    authorInputMode?: AuthorInputMode
     generationMode?: 'standard' | 'prewriter'
     clarifyBeforeGenerate?: boolean
     prewriterReasoning?: 'short' | 'normal' | 'extensive'

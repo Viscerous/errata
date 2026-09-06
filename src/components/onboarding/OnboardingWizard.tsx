@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo } from 'react'
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { useTheme, useFontPreferences, getActiveFont, FONT_CATALOGUE, loadFullFontCatalogue } from '@/lib/theme'
 import { Button } from '@/components/ui/button'
@@ -19,6 +19,7 @@ import {
 } from 'lucide-react'
 import { Hint, Caption } from '@/components/ui/prose-text'
 import { Wizard } from '@/components/ui/wizard'
+import { PROVIDER_PRESETS, providerPresetEntries, type PresetId } from '@/contracts/providers'
 
 // ── Guilloche background ─────────────────────────────
 
@@ -102,76 +103,7 @@ function GuillocheBackground() {
 
 // ── Provider card data ────────────────────────────────
 
-const PROVIDER_CARDS = {
-  deepseek: {
-    name: 'DeepSeek',
-    baseURL: 'https://api.deepseek.com',
-    defaultModel: 'deepseek-v4-flash',
-    models: ['deepseek-v4-flash', 'deepseek-v4-pro'],
-    description: 'Fast and affordable. Great default for fiction writing.',
-    accent: 'blue',
-    customHeaders: {},
-  },
-  openai: {
-    name: 'OpenAI',
-    baseURL: 'https://api.openai.com/v1',
-    defaultModel: 'gpt-5.2',
-    description: 'GPT-5.2 and Codex. The most capable models for professional work.',
-    accent: 'emerald',
-    customHeaders: {},
-  },
-  anthropic: {
-    name: 'Anthropic',
-    baseURL: 'https://api.anthropic.com/v1',
-    defaultModel: 'claude-opus-4-6',
-    description: 'Claude Opus 4.6. Nuanced writing with 1M token context.',
-    accent: 'amber',
-    customHeaders: {},
-  },
-  gemini: {
-    name: 'Google Gemini',
-    baseURL: 'https://generativelanguage.googleapis.com/v1beta',
-    defaultModel: 'gemini-3.5-flash',
-    models: ['gemini-3.5-flash', 'gemini-3.1-pro-preview', 'gemini-2.5-flash'],
-    description: 'Native Gemini models with tool use and long-context reasoning.',
-    accent: 'indigo',
-    customHeaders: {},
-  },
-  kimi: {
-    name: 'Kimi',
-    baseURL: 'https://api.moonshot.ai/v1',
-    defaultModel: 'kimi-k2.5',
-    description: 'Moonshot K2.5. Powerful open model, great value.',
-    accent: 'cyan',
-    customHeaders: {},
-  },
-  'kimi-code': {
-    name: 'Kimi Code',
-    baseURL: 'https://api.kimi.com/coding/v1',
-    defaultModel: 'kimi-for-coding',
-    description: 'Kimi Code CLI. Optimized for coding and agentic tasks.',
-    accent: 'rose',
-    customHeaders: { 'User-Agent': 'claude-code/1.0' } as Record<string, string>,
-  },
-  openrouter: {
-    name: 'OpenRouter',
-    baseURL: 'https://openrouter.ai/api/v1',
-    defaultModel: 'deepseek/deepseek-chat-v3-0324',
-    description: 'Access hundreds of models through one API.',
-    accent: 'purple',
-    customHeaders: {},
-  },
-  custom: {
-    name: 'Custom',
-    baseURL: '',
-    defaultModel: '',
-    description: 'Any OpenAI-compatible endpoint. Full control.',
-    accent: 'neutral',
-    customHeaders: {},
-  },
-} as const
-
-type PresetKey = keyof typeof PROVIDER_CARDS
+type PresetKey = PresetId
 
 const ACCENT_COLORS: Record<string, { border: string; bg: string; text: string }> = {
   blue: { border: 'border-blue-500/30', bg: 'bg-blue-500/10', text: 'text-blue-400' },
@@ -577,7 +509,19 @@ function ProviderSelectStep({
   onSelect: (preset: PresetKey) => void
   onBack: () => void
 }) {
-  const cards = Object.entries(PROVIDER_CARDS) as [PresetKey, (typeof PROVIDER_CARDS)[PresetKey]][]
+  const discovery = useQuery({
+    queryKey: ['provider-discovery'],
+    queryFn: () => api.config.discoverLocal(),
+    staleTime: 10_000,
+  })
+  const found = new Map(
+    (discovery.data?.providers ?? [])
+      .filter(provider => provider.status === 'available')
+      .map(provider => [provider.preset, provider]),
+  )
+  const cards = providerPresetEntries()
+    .filter(([id, card]) => card.kind !== 'local' || found.has(id))
+    .sort(([leftId], [rightId]) => Number(found.has(rightId)) - Number(found.has(leftId)))
 
   return (
     <div className="max-w-2xl mx-auto px-6">
@@ -586,6 +530,9 @@ function ProviderSelectStep({
         <Caption size="sm">
           Pick an LLM provider to power your writing. You can always add more later.
         </Caption>
+        {discovery.isFetching && (
+          <Hint className="mt-2">Checking for local model servers…</Hint>
+        )}
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -610,6 +557,11 @@ function ProviderSelectStep({
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2 mb-1">
                     <span className="text-sm font-medium">{card.name}</span>
+                    {found.has(key) && (
+                      <span className="text-[0.625rem] px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-500">
+                        found locally
+                      </span>
+                    )}
                     {card.defaultModel && (
                       <span className="text-[0.625rem] px-1.5 py-0.5 rounded-full bg-muted/50 text-muted-foreground">
                         {card.defaultModel}
@@ -617,7 +569,9 @@ function ProviderSelectStep({
                     )}
                   </div>
                   <Hint className="leading-relaxed">
-                    {card.description}
+                    {found.get(key)?.models.length
+                      ? `${found.get(key)!.models.length} model${found.get(key)!.models.length === 1 ? '' : 's'} available. ${card.description}`
+                      : card.description}
                   </Hint>
                 </div>
               </div>
@@ -647,7 +601,7 @@ function ProviderSetupStep({
   onComplete: () => void
   onBack: () => void
 }) {
-  const card = PROVIDER_CARDS[preset]
+  const card = PROVIDER_PRESETS[preset]
   const accent = ACCENT_COLORS[card.accent]
 
   const [apiKey, setApiKey] = useState('')
@@ -668,6 +622,24 @@ function ProviderSetupStep({
   } | null>(null)
 
   const [success, setSuccess] = useState(false)
+
+  const discovery = useQuery({
+    queryKey: ['provider-discovery'],
+    queryFn: () => api.config.discoverLocal(),
+    staleTime: 10_000,
+    enabled: card.kind === 'local',
+  })
+  const detectedProvider = discovery.data?.providers.find(provider => provider.preset === preset && provider.status === 'available')
+
+  useEffect(() => {
+    if (!detectedProvider) return
+    setBaseURL(detectedProvider.baseURL)
+    setFetchedModels(detectedProvider.models.map(id => ({ id })))
+    if (detectedProvider.models.length > 0) {
+      setDefaultModel(current => current || detectedProvider.models[0])
+      setUseCustomModel(false)
+    }
+  }, [detectedProvider])
 
   const addMutation = useMutation({
     mutationFn: (data: {
@@ -712,8 +684,8 @@ function ProviderSetupStep({
       setTestResult({ ok: false, error: 'Model is required to test' })
       return
     }
-    if (!baseURL || !apiKey) {
-      setTestResult({ ok: false, error: 'Base URL and API Key are required' })
+    if (!baseURL || (card.requiresApiKey && !apiKey)) {
+      setTestResult({ ok: false, error: card.requiresApiKey ? 'Base URL and API Key are required' : 'Base URL is required' })
       return
     }
     setTesting(true)
@@ -748,7 +720,10 @@ function ProviderSetupStep({
     })
   }
 
-  const canSave = (preset === 'custom' ? name.trim() : true) && baseURL && apiKey && defaultModel
+  const canSave = (preset === 'custom' ? name.trim() : true)
+    && baseURL
+    && (!card.requiresApiKey || apiKey)
+    && defaultModel
 
   // ── Success celebration ──
   if (success) {
@@ -818,13 +793,13 @@ function ProviderSetupStep({
 
         {/* API Key */}
         <div>
-          <label className={labelClass}>API Key</label>
+          <label className={labelClass}>API Key{card.requiresApiKey ? '' : ' (optional)'}</label>
           <input
             type="password"
             value={apiKey}
             onChange={(e) => setApiKey(e.target.value)}
             className={inputClass}
-            placeholder="Enter your API key"
+            placeholder={card.requiresApiKey ? 'Enter your API key' : 'Leave blank for a keyless local server'}
             autoFocus
           />
         </div>
@@ -874,7 +849,7 @@ function ProviderSetupStep({
               variant="outline"
               className="h-9 text-xs gap-1.5 shrink-0"
               onClick={handleFetchModels}
-              disabled={fetchingModels || !baseURL || !apiKey}
+              disabled={fetchingModels || !baseURL || (card.requiresApiKey && !apiKey)}
             >
               {fetchingModels ? (
                 <Loader2 className="size-3 animate-spin" />
@@ -954,7 +929,7 @@ function ProviderSetupStep({
           <Button
             variant="outline"
             onClick={handleTestConnection}
-            disabled={testing || !defaultModel || !apiKey || !baseURL}
+            disabled={testing || !defaultModel || !baseURL || (card.requiresApiKey && !apiKey)}
             className="gap-1.5"
           >
             {testing ? <Loader2 className="size-3 animate-spin" /> : <Zap className="size-3" />}

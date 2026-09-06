@@ -90,7 +90,6 @@ In prewriter mode, the writer sees a stripped-down context instead of the full o
 | Block ID | Role | Content |
 |---|---|---|
 | `instructions` | system | Resolved from `generation.writer-brief.system` |
-| `tools` | system | Tool descriptions + `generation.writer-brief.tools-suffix` |
 | `prose-recent` | user | Recent prose fragments (for continuity) |
 | `writing-brief` | user | The prewriter's output |
 
