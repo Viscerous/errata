@@ -5,6 +5,7 @@ import { createLogger } from '../logging'
 import type { DirectionProposalResult } from '../directions/suggest'
 import { runGeneration } from '../generation/run-generation'
 import { compileGenerationWriterContext } from '../llm/compile-generation-writer-context'
+import { getModel } from '../llm/client'
 import { pluginRegistry } from '../plugins/registry'
 import { describeToolSurface } from '../llm/tool-surface'
 
@@ -50,12 +51,20 @@ export function generationRoutes(dataDir: string) {
 
       const inputMode = body.inputMode ?? story.settings.authorInputMode ?? 'direct'
       const enabledPlugins = pluginRegistry.getEnabled(story.settings.enabledPlugins)
+      let modelId: string | undefined
+      try {
+        const resolved = await getModel(dataDir, params.storyId, { role: 'generation.writer' })
+        modelId = resolved.modelId || undefined
+      } catch {
+        // Context remains previewable before the author configures a provider.
+      }
       const compiled = await compileGenerationWriterContext({
         dataDir,
         storyId: params.storyId,
         authorInput: body.input,
         enabledPlugins,
         contextOptions: { authorInputMode: inputMode },
+        modelId,
       })
       const messages = compiled.messages.map(message => ({ role: message.role, content: message.content }))
       const messageCharacters = messages.reduce((sum, message) => sum + message.content.length, 0)

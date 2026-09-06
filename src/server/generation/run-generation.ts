@@ -1,4 +1,4 @@
-import { ToolLoopAgent, stepCountIs, type ToolSet } from 'ai'
+import { ToolLoopAgent, stepCountIs } from 'ai'
 import {
   getStory,
   createFragment,
@@ -11,11 +11,11 @@ import {
   findSectionIndex,
 } from '../fragments/prose-chain'
 import { generateFragmentId } from '@/lib/fragment-ids'
-import { buildContextState, createDefaultBlocks, compileBlocks, addCacheBreakpoints, expandMessagesFragmentTags, type ContextBlock } from '../llm/context-builder'
+import { buildContextState, addCacheBreakpoints, type ContextBlock } from '../llm/context-builder'
+import { finalizeGenerationMessages, prepareGenerationWriterSurface } from '../llm/compile-generation-writer-context'
 import { createContextReceipt } from '../llm/context-receipt'
 import { applyBlockConfig } from '../blocks/apply'
 import { createScriptHelpers } from '../blocks/script-context'
-import { createFragmentTools } from '../llm/tools'
 import { resolveAgentRuntime, samplingCallSettings, samplingDiagnostics } from '../llm/client'
 import type { SamplingSettings } from '../fragments/schema'
 import { runPrewriter, createWriterBriefBlocks } from '../llm/prewriter'
@@ -28,11 +28,9 @@ import { pluginRegistry } from '../plugins/registry'
 import {
   runBeforeContext,
   runBeforeBlocks,
-  runBeforeGeneration,
   runAfterGeneration,
   runAfterSave,
 } from '../plugins/hooks'
-import { collectPluginToolsWithOrigin } from '../plugins/tools'
 import { triggerLibrarian } from '../librarian/scheduler'
 import { getAgentBlockConfig } from '../agents/agent-block-storage'
 import { beginAgentRun } from '../agents/agent-run'
@@ -194,34 +192,27 @@ export async function runGeneration(
   requestLogger.info('Resolved model', { resolvedModelId, sampling: samplingDiagnostics(runtime) })
   ctxState.modelId = resolvedModelId
 
-  // Merge fragment tools + plugin tools, then filter by agent block config
-  const fragmentTools = createFragmentTools(dataDir, storyId, { readOnly: true })
-  const { tools: pluginTools, origins: pluginToolOrigins } = collectPluginToolsWithOrigin(enabledPlugins, dataDir, storyId)
-  // Core fragment tools take precedence: a plugin must not silently shadow
-  // readFragments/listFragments/etc. Colliding plugin tools are dropped + logged.
-  const allTools: ToolSet = { ...fragmentTools }
-  for (const [name, t] of Object.entries(pluginTools)) {
-    if (name in allTools) {
-      requestLogger.warn('Plugin tool name collides with a core tool; ignoring the plugin tool', { tool: name, plugin: pluginToolOrigins[name] })
-      continue
-    }
-    allTools[name] = t
-  }
-
-  const agentConfig = await getAgentBlockConfig(dataDir, storyId, 'generation.writer')
-  const disabledTools = new Set(agentConfig.disabledTools ?? [])
-  const tools: Record<string, (typeof allTools)[string]> = {}
-  for (const [name, t] of Object.entries(allTools)) {
-    if (!disabledTools.has(name)) tools[name] = t
+  const preparedWriter = await prepareGenerationWriterSurface({
+    dataDir,
+    storyId,
+    ctxState,
+    enabledPlugins,
+    modelId: resolvedModelId,
+  })
+  ctxState = preparedWriter.ctxState
+  const { allTools, tools, agentConfig } = preparedWriter
+  for (const ignored of preparedWriter.ignoredPluginTools) {
+    requestLogger.warn('Plugin tool name collides with a core tool; ignoring the plugin tool', {
+      tool: ignored.name,
+      plugin: ignored.pluginName,
+    })
   }
   requestLogger.info('Tools prepared', { toolCount: Object.keys(tools).length })
 
   const isPrewriterMode = story.settings.generationMode === 'prewriter'
 
   const scriptContext = { ...ctxState, ...createScriptHelpers(dataDir, storyId) }
-  let blocks = createDefaultBlocks(ctxState)
-  blocks = await applyBlockConfig(blocks, agentConfig, scriptContext)
-  blocks = await runBeforeBlocks(enabledPlugins, blocks)
+  let blocks = preparedWriter.blocks
   // Retain the complete Writer surface for the documented empty-brief fallback.
   // The prewriter projection below intentionally strips several of these blocks.
   const directWriterFallbackBlocks = blocks
@@ -250,12 +241,7 @@ export async function runGeneration(
     blocks = blocks.filter(b => !WRITER_ONLY_BLOCKS.has(b.id) && b.source !== 'custom')
   }
 
-  let messages = compileBlocks(blocks)
-  messages = await runBeforeGeneration(enabledPlugins, messages)
-  // Expand inline `<@fragment-id>` references so they don't leak literally
-  // into the prompt. The prewriter writer path expands its own context
-  // separately (createWriterBriefBlocks + expandMessagesFragmentTags).
-  messages = await expandMessagesFragmentTags(messages, dataDir, storyId)
+  const messages = await finalizeGenerationMessages(blocks, enabledPlugins, dataDir, storyId)
   requestLogger.info('BeforeGeneration hooks completed', { messageCount: messages.length })
 
   // Prewriter phase: if enabled, run prewriter and replace messages with stripped context
@@ -402,17 +388,13 @@ export async function runGeneration(
               let finalWriterBlocks = await applyBlockConfig(writerBlocks, agentConfig, scriptContext)
               finalWriterBlocks = await runBeforeBlocks(enabledPlugins, finalWriterBlocks)
               writerContextBlocks = finalWriterBlocks
-              let writerCompiled = compileBlocks(finalWriterBlocks)
-              writerCompiled = await expandMessagesFragmentTags(writerCompiled, dataDir, storyId)
-              writerCompiled = await runBeforeGeneration(enabledPlugins, writerCompiled)
+              const writerCompiled = await finalizeGenerationMessages(finalWriterBlocks, enabledPlugins, dataDir, storyId)
               writerMessages = addCacheBreakpoints(writerCompiled)
               logMessages = writerCompiled
             } else {
               requestLogger.warn('Prewriter produced an empty brief; falling back to full context for the writer')
               writerContextBlocks = directWriterFallbackBlocks
-              let fallbackCompiled = compileBlocks(directWriterFallbackBlocks)
-              fallbackCompiled = await expandMessagesFragmentTags(fallbackCompiled, dataDir, storyId)
-              fallbackCompiled = await runBeforeGeneration(enabledPlugins, fallbackCompiled)
+              const fallbackCompiled = await finalizeGenerationMessages(directWriterFallbackBlocks, enabledPlugins, dataDir, storyId)
               writerMessages = addCacheBreakpoints(fallbackCompiled)
               logMessages = fallbackCompiled
             }

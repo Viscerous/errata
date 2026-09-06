@@ -18,6 +18,7 @@ Author input
   → beforeBlocks hooks             Plugin transformations on blocks
   → compileBlocks()                Blocks → ContextMessage[]
   → beforeGeneration hooks         Plugin transformations on messages
+  → expandFragmentTags()           Resolve inline fragment references
   → addCacheBreakpoints()          Add Anthropic cache control hints
   → Writer agent streams prose     ToolLoopAgent with fragment tools
   → afterGeneration hooks          Plugin post-processing
@@ -27,6 +28,15 @@ Author input
 ```
 
 The writer agent sees the complete context: system instructions, tool guidance, story info, summaries, full fragments, catalog rows, prose chain, and the author's input.
+
+Runtime generation and the composer context preview use the same Writer-surface
+preparation and final-message functions. This keeps block configuration, plugin
+hooks, disabled tools, core/plugin tool precedence, and fragment-reference
+expansion identical between the receipt and the request. The preview also
+resolves the configured Writer model before selecting instruction defaults.
+Core fragment tools
+win if a plugin declares the same tool name; the colliding plugin tool is
+omitted rather than silently replacing the built-in contract.
 
 ## Prewriter Mode Flow
 

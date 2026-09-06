@@ -7,7 +7,7 @@ The context block system provides a structured, manipulable representation of th
 The generation pipeline works in stages:
 
 ```
-buildContextState() → beforeContext hooks → createDefaultBlocks() → applyBlockConfig() → beforeBlocks hooks → compileBlocks() → expandMessagesFragmentTags() → beforeGeneration hooks → streamText()
+buildContextState() → beforeContext hooks → createDefaultBlocks() → applyBlockConfig() → beforeBlocks hooks → compileBlocks() → beforeGeneration hooks → expandMessagesFragmentTags() → streamText()
 ```
 
 1. **`buildContextState()`** loads fragments from storage into a typed state object.
@@ -17,7 +17,9 @@ buildContextState() → beforeContext hooks → createDefaultBlocks() → applyB
 5. **`beforeBlocks`** hooks let plugins manipulate individual blocks (replace instructions, inject sections, reorder).
 6. **`compileBlocks()`** groups blocks by role, sorts by order, and joins their content into `ContextMessage[]` without serializing block metadata.
 7. **`expandMessagesFragmentTags()`** expands fragment reference tags inside compiled message content.
-8. **`beforeGeneration`** hooks operate on the final message strings.
+8. **`beforeGeneration`** hooks operate on the compiled message strings. Inline
+   fragment references introduced there are expanded afterward, before the
+   request is sent.
 
 ## ContextBlock
 
