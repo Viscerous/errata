@@ -402,7 +402,7 @@ Storage functions for per-agent configs live in `src/server/agents/agent-block-s
 
 ## UI: Agent Block Editor
 
-The Agents panel is in the sidebar under **Management**. Pick an agent to open its block editor. It shows model settings, agent-specific toggles, tool toggles, and a unified list of prompt blocks (builtin + custom), merged and sorted by role then order. Its context preview reports message, tool-schema, and combined size estimates and lets each exact serialized tool schema be inspected. For staged agents such as Librarian Analyze, it also shows the initial, conditional inspection, and follow-up surfaces separately; the maximum is not presented as though every request receives every tool.
+The Agents panel is in the sidebar under **Management**. Pick an agent to open its block editor. It shows model settings, agent-specific toggles, tool toggles, and a unified list of prompt blocks (builtin + custom), merged and sorted by role then order. Its context preview begins with a payload map: exact compiled-message and serialized-tool proportions, the largest declared block/tool sources, and the combined request estimate. Each serialized tool schema remains inspectable below it. For staged agents such as Librarian Analyze, Primary, conditional Inspection, and Recovery are selectable views, so the full inspection surface is not presented as though every request receives every tool.
 
 ### Block list
 

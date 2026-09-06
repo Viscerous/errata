@@ -12,6 +12,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog'
+import { ContextPayloadOverview } from '@/components/blocks/ContextPayloadOverview'
 
 interface ContextPreviewDialogProps {
   storyId: string
@@ -69,9 +70,6 @@ export function ContextPreviewDialog({ storyId, input, inputMode, disabled }: Co
               <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
                 <span className="rounded-full border border-border/50 px-2 py-1">{preview.data.pipeline} pipeline</span>
                 <span className="rounded-full border border-border/50 px-2 py-1">{preview.data.inputMode} input</span>
-                <span className="rounded-full border border-border/50 px-2 py-1">~{preview.data.estimatedTokens.toLocaleString()} tokens</span>
-                <span className="rounded-full border border-border/50 px-2 py-1">messages ~{Math.ceil(preview.data.messageCharacters / 4).toLocaleString()}</span>
-                <span className="rounded-full border border-border/50 px-2 py-1">tools ~{Math.ceil(preview.data.toolCharacters / 4).toLocaleString()}</span>
                 <span className="rounded-full border border-border/50 px-2 py-1">{preview.data.blocks.length} blocks</span>
                 <span className="rounded-full border border-border/50 px-2 py-1">{preview.data.tools.length} tools</span>
               </div>
@@ -81,6 +79,12 @@ export function ContextPreviewDialog({ storyId, input, inputMode, disabled }: Co
                   {preview.data.caveat}
                 </p>
               )}
+
+              <ContextPayloadOverview
+                messages={preview.data.messages}
+                blocks={preview.data.blocks}
+                tools={preview.data.tools}
+              />
 
               <section className="space-y-2">
                 <div className="flex items-baseline justify-between gap-3">

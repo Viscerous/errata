@@ -4,6 +4,7 @@ import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import { componentId } from '@/lib/dom-ids'
 import { EmptyHint } from '@/components/ui/prose-text'
+import { ContextPayloadOverview } from './ContextPayloadOverview'
 
 interface BlockContentViewProps {
   messages: Array<{ role: string; content: string }>
@@ -146,6 +147,13 @@ export function BlockContentView({ messages, blocks, tools, toolStages, classNam
       {/* Right content */}
       <ScrollArea className="flex-1 min-w-0" data-component-id="block-content-scroll">
         <div ref={contentRef} className="p-4 space-y-2">
+          <ContextPayloadOverview
+            messages={messages}
+            blocks={segments}
+            tools={tools}
+            toolStages={toolStages}
+            className="mb-3"
+          />
           {segments.map((seg) => (
             <div
               key={seg.id}
@@ -202,37 +210,6 @@ export function BlockContentView({ messages, blocks, tools, toolStages, classNam
               </div>
 
               <div className="p-3 space-y-2">
-                {(toolStages?.length ?? 0) > 0 && (
-                  <div className="mb-3 grid gap-2 sm:grid-cols-3">
-                    {toolStages!.map((stage) => (
-                      <div key={stage.id} className="rounded border border-border/20 bg-muted/5 p-2">
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-[0.625rem] font-medium text-foreground/85">{stage.label}</span>
-                          {stage.conditional && (
-                            <Badge
-                              variant="outline"
-                              className="h-3.5 border-transparent bg-muted/30 px-1 text-[0.5rem] font-normal text-muted-foreground"
-                            >
-                              when needed
-                            </Badge>
-                          )}
-                          <span className="ml-auto text-[0.5625rem] tabular-nums text-muted-foreground">
-                            ~{stage.estimatedTokens.toLocaleString()} total
-                          </span>
-                        </div>
-                        <p className="mt-1 text-[0.5625rem] leading-relaxed text-muted-foreground">
-                          {stage.description}
-                        </p>
-                        <div className="mt-1.5 flex items-center gap-2 text-[0.5rem] text-muted-foreground/70">
-                          <p className="min-w-0 flex-1 truncate font-mono" title={stage.toolNames.join(', ')}>
-                            {stage.toolNames.join(' · ') || 'No tools'}
-                          </p>
-                          <span className="shrink-0 tabular-nums">tools ~{Math.ceil(stage.toolCharacters / 4).toLocaleString()}</span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
                 {tools!.map((t) => (
                   <details key={t.name} className={cn('rounded border border-border/20 px-2 py-1.5', !t.enabled && 'opacity-45')}>
                     <summary className="flex cursor-pointer list-none items-center gap-2">

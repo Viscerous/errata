@@ -117,9 +117,10 @@ Play and Direct remain explicit request contracts (`inputMode: "play" | "direct"
 not prompt-shape guesses. Guided actions are always directions, even in a Play
 story. The selected contract is stored with generation provenance. The
 composer’s **Context** action compiles a live receipt showing
-the ordered blocks with per-block size, exact compiled messages, and each tool's
-description plus serialized input schema. Message, tool, and combined token
-estimates make schema-heavy agents visible instead of counting prompt text alone. Block IDs stay
+the request payload proportions and largest sources, ordered blocks with
+per-block size, exact compiled messages, and each tool's description plus
+serialized input schema. Message, tool, and combined token estimates make
+schema-heavy agents visible instead of counting prompt text alone. Block IDs stay
 in structured editor metadata and are never serialized into model text. In
 prewriter stories it labels the preview as the prewriter’s source
 context because the final brief does not exist until generation runs.
