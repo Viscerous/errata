@@ -116,6 +116,14 @@ composer also exposes two auxiliary surfaces:
 Play and Direct remain explicit request contracts (`inputMode: "play" | "direct"`),
 not prompt-shape guesses. Guided actions are always directions, even in a Play
 story. The selected contract is stored with generation provenance. The
+model-facing input renderer is shared by standard and staged generation so the
+same Play turn cannot acquire different framing in those paths. A staged Play
+turn appears once in the planner request and once in the later Writer request;
+those are separate model calls, not duplicate text within one prompt. Direct
+input is prompt-only, while Play input is committed manuscript and therefore
+appears in story export as part of the generated passage. The
+`<author-story-turn>` delimiter is intentional model-facing structure; internal
+context-block bookkeeping is stripped before the request is sent. The
 composer’s **Context** action compiles a live receipt showing
 the request payload proportions and largest sources, ordered blocks with
 per-block size, exact compiled messages, and each tool's description plus

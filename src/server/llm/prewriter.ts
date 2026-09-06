@@ -15,6 +15,7 @@ import { resolveAndReportServedUsage } from './usage-normalizer'
 import { servedModelIdFromResponse } from './served-models'
 import { createLogger } from '../logging'
 import type { AuthorInputMode } from '@/contracts/generation'
+import { createGenerationInputBlocks, createPlanningRequest } from './generation-input-contract'
 
 const logger = createLogger('prewriter')
 
@@ -201,13 +202,10 @@ export async function runPrewriter(args: RunPrewriterArgs): Promise<PrewriterRes
   // Update planning-request based on operation and the author's input contract.
   // A story turn stays verbatim here and is also sent verbatim to the writer;
   // the brief may interpret its consequences but cannot replace it.
-  const generationRequest = inputMode === 'play'
-    ? `## Author Story Turn\n\nThis is canonical manuscript text. Plan from its endpoint.\n\n<author-story-turn>\n${authorInput}\n</author-story-turn>`
-    : `## Author Request\n\n${authorInput}`
   const modePrompts: Record<string, string> = {
-    generate: generationRequest,
-    regenerate: `The author wants to REGENERATE the latest passage. Their direction: ${authorInput}\n\nCreate a writing brief for an alternative version of the most recent prose.`,
-    refine: `The author wants to REFINE/EDIT the latest passage. Their direction: ${authorInput}\n\nCreate a writing brief that addresses the author's refinement request while maintaining continuity.`,
+    generate: createPlanningRequest(authorInput, inputMode, 'generate'),
+    regenerate: createPlanningRequest(authorInput, inputMode, 'regenerate'),
+    refine: createPlanningRequest(authorInput, inputMode, 'refine'),
   }
 
   prewriterBlocks = prewriterBlocks.map(b => {
@@ -522,25 +520,13 @@ export function createWriterBriefBlocks(
     source: 'builtin',
   })
 
-  if (authorStoryTurn?.trim()) {
-    blocks.push({
-      id: 'play-output-contract',
-      role: 'system' as const,
-      content: instructionRegistry.resolve('generation.play-continuation', modelId),
-      order: 150,
-      source: 'builtin',
-    })
-  }
-
-  if (authorStoryTurn?.trim()) {
-    blocks.push({
-      id: 'author-story-turn',
-      role: 'user' as const,
-      content: `## Author Story Turn\n\n<author-story-turn>\n${authorStoryTurn}\n</author-story-turn>`,
-      order: 300,
-      source: 'builtin',
-    })
-  }
+  blocks.push(...createGenerationInputBlocks({
+    authorInput: authorStoryTurn ?? '',
+    inputMode: 'play',
+    modelId,
+    inputBlockId: 'author-story-turn',
+    inputOrder: 300,
+  }))
 
   return blocks
 }

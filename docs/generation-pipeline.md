@@ -38,6 +38,28 @@ Core fragment tools
 win if a plugin declares the same tool name; the colliding plugin tool is
 omitted rather than silently replacing the built-in contract.
 
+### Author input contract
+
+Generation input has one shared model-facing renderer. Standard and staged
+Writer requests therefore cannot independently drift in how they label or
+delimit Direct and Play input:
+
+- **Direct** input is a prompt-only `Author Direction`. In prewriter mode it is
+  shown to the planner once and represented to the Writer by the resulting
+  brief; the raw direction is not repeated to the Writer.
+- **Play** input is canonical manuscript. It is shown once to each stage that
+  needs it: the planner plans from its endpoint, while the Writer receives the
+  verbatim turn plus the continuation-only output contract. The turn is
+  committed immediately before the generated continuation.
+
+The `<author-story-turn>` delimiter is model-visible and intentional: it marks
+the exact manuscript span without changing it. Internal block bookkeeping is
+not sent to the model.
+
+Run `bun run audit:prompts` for a compact Direct/Play × standard/planner/brief
+matrix. Add `--verbose` to print the exact input-related blocks. This command is
+diagnostic only; it does not impose a runtime validation or repair policy.
+
 ## Prewriter Mode Flow
 
 Prewriter mode uses the same context build pipeline through `compileBlocks()`, then diverges:

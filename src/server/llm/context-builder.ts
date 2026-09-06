@@ -1,5 +1,6 @@
 import { getStory, listFragments, getFragment } from '../fragments/storage'
 import { instructionRegistry } from '../instructions'
+import { createGenerationInputBlocks } from './generation-input-contract'
 import { createLogger } from '../logging'
 import { getActiveProseIds, findSectionIndex } from '../fragments/prose-chain'
 import { type Fragment, type StoryMeta } from '../fragments/schema'
@@ -11,7 +12,6 @@ import {
   fragmentFullContextBlock,
   isBuiltinContextFragmentType,
   fragmentTypeLabel,
-  markdownSection,
   proseWindowBlock,
   renderContextFragment,
   storyHeaderContent,
@@ -561,16 +561,6 @@ export function createDefaultBlocks(state: ContextBuildState): ContextBlock[] {
     source: 'builtin',
   })
 
-  if (authorInputMode === 'play') {
-    blocks.push({
-      id: 'play-output-contract',
-      role: 'system',
-      content: instructionRegistry.resolve('generation.play-continuation', state.modelId),
-      order: 150,
-      source: 'builtin',
-    })
-  }
-
   if (systemPlaced.length > 0) {
     pushFragmentBlock(fragmentFullContextBlock({
       id: 'system-fragments',
@@ -661,25 +651,13 @@ export function createDefaultBlocks(state: ContextBuildState): ContextBlock[] {
     if (prose) blocks.push(prose)
   }
 
-  // Only frame an explicit direction when the author gave one; a bare "continue"
-  // (empty input) leaves the model to continue from the prose without a dangling
-  // instruction label.
-  if (authorInput.trim()) {
-    const isStoryTurn = authorInputMode === 'play'
-    blocks.push({
-      id: 'author-input',
-      role: 'user',
-      content: isStoryTurn
-        ? markdownSection(
-            2,
-            'Author Story Turn',
-            `<author-story-turn>\n${authorInput}\n</author-story-turn>`,
-          )
-        : markdownSection(2, 'Author Direction', authorInput),
-      order: 600,
-      source: 'builtin',
-    })
-  }
+  // A bare "continue" (empty input) leaves no dangling instruction label.
+  // Direct/Play framing is centralized with the staged Writer path.
+  blocks.push(...createGenerationInputBlocks({
+    authorInput,
+    inputMode: authorInputMode,
+    modelId: state.modelId,
+  }))
 
   return blocks
 }
