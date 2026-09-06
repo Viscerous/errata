@@ -33,9 +33,10 @@ import {
   ToolLoopPassError,
   type ToolLoopPassArgs,
   type ToolLoopPrepareStep,
+  type ToolLoopStopWhen,
   type ToolLoopStepUsage,
 } from './tool-runner'
-import { selectAnalyzeToolStage } from './analyze-stages'
+import { isAnalyzeWorkflowComplete, selectAnalyzeToolStage } from './analyze-stages'
 
 type LibrarianRuntime = Awaited<ReturnType<typeof resolveAgentRuntime>>
 
@@ -60,6 +61,7 @@ interface RunCompiledPassArgs {
   abortSignal?: AbortSignal
   idleTimeoutMs?: number
   prepareStep?: ToolLoopPrepareStep
+  stopWhen?: ToolLoopStopWhen
 }
 
 export interface LibrarianPipelineInput {
@@ -122,6 +124,7 @@ async function runCompiledToolPass(args: RunCompiledPassArgs): Promise<{
     abortSignal: args.abortSignal,
     idleTimeoutMs: args.idleTimeoutMs,
     prepareStep: args.prepareStep,
+    stopWhen: args.stopWhen,
   })
 }
 
@@ -351,15 +354,12 @@ async function runOnlineAnalyzePass(
       maxOutputTokens: guards.maxOutputTokens,
       maxSteps: 8,
       emit,
-      terminalToolName: compiled.tools.finishAnalysis ? 'finishAnalysis' : undefined,
-      terminalRequiresToolName: compiled.tools.finishAnalysis && compiled.tools.reportAnalysis
-        ? 'reportAnalysis'
-        : undefined,
       abortSignal,
       idleTimeoutMs,
       prepareStep: ({ steps }) => ({
         activeTools: selectAnalyzeToolStage(Object.keys(compiled.tools), steps).activeTools,
       }),
+      stopWhen: ({ steps }) => isAnalyzeWorkflowComplete(Object.keys(compiled.tools), steps),
     })
     const { modelId: servedModelId, usage } = await resolveAndReportServedUsage(
       dataDir,
@@ -369,7 +369,9 @@ async function runOnlineAnalyzePass(
       { providerId, configuredModelId: modelId, servedModelId: result.servedModelId },
     )
     const toolCallNames = result.toolCalls.map((call) => call.toolName)
-    const workflowComplete = toolCallSucceeded(result.toolCalls, 'finishAnalysis')
+    const workflowComplete = isAnalyzeWorkflowComplete(Object.keys(compiled.tools), [{
+      toolResults: result.toolCalls.map((call) => ({ toolName: call.toolName, output: call.result })),
+    }])
     const proposalToolNames = new Set(['proposeRecordCorrections', 'proposeNewRecords'])
     const proposalToolResults = result.toolCalls
       .filter((call) => proposalToolNames.has(call.toolName))
@@ -423,7 +425,7 @@ async function runOnlineAnalyzePass(
         modelId: servedModelId,
         stepCount: result.stepCount,
         finishReason: result.finishReason,
-        ...(!workflowComplete ? { error: 'Analyze ended without a successful finishAnalysis call' } : {}),
+        ...(!workflowComplete ? { error: 'Analyze ended before its required tool work completed' } : {}),
         diagnostics,
       }),
     }

@@ -176,7 +176,7 @@ describe('compileAgentContext', () => {
 
     expect(Object.keys(result.tools)).toEqual(['reportAnalysis', 'finishAnalysis'])
     expect(instructions.content).toContain('1. Call **reportAnalysis**')
-    expect(instructions.content).toContain('2. Finally, call **finishAnalysis**')
+    expect(instructions.content).toContain('2. Finally, successful required work completes automatically')
     expect(instructions.content).toContain('reportAnalysis')
     expect(instructions.content).not.toContain('proposeDirections')
     expect(instructions.content).not.toContain('proposeRecordCorrections')

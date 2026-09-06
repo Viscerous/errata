@@ -292,7 +292,7 @@ export interface BlockPreviewResponse {
   }>
   /** Per-request tool surfaces for agents whose tool loop is staged. */
   toolStages: Array<{
-    id: 'observation' | 'inspection' | 'follow-up'
+    id: 'primary' | 'inspection' | 'recovery'
     label: string
     description: string
     conditional: boolean

@@ -1623,6 +1623,12 @@ export function createAnalysisTools(
           [...anchoredMentions.map((mention) => mention.fragmentId), ...candidateFragmentIds],
           numberedFragmentIds,
         )
+        // Mention bodies improve the next writer context but do not, by
+        // themselves, justify another Analyze request. Candidate IDs are the
+        // model explicitly asking to inspect durable assertions, so only a
+        // newly delivered candidate keeps the inspection stage open.
+        const candidateIds = new Set(candidateFragmentIds)
+        const inspectionRequired = resolvedFragments.some((fragment) => candidateIds.has(fragment.id))
 
         const skippedContradictions: Array<Skipped<{ description: string }>> = []
         const groundedContradictions: AnalysisCollector['contradictions'] = []
@@ -1725,6 +1731,7 @@ export function createAnalysisTools(
             resolvedFragments,
             resolvedFragmentNote: 'Full records for what you just reported, not already in your context. Their sentences are numbered for correction targeting. Use them for directions and record maintenance; no further reads are needed for these.',
           } : {}),
+          ...(inspectionRequired ? { inspectionRequired: true } : {}),
           ...(unresolvedContinuity.length > 0 ? { skippedContinuity: unresolvedContinuity } : {}),
           ...(skippedMentions.length > 0 ? {
             skippedMentions,

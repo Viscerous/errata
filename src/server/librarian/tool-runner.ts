@@ -5,6 +5,7 @@ import { servedModelIdFromResponse } from '../llm/served-models'
 
 type ToolLoopAgentSettings = ConstructorParameters<typeof ToolLoopAgent>[0]
 export type ToolLoopPrepareStep = NonNullable<ToolLoopAgentSettings['prepareStep']>
+export type ToolLoopStopWhen = ToolLoopAgentSettings['stopWhen']
 
 /** Zero disables the watchdog; callers may opt in when a provider needs one. */
 export const DEFAULT_TOOL_LOOP_IDLE_TIMEOUT_MS = 0
@@ -26,6 +27,7 @@ export interface ToolLoopPassArgs {
   abortSignal?: AbortSignal
   idleTimeoutMs?: number
   prepareStep?: ToolLoopPrepareStep
+  stopWhen?: ToolLoopStopWhen
 }
 
 export interface ToolLoopPassResult {
@@ -109,9 +111,13 @@ export async function runToolLoopPass(args: ToolLoopPassArgs): Promise<ToolLoopP
     instructions: args.instructions,
     tools: args.tools,
     toolChoice: 'auto',
-    stopWhen: args.terminalToolName
-      ? [stepCountIs(args.maxSteps ?? 6), terminalToolSucceeded(args.terminalToolName, args.terminalRequiresToolName)]
-      : stepCountIs(args.maxSteps ?? 6),
+    stopWhen: [
+      stepCountIs(args.maxSteps ?? 6),
+      ...(args.terminalToolName
+        ? [terminalToolSucceeded(args.terminalToolName, args.terminalRequiresToolName)]
+        : []),
+      ...(Array.isArray(args.stopWhen) ? args.stopWhen : args.stopWhen ? [args.stopWhen] : []),
+    ],
     temperature: args.temperature,
     topP: args.topP,
     topK: args.topK,

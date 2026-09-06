@@ -1522,6 +1522,7 @@ describe('analysis-tools', () => {
         content: '[1] Alice avoids the northern road.\n[2] She fears it.',
       }],
     })
+    expect(report).not.toHaveProperty('inspectionRequired')
     // No read, no refusal: the first attempt records.
     expect(directions).toMatchObject({ ok: true })
     expect(collector.directions).toHaveLength(3)
@@ -1548,6 +1549,31 @@ describe('analysis-tools', () => {
     }, { toolCallId: 'report', messages: [], abortSignal: undefined as unknown as AbortSignal })
 
     expect(report).not.toHaveProperty('resolvedFragments')
+  })
+
+  it('requests inspection only when a durable candidate is newly resolved', async () => {
+    const prose = mockFragment({ id: 'pr-0001', type: 'prose', content: 'The roster changed.' })
+    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => {
+      if (id === 'pr-0001') return prose
+      if (id === 'ch-0001') return mockFragment({ id, content: 'Alice commands the guard.' })
+      return null
+    })
+    const tools = createAnalysisTools(createEmptyCollector(), {
+      dataDir: '/tmp',
+      storyId: 'story-test',
+      proseFragmentId: 'pr-0001',
+    })
+
+    const report = await tools.reportAnalysis.execute!({
+      summary: 'The roster changed.',
+      candidateFragmentIds: ['ch-0001'],
+    }, { toolCallId: 'report', messages: [], abortSignal: undefined as unknown as AbortSignal })
+
+    expect(report).toMatchObject({
+      ok: true,
+      inspectionRequired: true,
+      resolvedFragments: [{ id: 'ch-0001' }],
+    })
   })
 
   it('tracks full presentation populated after tool construction', async () => {

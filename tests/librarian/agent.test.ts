@@ -243,9 +243,6 @@ describe('librarian agent', () => {
           yield { type: 'tool-call' as const, toolCallId: id, toolName: 'reportAnalysis', input }
           const output = tools.reportAnalysis ? await tools.reportAnalysis.execute(input) : { ok: true }
           yield { type: 'tool-result' as const, toolCallId: id, toolName: 'reportAnalysis', output }
-          const finishInput = {}
-          yield { type: 'tool-call' as const, toolCallId: 'call-finish', toolName: 'finishAnalysis', input: finishInput }
-          yield { type: 'tool-result' as const, toolCallId: 'call-finish', toolName: 'finishAnalysis', output: await tools.finishAnalysis.execute(finishInput) }
           yield { type: 'finish' as const, finishReason: 'stop' }
         })(),
       }
@@ -623,9 +620,6 @@ describe('librarian agent', () => {
             yield { type: 'tool-call' as const, toolCallId: 'call-directions', toolName: 'proposeDirections', input }
             yield { type: 'tool-result' as const, toolCallId: 'call-directions', toolName: 'proposeDirections', output: await tools.proposeDirections.execute(input) }
           }
-          const finishInput = {}
-          yield { type: 'tool-call' as const, toolCallId: 'call-finish', toolName: 'finishAnalysis', input: finishInput }
-          yield { type: 'tool-result' as const, toolCallId: 'call-finish', toolName: 'finishAnalysis', output: await tools.finishAnalysis.execute(finishInput) }
           yield { type: 'finish' as const, finishReason: 'stop' }
         })(),
       }
@@ -636,6 +630,7 @@ describe('librarian agent', () => {
     const analyzePass = analysis.passes?.find((pass) => pass.name === 'analyze')
     expect(analyzePass?.status).toBe('complete')
     expect(analyzePass?.diagnostics?.directionToolCallCount).toBe(1)
+    expect(analyzePass?.diagnostics?.finishToolCallCount).toBe(0)
     expect(analysis.directions).toEqual(directions)
     expect(analysis.analyzeLanes?.directions).toEqual({ requirement: 'required', completion: 'complete' })
   })
@@ -731,7 +726,7 @@ describe('librarian agent', () => {
     expect(analysis?.analyzeLanes?.observation.completion).toBe('complete')
   })
 
-  it('saves an unfinished report for inspection without advancing continuity state', async () => {
+  it('completes accepted required work without a redundant finish tool call', async () => {
     await createStory(dataDir, makeStory())
     await createFragment(dataDir, storyId, makeFragment({
       id: 'ch-0001',
@@ -768,26 +763,23 @@ describe('librarian agent', () => {
           toolName: 'reportAnalysis',
           output: await tools.reportAnalysis.execute(input),
         }
-        // The provider stops before calling finishAnalysis.
+        // No model-authored finish marker is needed after accepted required work.
         yield { type: 'finish' as const, finishReason: 'stop' }
       })(),
     }))
 
-    await expect(runLibrarian(dataDir, storyId, 'pr-0001')).rejects.toThrow(
-      'without a successful finishAnalysis call',
-    )
+    await runLibrarian(dataDir, storyId, 'pr-0001')
 
     const summaries = await listAnalyses(dataDir, storyId)
     expect(summaries).toHaveLength(1)
     const analysis = await getAnalysis(dataDir, storyId, summaries[0].id)
     expect(analysis?.summaryUpdate).toBe('Alice crossed the north hall.')
-    expect(analysis?.continuityProjection).toBeUndefined()
-    expect(analysis?.passes?.[0]).toMatchObject({ name: 'analyze', status: 'failed' })
+    expect(analysis?.continuityProjection?.stateOperations).toHaveLength(1)
+    expect(analysis?.passes?.[0]).toMatchObject({ name: 'analyze', status: 'complete' })
 
     const state = await getState(dataDir, storyId)
-    expect(state.lastAnalyzedFragmentId).toBeNull()
-    expect(state.timeline).toEqual([])
-    expect((await getFragment(dataDir, storyId, 'pr-0001'))?.meta.annotations).toBeUndefined()
+    expect(state.lastAnalyzedFragmentId).toBe('pr-0001')
+    expect((await getFragment(dataDir, storyId, 'pr-0001'))?.meta.annotations).toHaveLength(1)
   })
 
   it('uses candidate fragments for memory context without recording mention annotations', async () => {

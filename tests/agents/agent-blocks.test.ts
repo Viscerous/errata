@@ -605,7 +605,8 @@ describe('Librarian Analyze Prompt', () => {
     expect(prompt).toContain('Cite the numbered prose instead of retyping evidence')
     expect(prompt).toContain('1. Call **reportAnalysis**')
     expect(prompt).toContain('3. Call **proposeDirections**')
-    expect(prompt).toContain('4. Finally, call **finishAnalysis**')
+    expect(prompt).toContain('4. Finally, successful required work completes automatically')
+    expect(prompt).toContain('**finishAnalysis** appears during inspection or recovery')
     expect(prompt).toContain('candidateFragmentIds')
     expect(prompt).toContain('durable assertions may directly conflict')
     expect(prompt).toContain('ordinary progression and current conditions are not canon contradictions')
@@ -616,12 +617,12 @@ describe('Librarian Analyze Prompt', () => {
   it('makes the last enabled analyze action explicit without naming disabled tools', () => {
     const noDirections = buildAnalyzeSystemPrompt({ disableDirections: true })
     expect(noDirections).toContain('2. Use **proposeRecordCorrections**')
-    expect(noDirections).toContain('3. Finally, call **finishAnalysis**')
+    expect(noDirections).toContain('3. Finally, successful required work completes automatically')
     expect(noDirections).not.toContain('proposeDirections')
 
     const noSuggestions = buildAnalyzeSystemPrompt({ disableSuggestions: true })
     expect(noSuggestions).toContain('2. Call **proposeDirections**')
-    expect(noSuggestions).toContain('3. Finally, call **finishAnalysis**')
+    expect(noSuggestions).toContain('3. Finally, successful required work completes automatically')
     expect(noSuggestions).not.toContain('proposeRecordCorrections')
     expect(noSuggestions).not.toContain('proposeNewRecords')
 
@@ -629,7 +630,7 @@ describe('Librarian Analyze Prompt', () => {
       disabledTools: ['proposeDirections', 'proposeRecordCorrections', 'proposeNewRecords'],
     })
     expect(noOptionalTools).toContain('1. Call **reportAnalysis**')
-    expect(noOptionalTools).toContain('2. Finally, call **finishAnalysis**')
+    expect(noOptionalTools).toContain('2. Finally, successful required work completes automatically')
     expect(noOptionalTools).not.toContain('proposeDirections')
     expect(noOptionalTools).not.toContain('proposeRecordCorrections')
     expect(noOptionalTools).not.toContain('proposeNewRecords')

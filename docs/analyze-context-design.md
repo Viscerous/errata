@@ -161,14 +161,19 @@ The current policy is semantic first, with no numeric context caps chosen yet:
   work. Routine online analysis does not block on a synchronous router fallback.
 - **Online analysis uses one staged adaptive tool loop.** The compiled story
   context and conversation stay in one agent run, while the tool schemas
-  exposed to each model request change with the workflow. The first request sees only
-  `reportAnalysis`. A settled report retires that large schema and exposes the
-  smaller follow-up surface for directions, maintenance, and completion. If the
-  report resolves previously unseen numbered records, one conditional inspection
-  stage keeps both surfaces available so a newly grounded contradiction can be
-  reported. Failed reports remain in the observation stage for a focused retry.
-  This staging does not add an orchestration round trip; it removes irrelevant
-  schemas from requests the existing tool loop already makes. A repeated
+  exposed to each model request change with the workflow. The primary request
+  contains reporting, optional record proposals, and directions, preserving the
+  common one-response path; read tools and the explicit finish tool are absent.
+  Once the required tools succeed, the server ends the run without asking the
+  model to restate that it is finished. If a report newly resolves a record that
+  was explicitly marked as a durable-review candidate, a conditional inspection
+  stage exposes the full surface so the finding can be amended. Resolving a
+  mention for future writer context does not create this extra request. Failed
+  reports and proposals enter a focused recovery stage, where `finishAnalysis`
+  remains available for the exceptional case that requires an explicit
+  abandonment reason. This hybrid follows the stored trace evidence: most runs
+  already produced report, directions, and finish in one response, so isolating
+  observation would have added latency to the common path. A repeated
   `readFragments` request for an available record returns its ID under
   `alreadyAvailable` instead of echoing the body again. Pass diagnostics retain
   usage, active tool names, and wall time for each model step as well as the
@@ -181,8 +186,9 @@ The current policy is semantic first, with no numeric context caps chosen yet:
   enabled. When disabled, their tool and instructions are absent.
   `reportAnalysis` loads every referenced fragment to validate its ID and makes
   records not already in the initial prompt available to subsequent model
-  steps. `finishAnalysis` still rejects falsely completed calls, and directions
-  cannot be abandoned as an optional skip. The dedicated `directions.suggest`
+  steps. Deterministic completion still requires successful directions when
+  enabled, and the exceptional `finishAnalysis` path rejects falsely completed
+  calls; directions cannot be abandoned as an optional skip. The dedicated `directions.suggest`
   runner remains available for guided/on-demand suggestions even when automatic
   directions are disabled.
 - **Lane completion is explicit.** Observation is required, record maintenance

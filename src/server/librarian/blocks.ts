@@ -123,7 +123,7 @@ export function buildAnalyzeSystemPrompt(opts?: {
     actions.push('call **proposeDirections** with distinct next-scene intents, without turning an interpretation or temporary emotion into settled canon.')
   }
   if (canFinish) {
-    actions.push('call **finishAnalysis** upon completion of all steps.')
+    actions.push('successful required work completes automatically. If **finishAnalysis** appears during inspection or recovery, use it only to close that exceptional path or explain abandoning a failed optional proposal.')
   }
 
   const sentenceCase = (action: string): string => action.charAt(0).toUpperCase() + action.slice(1)
