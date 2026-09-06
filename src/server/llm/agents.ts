@@ -49,10 +49,10 @@ export function registerGenerationBlocks(): void {
   if (registered) return
 
   // Register instruction defaults
-  instructionRegistry.registerDefault('generation.system', GENERATION_SYSTEM_PROMPT)
-  instructionRegistry.registerDefault('generation.writer-brief.system', WRITER_BRIEF_SYSTEM_PROMPT)
-  instructionRegistry.registerDefault('generation.play-continuation', PLAY_CONTINUATION_SYSTEM_PROMPT)
-  instructionRegistry.registerDefault('generation.prewriter.system', PREWRITER_INSTRUCTIONS)
+  instructionRegistry.registerDefault('generation.system', GENERATION_SYSTEM_PROMPT, { usedBy: 'generation.writer', kind: 'system' })
+  instructionRegistry.registerDefault('generation.writer-brief.system', WRITER_BRIEF_SYSTEM_PROMPT, { usedBy: 'generation.writer', kind: 'system' })
+  instructionRegistry.registerDefault('generation.play-continuation', PLAY_CONTINUATION_SYSTEM_PROMPT, { usedBy: 'generation.writer', kind: 'contract' })
+  instructionRegistry.registerDefault('generation.prewriter.system', PREWRITER_INSTRUCTIONS, { usedBy: 'generation.prewriter', kind: 'system' })
 
   agentBlockRegistry.register({
     agentName: 'generation.writer',

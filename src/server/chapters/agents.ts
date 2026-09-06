@@ -30,7 +30,7 @@ let registered = false
 
 export function registerChapterAgents(): void {
   if (registered) return
-  instructionRegistry.registerDefault('chapters.summarize.system', CHAPTER_SUMMARIZE_SYSTEM_PROMPT)
+  instructionRegistry.registerDefault('chapters.summarize.system', CHAPTER_SUMMARIZE_SYSTEM_PROMPT, { usedBy: 'chapters.summarize', kind: 'system' })
   agentRegistry.register(summarizeDefinition)
   registered = true
 }

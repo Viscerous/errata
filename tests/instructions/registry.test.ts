@@ -50,6 +50,25 @@ describe('InstructionRegistry', () => {
     })
   })
 
+  describe('listEntries', () => {
+    it('returns text and optional ownership metadata without exposing registry state', () => {
+      instructionRegistry.registerDefault('test.key', 'text', {
+        usedBy: 'test.agent',
+        kind: 'contract',
+      })
+
+      const [entry] = instructionRegistry.listEntries()
+      expect(entry).toEqual({
+        key: 'test.key',
+        text: 'text',
+        usedBy: 'test.agent',
+        kind: 'contract',
+      })
+      entry.text = 'changed outside the registry'
+      expect(instructionRegistry.resolve('test.key')).toBe('text')
+    })
+  })
+
   describe('clear', () => {
     it('resets all state', async () => {
       instructionRegistry.registerDefault('test.key', 'text')

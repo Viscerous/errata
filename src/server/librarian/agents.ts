@@ -127,11 +127,11 @@ export function registerLibrarianAgents(): void {
   if (registered) return
 
   // Register instruction defaults
-  instructionRegistry.registerDefault('librarian.analyze.system', ANALYZE_SYSTEM_PROMPT.trim())
-  instructionRegistry.registerDefault('librarian.chat.system', CHAT_SYSTEM_PROMPT.trim())
-  instructionRegistry.registerDefault('librarian.refine.system', REFINE_SYSTEM_PROMPT)
-  instructionRegistry.registerDefault('librarian.optimize-character.system', OPTIMIZE_CHARACTER_SYSTEM_PROMPT)
-  instructionRegistry.registerDefault('librarian.prose-transform.system', PROSE_TRANSFORM_SYSTEM_PROMPT)
+  instructionRegistry.registerDefault('librarian.analyze.system', ANALYZE_SYSTEM_PROMPT.trim(), { usedBy: 'librarian.analyze', kind: 'system' })
+  instructionRegistry.registerDefault('librarian.chat.system', CHAT_SYSTEM_PROMPT.trim(), { usedBy: 'librarian.chat', kind: 'system' })
+  instructionRegistry.registerDefault('librarian.refine.system', REFINE_SYSTEM_PROMPT, { usedBy: 'librarian.refine', kind: 'system' })
+  instructionRegistry.registerDefault('librarian.optimize-character.system', OPTIMIZE_CHARACTER_SYSTEM_PROMPT, { usedBy: 'librarian.optimize-character', kind: 'system' })
+  instructionRegistry.registerDefault('librarian.prose-transform.system', PROSE_TRANSFORM_SYSTEM_PROMPT, { usedBy: 'librarian.prose-transform', kind: 'system' })
 
   // Agent definitions
   agentRegistry.register(analyzeDefinition)

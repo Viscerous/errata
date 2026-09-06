@@ -4,8 +4,10 @@
 
 The instruction registry provides centralized management of all LLM prompt instructions. Instead of hardcoding system prompts in agent modules, each instruction is registered under a dot-separated key and resolved at runtime.
 
-The registry stores built-in defaults. Story-specific prompt customization lives
-in per-agent block configuration through the Agent Context panel.
+The registry stores built-in defaults together with the receiving agent and the
+text's role as a system instruction, narrower contract, or interpolated
+template. Story-specific prompt customization lives in per-agent block
+configuration through the Agent Context panel.
 
 ## API
 
@@ -13,10 +15,11 @@ The singleton `instructionRegistry` is exported from `src/server/instructions/in
 
 | Method | Signature | Description |
 |---|---|---|
-| `registerDefault` | `(key: string, text: string) => void` | Register the default text for an instruction key. Called at module init. |
+| `registerDefault` | `(key: string, text: string, metadata?) => void` | Register default text and its `usedBy`/`kind` inventory metadata. Called at module init. |
 | `resolve` | `(key: string, modelId?: string) => string` | Return the registered default. The `modelId` parameter is accepted for call-site compatibility but ignored. Throws if key is unregistered. |
 | `getDefault` | `(key: string) => string \| undefined` | Return the default text, or undefined for unknown keys. |
 | `listKeys` | `() => string[]` | List all registered instruction keys. |
+| `listEntries` | `() => RegisteredInstruction[]` | List text plus ownership/kind metadata for inspection. |
 | `clear` | `() => void` | Reset all defaults. Used in tests. |
 
 ## Registered Instruction Keys
@@ -95,6 +98,20 @@ Instructions flow into agent contexts through `instructionRegistry.resolve(key)`
 1. Agent block definitions call `resolve()` in their `createDefaultBlocks()` function
 2. The instruction text becomes the content of a context block (typically the `instructions` block)
 3. Users customize that block per story via the Agent Context panel (block overrides), not via the registry
+
+## Prompt surface audit
+
+Run `bun run audit:prompts` to print three complementary views:
+
+1. every registered instruction, its receiving agent, kind, approximate size,
+   and template placeholders;
+2. every agent's instruction keys, context-block support, advertised tool count,
+   and child-agent call surface;
+3. the generation Direct/Play × standard/planner/brief input contract.
+
+`bun run audit:prompts --verbose` additionally prints the exact registered text
+and generation input blocks. This is an inventory, not a runtime policy. Dynamic
+story context and tool schemas remain visible in the live Agent Context preview.
 
 ## File Reference
 

@@ -39,7 +39,7 @@ let registered = false
 export function registerStorySetupAgents(): void {
   if (registered) return
 
-  instructionRegistry.registerDefault('story-setup.system', STORY_SETUP_SYSTEM_PROMPT)
+  instructionRegistry.registerDefault('story-setup.system', STORY_SETUP_SYSTEM_PROMPT, { usedBy: 'story-setup.chat', kind: 'system' })
   agentRegistry.register(chatDefinition)
   modelRoleRegistry.register({
     key: 'story-setup',

@@ -32,8 +32,8 @@ export function registerDirectionsAgents(): void {
   if (registered) return
 
   // Register instruction defaults
-  instructionRegistry.registerDefault('directions.system', DIRECTIONS_SYSTEM_PROMPT.trim())
-  instructionRegistry.registerDefault('directions.suggest-template', DEFAULT_SUGGEST_PROMPT)
+  instructionRegistry.registerDefault('directions.system', DIRECTIONS_SYSTEM_PROMPT.trim(), { usedBy: 'directions.suggest', kind: 'system' })
+  instructionRegistry.registerDefault('directions.suggest-template', DEFAULT_SUGGEST_PROMPT, { usedBy: 'directions.suggest', kind: 'template' })
 
   agentRegistry.register(suggestDefinition)
 

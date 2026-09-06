@@ -46,10 +46,10 @@ export function registerCharacterChatAgents(): void {
   if (registered) return
 
   // Register instruction defaults
-  instructionRegistry.registerDefault('character-chat.system', CHARACTER_CHAT_SYSTEM_PROMPT)
-  instructionRegistry.registerDefault('character-chat.persona.character', 'You are speaking with {{personaName}}. {{personaDescription}}')
-  instructionRegistry.registerDefault('character-chat.persona.stranger', 'You are speaking with a stranger you have just met. You do not know who they are.')
-  instructionRegistry.registerDefault('character-chat.persona.custom', 'You are speaking with someone described as: {{prompt}}')
+  instructionRegistry.registerDefault('character-chat.system', CHARACTER_CHAT_SYSTEM_PROMPT, { usedBy: 'character-chat.chat', kind: 'system' })
+  instructionRegistry.registerDefault('character-chat.persona.character', 'You are speaking with {{personaName}}. {{personaDescription}}', { usedBy: 'character-chat.chat', kind: 'template' })
+  instructionRegistry.registerDefault('character-chat.persona.stranger', 'You are speaking with a stranger you have just met. You do not know who they are.', { usedBy: 'character-chat.chat', kind: 'template' })
+  instructionRegistry.registerDefault('character-chat.persona.custom', 'You are speaking with someone described as: {{prompt}}', { usedBy: 'character-chat.chat', kind: 'template' })
 
   // Agent definition
   agentRegistry.register(chatDefinition)
