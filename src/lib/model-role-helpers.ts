@@ -5,12 +5,16 @@ import type { ModelRoleInfo, GlobalConfigSafe, StoryMeta } from '@/lib/api/types
  * Same logic as the server-side registry.
  * e.g. 'librarian.chat' → ['librarian.chat', 'librarian', 'generation']
  */
-export function getModelFallbackChain(key: string): string[] {
+export function getModelFallbackChain(key: string, roles: ModelRoleInfo[] = []): string[] {
   const chain: string[] = [key]
   const parts = key.split('.')
   while (parts.length > 1) {
     parts.pop()
     chain.push(parts.join('.'))
+  }
+  const namespaceFallback = roles.find(role => role.key === chain[chain.length - 1])?.fallback
+  if (namespaceFallback && !chain.includes(namespaceFallback)) {
+    chain.push(namespaceFallback)
   }
   if (chain[chain.length - 1] !== 'generation') {
     chain.push('generation')
@@ -23,9 +27,10 @@ export function resolveProvider(
   roleKey: string,
   settings: StoryMeta['settings'],
   globalConfig: GlobalConfigSafe | null,
+  roles: ModelRoleInfo[] = [],
 ): string | null {
   const overrides = settings.modelOverrides ?? {}
-  const chain = getModelFallbackChain(roleKey)
+  const chain = getModelFallbackChain(roleKey, roles)
   for (const r of chain) {
     const pid = overrides[r]?.providerId
     if (pid) return pid
@@ -38,9 +43,10 @@ export function resolveInheritedTemperature(
   roleKey: string,
   settings: StoryMeta['settings'],
   globalConfig: GlobalConfigSafe | null,
+  roles: ModelRoleInfo[] = [],
 ): { value: number; source: string } | null {
   const overrides = settings.modelOverrides ?? {}
-  const chain = getModelFallbackChain(roleKey)
+  const chain = getModelFallbackChain(roleKey, roles)
 
   // Walk fallback chain (skip self) to find a parent with temperature set
   for (let i = 1; i < chain.length; i++) {
@@ -52,7 +58,7 @@ export function resolveInheritedTemperature(
   }
 
   // Fall back to the resolved provider's temperature
-  const providerId = resolveProvider(roleKey, settings, globalConfig)
+  const providerId = resolveProvider(roleKey, settings, globalConfig, roles)
   if (providerId && globalConfig) {
     const provider = globalConfig.providers.find(p => p.id === providerId)
     if (provider?.temperature != null) {
@@ -70,9 +76,10 @@ export function resolveInheritedSamplingValue(
   roleKey: string,
   key: SamplingOverrideKey,
   settings: StoryMeta['settings'],
+  roles: ModelRoleInfo[] = [],
 ): { value: number; source: string } | null {
   const overrides = settings.modelOverrides ?? {}
-  const chain = getModelFallbackChain(roleKey)
+  const chain = getModelFallbackChain(roleKey, roles)
   for (let index = 1; index < chain.length; index += 1) {
     const parentKey = chain[index]
     const value = overrides[parentKey]?.[key]
@@ -89,7 +96,7 @@ export function getInheritLabel(
   globalConfig: GlobalConfigSafe | null,
 ): string {
   const overrides = settings.modelOverrides ?? {}
-  const chain = getModelFallbackChain(roleKey)
+  const chain = getModelFallbackChain(roleKey, roles)
 
   // Walk fallback chain (skip self) to find which parent has a provider set
   for (let i = 1; i < chain.length; i++) {

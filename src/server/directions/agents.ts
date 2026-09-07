@@ -22,7 +22,7 @@ const suggestDefinition: AgentDefinition<typeof SuggestInputSchema> = {
   description: 'Suggest possible story directions based on current context.',
   inputSchema: SuggestInputSchema,
   run: async (ctx, input) => {
-    return proposeDirections(ctx.dataDir, ctx.storyId, input)
+    return proposeDirections(ctx.dataDir, ctx.storyId, input, { abortSignal: ctx.abortSignal })
   },
 }
 

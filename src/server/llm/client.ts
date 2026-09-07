@@ -4,7 +4,6 @@ import type { LanguageModelV3CallOptions } from '@ai-sdk/provider'
 import { getGlobalConfig } from '../config/storage'
 import { getStory } from '../fragments/storage'
 import { modelRoleRegistry } from '../agents/model-role-registry'
-import { ensureCoreAgentsRegistered } from '../agents/register-core'
 import {
   extractReasoningMiddleware,
   wrapLanguageModel,
@@ -173,8 +172,6 @@ export interface GetModelOptions {
  * Checks modelOverrides map first, then legacy fields, walking the role's fallback chain.
  */
 export async function getModel(dataDir: string, storyId?: string, opts: GetModelOptions = {}): Promise<ResolvedModel> {
-  ensureCoreAgentsRegistered()
-
   const role = opts.role ?? 'generation'
   const chain = modelRoleRegistry.getFallbackChain(role)
 

@@ -2,6 +2,8 @@ export interface ModelRoleDefinition {
   key: string
   label: string
   description: string
+  /** Optional namespace inherited before the global generation fallback. */
+  fallback?: string
 }
 
 class ModelRoleRegistry {
@@ -32,6 +34,10 @@ class ModelRoleRegistry {
     while (parts.length > 1) {
       parts.pop()
       chain.push(parts.join('.'))
+    }
+    const namespaceFallback = this.definitions.get(chain[chain.length - 1])?.fallback
+    if (namespaceFallback && !chain.includes(namespaceFallback)) {
+      chain.push(namespaceFallback)
     }
     // Always end at 'generation' if not already there
     if (chain[chain.length - 1] !== 'generation') {

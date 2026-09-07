@@ -1,14 +1,7 @@
-import { ToolLoopAgent, stepCountIs } from 'ai'
 import { z } from 'zod/v4'
-import { resolveAgentRuntime, samplingCallSettings, samplingDiagnostics } from '../llm/client'
-import { getStory } from '../fragments/storage'
-import { buildContextState } from '../llm/context-builder'
-import { compileAgentContext } from '../agents/compile-agent-context'
 import { instructionRegistry } from '../instructions'
-import { resolveAndReportServedUsage } from '../llm/usage-normalizer'
 import { createLogger } from '../logging'
-import { type AgentBlockContext, baseBlockContext } from '../agents/agent-block-context'
-import { drainAgentStream } from '../agents/drain-agent-stream'
+import { createStreamingRunner, type StreamingRunOptions } from '../agents/create-streaming-runner'
 import { suggestionDirectionSchema, type SuggestionDirection } from './schema'
 
 export type { SuggestionDirection } from './schema'
@@ -46,76 +39,45 @@ export function parseSuggestionDirectionsResponse(text: string, count: number): 
   return validation.data.slice(0, count)
 }
 
+const runDirectionProposal = createStreamingRunner<DirectionProposalInput>({
+  name: 'directions.suggest',
+  maxSteps: 1,
+  toolChoice: 'none',
+  readOnly: 'none',
+  messages: ({ compiled, opts, story, modelId }) => {
+    const count = opts.count ?? 4
+    const resolvedTemplate = instructionRegistry.resolve('directions.suggest-template', modelId)
+    const promptTemplate = story.settings.guidedSuggestPrompt || resolvedTemplate
+    const prompt = promptTemplate.replace(/\{\{count\}\}/g, String(count))
+    const contextMessage = compiled.messages.find(message => message.role === 'user')
+    return [
+      ...(contextMessage ? [{ role: 'user' as const, content: contextMessage.content }] : []),
+      { role: 'user' as const, content: prompt },
+    ]
+  },
+})
+
 export async function proposeDirections(
   dataDir: string,
   storyId: string,
   input: DirectionProposalInput,
+  execution?: StreamingRunOptions,
 ): Promise<DirectionProposalResult> {
   const requestLogger = logger.child({ storyId })
   const count = input.count ?? 4
-
-  // Load story to get custom prompt if configured
-  const story = await getStory(dataDir, storyId)
-  if (!story) throw new Error(`Story not found: ${storyId}`)
-  const runtime = await resolveAgentRuntime(dataDir, storyId, 'directions.suggest', story)
-  const { model, modelId, providerId, providerOptions, guards } = runtime
-
-  const resolvedTemplate = instructionRegistry.resolve('directions.suggest-template', modelId)
-  const promptTemplate = story.settings.guidedSuggestPrompt || resolvedTemplate
-  const prompt = promptTemplate.replace(/\{\{count\}\}/g, String(count))
-
-  // Build context through the directions agent block system
-  const ctxState = await buildContextState(dataDir, storyId, '')
-
-  const blockContext: AgentBlockContext = {
-    ...baseBlockContext(ctxState, ctxState.story),
-    systemPromptFragments: [],
-    modelId,
-  }
-
-  const compiled = await compileAgentContext(dataDir, storyId, 'directions.suggest', blockContext, {})
-  const systemMsg = compiled.messages.find(m => m.role === 'system')
-  const userMessages = compiled.messages.filter(m => m.role !== 'system')
-
-  requestLogger.info('Generating suggestions', { modelId, count, sampling: samplingDiagnostics(runtime) })
-
-  const agent = new ToolLoopAgent({
-    model,
-    instructions: systemMsg?.content || instructionRegistry.resolve('directions.system', modelId),
-    tools: {},
-    toolChoice: 'none' as const,
-    stopWhen: stepCountIs(1),
-    ...samplingCallSettings(runtime),
-    providerOptions,
-    maxOutputTokens: guards.maxOutputTokens,
-  })
-
   const startTime = Date.now()
-
-  const result = await agent.stream({
-    messages: [
-      ...userMessages,
-      { role: 'user' as const, content: prompt },
-    ],
-  })
-
-  const { fullText, stepCount, finishReason, servedModelId } = await drainAgentStream(result.fullStream)
-
-  // Track token usage against the model that answered, not the configured name.
-  const { modelId: servedModel } = await resolveAndReportServedUsage(
-    dataDir,
-    storyId,
-    'directions.suggest',
-    result.totalUsage,
-    { providerId, configuredModelId: modelId, servedModelId },
-  )
-
+  const result = await runDirectionProposal(dataDir, storyId, input, execution)
+  const completion = await result.completion
   const durationMs = Date.now() - startTime
-
-  // Parse the JSON array from the response
-  const suggestions = parseSuggestionDirectionsResponse(fullText, count)
+  const suggestions = parseSuggestionDirectionsResponse(completion.text, count)
 
   requestLogger.info('Suggestions generated', { count: suggestions.length, durationMs })
 
-  return { suggestions, modelId: servedModel, durationMs, stepCount, finishReason }
+  return {
+    suggestions,
+    modelId: completion.modelId,
+    durationMs,
+    stepCount: completion.stepCount,
+    finishReason: completion.finishReason,
+  }
 }

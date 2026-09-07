@@ -381,6 +381,7 @@ function ActionTile({ icon: Icon, label, description, onClick, dataComponentId }
 const SOURCE_LABELS: Record<string, string> = {
   'generation.writer': 'Writer',
   'generation.prewriter': 'Prewriter',
+  'chapters.summarize': 'Chapter summarizer',
   'librarian.analyze': 'Librarian',
   'librarian.rollup': 'Memory roll-up',
   'librarian.chat': 'Librarian chat',

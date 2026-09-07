@@ -18,9 +18,18 @@ export interface AgentStreamCompletion {
   servedModelId?: string
 }
 
+/** Completion produced by the shared runner after usage/model normalization. */
+export interface ResolvedAgentStreamCompletion extends AgentStreamCompletion {
+  modelId: string
+}
+
 export interface AgentStreamResult {
   eventStream: ReadableStream<string>
   completion: Promise<AgentStreamCompletion>
+}
+
+export interface ResolvedAgentStreamResult extends AgentStreamResult {
+  completion: Promise<ResolvedAgentStreamCompletion>
 }
 
 // Backwards-compat aliases

@@ -604,14 +604,21 @@ librarian.optimize-character →
   ['librarian.optimize-character', 'librarian', 'generation']
 ```
 
-The chain is derived automatically by popping the last segment at each step, with `generation` always at the end. Resolution walks the chain looking for a configured provider:
+The chain is derived automatically by popping the last segment at each step,
+then following an optional namespace `fallback`, with `generation` always at
+the end. Resolution walks the chain looking for a configured provider:
 
 1. **Story `modelOverrides`** — per-agent override in story settings
 2. **Namespace default** — e.g. the `librarian` entry
 3. **Global default** — the `generation` provider
 4. **Error** — if nothing is configured
 
-Only **namespace-level** roles need explicit registration in `modelRoleRegistry` (e.g. `librarian`, `character-chat`). Per-agent resolution happens automatically. Users configure namespace-level models in Settings and per-agent models in the Agent Context panel.
+Only **namespace-level** roles need explicit registration in
+`modelRoleRegistry` (e.g. `librarian`, `character-chat`). A namespace that
+should inherit another namespace can declare `fallback` (chapter summarization,
+for example, inherits `librarian`). Per-agent resolution happens automatically.
+Users configure namespace-level models in Settings and per-agent models in the
+Agent Context panel.
 
 ## Customizing Instructions
 

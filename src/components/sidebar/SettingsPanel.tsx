@@ -184,7 +184,7 @@ function LLMSection({ story, globalConfig, updateMutation, onManageProviders }: 
         {roles.map((role) => {
           const directProviderId = overrides[role.key]?.providerId ?? null
           const directModelId = overrides[role.key]?.modelId ?? null
-          const effectiveProviderId = resolveProvider(role.key, settings, globalConfig)
+          const effectiveProviderId = resolveProvider(role.key, settings, globalConfig, roles)
           const isGeneration = role.key === 'generation'
 
           return (

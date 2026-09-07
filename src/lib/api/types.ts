@@ -315,6 +315,7 @@ export interface ModelRoleInfo {
   key: string
   label: string
   description: string
+  fallback?: string
 }
 
 export interface AgentBlockInfo {

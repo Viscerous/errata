@@ -9,7 +9,7 @@ import { ToolLoopAgent, stepCountIs, type ToolSet } from 'ai'
 import type { StoryMeta } from '../fragments/schema'
 import type { ContextBuildState } from '../llm/context-builder'
 import { type AgentBlockContext, baseBlockContext } from './agent-block-context'
-import type { AgentStreamResult } from './stream-types'
+import type { AgentStreamResult, ResolvedAgentStreamResult } from './stream-types'
 import { resolveAgentRuntime, samplingCallSettings, samplingDiagnostics } from '../llm/client'
 import { MISSING_SYSTEM_PROMPT_FALLBACK } from '../instructions'
 import { getStory } from '../fragments/storage'
@@ -92,6 +92,9 @@ export interface StreamingRunnerConfig<TOpts, TValidated = Record<string, unknow
   messages?: (params: {
     compiled: CompiledAgentContext
     opts: TOpts
+    story: StoryMeta
+    validated: TValidated
+    modelId: string
   }) => Array<{ role: 'user' | 'assistant'; content: string }>
 
   /**
@@ -108,12 +111,12 @@ export interface StreamingRunOptions {
 /**
  * Create a streaming agent runner function from a config object.
  *
- * Returns `(dataDir, storyId, opts) => Promise<AgentStreamResult>` that
+ * Returns `(dataDir, storyId, opts) => Promise<ResolvedAgentStreamResult>` that
  * wraps the full validate → resolve → build → compile → stream pipeline.
  */
 export function createStreamingRunner<TOpts extends object, TValidated = Record<string, unknown>>(
   config: StreamingRunnerConfig<TOpts, TValidated>,
-): (dataDir: string, storyId: string, opts: TOpts, execution?: StreamingRunOptions) => Promise<AgentStreamResult> {
+): (dataDir: string, storyId: string, opts: TOpts, execution?: StreamingRunOptions) => Promise<ResolvedAgentStreamResult> {
   const logger = createLogger(config.name)
   const role = config.role ?? config.name
   const defaultMaxSteps = config.maxSteps ?? 10
@@ -124,7 +127,7 @@ export function createStreamingRunner<TOpts extends object, TValidated = Record<
     storyId: string,
     opts: TOpts,
     execution: StreamingRunOptions = {},
-  ): Promise<AgentStreamResult> {
+  ): Promise<ResolvedAgentStreamResult> {
     return withBranch(dataDir, storyId, async () => {
       const requestLogger = logger.child({ storyId })
       requestLogger.info(`Starting ${config.name}...`)
@@ -197,7 +200,7 @@ export function createStreamingRunner<TOpts extends object, TValidated = Record<
 
       // 10. Build messages
       const messages = config.messages
-        ? config.messages({ compiled, opts })
+        ? config.messages({ compiled, opts, story, validated, modelId })
         : userMessage ? [{ role: 'user' as const, content: userMessage.content }] : []
 
       // 11. Stream. Hold analysis for write-enabled runs so multi-step prose edits
@@ -234,23 +237,34 @@ export function createStreamingRunner<TOpts extends object, TValidated = Record<
       void streamResult.completion.then(unlinkAbort, unlinkAbort)
       void streamResult.completion.then(releaseAnalysis, releaseAnalysis)
 
-      // 12. Track token usage after stream completes
-      streamResult.completion
-        .then((completion) => resolveAndReportServedUsage(dataDir, storyId, config.name, result.totalUsage, {
-          providerId,
-          configuredModelId: modelId,
-          servedModelId: completion.servedModelId,
-        }))
-        .catch(() => {
-          // Stream errored — skip usage tracking
-        })
+      // 12. Normalize the answering model while tracking usage. Usage failures
+      // remain non-fatal, as before; callers still receive the configured or
+      // provider-reported model alongside the completion.
+      const completion = streamResult.completion.then(async (completed) => {
+        let resolvedModelId = completed.servedModelId ?? modelId
+        try {
+          const usage = await resolveAndReportServedUsage(dataDir, storyId, config.name, result.totalUsage, {
+            providerId,
+            configuredModelId: modelId,
+            servedModelId: completed.servedModelId,
+          })
+          resolvedModelId = usage.modelId
+        } catch {
+          // Usage reporting must not turn a completed model call into a failure.
+        }
+        return { ...completed, modelId: resolvedModelId }
+      })
+      const resolvedResult: ResolvedAgentStreamResult = {
+        eventStream: streamResult.eventStream,
+        completion,
+      }
 
       // 13. Post-stream hook
       if (config.afterStream) {
-        config.afterStream(streamResult)
+        config.afterStream(resolvedResult)
       }
 
-      return streamResult
+      return resolvedResult
     })
   }
 }

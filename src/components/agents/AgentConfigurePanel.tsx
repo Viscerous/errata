@@ -110,6 +110,7 @@ const CONTENT_MODES = [
 /** Hierarchical agent groups in display order */
 const AGENT_GROUPS: { label: string; prefix: string }[] = [
   { label: 'Generation', prefix: 'generation.' },
+  { label: 'Chapters', prefix: 'chapters.' },
   { label: 'Directions', prefix: 'directions.' },
   { label: 'Librarian', prefix: 'librarian.' },
   { label: 'Character', prefix: 'character-chat.' },
@@ -120,6 +121,8 @@ const AGENT_ORDER: string[] = [
   // Generation
   'generation.writer',
   'generation.prewriter',
+  // Chapters
+  'chapters.summarize',
   // Directions
   'directions.suggest',
   // Librarian
@@ -628,19 +631,19 @@ function AgentBlockEditor({ storyId, agentName, agents, onBack }: AgentBlockEdit
             const overrides = story.settings.modelOverrides ?? {}
             const directProviderId = overrides[overrideKey]?.providerId ?? null
             const directModelId = overrides[overrideKey]?.modelId ?? null
-            const effectiveProviderId = resolveProvider(overrideKey, story.settings, globalConfig ?? null)
+            const effectiveProviderId = resolveProvider(overrideKey, story.settings, globalConfig ?? null, roles)
             const isGeneration = overrideKey === 'generation'
             const directTemp = overrides[overrideKey]?.temperature
             const inherited = directTemp == null
-              ? resolveInheritedTemperature(overrideKey, story.settings, globalConfig ?? null)
+              ? resolveInheritedTemperature(overrideKey, story.settings, globalConfig ?? null, roles)
               : null
             const directTopP = overrides[overrideKey]?.topP
             const inheritedTopP = directTopP == null
-              ? resolveInheritedSamplingValue(overrideKey, 'topP', story.settings)
+              ? resolveInheritedSamplingValue(overrideKey, 'topP', story.settings, roles)
               : null
             const directTopK = overrides[overrideKey]?.topK
             const inheritedTopK = directTopK == null
-              ? resolveInheritedSamplingValue(overrideKey, 'topK', story.settings)
+              ? resolveInheritedSamplingValue(overrideKey, 'topK', story.settings, roles)
               : null
 
             const updateSampling = (key: 'temperature' | 'topP' | 'topK', value: number | null) => {

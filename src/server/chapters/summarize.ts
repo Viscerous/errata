@@ -1,11 +1,7 @@
-import { ToolLoopAgent, stepCountIs } from 'ai'
-import { resolveAgentRuntime, samplingCallSettings, samplingDiagnostics } from '../llm/client'
-import { getStory, getFragment, updateFragment } from '../fragments/storage'
+import { getFragment, updateFragment } from '../fragments/storage'
 import { getProseChain } from '../fragments/prose-chain'
-import { instructionRegistry } from '../instructions'
 import { createLogger } from '../logging'
-import { drainAgentStream } from '../agents/drain-agent-stream'
-import { resolveAndReportServedUsage } from '../llm/usage-normalizer'
+import { createStreamingRunner, type StreamingRunOptions } from '../agents/create-streaming-runner'
 
 const logger = createLogger('chapter-summarize')
 
@@ -30,33 +26,27 @@ export interface ChapterSummarizeResult {
   trace: StreamEvent[]
 }
 
-export async function summarizeChapter(
+interface ChapterSummarySource {
+  proseContent: string[]
+}
+
+async function loadChapterSummarySource(
   dataDir: string,
   storyId: string,
-  input: ChapterSummarizeInput,
-): Promise<ChapterSummarizeResult> {
-  const requestLogger = logger.child({ storyId })
-
-  const marker = await getFragment(dataDir, storyId, input.fragmentId)
-  if (!marker || marker.type !== 'marker') {
-    throw new Error('Chapter marker not found')
-  }
+  fragmentId: string,
+): Promise<ChapterSummarySource> {
+  const marker = await getFragment(dataDir, storyId, fragmentId)
+  if (!marker || marker.type !== 'marker') throw new Error('Chapter marker not found')
 
   const chain = await getProseChain(dataDir, storyId)
-  if (!chain) {
-    throw new Error('No prose chain found')
-  }
+  if (!chain) throw new Error('No prose chain found')
 
-  const markerIndex = chain.entries.findIndex(e => e.active === input.fragmentId)
-  if (markerIndex === -1) {
-    throw new Error('Marker not found in prose chain')
-  }
+  const markerIndex = chain.entries.findIndex(entry => entry.active === fragmentId)
+  if (markerIndex === -1) throw new Error('Marker not found in prose chain')
 
-  // Collect prose content from marker to next marker/end
   const proseContent: string[] = []
-  for (let i = markerIndex + 1; i < chain.entries.length; i++) {
-    const entry = chain.entries[i]
-    const fragment = await getFragment(dataDir, storyId, entry.active)
+  for (let index = markerIndex + 1; index < chain.entries.length; index++) {
+    const fragment = await getFragment(dataDir, storyId, chain.entries[index].active)
     if (!fragment) continue
     if (fragment.type === 'marker') break
     proseContent.push(fragment.content)
@@ -65,76 +55,58 @@ export async function summarizeChapter(
   if (proseContent.length === 0) {
     throw new Error('No prose content in this chapter to summarize')
   }
+  return { proseContent }
+}
 
-  requestLogger.info('Summarizing chapter...', {
-    fragmentId: input.fragmentId,
-    proseFragments: proseContent.length,
-  })
+const runChapterSummary = createStreamingRunner<ChapterSummarizeInput, ChapterSummarySource>({
+  name: 'chapters.summarize',
+  maxSteps: 1,
+  toolChoice: 'none',
+  buildContext: false,
+  readOnly: 'none',
+  validate: async ({ dataDir, storyId, opts }) => {
+    return loadChapterSummarySource(dataDir, storyId, opts.fragmentId)
+  },
+  messages: ({ validated }) => [{
+    role: 'user',
+    content: `Summarize this chapter:\n\n${validated.proseContent.join('\n\n')}`,
+  }],
+})
 
-  const story = await getStory(dataDir, storyId)
-  if (!story) throw new Error(`Story ${storyId} not found`)
-
-  const runtime = await resolveAgentRuntime(dataDir, storyId, 'librarian', story)
-  const { model, modelId, providerId, providerOptions, guards } = runtime
-  requestLogger.info('Resolved model', { modelId, sampling: samplingDiagnostics(runtime) })
-
-  const agent = new ToolLoopAgent({
-    model,
-    instructions: instructionRegistry.resolve('chapters.summarize.system', modelId),
-    tools: {},
-    toolChoice: 'none' as const,
-    stopWhen: stepCountIs(1),
-    ...samplingCallSettings(runtime),
-    providerOptions,
-    maxOutputTokens: guards.maxOutputTokens,
-  })
-
+export async function summarizeChapter(
+  dataDir: string,
+  storyId: string,
+  input: ChapterSummarizeInput,
+  execution?: StreamingRunOptions,
+): Promise<ChapterSummarizeResult> {
+  const requestLogger = logger.child({ storyId })
   const startTime = Date.now()
-  const trace: StreamEvent[] = []
-
-  const result = await agent.stream({
-    prompt: `Summarize this chapter:\n\n${proseContent.join('\n\n')}`,
-  })
-
-  // Adapt the normalized text/reasoning events back to this agent's own trace
-  // naming (text-delta/reasoning-delta) — an existing, unconsumed output shape
-  // kept as-is rather than migrated in the same pass that unified the loop.
-  const drained = await drainAgentStream(result.fullStream, (event) => {
-    if (event.type === 'text') trace.push({ type: 'text-delta', text: event.text })
-    else if (event.type === 'reasoning') trace.push({ type: 'reasoning-delta', text: event.text })
-  })
-  const { fullText, fullReasoning, stepCount, finishReason: lastFinishReason } = drained
-  trace.push({ type: 'finish', finishReason: lastFinishReason, stepCount })
-
-  // Source is the agent's own name for per-agent attribution; 'librarian' is
-  // only its model-resolution role. The model id is the one that answered.
-  const { modelId: servedModelId } = await resolveAndReportServedUsage(
-    dataDir,
-    storyId,
-    'chapters.summarize',
-    result.totalUsage,
-    { providerId, configuredModelId: modelId, servedModelId: drained.servedModelId },
-  )
-
+  const result = await runChapterSummary(dataDir, storyId, input, execution)
+  const completion = await result.completion
   const durationMs = Date.now() - startTime
-  const summary = fullText.trim()
+  const summary = completion.text.trim()
+  const trace: StreamEvent[] = [
+    ...(completion.reasoning ? [{ type: 'reasoning-delta', text: completion.reasoning }] : []),
+    ...(completion.text ? [{ type: 'text-delta', text: completion.text }] : []),
+    { type: 'finish', finishReason: completion.finishReason, stepCount: completion.stepCount },
+  ]
 
   requestLogger.info('Summary generated', {
     summaryLength: summary.length,
-    reasoningLength: fullReasoning.length,
-    modelId: servedModelId,
+    reasoningLength: completion.reasoning.length,
+    modelId: completion.modelId,
     durationMs,
-    stepCount,
-    finishReason: lastFinishReason,
+    stepCount: completion.stepCount,
+    finishReason: completion.finishReason,
   })
 
-  let old = await getFragment(dataDir, storyId, input.fragmentId)
+  const old = await getFragment(dataDir, storyId, input.fragmentId)
   if (!old) {
     requestLogger.error('Marker fragment disappeared during summarization')
     return {
       summary,
-      reasoning: fullReasoning,
-      modelId: servedModelId,
+      reasoning: completion.reasoning,
+      modelId: completion.modelId,
       durationMs,
       trace,
     }
@@ -146,15 +118,13 @@ export async function summarizeChapter(
   // Save as marker content
   await updateFragment(dataDir, storyId, {
     ...old,
-    name: marker.name,
-    description: marker.description,
     content: summary,
   })
 
   return {
     summary,
-    reasoning: fullReasoning,
-    modelId: servedModelId,
+    reasoning: completion.reasoning,
+    modelId: completion.modelId,
     durationMs,
     trace,
   }

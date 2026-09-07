@@ -565,13 +565,16 @@ Agent names double as model role keys. The system derives a **fallback chain** f
 
 ### Fallback Chain Derivation
 
-Algorithm: split the key on `.`, pop the last segment, repeat. Append `generation` if not already terminal.
+Algorithm: split the key on `.`, pop the last segment, repeat. A namespace may
+declare one explicit parent; append that parent and then `generation` if it is
+not already terminal.
 
 ```
 librarian.chat       → ['librarian.chat', 'librarian', 'generation']
 generation.prewriter → ['generation.prewriter', 'generation']
 character-chat.chat  → ['character-chat.chat', 'character-chat', 'generation']
 directions.suggest   → ['directions.suggest', 'directions', 'generation']
+chapters.summarize   → ['chapters.summarize', 'chapters', 'librarian', 'generation']
 generation           → ['generation']
 ```
 
@@ -616,7 +619,7 @@ If both old and new key forms exist, the new-style key takes priority.
 
 ### Namespace vs Per-Agent
 
-The Settings panel exposes **four namespace-level roles** for model selection. These serve as defaults for all agents within that namespace:
+The Settings panel exposes the registered namespace-level roles. These serve as defaults for all agents within that namespace:
 
 | Key | Label | Description |
 |---|---|---|
@@ -624,6 +627,8 @@ The Settings panel exposes **four namespace-level roles** for model selection. T
 | `librarian` | Librarian | Background analysis and summaries |
 | `character-chat` | Character Chat | In-character conversations |
 | `directions` | Directions | Story direction suggestions |
+| `chapters` | Chapters | Chapter summaries; inherits Librarian when unset |
+| `story-setup` | Story Setup | Conversational story planning |
 
 **Per-agent overrides** are configured in the Agent Context panel's block editor. For example, setting a model on `generation.prewriter` overrides only the prewriter, while the writer inherits from `generation`. An agent with no per-agent override walks up to its namespace, then to `generation`, then to the global default.
 
