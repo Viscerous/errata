@@ -604,48 +604,38 @@ describe('Continuity reaches the agents that decide what happens next', () => {
 })
 
 describe('Librarian Analyze Prompt', () => {
-  it('reports named character references', () => {
+  it('keeps only role and cross-tool workflow in the system instruction', () => {
     const prompt = buildAnalyzeSystemPrompt()
-    expect(prompt).toContain('direct name, title, role, nickname, or distinctive term')
-    expect(prompt).toContain('let dormant threads remain unresolved')
-    expect(prompt).toContain('Cite the numbered prose instead of retyping evidence')
-    expect(prompt).toContain('1. Call **reportAnalysis**')
-    expect(prompt).toContain('3. Call **proposeDirections**')
-    expect(prompt).toContain('4. Finally, successful required work completes automatically')
-    expect(prompt).toContain('**finishAnalysis** appears during inspection or recovery')
+    expect(prompt).toContain('Analyze the new prose against the supplied story context')
+    expect(prompt).toContain('Before calling **reportAnalysis**')
     expect(prompt).toContain('candidateFragmentIds')
-    expect(prompt).toContain('durable assertions may directly conflict')
-    expect(prompt).toContain('ordinary progression and current conditions are not canon contradictions')
-    expect(prompt).not.toContain('final assistant text')
-    expect(prompt).not.toContain('Analysis complete')
+    expect(prompt).toContain('revise only findings those records change')
+    expect(prompt).toContain('Report findings before making any optional record-maintenance proposals')
+    expect(prompt).toContain('Suggest next directions only after the analysis is complete')
   })
 
-  it('makes the last enabled analyze action explicit without naming disabled tools', () => {
+  it('derives workflow guidance from the tools that are actually available', () => {
     const noDirections = buildAnalyzeSystemPrompt({ disableDirections: true })
-    expect(noDirections).toContain('2. Use **proposeRecordCorrections**')
-    expect(noDirections).toContain('3. Finally, successful required work completes automatically')
-    expect(noDirections).not.toContain('proposeDirections')
+    expect(noDirections).toContain('optional record-maintenance proposals')
+    expect(noDirections).not.toContain('Suggest next directions')
 
     const noSuggestions = buildAnalyzeSystemPrompt({ disableSuggestions: true })
-    expect(noSuggestions).toContain('2. Call **proposeDirections**')
-    expect(noSuggestions).toContain('3. Finally, successful required work completes automatically')
-    expect(noSuggestions).not.toContain('proposeRecordCorrections')
-    expect(noSuggestions).not.toContain('proposeNewRecords')
+    expect(noSuggestions).toContain('Suggest next directions')
+    expect(noSuggestions).not.toContain('optional record-maintenance proposals')
 
     const noOptionalTools = buildAnalyzeSystemPrompt({
       disabledTools: ['proposeDirections', 'proposeRecordCorrections', 'proposeNewRecords'],
     })
-    expect(noOptionalTools).toContain('1. Call **reportAnalysis**')
-    expect(noOptionalTools).toContain('2. Finally, successful required work completes automatically')
-    expect(noOptionalTools).not.toContain('proposeDirections')
-    expect(noOptionalTools).not.toContain('proposeRecordCorrections')
-    expect(noOptionalTools).not.toContain('proposeNewRecords')
+    expect(noOptionalTools).toContain('Before calling **reportAnalysis**')
+    expect(noOptionalTools).not.toContain('optional record-maintenance proposals')
+    expect(noOptionalTools).not.toContain('Suggest next directions')
 
-    const noFinishTool = buildAnalyzeSystemPrompt({
-      disabledTools: ['proposeDirections', 'proposeRecordCorrections', 'proposeNewRecords', 'finishAnalysis'],
+    const noReport = buildAnalyzeSystemPrompt({
+      enabledTools: ['proposeDirections'],
     })
-    expect(noFinishTool).toContain('1. Finally, call **reportAnalysis**')
-    expect(noFinishTool).not.toContain('finishAnalysis')
+    expect(noReport).toContain('without inventing a replacement reporting tool')
+    expect(noReport).not.toContain('reportAnalysis')
+    expect(noReport).toContain('Suggest next directions')
   })
 
   it('includes custom fragment groups for mention detection', () => {

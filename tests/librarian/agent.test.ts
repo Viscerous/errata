@@ -226,14 +226,15 @@ describe('librarian agent', () => {
 
     mockAgentStream.mockImplementation(async (
       _args: unknown,
-      tools: Record<string, { execute: (args: unknown) => Promise<unknown> }>,
+      tools: Record<string, { description?: string; execute: (args: unknown) => Promise<unknown> }>,
       opts?: { instructions?: string },
     ) => {
       expect(opts?.instructions).toContain('CUSTOM PREPEND')
       expect(opts?.instructions).toContain('Never drop custom system fragments.')
       if (tools.proposeRecordCorrections) {
-        expect(opts?.instructions).toContain('**proposeRecordCorrections**')
-        expect(opts?.instructions).toContain('new reusable named records in these types: characters, knowledge, locations')
+        expect(opts?.instructions).toContain('optional record-maintenance proposals')
+        expect(opts?.instructions).not.toContain('**proposeRecordCorrections**')
+        expect(tools.proposeNewRecords.description).toContain('Allowed type values: character, knowledge, location')
       }
 
       return {

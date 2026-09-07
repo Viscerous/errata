@@ -114,6 +114,7 @@ describe('analysis-tools', () => {
     expect(Object.keys(onlineTools)).toContain('proposeNewRecords')
     expect(Object.keys(onlineTools)).toContain('proposeDirections')
     expect(Object.keys(onlineTools)).toContain('finishAnalysis')
+    expect(onlineTools.proposeNewRecords.description).toContain('Allowed type values: character, knowledge')
 
     // Analyze already has the prose chain and the rolling summary in context,
     // so it is not also handed tools that fetch them.

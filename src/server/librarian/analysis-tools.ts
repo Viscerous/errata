@@ -2123,7 +2123,7 @@ export function createAnalysisTools(
     })
 
     tools.proposeNewRecords = tool({
-      description: 'Queue new reusable named records established by the prose; not events, temporary conditions, unnamed scenery, or feelings.',
+      description: `Queue new reusable named records established by the prose; not events, temporary conditions, unnamed scenery, or feelings. Allowed type values: ${allowedTypes.join(', ')}.`,
       inputSchema: librarianNewRecordsInputSchema,
       execute: async ({ title, evidenceSegments = [], rationale, newFragments = [] }) => {
         const record = <T extends { ok: boolean; invalid?: number }>(result: T) => recordProposalOutcome('proposeNewRecords', result)

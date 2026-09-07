@@ -80,66 +80,38 @@ export function buildAnalyzeSystemPrompt(opts?: {
   disableSuggestions?: boolean;
   disabledTools?: Iterable<string>;
   enabledTools?: Iterable<string>;
-  customFragmentTypes?: Array<{ type: string; name: string }>;
 }): string {
-  // Keep workflow here and field-level contracts in the tool schemas.
+  // Keep only cross-tool workflow here. Field semantics and retry contracts
+  // belong to the tool that receives them.
   const disabledTools = new Set(opts?.disabledTools ?? [])
   const enabledTools = opts?.enabledTools ? new Set(opts.enabledTools) : null
   const hasTool = (toolName: string): boolean => enabledTools
     ? enabledTools.has(toolName)
     : !disabledTools.has(toolName)
   const canReport = hasTool('reportAnalysis')
-  const canCorrectRecords = opts?.disableSuggestions !== true && hasTool('proposeRecordCorrections')
-  const canCreateRecords = opts?.disableSuggestions !== true && hasTool('proposeNewRecords')
-  const canSuggest = canCorrectRecords || canCreateRecords
+  const canMaintainRecords = opts?.disableSuggestions !== true && (
+    hasTool('proposeRecordCorrections') || hasTool('proposeNewRecords')
+  )
   const canSuggestDirections = opts?.disableDirections !== true && hasTool('proposeDirections')
-  const canFinish = hasTool('finishAnalysis')
-  const actions: string[] = []
+  const guidance: string[] = []
 
   if (canReport) {
-    actions.push([
-      'call **reportAnalysis** with the passage findings. Before the call, inspect catalog descriptions for reusable records whose durable assertions may directly conflict and include their IDs as candidateFragmentIds; ordinary progression and current conditions are not canon contradictions. If the result supplies newly resolved records, amend the report only when inspecting them changes a finding.',
-      'Cite the numbered prose instead of retyping evidence. Keep events, persistent state, unresolved threads, and character-specific knowledge distinct. Attribute beliefs and temporary disclosures; do not turn an expression into general willingness. Mentions require a direct name, title, role, nickname, or distinctive term rather than a pronoun.',
-      'Use one stable state question per facet, keep independently changing conditions separate, and let dormant threads remain unresolved. On retry, follow tool feedback and repair only rejected or incomplete data.',
-    ].join(' '))
+    guidance.push('Before calling **reportAnalysis**, use the catalog descriptions to identify reusable records whose durable claims could materially change a finding, and include their IDs in candidateFragmentIds. If the result supplies additional record bodies, revise only findings those records change.')
   } else {
-    actions.push('review the new prose against the supplied context without inventing a replacement reporting tool.')
+    guidance.push('Review the new prose against the supplied context without inventing a replacement reporting tool.')
   }
 
-  if (canSuggest) {
-    const customTypes = opts?.customFragmentTypes ?? []
-    const typeNamesList = ['characters', 'knowledge', ...customTypes.map(t => t.name.toLowerCase())].join(', ')
-    const proposalActions: string[] = []
-    if (canCorrectRecords) {
-      proposalActions.push('Use **proposeRecordCorrections** only for a numbered record sentence grounded by reportAnalysis; leave prose errors and unresolved conflicts for review.')
-    }
-    if (canCreateRecords) {
-      proposalActions.push(`Use **proposeNewRecords** only for new reusable named records in these types: ${typeNamesList}.`)
-    }
-    proposalActions.push('Both proposal tools are optional; retry only rejected items from a partial call.')
-    actions.push(proposalActions.join(' '))
+  if (canReport && canMaintainRecords) {
+    guidance.push('Report findings before making any optional record-maintenance proposals.')
   }
   if (canSuggestDirections) {
-    actions.push('call **proposeDirections** with distinct next-scene intents, without turning an interpretation or temporary emotion into settled canon.')
+    guidance.push('Suggest next directions only after the analysis is complete.')
   }
-  if (canFinish) {
-    actions.push('successful required work completes automatically. If **finishAnalysis** appears during inspection or recovery, use it only to close that exceptional path or explain abandoning a failed optional proposal.')
-  }
-
-  const sentenceCase = (action: string): string => action.charAt(0).toUpperCase() + action.slice(1)
-  const steps = actions.map((action, index) => {
-    if (index === actions.length - 1) return `Finally, ${action}`
-    return sentenceCase(action)
-  })
-  const numbered = steps.map((s, i) => `${i + 1}. ${s}`).join('\n')
 
   return `
-You are the Librarian. Keep the ongoing story's records accurate by analyzing the new prose against the supplied context. Tools are exposed by stage; use the tools available in the current request, then continue with newly available follow-up tools.
+You are the Librarian. Analyze the new prose against the supplied story context and keep its durable records accurate.
 
-## Steps
-
-Work in order:
-${numbered}
+${guidance.join('\n\n')}
 `
 }
 
@@ -207,7 +179,6 @@ export function createLibrarianAnalyzeBlocks(ctx: AgentBlockContext): ContextBlo
       disableSuggestions: ctx.story.settings?.disableLibrarianSuggestions === true,
       disabledTools: ctx.disabledTools,
       enabledTools: ctx.enabledTools,
-      customFragmentTypes: ctx.story.settings.customFragmentTypes,
     }).trim(),
     order: 100,
     source: 'builtin',

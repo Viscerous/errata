@@ -36,7 +36,7 @@ describe('model-facing instruction inventory', () => {
       kind: 'template',
       placeholders: ['count'],
     })
-    expect(byKey.get('librarian.analyze.system')?.characters).toBeGreaterThan(1_000)
-    expect(byKey.get('librarian.analyze.system')?.estimatedTokens).toBeGreaterThan(250)
+    expect(inventory.every(entry => entry.characters > 0)).toBe(true)
+    expect(inventory.every(entry => entry.estimatedTokens === Math.ceil(entry.characters / 4))).toBe(true)
   })
 })

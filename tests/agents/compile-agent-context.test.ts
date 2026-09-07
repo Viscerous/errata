@@ -175,12 +175,10 @@ describe('compileAgentContext', () => {
     const instructions = result.blocks.find((block) => block.id === 'instructions')!
 
     expect(Object.keys(result.tools)).toEqual(['reportAnalysis', 'finishAnalysis'])
-    expect(instructions.content).toContain('1. Call **reportAnalysis**')
-    expect(instructions.content).toContain('2. Finally, successful required work completes automatically')
-    expect(instructions.content).toContain('reportAnalysis')
-    expect(instructions.content).not.toContain('proposeDirections')
-    expect(instructions.content).not.toContain('proposeRecordCorrections')
-    expect(instructions.content).not.toContain('proposeNewRecords')
+    expect(instructions.content).toContain('Before calling **reportAnalysis**')
+    expect(instructions.content).not.toContain('optional record-maintenance proposals')
+    expect(instructions.content).not.toContain('Suggest next directions')
+    expect(instructions.content).not.toContain('finishAnalysis')
   })
 
   it('applies block overrides from config', async () => {
