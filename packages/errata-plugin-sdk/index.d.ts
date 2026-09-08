@@ -76,14 +76,6 @@ export interface ContextBuildState {
   characterCatalog: Fragment[]
   summaryProjection?: SummaryProjection
   customFragmentCatalogs?: Array<{ type: string; name: string; fragments: Fragment[] }>
-  /** @deprecated Use guidelineCatalog. */
-  guidelineShortlist?: Fragment[]
-  /** @deprecated Use knowledgeCatalog. */
-  knowledgeShortlist?: Fragment[]
-  /** @deprecated Use characterCatalog. */
-  characterShortlist?: Fragment[]
-  /** @deprecated Use customFragmentCatalogs. */
-  customFragmentShortlists?: Array<{ type: string; name: string; fragments: Fragment[] }>
   authorInput?: string
   modelId?: string
 }

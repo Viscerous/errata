@@ -12,7 +12,7 @@ import {
   type ToolLoopAgentSettings,
 } from 'ai'
 import { createLogger } from '../logging'
-import type { SamplingSettings, StoryMeta } from '../fragments/schema'
+import type { SamplingSettings, StoryMeta } from '@/contracts/story'
 import { isGeminiProvider, normalizeGeminiBaseURL } from '../config/provider-urls'
 
 type ModelOverride = StoryMeta['settings']['modelOverrides'][string]

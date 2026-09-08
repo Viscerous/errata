@@ -10,7 +10,7 @@ import { createLogger } from '../logging/logger'
 import { getContentRoot } from './branches'
 import { getState, saveState, getAnalysis, saveAnalysis, rebuildAnalysisIndex } from '../librarian/storage'
 import { writeJsonAtomic } from '../fs-utils'
-import type { Fragment } from './schema'
+import type { Fragment } from '@/contracts/story'
 
 const log = createLogger('rename-id')
 

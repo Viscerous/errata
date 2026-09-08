@@ -9,7 +9,7 @@ import {
   resolveGenerationGuards,
   translateOpenAICompatibleTopK,
 } from '@/server/llm/client'
-import type { StoryMeta } from '@/server/fragments/schema'
+import type { StoryMeta } from '@/contracts/story'
 
 function makeStory(): StoryMeta {
   const now = new Date().toISOString()
@@ -180,12 +180,12 @@ describe('llm client model resolution', () => {
     expect((resolved.model as unknown as { provider: string }).provider).toBe('google.generative-ai')
   })
 
-  it('migrates Google OpenAI-compatible endpoints to the native Gemini provider', async () => {
+  it('detects Google endpoints and uses the native Gemini provider', async () => {
     await saveGlobalConfig(dataDir, makeTestGlobalConfig({
-      defaultProviderId: 'legacy-gemini',
+      defaultProviderId: 'detected-gemini',
       providers: [{
-        id: 'legacy-gemini',
-        name: 'Gemini (legacy)',
+        id: 'detected-gemini',
+        name: 'Gemini',
         preset: 'custom',
         baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai',
         apiKey: 'test-gemini-key',

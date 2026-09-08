@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { existsSync } from 'node:fs'
-import { AssociationsSchema, type Associations } from './schema'
+import { AssociationsSchema, type Associations } from '@/contracts/story'
 import { getFragment, updateFragment } from './storage'
 import { createLogger } from '../logging/logger'
 import { getContentRoot } from './branches'

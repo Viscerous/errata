@@ -7,12 +7,9 @@ import {
   MAX_LOCALIZED_EDIT_CHARS,
 } from '@/server/fragments/change-operations'
 import { getFragment } from '@/server/fragments/storage'
-import type { Fragment, StoryMeta } from '@/server/fragments/schema'
+import type { Fragment, StoryMeta } from '@/contracts/story'
 
 const now = new Date().toISOString()
-
-// A paragraph long enough for the repetition check (>= 80 normalized chars).
-const LONG_PARA = 'The Cabinet is actively weaponizing the ghosts of the old accord by framing the clearance as a high-friction gatehouse for every permit.'
 
 function makeStory(): StoryMeta {
   return {
@@ -103,80 +100,6 @@ describe('change-operation content integrity guards', () => {
     expect(error!.message).toContain('whole-field rewrite')
     expect(error!.message).toContain('set_fields with baseHash')
     expect(error!.message).toContain('smaller replace_text operations')
-  })
-
-  it('rejects an edit that introduces a duplicated paragraph (looping artifact)', async () => {
-    await createFragment(dataDir, 'story-guards', makeKnowledge(`${LONG_PARA}\n\nA second topic paragraph.`))
-
-    const { results } = await validateOperations(dataDir, 'story-guards', [{
-      action: 'replace_text',
-      fragmentId: 'kn-guard01',
-      field: 'content',
-      oldText: 'A second topic paragraph.',
-      newText: LONG_PARA,
-      replaceAll: false,
-    }])
-
-    expect(results[0].status).toBe('invalid')
-    expect(results[0].errors?.some(e => e.code === 'repeated_content')).toBe(true)
-  })
-
-  it('rejects append_paragraph that re-adds an already-present paragraph', async () => {
-    await createFragment(dataDir, 'story-guards', makeKnowledge(LONG_PARA))
-
-    const { results } = await validateOperations(dataDir, 'story-guards', [{
-      action: 'append_paragraph',
-      fragmentId: 'kn-guard01',
-      field: 'content',
-      text: LONG_PARA,
-    }])
-
-    expect(results[0].status).toBe('invalid')
-    expect(results[0].errors?.some(e => e.code === 'repeated_content')).toBe(true)
-  })
-
-  it('still allows edits to a fragment whose body already carries legacy duplication', async () => {
-    // Pre-existing damage: the paragraph appears twice already. An unrelated
-    // small edit must stay allowed — only making it worse is blocked.
-    await createFragment(dataDir, 'story-guards', makeKnowledge(`${LONG_PARA}\n\n${LONG_PARA}\n\nStatus: mapping.`))
-
-    const { results } = await validateOperations(dataDir, 'story-guards', [{
-      action: 'replace_text',
-      fragmentId: 'kn-guard01',
-      field: 'content',
-      oldText: 'Status: mapping.',
-      newText: 'Status: engagement.',
-      replaceAll: false,
-    }])
-
-    expect(results[0].status).toBe('valid')
-  })
-
-  it('rejects content that pastes a context-rendering heading into the body', async () => {
-    await createFragment(dataDir, 'story-guards', makeKnowledge('Plain body.'))
-
-    const { results } = await validateOperations(dataDir, 'story-guards', [{
-      action: 'append_paragraph',
-      fragmentId: 'kn-guard01',
-      field: 'content',
-      text: '### `kn-guard01` | Guarded Sheet | A knowledge sheet used to test write guards\nEchoed body text.',
-    }])
-
-    expect(results[0].status).toBe('invalid')
-    expect(results[0].errors?.some(e => e.code === 'context_heading_in_content')).toBe(true)
-  })
-
-  it('rejects create_fragment content carrying a context heading', async () => {
-    const { results } = await validateOperations(dataDir, 'story-guards', [{
-      action: 'create_fragment',
-      type: 'knowledge',
-      name: 'Echo Sheet',
-      description: 'Echoed context',
-      content: '### `kn-abcdef` | Echo Sheet | Echoed context\nBody.',
-    }])
-
-    expect(results[0].status).toBe('invalid')
-    expect(results[0].errors?.some(e => e.code === 'context_heading_in_content')).toBe(true)
   })
 
   it('rejects an oversized localized edit and directs the model to set_fields', async () => {

@@ -28,7 +28,7 @@ import { registry } from '../fragments/registry'
 import { reanalyzeAfterProseChange } from '../librarian/scheduler'
 import { installFragmentBundle } from '../erratanet/pack-install'
 import { revertAppliedChanges, RevertConflictError, type AppliedChange } from '../fragments/change-apply'
-import type { Fragment } from '../fragments/schema'
+import type { Fragment } from '@/contracts/story'
 import type { FragmentBundleData } from '@/lib/fragment-clipboard'
 
 export function fragmentRoutes(dataDir: string) {
@@ -501,7 +501,7 @@ export function fragmentRoutes(dataDir: string) {
       ]
     }, { detail: { summary: 'List available fragment types' } })
 
-    // --- Fragment Revert (legacy + versioned) ---
+    // --- Fragment Revert ---
     .post('/stories/:storyId/fragments/:fragmentId/revert', async ({ params, set }) => {
       const story = await getStory(dataDir, params.storyId)
       if (!story) {
@@ -514,27 +514,12 @@ export function fragmentRoutes(dataDir: string) {
         return { error: 'Fragment not found' }
       }
 
-      // Preferred path: version history
       const reverted = await revertFragmentToVersion(dataDir, params.storyId, params.fragmentId)
-      if (reverted) {
-        return reverted
-      }
-
-      // Legacy fallback: old previousContent meta
-      const previousContent = fragment.meta?.previousContent
-      if (typeof previousContent !== 'string') {
+      if (!reverted) {
         set.status = 422
         return { error: 'No previous version to revert to' }
       }
-
-      const updated: Fragment = {
-        ...fragment,
-        content: previousContent,
-        meta: { ...fragment.meta, previousContent: undefined },
-        updatedAt: new Date().toISOString(),
-      }
-      await updateFragment(dataDir, params.storyId, updated)
-      return updated
+      return reverted
     }, { detail: { summary: 'Revert to previous version' } })
 
     // Reverse a batch of applied fragment changes (the chat edit-card Undo).

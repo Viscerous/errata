@@ -3,7 +3,7 @@ import { createTempDir, makeTestSettings } from '../setup'
 import { createStory } from '@/server/fragments/storage'
 import { installFragmentBundle, type PackProvenance } from '@/server/erratanet/pack-install'
 import type { FragmentBundleData } from '@/lib/fragment-clipboard'
-import type { StoryMeta } from '@/server/fragments/schema'
+import type { StoryMeta } from '@/contracts/story'
 import type { Fragment as ApiFragment } from '@/lib/api'
 import { resolveHeaderImage, parseHeaderAspect, parseHeaderFade } from '@/lib/fragment-visuals'
 

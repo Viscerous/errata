@@ -84,9 +84,6 @@ export const BASE_MENTION_TYPES = ['character', 'knowledge'] as const
 
 const MENTION_TYPES_KEY = 'errata-mention-types'
 const MENTION_TYPES_EVENT = 'errata-mention-types-change'
-const LEGACY_CHARACTER_MENTIONS_KEY = 'errata-character-mentions'
-const LEGACY_KNOWLEDGE_MENTIONS_KEY = 'errata-knowledge-mentions'
-
 function normalizeMentionTypes(types: readonly string[]): string[] {
   return [...new Set(types.map((type) => type.trim()).filter(Boolean))]
 }
@@ -101,15 +98,9 @@ function readMentionTypes(): string[] {
       if (Array.isArray(parsed)) {
         return normalizeMentionTypes(parsed.filter((type): type is string => typeof type === 'string'))
       }
-    } catch {
-      return normalizeMentionTypes(stored.split(','))
-    }
+    } catch {}
   }
-
-  const migrated: string[] = []
-  if (localStorage.getItem(LEGACY_CHARACTER_MENTIONS_KEY) === 'true') migrated.push('character')
-  if (localStorage.getItem(LEGACY_KNOWLEDGE_MENTIONS_KEY) === 'true') migrated.push('knowledge')
-  return migrated
+  return []
 }
 
 export function useMentionTypes(): [string[], (types: string[]) => void] {

@@ -8,7 +8,7 @@ import {
 import { getActiveProseIds } from '../fragments/prose-chain'
 import { registry } from '../fragments/registry'
 import { createLogger } from '../logging'
-import type { Fragment } from '../fragments/schema'
+import type { Fragment } from '@/contracts/story'
 import { reanalyzeAfterProseChange } from '../librarian/scheduler'
 import {
   MAX_BATCH_OPERATIONS,

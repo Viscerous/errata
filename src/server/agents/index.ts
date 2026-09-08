@@ -19,8 +19,6 @@ export type {
   AgentStreamEvent,
   AgentStreamCompletion,
   AgentStreamResult,
-  ChatStreamEvent,
-  ChatResult,
 } from './stream-types'
 export type { AgentBlockContext } from './agent-block-context'
 export type { AgentBlockDefinition } from './agent-block-registry'

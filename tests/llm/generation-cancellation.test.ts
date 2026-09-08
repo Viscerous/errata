@@ -4,7 +4,7 @@ import { createStory, listFragments } from '@/server/fragments/storage'
 import { runGeneration } from '@/server/generation/run-generation'
 import { listActiveAgents, requestAgentCancellation } from '@/server/agents/active-registry'
 import { listAgentRuns } from '@/server/agents/traces'
-import type { StoryMeta } from '@/server/fragments/schema'
+import type { StoryMeta } from '@/contracts/story'
 
 describe('prose generation cancellation', () => {
   let dataDir: string

@@ -3,7 +3,7 @@ import { instructionRegistry } from '../instructions'
 import { createGenerationInputBlocks } from './generation-input-contract'
 import { createLogger } from '../logging'
 import { getActiveProseIds, findSectionIndex } from '../fragments/prose-chain'
-import { type Fragment, type StoryMeta } from '../fragments/schema'
+import { type Fragment, type StoryMeta } from '@/contracts/story'
 import {
   buildFragmentContextLanes,
   customContextFragmentTypes,
@@ -153,7 +153,6 @@ export function reorderBlock(blocks: ContextBlock[], id: string, newOrder: numbe
   return blocks.map(b => b.id === id ? { ...b, order: newOrder } : b)
 }
 
-const DEFAULT_PROSE_LIMIT = 10
 const logger = createLogger('context-builder')
 export const STORY_SUMMARY_PLACEHOLDER = '(summary will appear here)'
 
@@ -165,7 +164,6 @@ export interface ContextCompactOption {
 }
 
 export interface BuildContextOptions {
-  proseLimit?: number
   contextCompact?: ContextCompactOption
   /** Fragment ID to exclude from context (e.g., when regenerating) */
   excludeFragmentId?: string
@@ -173,7 +171,7 @@ export interface BuildContextOptions {
   proseBeforeFragmentId?: string
   /** Exclude story summary from context */
   excludeStorySummary?: boolean
-  /** Semantic contract for authorInput. Defaults to the legacy `direct` mode. */
+  /** Semantic contract for authorInput. Defaults to `direct`. */
   authorInputMode?: AuthorInputMode
 }
 
@@ -237,7 +235,6 @@ export async function buildContextState(
   opts: BuildContextOptions = {},
 ): Promise<ContextBuildState> {
   const {
-    proseLimit,
     contextCompact: optsContextCompact,
     excludeFragmentId,
     proseBeforeFragmentId,
@@ -346,12 +343,7 @@ export async function buildContextState(
     (a, b) => a.order - b.order || a.createdAt.localeCompare(b.createdAt),
   )
 
-  // Resolve the prose compact option: opts override > legacy proseLimit > story setting > default
-  const effectiveCompact: ContextCompactOption =
-    optsContextCompact
-    ?? (proseLimit !== undefined ? { type: 'proseLimit', value: proseLimit } : undefined)
-    ?? (story.settings as Record<string, unknown>).contextCompact as ContextCompactOption | undefined
-    ?? { type: 'proseLimit', value: DEFAULT_PROSE_LIMIT }
+  const effectiveCompact = optsContextCompact ?? story.settings.contextCompact
 
   // Apply the prose limit
   const recentProse = applyProseLimit(sortedProse, effectiveCompact)
@@ -841,8 +833,7 @@ export async function expandMessagesFragmentTags(
  *   stable story context gets cache control; the volatile request does not.
  * - Other messages: passed through unchanged.
  *
- * This is backward-compatible — providers that don't support cache control
- * simply ignore the providerOptions.
+ * Providers that do not support cache control simply ignore the provider options.
  */
 export function addCacheBreakpoints(messages: ContextMessage[]): ModelMessage[] {
   return messages.map((msg): ModelMessage => {

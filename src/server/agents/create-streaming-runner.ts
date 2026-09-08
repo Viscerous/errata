@@ -6,7 +6,7 @@
  */
 
 import { ToolLoopAgent, stepCountIs, type ToolSet } from 'ai'
-import type { StoryMeta } from '../fragments/schema'
+import type { StoryMeta } from '@/contracts/story'
 import type { ContextBuildState } from '../llm/context-builder'
 import { type AgentBlockContext, baseBlockContext } from './agent-block-context'
 import type { AgentStreamResult, ResolvedAgentStreamResult } from './stream-types'

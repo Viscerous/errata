@@ -10,7 +10,7 @@ import { generateFragmentId } from '@/lib/fragment-ids'
 import { registry } from '../fragments/registry'
 import { remapFragment, type IdMap } from '../fragments/remap'
 import { importStoryFromZip } from '../story-archive'
-import type { Fragment, StoryMeta } from '../fragments/schema'
+import type { Fragment, StoryMeta } from '@/contracts/story'
 
 /**
  * Server-side install path for the shared "@tealios/erratapack" format: fragment

@@ -1,4 +1,4 @@
-import type { Fragment, StoryMeta } from '../fragments/schema'
+import type { Fragment, StoryMeta } from '@/contracts/story'
 import type { ContextBuildState, CustomFragmentGroup } from '../llm/context-builder'
 import type { FragmentSignal } from '../llm/context-selection'
 

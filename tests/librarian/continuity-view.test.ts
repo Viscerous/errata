@@ -17,7 +17,7 @@ import {
 } from '../setup'
 import { createStory, createFragment, getFragment } from '@/server/fragments/storage'
 import { saveAnalysis, type LibrarianAnalysis } from '@/server/librarian/storage'
-import type { Fragment, StoryMeta } from '@/server/fragments/schema'
+import type { Fragment, StoryMeta } from '@/contracts/story'
 import { analysisSourceRevision } from '@/server/librarian/continuity-source'
 
 async function buildContinuityView(
@@ -86,7 +86,7 @@ describe('continuity view', () => {
     await cleanup()
   })
 
-  it('does not turn legacy summary observations into a second Writer memory channel', async () => {
+  it('does not turn analyses without a projection into a second Writer memory channel', async () => {
     const story = makeStory()
     await createStory(dataDir, story)
     for (let position = 1; position <= 3; position += 1) {

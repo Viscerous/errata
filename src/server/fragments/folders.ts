@@ -27,11 +27,7 @@ async function readIndex(dataDir: string, storyId: string): Promise<FoldersIndex
   const path = foldersPath(dataDir, storyId)
   if (!existsSync(path)) return { folders: [], assignments: {} }
   const raw = await readFile(path, 'utf-8')
-  const parsed = JSON.parse(raw) as Partial<FoldersIndex>
-  return {
-    folders: parsed.folders ?? [],
-    assignments: parsed.assignments ?? {},
-  }
+  return JSON.parse(raw) as FoldersIndex
 }
 
 async function writeIndex(dataDir: string, storyId: string, index: FoldersIndex): Promise<void> {

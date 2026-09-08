@@ -5,7 +5,7 @@ import { addProseSection, initProseChain } from '@/server/fragments/prose-chain'
 import { saveAgentBlockConfig } from '@/server/agents/agent-block-storage'
 import { ensureCoreAgentsRegistered } from '@/server/agents'
 import { summarizeChapter } from '@/server/chapters/summarize'
-import type { Fragment, StoryMeta } from '@/server/fragments/schema'
+import type { Fragment, StoryMeta } from '@/contracts/story'
 
 const { mockAgentConfig, mockStreamArgs } = vi.hoisted(() => ({
   mockAgentConfig: vi.fn(),

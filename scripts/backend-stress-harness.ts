@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { performance } from 'node:perf_hooks'
 import { createStory, createFragment } from '../src/server/fragments/storage'
-import { StoryMetaSchema } from '../src/server/fragments/schema'
+import { StoryMetaSchema } from '../src/contracts/story'
 import { addProseSection } from '../src/server/fragments/prose-chain'
 import { buildContextState } from '../src/server/llm/context-builder'
 import {
@@ -21,7 +21,7 @@ import {
   renderSummaryProjection,
   SUMMARY_CONTRACT_VERSION,
 } from '../src/server/librarian/summary-projection'
-import type { Fragment } from '../src/server/fragments/schema'
+import type { Fragment } from '../src/contracts/story'
 
 type CompactType = 'proseLimit' | 'maxTokens' | 'maxCharacters'
 

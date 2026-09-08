@@ -3,7 +3,7 @@ import { unzipSync, zipSync } from 'fflate'
 import { createTempDir, makeTestSettings } from '../setup'
 import { createStory, createFragment, listStories, getStory } from '@/server/fragments/storage'
 import { exportStoryAsZip, importStoryFromZip } from '@/server/story-archive'
-import type { StoryMeta, Fragment } from '@/server/fragments/schema'
+import type { StoryMeta, Fragment } from '@/contracts/story'
 
 function makeStory(): StoryMeta {
   const now = new Date().toISOString()

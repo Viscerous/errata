@@ -6,7 +6,7 @@ import {
   createFragment,
 } from '@/server/fragments/storage'
 import { initProseChain } from '@/server/fragments/prose-chain'
-import type { StoryMeta, Fragment } from '@/server/fragments/schema'
+import type { StoryMeta, Fragment } from '@/contracts/story'
 
 // Mock the AI SDK ToolLoopAgent
 const mockAgentInstances: Array<{ stream: ReturnType<typeof vi.fn>; fullStream?: ReadableStream<unknown> }> = []
@@ -88,7 +88,7 @@ async function consumeStream(res: Response): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 10))
 }
 
-describe('librarian chat endpoint', () => {
+describe('librarian conversation chat endpoint', () => {
   let dataDir: string
   let cleanup: () => Promise<void>
   let app: ReturnType<typeof createApp>
@@ -129,7 +129,7 @@ describe('librarian chat endpoint', () => {
     })
 
     const res = await app.fetch(
-      new Request(`http://localhost/api/stories/${story.id}/librarian/chat`, {
+      new Request(`http://localhost/api/stories/${story.id}/librarian/conversations/conv-test/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -205,7 +205,7 @@ describe('librarian chat endpoint', () => {
     })
 
     const res = await app.fetch(
-      new Request(`http://localhost/api/stories/${story.id}/librarian/chat`, {
+      new Request(`http://localhost/api/stories/${story.id}/librarian/conversations/conv-test/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -261,7 +261,7 @@ describe('librarian chat endpoint', () => {
     })
 
     const res = await app.fetch(
-      new Request(`http://localhost/api/stories/${story.id}/librarian/chat`, {
+      new Request(`http://localhost/api/stories/${story.id}/librarian/conversations/conv-test/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -311,7 +311,7 @@ describe('librarian chat endpoint', () => {
     })
 
     const res = await app.fetch(
-      new Request(`http://localhost/api/stories/${story.id}/librarian/chat`, {
+      new Request(`http://localhost/api/stories/${story.id}/librarian/conversations/conv-test/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -343,7 +343,7 @@ describe('librarian chat endpoint', () => {
     })
 
     const res = await app.fetch(
-      new Request(`http://localhost/api/stories/${story.id}/librarian/chat`, {
+      new Request(`http://localhost/api/stories/${story.id}/librarian/conversations/conv-test/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -377,7 +377,7 @@ describe('librarian chat endpoint', () => {
     })
 
     const res = await app.fetch(
-      new Request(`http://localhost/api/stories/${story.id}/librarian/chat`, {
+      new Request(`http://localhost/api/stories/${story.id}/librarian/conversations/conv-test/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -408,7 +408,7 @@ describe('librarian chat endpoint', () => {
     })
 
     const res = await app.fetch(
-      new Request(`http://localhost/api/stories/${story.id}/librarian/chat`, {
+      new Request(`http://localhost/api/stories/${story.id}/librarian/conversations/conv-test/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -447,7 +447,7 @@ describe('librarian chat endpoint', () => {
     })
 
     const res = await app.fetch(
-      new Request(`http://localhost/api/stories/${story.id}/librarian/chat`, {
+      new Request(`http://localhost/api/stories/${story.id}/librarian/conversations/conv-test/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -488,7 +488,7 @@ describe('librarian chat endpoint', () => {
     })
 
     const res = await app.fetch(
-      new Request(`http://localhost/api/stories/${story.id}/librarian/chat`, {
+      new Request(`http://localhost/api/stories/${story.id}/librarian/conversations/conv-test/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -520,7 +520,7 @@ describe('librarian chat endpoint', () => {
     })
 
     const res = await app.fetch(
-      new Request(`http://localhost/api/stories/${story.id}/librarian/chat`, {
+      new Request(`http://localhost/api/stories/${story.id}/librarian/conversations/conv-test/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -553,7 +553,7 @@ describe('librarian chat endpoint', () => {
     })
 
     const res = await app.fetch(
-      new Request(`http://localhost/api/stories/${story.id}/librarian/chat`, {
+      new Request(`http://localhost/api/stories/${story.id}/librarian/conversations/conv-test/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -568,7 +568,7 @@ describe('librarian chat endpoint', () => {
 
     // Fetch the persisted history
     const historyRes = await app.fetch(
-      new Request(`http://localhost/api/stories/${story.id}/librarian/chat`),
+      new Request(`http://localhost/api/stories/${story.id}/librarian/conversations/conv-test/chat`),
     )
     expect(historyRes.status).toBe(200)
     const history = await historyRes.json()

@@ -1,7 +1,7 @@
 import { mkdir, readdir, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { existsSync } from 'node:fs'
-import { StoryMetaSchema, type Fragment, type FragmentVersion, type StoryMeta } from './schema'
+import { StoryMetaSchema, type Fragment, type FragmentVersion, type StoryMeta } from '@/contracts/story'
 import { getContentRoot, initBranches } from './branches'
 import { createLogger } from '../logging'
 import { readJsonFile, writeJsonAtomic, withStorageLock } from '../fs-utils'
@@ -46,10 +46,9 @@ function normalizeFragment(fragment: Fragment | null): Fragment | null {
   if (!fragment) return null
   const version = fragment.version ?? 1
   const rawVersions = Array.isArray(fragment.versions) ? fragment.versions : []
-  // Invariant: the live content is always represented as a version, so switching
-  // between versions is a pointer move (no new snapshot). Legacy fragments stored
-  // history as past-only with the current content outside the array — fold the
-  // current content in as its own version here, idempotently.
+  // The live content is always represented as a version, so switching between
+  // versions is a pointer move. Creation inputs may omit the initial snapshot;
+  // fold it in here once at the storage boundary.
   const versions = rawVersions.some((v) => v.version === version)
     ? rawVersions
     : [
@@ -91,7 +90,8 @@ export async function getStory(
   dataDir: string,
   storyId: string
 ): Promise<StoryMeta | null> {
-  return readJson<StoryMeta>(storyMetaPath(dataDir, storyId))
+  const story = await readJson<StoryMeta>(storyMetaPath(dataDir, storyId))
+  return story ? normalizeStoryMeta(story) : null
 }
 
 export async function listStories(dataDir: string): Promise<StoryMeta[]> {

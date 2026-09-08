@@ -24,7 +24,7 @@ import { createApp } from '@/server/api'
 import { createStory, getStory } from '@/server/fragments/storage'
 import { getAgentBlockConfig, saveAgentBlockConfig, type AgentBlockConfig } from '@/server/agents/agent-block-storage'
 import { agentBlockRegistry } from '@/server/agents/agent-block-registry'
-import type { StoryMeta } from '@/server/fragments/schema'
+import type { StoryMeta } from '@/contracts/story'
 
 const SOURCE = 'story-src'
 const TARGET = 'story-tgt'

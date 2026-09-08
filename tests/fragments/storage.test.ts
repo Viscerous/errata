@@ -20,7 +20,7 @@ import {
   revertFragmentToVersion,
   deleteFragmentVersion,
 } from '@/server/fragments/storage'
-import type { Fragment, StoryMeta } from '@/server/fragments/schema'
+import type { Fragment, StoryMeta } from '@/contracts/story'
 
 let dataDir: string
 let cleanup: () => Promise<void>
@@ -449,11 +449,10 @@ describe('Fragment Archive', () => {
     expect(fragments).toHaveLength(2)
   })
 
-  it('defaults archived to false for legacy fragments without the field', async () => {
-    // Create a fragment without the archived field (simulating legacy data)
-    const legacy = makeFragment({ id: 'pr-lega' })
-    delete (legacy as unknown as Record<string, unknown>).archived
-    await createFragment(dataDir, storyId, legacy)
+  it('fills storage defaults for a creation input', async () => {
+    const fragment = makeFragment({ id: 'pr-defaults' })
+    delete (fragment as unknown as Record<string, unknown>).archived
+    await createFragment(dataDir, storyId, fragment)
 
     const fragments = await listFragments(dataDir, storyId)
     expect(fragments).toHaveLength(1)

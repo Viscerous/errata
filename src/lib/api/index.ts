@@ -1,4 +1,4 @@
-// API Client - Re-exports all modules for backward compatibility
+// Public API client surface.
 
 // Types
 export * from './types'
@@ -34,7 +34,7 @@ export type {
 // HTTP Client utilities (exported for advanced use cases)
 export { apiFetch, fetchStream, fetchEventStream, ApiError } from './client'
 
-// Combined API object for backward compatibility
+// Combined API object used by application callers.
 import { stories } from './stories'
 import { fragments } from './fragments'
 import { generation } from './generation'

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vite
 import { ensureCoreAgentsRegistered } from '@/server/agents/register-core'
 import { createTempDir, seedTestProvider, makeTestSettings } from '../setup'
 import { createStory } from '@/server/fragments/storage'
-import { StoryMetaSchema, type StoryMeta } from '@/server/fragments/schema'
+import { StoryMetaSchema, type StoryMeta } from '@/contracts/story'
 
 const { mockAgentCtor, mockAgentStream } = vi.hoisted(() => ({
   mockAgentCtor: vi.fn(),
@@ -27,7 +27,7 @@ vi.mock('ai', async () => {
 import { createApp } from '@/server/api'
 import { createFragment } from '@/server/fragments/storage'
 import { ClarifyQuestionsInputSchema, MAX_CLARIFY_ROUNDS } from '@/server/llm/prewriter'
-import type { Fragment } from '@/server/fragments/schema'
+import type { Fragment } from '@/contracts/story'
 
 function makeStory(overrides?: Partial<StoryMeta['settings']>): StoryMeta {
   const now = new Date().toISOString()

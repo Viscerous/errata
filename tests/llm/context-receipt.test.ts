@@ -5,7 +5,7 @@ import {
   createContextReceipt,
 } from '../../src/server/llm/context-receipt'
 import type { ContextBlock } from '../../src/server/llm/context-builder'
-import type { Fragment } from '../../src/server/fragments/schema'
+import type { Fragment } from '@/contracts/story'
 
 function prose(meta: Record<string, unknown>): Fragment {
   return {

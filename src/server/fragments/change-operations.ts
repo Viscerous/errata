@@ -8,7 +8,7 @@ import type {
   OperationValidation,
 } from '@/contracts/fragment-changes'
 import { PREFIXES } from '@/lib/fragment-ids'
-import type { Fragment } from './schema'
+import type { Fragment } from '@/contracts/story'
 import {
   archiveFragment,
   createFragment as createFragmentInStorage,
@@ -315,53 +315,6 @@ function wholeFieldReplaceTextError(
   )
 }
 
-// Matches the context-rendering identity heading ("### `ch-abc123` | Name | desc")
-// that full sheets carry in agent prompts. It is prompt chrome, never fragment text;
-// a model pasting it into content is echoing its own context back into storage.
-const CONTEXT_HEADING_RE = /^#{2,3}\s*`[a-z]{2,4}-[a-z0-9]{4,12}`\s*\|/m
-
-/** Paragraphs shorter than this are ignored by the repetition check (labels, headings). */
-const MIN_DUP_PARAGRAPH_CHARS = 80
-
-function normalizedParagraphCounts(content: string): Map<string, number> {
-  const counts = new Map<string, number>()
-  for (const paragraph of content.split(/\n\s*\n/)) {
-    const normalized = paragraph.trim().replace(/\s+/g, ' ').toLowerCase()
-    if (normalized.length < MIN_DUP_PARAGRAPH_CHARS) continue
-    counts.set(normalized, (counts.get(normalized) ?? 0) + 1)
-  }
-  return counts
-}
-
-/**
- * Errors for looping/format artifacts an operation would INTRODUCE into content.
- * Compares against the pre-edit content so a fragment that already carries an
- * artifact (legacy damage) stays editable — only making it worse is blocked.
- */
-function contentIntegrityErrors(label: string, before: string, after: string): OperationError[] {
-  const errors: OperationError[] = []
-  if (CONTEXT_HEADING_RE.test(after) && !CONTEXT_HEADING_RE.test(before)) {
-    errors.push(makeOperationError(
-      'context_heading_in_content',
-      `Content for ${label} contains a context-rendering heading ("### \`id\` | name | description"). That line is prompt formatting, not fragment text — write only the fragment body.`,
-    ))
-  }
-  const beforeCounts = normalizedParagraphCounts(before)
-  const introduced: string[] = []
-  for (const [paragraph, count] of normalizedParagraphCounts(after)) {
-    if (count >= 2 && count > (beforeCounts.get(paragraph) ?? 0)) {
-      introduced.push(paragraph.slice(0, 60))
-    }
-  }
-  if (introduced.length > 0) {
-    errors.push(makeOperationError(
-      'repeated_content',
-      `Content for ${label} would repeat the same paragraph more than once (e.g. "${introduced[0]}..."). State each fact once — remove the repetition and resubmit.`,
-    ))
-  }
-  return errors
-}
-
 function validateDraftFields(fragmentId: string, type: string, draft: Pick<Fragment, EditableField>): OperationError[] {
   const errors: OperationError[] = []
   const nameError = fragmentNameError(type, draft.name)
@@ -579,7 +532,6 @@ async function validateCreateOperation(
   if (operation.content.trim().length === 0) {
     errors.push(makeOperationError('content_empty', 'Fragment content cannot be empty.'))
   }
-  errors.push(...contentIntegrityErrors(`new ${operation.type} "${operation.name}"`, '', operation.content))
 
   return {
     operationId: operation.operationId ?? '',
@@ -764,7 +716,6 @@ export async function validateOperations(
     }
 
     const fieldErrors = validateDraftFields(fragmentId, target.type, draft)
-    fieldErrors.push(...contentIntegrityErrors(fragmentId, target.content, draft.content))
     const protection = checkFragmentWrite(target, { content: draft.content })
     if (!protection.allowed) {
       fieldErrors.push(makeOperationError('protected_fragment', protection.reason ?? 'Fragment is protected.'))

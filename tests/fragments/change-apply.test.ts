@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from 'vitest'
 import { createTempDir, makeTestSettings } from '../setup'
 import { createStory, createFragment, getFragment, updateFragmentVersioned } from '@/server/fragments/storage'
 import { applyOperationsWithSnapshot, revertAppliedChanges, RevertConflictError } from '@/server/fragments/change-apply'
-import type { StoryMeta, Fragment } from '@/server/fragments/schema'
+import type { StoryMeta, Fragment } from '@/contracts/story'
 
 function makeStory(): StoryMeta {
   const now = new Date().toISOString()

@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach } from 'vitest'
 import { z } from 'zod'
-import { StoryMetaSchema, type StoryMeta } from '../src/server/fragments/schema'
+import { StoryMetaSchema, type StoryMeta } from '@/contracts/story'
 import { GlobalConfigSchema, type GlobalConfig } from '../src/server/config/schema'
 import type {
   CharacterKnowledgeEntry,
@@ -119,9 +119,8 @@ export function makeTestGlobalConfig(
  * Writes a minimal provider config to the test data directory.
  * Required because getModel() throws when no provider is configured.
  *
- * Goes through saveGlobalConfig rather than writing config.json directly, so the
- * fixture lands in the same two-file shape production uses — writing the file by
- * hand would leave every suite exercising the legacy inline-secret fallback.
+ * Goes through saveGlobalConfig so the fixture lands in the same two-file shape
+ * production uses.
  */
 export async function seedTestProvider(dataDir: string): Promise<void> {
   await mkdir(dataDir, { recursive: true })

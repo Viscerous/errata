@@ -225,9 +225,8 @@ help reliability more than they hurt recall.
 
 ## Related memory surfaces
 
-- `structuredSummary.events`, `stateChanges`, timeline events, and legacy
-  `openThreads` remain Analysis and summary material; they do not re-enter Writer
-  context as a parallel history channel.
+- Summary and timeline material do not re-enter Writer context as a parallel
+  history channel.
 - New analyses also emit an evidence-backed continuity projection: material
   source hash, temporal frame, keyed state operations, explicit thread lifecycle
   plus focus, and per-character knowledge operations. Global participant/witness

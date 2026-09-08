@@ -4,7 +4,7 @@ import {
   FragmentSchema,
   StoryMetaSchema,
   AssociationsSchema,
-} from '@/server/fragments/schema'
+} from '@/contracts/story'
 
 describe('FragmentIdSchema', () => {
   it('accepts valid fragment IDs', () => {

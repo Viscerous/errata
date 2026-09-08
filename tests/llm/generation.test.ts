@@ -10,7 +10,7 @@ import {
 import { saveAgentBlockConfig } from '@/server/agents/agent-block-storage'
 import { listAgentRuns, clearAgentRuns } from '@/server/agents/traces'
 import { clearPending, getPendingCount } from '@/server/librarian/scheduler'
-import type { StoryMeta, Fragment } from '@/server/fragments/schema'
+import type { StoryMeta, Fragment } from '@/contracts/story'
 import { stripAuthorTurnEcho } from '@/contracts/generation'
 
 const { mockAgentCtor, mockAgentStream } = vi.hoisted(() => ({
@@ -694,7 +694,7 @@ describe('generation endpoint', () => {
 
   // --- Regenerate mode ---
 
-  it('regenerate mode replaces fragment content and stores previousContent', async () => {
+  it('regenerate mode creates a variation without changing the source', async () => {
     const original = makeFragment({
       id: 'pr-regen',
       content: 'Original prose content.',
@@ -823,29 +823,7 @@ describe('generation endpoint', () => {
 
   // --- Revert endpoint ---
 
-  it('POST /stories/:storyId/fragments/:fragmentId/revert restores previousContent', async () => {
-    const fragment = makeFragment({
-      id: 'pr-revert',
-      content: 'New content after regenerate.',
-      meta: { previousContent: 'Original content before regenerate.' },
-    })
-    await createFragment(dataDir, storyId, fragment)
-
-    const res = await api(`/stories/${storyId}/fragments/pr-revert/revert`, {
-      method: 'POST',
-    })
-
-    expect(res.status).toBe(200)
-    const body = await res.json()
-    expect(body.content).toBe('Original content before regenerate.')
-
-    // Verify on disk
-    const reverted = await getFragment(dataDir, storyId, 'pr-revert')
-    expect(reverted!.content).toBe('Original content before regenerate.')
-    expect(reverted!.meta.previousContent).toBeUndefined()
-  })
-
-  it('POST /stories/:storyId/fragments/:fragmentId/revert returns 422 when no previousContent', async () => {
+  it('POST /stories/:storyId/fragments/:fragmentId/revert returns 422 when there is no previous version', async () => {
     const fragment = makeFragment({
       id: 'pr-norevert',
       content: 'Some content.',

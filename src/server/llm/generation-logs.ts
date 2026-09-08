@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { existsSync } from 'node:fs'
 import { getContentRoot } from '../fragments/branches'
 import { writeJsonAtomic } from '../fs-utils'
-import type { SamplingSettings } from '../fragments/schema'
+import type { SamplingSettings } from '@/contracts/story'
 import type { AuthorInputMode } from '@/contracts/generation'
 
 export interface ToolCallLog {

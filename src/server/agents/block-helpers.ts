@@ -7,7 +7,7 @@
 
 import type { ContextBlock } from '../llm/context-builder'
 import { type AgentBlockContext, baseBlockContext } from './agent-block-context'
-import type { Fragment } from '../fragments/schema'
+import type { Fragment } from '@/contracts/story'
 import { buildContextState } from '../llm/context-builder'
 import {
   joinMarkdownBlocks,

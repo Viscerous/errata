@@ -7,7 +7,7 @@ import {
   deleteStory,
 } from '../fragments/storage'
 import { exportStoryAsZip, importStoryFromZip } from '../story-archive'
-import type { StoryMeta } from '../fragments/schema'
+import type { StoryMeta } from '@/contracts/story'
 
 export function storyRoutes(dataDir: string) {
   return new Elysia({ detail: { tags: ['Stories'] } })

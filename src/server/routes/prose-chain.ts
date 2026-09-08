@@ -20,7 +20,7 @@ import type {
   Fragment,
   ProseChainResponse,
   ProseVariationSummary,
-} from '../fragments/schema'
+} from '@/contracts/story'
 
 function toProseVariationSummary(fragment: Fragment): ProseVariationSummary {
   const generationMode = fragment.meta.generationMode

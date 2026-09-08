@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { mkdir, writeFile, readFile } from 'node:fs/promises'
+import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { existsSync } from 'node:fs'
 import { createTempDir, makeTestSettings } from '../setup'
@@ -11,16 +11,14 @@ import {
   createBranch,
   deleteBranch,
   renameBranch,
-  migrateIfNeeded,
-  clearMigrationCache,
   withBranch,
 } from '../../src/server/fragments/branches'
 import { createStory, createFragment, getFragment, listFragments } from '../../src/server/fragments/storage'
 import { getProseChain, addProseSection } from '../../src/server/fragments/prose-chain'
-import { saveState, getState, saveAnalysis, getAnalysis, saveChatHistory, getChatHistory } from '../../src/server/librarian/storage'
+import { saveState, getState, saveAnalysis, getAnalysis, saveConversationHistory, getConversationHistory } from '../../src/server/librarian/storage'
 import type { LibrarianAnalysis } from '../../src/server/librarian/storage'
 import type { StoredLibrarianState } from '@/contracts/librarian'
-import type { StoryMeta, Fragment } from '../../src/server/fragments/schema'
+import type { StoryMeta, Fragment } from '@/contracts/story'
 
 let dataDir: string
 let cleanup: () => Promise<void>
@@ -63,77 +61,14 @@ function makeFragment(id: string, content: string = 'test content'): Fragment {
 }
 
 beforeEach(async () => {
-  clearMigrationCache()
   const temp = await createTempDir()
   dataDir = temp.path
   cleanup = temp.cleanup
 })
 
-afterEach(async () => {
-  clearMigrationCache()
-  await cleanup()
-})
+afterEach(async () => cleanup())
 
 describe('branches', () => {
-  describe('migration', () => {
-    it('migrates legacy story with root-level content to branches/main/', async () => {
-      // Create legacy story layout
-      const storyDir = join(dataDir, 'stories', TEST_STORY_ID)
-      await mkdir(join(storyDir, 'fragments'), { recursive: true })
-      await writeFile(join(storyDir, 'meta.json'), JSON.stringify(makeStory()))
-      await writeFile(join(storyDir, 'prose-chain.json'), JSON.stringify({ entries: [] }))
-      await writeFile(join(storyDir, 'associations.json'), JSON.stringify({ tagIndex: {}, refIndex: {} }))
-      await writeFile(join(storyDir, 'fragments', 'pr-test01.json'), JSON.stringify(makeFragment('pr-test01')))
-
-      // Trigger migration
-      await migrateIfNeeded(storyDir)
-
-      // Verify: content moved to branches/main/
-      expect(existsSync(join(storyDir, 'branches', 'main', 'prose-chain.json'))).toBe(true)
-      expect(existsSync(join(storyDir, 'branches', 'main', 'fragments', 'pr-test01.json'))).toBe(true)
-      expect(existsSync(join(storyDir, 'branches', 'main', 'associations.json'))).toBe(true)
-
-      // Verify: root-level content removed
-      expect(existsSync(join(storyDir, 'prose-chain.json'))).toBe(false)
-      expect(existsSync(join(storyDir, 'fragments'))).toBe(false)
-      expect(existsSync(join(storyDir, 'associations.json'))).toBe(false)
-
-      // Verify: branches.json created
-      expect(existsSync(join(storyDir, 'branches.json'))).toBe(true)
-      const index = JSON.parse(await readFile(join(storyDir, 'branches.json'), 'utf-8'))
-      expect(index.activeBranchId).toBe('main')
-      expect(index.branches).toHaveLength(1)
-      expect(index.branches[0].id).toBe('main')
-    })
-
-    it('handles already-migrated story (no-op)', async () => {
-      const storyDir = join(dataDir, 'stories', TEST_STORY_ID)
-      await mkdir(join(storyDir, 'branches', 'main', 'fragments'), { recursive: true })
-      await writeFile(join(storyDir, 'meta.json'), JSON.stringify(makeStory()))
-      await writeFile(join(storyDir, 'branches.json'), JSON.stringify({
-        branches: [{ id: 'main', name: 'Main', order: 0, createdAt: new Date().toISOString() }],
-        activeBranchId: 'main',
-      }))
-
-      // Should not throw
-      await migrateIfNeeded(storyDir)
-
-      // Still valid
-      expect(existsSync(join(storyDir, 'branches', 'main'))).toBe(true)
-    })
-
-    it('handles new story with no content', async () => {
-      const storyDir = join(dataDir, 'stories', TEST_STORY_ID)
-      await mkdir(storyDir, { recursive: true })
-      await writeFile(join(storyDir, 'meta.json'), JSON.stringify(makeStory()))
-
-      await migrateIfNeeded(storyDir)
-
-      expect(existsSync(join(storyDir, 'branches', 'main'))).toBe(true)
-      expect(existsSync(join(storyDir, 'branches.json'))).toBe(true)
-    })
-  })
-
   describe('content root resolution', () => {
     it('resolves to active branch directory', async () => {
       await createStory(dataDir, makeStory())
@@ -200,27 +135,6 @@ describe('branches', () => {
       expect(index.branches[0].id).toBe('main')
       expect(index.activeBranchId).toBe('main')
       expect(index.rootBranchId).toBe('main')
-    })
-
-    it('repairs imported master indexes with an invalid main selection', async () => {
-      const storyDir = join(dataDir, 'stories', TEST_STORY_ID)
-      await mkdir(join(storyDir, 'branches', 'master', 'fragments'), { recursive: true })
-      await writeFile(join(storyDir, 'meta.json'), JSON.stringify(makeStory()))
-      await writeFile(join(storyDir, 'branches.json'), JSON.stringify({
-        branches: [
-          { id: 'master', name: 'Master', order: 0, createdAt: new Date().toISOString() },
-          { id: 'br-alt', name: 'Alt', order: 1, parentBranchId: 'master', createdAt: new Date().toISOString() },
-        ],
-        activeBranchId: 'main',
-      }))
-
-      const index = await getBranchesIndex(dataDir, TEST_STORY_ID)
-      expect(index.rootBranchId).toBe('master')
-      expect(index.activeBranchId).toBe('master')
-
-      const persisted = JSON.parse(await readFile(join(storyDir, 'branches.json'), 'utf-8'))
-      expect(persisted.rootBranchId).toBe('master')
-      expect(persisted.activeBranchId).toBe('master')
     })
 
     it('creates a branch by copying parent content', async () => {
@@ -333,7 +247,7 @@ describe('branches', () => {
         .rejects.toThrow("Cannot delete the root branch 'main'")
     })
 
-    it('protects a legacy master root and falls back to a deleted branch parent', async () => {
+    it('protects a non-default root and falls back to a deleted branch parent', async () => {
       const storyDir = join(dataDir, 'stories', TEST_STORY_ID)
       await mkdir(join(storyDir, 'branches', 'master', 'fragments'), { recursive: true })
       await mkdir(join(storyDir, 'branches', 'br-parent', 'fragments'), { recursive: true })
@@ -346,6 +260,7 @@ describe('branches', () => {
           { id: 'br-child', name: 'Child', order: 2, parentBranchId: 'br-parent', createdAt: new Date().toISOString() },
         ],
         activeBranchId: 'br-child',
+        rootBranchId: 'master',
       }))
 
       await expect(deleteBranch(dataDir, TEST_STORY_ID, 'master'))
@@ -441,8 +356,8 @@ describe('branches', () => {
       }
       await saveAnalysis(dataDir, TEST_STORY_ID, analysis)
 
-      // Save chat history on main
-      await saveChatHistory(dataDir, TEST_STORY_ID, [
+      // Save a conversation on main
+      await saveConversationHistory(dataDir, TEST_STORY_ID, 'conv-branch', [
         { role: 'user', content: 'Who is Alice?' },
         { role: 'assistant', content: 'Alice is the protagonist.' },
       ])
@@ -461,8 +376,8 @@ describe('branches', () => {
       expect(branchAnalysis).not.toBeNull()
       expect(branchAnalysis!.summaryUpdate).toBe('Alice arrived at the castle.')
 
-      // Verify: new branch has chat history
-      const branchChat = await getChatHistory(dataDir, TEST_STORY_ID)
+      // Verify: new branch has conversation history
+      const branchChat = await getConversationHistory(dataDir, TEST_STORY_ID, 'conv-branch')
       expect(branchChat.messages).toHaveLength(2)
       expect(branchChat.messages[0].content).toBe('Who is Alice?')
 
@@ -474,7 +389,7 @@ describe('branches', () => {
       const mainAnalysis = await getAnalysis(dataDir, TEST_STORY_ID, 'analysis-001')
       expect(mainAnalysis).not.toBeNull()
 
-      const mainChat = await getChatHistory(dataDir, TEST_STORY_ID)
+      const mainChat = await getConversationHistory(dataDir, TEST_STORY_ID, 'conv-branch')
       expect(mainChat.messages).toHaveLength(2)
     })
 

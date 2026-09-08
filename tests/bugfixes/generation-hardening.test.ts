@@ -5,7 +5,7 @@ import { saveGlobalConfig } from '@/server/config/storage'
 import { getModel } from '@/server/llm/client'
 import { expandFragmentTags } from '@/server/llm/context-builder'
 import { withKeyLock } from '@/server/async-lock'
-import type { StoryMeta, Fragment } from '@/server/fragments/schema'
+import type { StoryMeta, Fragment } from '@/contracts/story'
 
 function makeStory(overrides: Partial<StoryMeta> = {}): StoryMeta {
   const now = new Date().toISOString()

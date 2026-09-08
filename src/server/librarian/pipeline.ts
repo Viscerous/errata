@@ -1,6 +1,6 @@
 import { MISSING_SYSTEM_PROMPT_FALLBACK } from '../instructions'
 import type { ToolSet } from 'ai'
-import type { Fragment, StoryMeta } from '../fragments/schema'
+import type { Fragment, StoryMeta } from '@/contracts/story'
 import { compileAgentContext } from '../agents/compile-agent-context'
 import type { ActivityStreamEvent } from '../agents/activity-stream'
 import type { ContextMessage } from '../llm/context-builder'

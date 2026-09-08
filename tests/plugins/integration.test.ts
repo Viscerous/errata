@@ -6,7 +6,7 @@ import {
 } from '@/server/fragments/storage'
 import { pluginRegistry } from '@/server/plugins/registry'
 import type { WritingPlugin } from '@/server/plugins/types'
-import type { StoryMeta, Fragment } from '@/server/fragments/schema'
+import type { StoryMeta, Fragment } from '@/contracts/story'
 
 // Mock the AI SDK ToolLoopAgent
 const mockAgentInstances: Array<{ stream: ReturnType<typeof vi.fn> }> = []

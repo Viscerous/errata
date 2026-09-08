@@ -14,7 +14,7 @@ import {
   timelineEventsFor,
 } from '@/server/librarian/analysis-tools'
 import { getFragment } from '@/server/fragments/storage'
-import type { Fragment } from '@/server/fragments/schema'
+import type { Fragment } from '@/contracts/story'
 
 vi.mock('@/server/fragments/storage', () => ({
   getFragment: vi.fn().mockResolvedValue(null),

@@ -1,11 +1,8 @@
 import { getFragment } from '../fragments/storage'
 import { instructionRegistry } from '../instructions'
 import { createStreamingRunner } from '../agents/create-streaming-runner'
-import type { Fragment } from '../fragments/schema'
+import type { Fragment } from '@/contracts/story'
 import type { PersonaMode } from './storage'
-import type { ChatStreamEvent, ChatResult } from '../agents/stream-types'
-
-export { type ChatStreamEvent, type ChatResult }
 
 function buildPersonaDescription(persona: PersonaMode, personaCharacterName?: string, personaCharacterDescription?: string): string {
   switch (persona.type) {

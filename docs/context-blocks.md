@@ -486,7 +486,7 @@ return ''
 | `src/server/agents/agent-block-storage.ts` | File-based CRUD for per-agent block config |
 | `src/server/blocks/apply.ts` | `applyBlockConfig()` — evaluates custom blocks, applies overrides/ordering/disabling. Script blocks receive a generic context object (not tied to `ContextBuildState`). |
 | `src/server/routes/agent-blocks.ts` | API routes under `/stories/:storyId/agent-blocks/*` |
-| `src/lib/api/blocks.ts` | Legacy compatibility client for script eval and config bundles |
+| `src/lib/api/blocks.ts` | Shared client for script evaluation and agent-config bundles |
 | `src/lib/api/agent-blocks.ts` | Per-agent block API client |
 | `src/lib/api/types.ts` | TypeScript types (`BlockConfig`, `CustomBlockDefinition`, `BlockOverride`, etc.) |
 | `src/components/agents/AgentConfigurePanel.tsx` | Main per-agent block editor component |

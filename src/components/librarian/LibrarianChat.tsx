@@ -1,7 +1,6 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
-import { useActiveBranchId } from '@/lib/query-keys'
 import { Textarea } from '@/components/ui/textarea'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { EmptyHint } from '@/components/ui/prose-text'
@@ -11,30 +10,24 @@ import { useChatTurn, type ChatTurnMessage } from '@/components/chat/use-chat-tu
 
 interface LibrarianChatProps {
   storyId: string
-  conversationId?: string | null
+  conversationId: string
   initialInput?: string
 }
 
 export function LibrarianChat({ storyId, conversationId, initialInput }: LibrarianChatProps) {
   const queryClient = useQueryClient()
-  const branchId = useActiveBranchId(storyId)
   const [loaded, setLoaded] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const initialInputAppliedRef = useRef<string | null>(null)
   const prevConversationIdRef = useRef<string | null | undefined>(undefined)
 
-  // Query key depends on whether we're in a conversation or legacy chat.
-  // Branch-scoped so switching timelines doesn't surface another branch's chat.
-  const historyQueryKey = useMemo(() => (
-    conversationId
-      ? ['librarian-conversation-history', storyId, conversationId]
-      : ['librarian-chat-history', storyId, branchId]
-  ), [branchId, conversationId, storyId])
+  const historyQueryKey = useMemo(
+    () => ['librarian-conversation-history', storyId, conversationId],
+    [conversationId, storyId],
+  )
 
   const startTurn = useCallback((messages: ChatTurnMessage[], runId: string, signal: AbortSignal) => (
-    conversationId
-      ? api.librarian.conversationChat(storyId, conversationId, messages, runId, signal)
-      : api.librarian.chat(storyId, messages, runId, signal)
+    api.librarian.conversationChat(storyId, conversationId, messages, runId, signal)
   ), [conversationId, storyId])
 
   const cancelTurn = useCallback(
@@ -50,9 +43,7 @@ export function LibrarianChat({ storyId, conversationId, initialInput }: Librari
       queryClient.invalidateQueries({ queryKey: ['fragments', storyId] }),
       queryClient.invalidateQueries({ queryKey: historyQueryKey }),
       // Conversation list so titles/timestamps refresh
-      ...(conversationId
-        ? [queryClient.invalidateQueries({ queryKey: ['librarian-conversations', storyId] })]
-        : []),
+      queryClient.invalidateQueries({ queryKey: ['librarian-conversations', storyId] }),
     ])
   }, [conversationId, historyQueryKey, queryClient, storyId])
 
@@ -94,9 +85,7 @@ export function LibrarianChat({ storyId, conversationId, initialInput }: Librari
   // Load persisted chat history on mount
   const { data: chatHistory } = useQuery({
     queryKey: historyQueryKey,
-    queryFn: () => conversationId
-      ? api.librarian.getConversationHistory(storyId, conversationId)
-      : api.librarian.getChatHistory(storyId),
+    queryFn: () => api.librarian.getConversationHistory(storyId, conversationId),
     staleTime: Infinity,
   })
 

@@ -593,47 +593,6 @@ export interface ChatHistory {
   updatedAt: string
 }
 
-async function chatHistoryPath(dataDir: string, storyId: string): Promise<string> {
-  const dir = await librarianDir(dataDir, storyId)
-  return join(dir, 'chat-history.json')
-}
-
-export async function getChatHistory(
-  dataDir: string,
-  storyId: string,
-): Promise<ChatHistory> {
-  const path = await chatHistoryPath(dataDir, storyId)
-  if (!existsSync(path)) {
-    return { messages: [], updatedAt: new Date().toISOString() }
-  }
-  const raw = await readFile(path, 'utf-8')
-  return JSON.parse(raw) as ChatHistory
-}
-
-export async function saveChatHistory(
-  dataDir: string,
-  storyId: string,
-  messages: ChatHistoryMessage[],
-): Promise<void> {
-  const dir = await librarianDir(dataDir, storyId)
-  await mkdir(dir, { recursive: true })
-  const history: ChatHistory = {
-    messages,
-    updatedAt: new Date().toISOString(),
-  }
-  await writeJsonAtomic(await chatHistoryPath(dataDir, storyId), history)
-}
-
-export async function clearChatHistory(
-  dataDir: string,
-  storyId: string,
-): Promise<void> {
-  const path = await chatHistoryPath(dataDir, storyId)
-  if (existsSync(path)) {
-    await unlink(path)
-  }
-}
-
 // --- Conversations ---
 
 export interface ConversationMeta {

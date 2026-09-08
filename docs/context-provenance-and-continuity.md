@@ -7,8 +7,8 @@ derived projections are disposable and rebuildable.
 
 The shared analysis envelope and status shapes live in
 `src/contracts/librarian.ts`; continuity projection types live in
-`src/contracts/continuity.ts`. Server-local modules retain compatibility
-re-exports but do not define separate client-facing mirrors.
+`src/contracts/continuity.ts`. Server modules import these shared contracts
+directly rather than defining client-facing mirrors.
 
 ## Authority boundaries
 

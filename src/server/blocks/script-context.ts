@@ -1,5 +1,5 @@
 import { getFragment, listFragments } from '../fragments/storage'
-import type { Fragment } from '../fragments/schema'
+import type { Fragment } from '@/contracts/story'
 
 /**
  * Creates the helper functions available to custom block scripts as `ctx.*`.

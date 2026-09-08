@@ -3,7 +3,7 @@ import { createTempDir, makeTestSettings } from '../setup'
 import { createStory, getStory, listFragments } from '@/server/fragments/storage'
 import { getProseChain } from '@/server/fragments/prose-chain'
 import { syncStorySetupSnapshot } from '@/server/story-setup/sync'
-import type { StoryMeta } from '@/server/fragments/schema'
+import type { StoryMeta } from '@/contracts/story'
 
 function makeStory(): StoryMeta {
   const now = new Date().toISOString()

@@ -51,14 +51,11 @@ export const FragmentSchema = z.object({
 })
 
 /** A fragment after schema parsing or storage normalization. */
-export type NormalizedFragment = z.infer<typeof FragmentSchema>
+export type StoredFragment = z.infer<typeof FragmentSchema>
 
-/**
- * The domain shape accepted from storage and import paths. Only fields added to
- * legacy records after the original format may be absent before normalization.
- */
-export type Fragment = Omit<NormalizedFragment, 'archived' | 'version' | 'versions'> &
-  Partial<Pick<NormalizedFragment, 'archived' | 'version' | 'versions'>>
+/** Fragment input accepted by creation paths before storage fills defaults. */
+export type Fragment = Omit<StoredFragment, 'archived' | 'version' | 'versions'> &
+  Partial<Pick<StoredFragment, 'archived' | 'version' | 'versions'>>
 
 /** Provider-facing sampling values used by and recorded with model calls. */
 export interface SamplingSettings {

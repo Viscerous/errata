@@ -74,7 +74,7 @@ export interface LibrarianFragmentChangeProposal {
   title?: string
   rationale?: string
   /** Which online maintenance lane queued this proposal. */
-  proposalKind?: 'correction' | 'new-fragment'
+  proposalKind: 'correction' | 'new-fragment'
   /** Sentence numbers the analyst cited in the accepted prose. */
   evidenceSegments?: number[]
   /** Those sentences resolved to exact text, for review and unattended re-checking. */

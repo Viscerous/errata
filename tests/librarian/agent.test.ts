@@ -11,7 +11,7 @@ import { createBackfillJob, runBackfillJob } from '@/server/librarian/backfill'
 import { saveAgentBlockConfig } from '@/server/agents/agent-block-storage'
 import { initProseChain, addProseSection } from '@/server/fragments/prose-chain'
 import { addTag } from '@/server/fragments/associations'
-import type { StoryMeta, Fragment } from '@/server/fragments/schema'
+import type { StoryMeta, Fragment } from '@/contracts/story'
 
 const { mockAgentStream } = vi.hoisted(() => ({
   mockAgentStream: vi.fn(),

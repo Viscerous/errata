@@ -2,7 +2,7 @@ import {
   getFragment,
   updateFragment,
 } from '../fragments/storage'
-import type { Fragment } from '../fragments/schema'
+import type { Fragment } from '@/contracts/story'
 import type { FragmentChangeOperation, OperationValidation } from '../fragments/change-operations'
 import {
   fragmentBaseHash,
@@ -12,7 +12,6 @@ import {
 import {
   applyOperationsWithSnapshot,
   revertAppliedChanges,
-  RevertConflictError,
   type AppliedChange,
   type RevertResult,
 } from '../fragments/change-apply'
@@ -40,10 +39,6 @@ export interface RevertFragmentChangeProposalResult {
   archivedFragmentIds: string[]
   restoredFragmentIds: string[]
 }
-
-/** Analysis-flavoured alias of the shared {@link RevertConflictError}, kept so the
- * accept/revert route handlers catch the same type they always did. */
-export { RevertConflictError as ProposalRevertConflictError }
 
 /**
  * Thrown when `applyOperations` wrote some targets to disk before a later target

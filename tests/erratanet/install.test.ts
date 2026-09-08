@@ -3,7 +3,7 @@ import { createTempDir, makeTestSettings } from '../setup'
 import { createStory, createFragment, getFragment, listFragments } from '@/server/fragments/storage'
 import { installFragmentBundle, type PackProvenance } from '@/server/erratanet/pack-install'
 import type { FragmentBundleData } from '@/lib/fragment-clipboard'
-import type { Fragment, StoryMeta } from '@/server/fragments/schema'
+import type { Fragment, StoryMeta } from '@/contracts/story'
 
 const STORY_ID = 'story-erratanet'
 

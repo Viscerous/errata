@@ -1,7 +1,7 @@
 import type { WritingPlugin, PluginHooks, GenerationResult } from './types'
 import type { ContextBuildState, ContextBlock, ContextMessage } from '../llm/context-builder'
 import { createLogger, type Logger } from '../logging'
-import type { Fragment } from '../fragments/schema'
+import type { Fragment } from '@/contracts/story'
 
 const logger = createLogger('plugin-hooks')
 

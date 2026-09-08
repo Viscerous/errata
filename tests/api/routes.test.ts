@@ -40,9 +40,6 @@ describe('Agent cancellation route', () => {
     const response = await api('/stories/story-1/agents/run-1/cancel', { method: 'POST' })
     expect(response.status).toBe(200)
     await expect(response.json()).resolves.toEqual({ ok: true, active: false })
-
-    const legacy = await api('/stories/story-1/generations/run-1/cancel', { method: 'POST' })
-    expect(legacy.status).toBe(404)
   })
 })
 

@@ -186,7 +186,7 @@ async function runLibrarianInner(
       if (proposal.autoApplySafe !== true) {
         requestLogger.warn('Leaving proposal pending because it did not pass the unattended-apply contract', {
           proposalIndex: index,
-          proposalKind: proposal.proposalKind ?? 'legacy',
+          proposalKind: proposal.proposalKind,
         })
         continue
       }

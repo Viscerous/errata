@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import type { StoredProseChain } from './schema'
+import type { StoredProseChain } from '@/contracts/story'
 import { getContentRoot } from './branches'
 import { writeJsonAtomic } from '../fs-utils'
 import { withKeyLock } from '../async-lock'

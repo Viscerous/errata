@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import type { Fragment } from '../fragments/schema'
+import type { Fragment } from '@/contracts/story'
 import type { AnalysisSourceRevision } from '@/contracts/continuity'
 
 /** Hash only material prose fields; Librarian annotation metadata must not stale its own Analysis. */

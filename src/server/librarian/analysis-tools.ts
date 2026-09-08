@@ -3,7 +3,7 @@ import { tool, type ToolSet } from 'ai'
 import { z } from 'zod/v4'
 import { suggestionDirectionSchema, type SuggestionDirection } from '../directions/schema'
 import { getFragment } from '../fragments/storage'
-import { FragmentIdSchema, type Fragment } from '../fragments/schema'
+import { FragmentIdSchema, type Fragment } from '@/contracts/story'
 import { numberSentences, resolveSegments, segmentText, stripSegmentMarker, type TextSegment } from '../llm/segments'
 import type { LibrarianAnalysis, LibrarianFragmentChangeProposal, LibrarianMention } from './storage'
 import {
@@ -1174,7 +1174,7 @@ function queueFragmentChangeProposal(params: {
   collector: AnalysisCollector
   title?: string
   rationale?: string
-  proposalKind?: 'correction' | 'new-fragment'
+  proposalKind: 'correction' | 'new-fragment'
   evidenceSegments?: number[]
   evidenceText?: string
   eligibilityReason?: string
@@ -1213,7 +1213,7 @@ function queueFragmentChangeProposal(params: {
   params.collector.fragmentChangeProposals.push({
     ...(title ? { title } : {}),
     ...(rationale ? { rationale } : {}),
-    ...(params.proposalKind ? { proposalKind: params.proposalKind } : {}),
+    proposalKind: params.proposalKind,
     ...(params.evidenceSegments?.length ? { evidenceSegments: params.evidenceSegments } : {}),
     ...(params.evidenceText ? { evidenceText: params.evidenceText } : {}),
     ...(eligibilityReason ? { eligibilityReason } : {}),
@@ -1543,7 +1543,7 @@ export function createAnalysisTools(
         const skippedContradictions: Array<Skipped<{ description: string }>> = []
         const groundedContradictions: AnalysisCollector['contradictions'] = []
         for (const contradiction of contradictions) {
-          // Storage-less consumers retain the legacy permissive shape. The
+          // Pure/test consumers have no durable records to cite. The
           // online Librarian must ground both sides so a plausible narrative
           // transition cannot become a permanent red flag merely because the
           // model called it a contradiction.

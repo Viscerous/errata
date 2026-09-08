@@ -6,7 +6,7 @@ import {
   expandMessagesFragmentTags,
   type ContextMessage,
 } from '@/server/llm/context-builder'
-import type { StoryMeta, Fragment } from '@/server/fragments/schema'
+import type { StoryMeta, Fragment } from '@/contracts/story'
 
 function makeStory(overrides: Partial<StoryMeta> = {}): StoryMeta {
   const now = new Date().toISOString()

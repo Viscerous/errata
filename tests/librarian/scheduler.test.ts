@@ -49,7 +49,7 @@ vi.mock('../../src/server/librarian/summary-rollup-maintenance', () => ({ reques
 // Import mocked modules AFTER vi.mock (vitest hoists mocks to top)
 import { invokeAgent } from '@/server/agents'
 import { triggerLibrarian, reanalyzeAfterProseChange, holdLibrarianAnalysis, clearPending, getPendingCount, getLibrarianRuntimeStatus } from '@/server/librarian/scheduler'
-import type { Fragment } from '@/server/fragments/schema'
+import type { Fragment } from '@/contracts/story'
 
 const mockedInvokeAgent = vi.mocked(invokeAgent)
 

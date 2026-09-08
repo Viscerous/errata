@@ -1,4 +1,4 @@
-import type { Fragment } from '../fragments/schema'
+import type { Fragment } from '@/contracts/story'
 
 export function uniqueFragments(groups: Fragment[][]): Fragment[] {
   const seen = new Set<string>()

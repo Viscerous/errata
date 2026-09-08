@@ -1,5 +1,5 @@
 import { uniqueFragments } from './utils'
-import type { Fragment } from '../fragments/schema'
+import type { Fragment } from '@/contracts/story'
 import type { FragmentContextLane } from './fragment-context-blocks'
 import { contextReceiptBridgeIds } from './context-receipt'
 

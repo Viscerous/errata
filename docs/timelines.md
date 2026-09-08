@@ -74,18 +74,6 @@ const root = await getContentRoot(dataDir, storyId)
 
 There is also `getContentRootForBranch(dataDir, storyId, branchId)` for operations that need to target a specific timeline (e.g., branch creation).
 
-## Migration
-
-Stories created before the timeline system have their content at the story root level. On first access, `migrateIfNeeded()` detects this layout and moves all content into `branches/main/`, then creates the initial `branches.json`. This migration runs once per story and is cached in memory.
-
-Content items that are migrated:
-
-- `prose-chain.json`
-- `fragments/`
-- `associations.json`
-- `generation-logs/`
-- `librarian/`
-
 Branch-scoped files like `block-config.json`, `agent-blocks/`, and `character-chat/` are created inside a branch on first use and are inherited automatically when later branches are copied.
 
 ## Creating a Timeline
@@ -166,7 +154,7 @@ A sidebar panel with a full list of timelines, showing parentage info ("from Mai
 
 | File | Purpose |
 |---|---|
-| `src/server/fragments/branches.ts` | Core branching logic: migration, CRUD, content root resolution. Uses `withBranch()` for branch-aware storage in agent and generation code. |
+| `src/server/fragments/branches.ts` | Core branching CRUD and content-root resolution. Uses `withBranch()` for branch-aware storage in agent and generation code. |
 | `src/contracts/story.ts` | Canonical `BranchMetaSchema` and `BranchesIndexSchema` contracts |
 | `src/lib/api/branches.ts` | Frontend API client |
 | `src/lib/api/types.ts` | Compatibility re-exports for the shared branch types |

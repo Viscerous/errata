@@ -4,7 +4,7 @@ import {
   createStory,
   createFragment,
 } from '@/server/fragments/storage'
-import type { StoryMeta, Fragment } from '@/server/fragments/schema'
+import type { StoryMeta, Fragment } from '@/contracts/story'
 
 // Mock the AI SDK ToolLoopAgent
 const mockAgentCtor = vi.fn()

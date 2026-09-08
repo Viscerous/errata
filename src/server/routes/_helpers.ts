@@ -1,5 +1,5 @@
 import { getStory } from '../fragments/storage'
-import type { StoryMeta } from '../fragments/schema'
+import type { StoryMeta } from '@/contracts/story'
 
 type StoryCtx = {
   params: { storyId: string }

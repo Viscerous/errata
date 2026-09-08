@@ -8,7 +8,7 @@ import {
   renderSummaryProjection,
   SUMMARY_CONTRACT_VERSION,
 } from '@/server/librarian/summary-projection'
-import type { Fragment, StoryMeta } from '@/server/fragments/schema'
+import type { Fragment, StoryMeta } from '@/contracts/story'
 import { clearServedModelObservations } from '@/server/llm/served-models'
 import { listActiveAgents } from '@/server/agents/active-registry'
 import { clearAgentRuns, listAgentRuns } from '@/server/agents/traces'

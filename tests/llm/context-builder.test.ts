@@ -7,7 +7,7 @@ import {
   getFragment,
 } from '@/server/fragments/storage'
 import { addProseSection } from '@/server/fragments/prose-chain'
-import type { StoryMeta, Fragment } from '@/server/fragments/schema'
+import type { StoryMeta, Fragment } from '@/contracts/story'
 import { saveAnalysis } from '@/server/librarian/storage'
 import { analysisSourceRevision } from '@/server/librarian/continuity-source'
 import { SUMMARY_CONTRACT_VERSION } from '@/server/librarian/summary-projection'

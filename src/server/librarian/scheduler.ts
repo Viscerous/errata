@@ -1,4 +1,4 @@
-import type { Fragment } from '../fragments/schema'
+import type { Fragment } from '@/contracts/story'
 import { createLogger } from '../logging'
 import { getActiveBranchId, getScopedBranchId, isBranchDeleting, withBranch } from '../fragments/branches'
 import { getStory } from '../fragments/storage'

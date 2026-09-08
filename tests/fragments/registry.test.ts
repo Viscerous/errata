@@ -3,7 +3,7 @@ import {
   FragmentTypeRegistry,
   type FragmentTypeDefinition,
 } from '@/server/fragments/registry'
-import type { Fragment } from '@/server/fragments/schema'
+import type { Fragment } from '@/contracts/story'
 
 describe('FragmentTypeRegistry', () => {
   let registry: FragmentTypeRegistry

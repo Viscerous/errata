@@ -6,7 +6,6 @@ import {
   deleteProvider,
   getGlobalConfig,
   maskApiKey,
-  migrateLegacyPlaintextSecrets,
   redactErratanetConfig,
   updateErratanetConfig,
   updateSharingConfig,
@@ -156,62 +155,4 @@ describe('global configuration storage', () => {
     })
   })
 
-  describe('migrating a pre-split config', () => {
-    /** config.json as it was written before secrets moved to their own file. */
-    const writeLegacyConfig = async () => {
-      await writeFile(join(dataDir, 'config.json'), JSON.stringify({
-        providers: [{ ...provider('legacy-a'), apiKey: 'legacy-key' }],
-        defaultProviderId: 'legacy-a',
-        sharing: { authEnabled: true, username: 'errata', passwordHash: 'legacy:hash', lanEnabled: true, tunnelEnabled: false },
-        erratanet: { hubUrl: 'https://hub.example', token: 'legacy-token', enabled: true, introSeen: true },
-      }), 'utf-8')
-    }
-
-    const NOTHING_TO_DO = {
-      migrated: false, providerKeys: 0, erratanetToken: false, sharingPasswordHash: false,
-    }
-
-    it('reads inline secrets before it has migrated', async () => {
-      await writeLegacyConfig()
-      const loaded = await getGlobalConfig(dataDir)
-      expect(loaded.providers[0].apiKey).toBe('legacy-key')
-      expect(loaded.erratanet.token).toBe('legacy-token')
-      expect(loaded.sharing.passwordHash).toBe('legacy:hash')
-    })
-
-    it('moves them out and leaves no plaintext behind', async () => {
-      await writeLegacyConfig()
-
-      expect(await migrateLegacyPlaintextSecrets(dataDir)).toEqual({
-        migrated: true, providerKeys: 1, erratanetToken: true, sharingPasswordHash: true,
-      })
-
-      const raw = await readFile(join(dataDir, 'config.json'), 'utf-8')
-      expect(raw).not.toContain('legacy-key')
-      expect(raw).not.toContain('legacy-token')
-      expect(raw).not.toContain('legacy:hash')
-
-      // Everything still resolves, and non-secret settings are preserved.
-      const loaded = await getGlobalConfig(dataDir)
-      expect(loaded.providers[0].apiKey).toBe('legacy-key')
-      expect(loaded.sharing).toMatchObject({ passwordHash: 'legacy:hash', authEnabled: true, lanEnabled: true })
-      expect(loaded.erratanet).toMatchObject({
-        token: 'legacy-token',
-        hubUrl: 'https://hub.example',
-        enabled: true,
-        introSeen: true,
-      })
-    })
-
-    it('is idempotent and a no-op once there is nothing inline', async () => {
-      await writeLegacyConfig()
-      await migrateLegacyPlaintextSecrets(dataDir)
-
-      expect(await migrateLegacyPlaintextSecrets(dataDir)).toEqual(NOTHING_TO_DO)
-    })
-
-    it('is a no-op on a fresh install', async () => {
-      expect(await migrateLegacyPlaintextSecrets(dataDir)).toEqual(NOTHING_TO_DO)
-    })
-  })
 })

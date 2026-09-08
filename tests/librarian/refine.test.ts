@@ -19,7 +19,7 @@ import {
   createStory,
   createFragment,
 } from '@/server/fragments/storage'
-import type { StoryMeta, Fragment } from '@/server/fragments/schema'
+import type { StoryMeta, Fragment } from '@/contracts/story'
 import { createApp } from '@/server/api'
 
 function makeStory(overrides: Partial<StoryMeta> = {}): StoryMeta {

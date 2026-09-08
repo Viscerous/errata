@@ -59,12 +59,6 @@ export const librarian = {
     instruction: options?.instruction,
     runId: options?.runId,
   }),
-  chat: (storyId: string, messages: Array<{ role: 'user' | 'assistant'; content: string }>, runId: string, signal?: AbortSignal) =>
-    fetchEventStream(`/stories/${storyId}/librarian/chat`, { messages, runId }, signal),
-  getChatHistory: (storyId: string) =>
-    apiFetch<ChatHistory>(`/stories/${storyId}/librarian/chat`),
-  clearChatHistory: (storyId: string) =>
-    apiFetch<{ ok: boolean }>(`/stories/${storyId}/librarian/chat`, { method: 'DELETE' }),
   // Conversations
   listConversations: (storyId: string) =>
     apiFetch<ConversationMeta[]>(`/stories/${storyId}/librarian/conversations`),

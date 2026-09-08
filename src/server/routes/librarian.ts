@@ -11,9 +11,6 @@ import {
   listAnalyses as listLibrarianAnalyses,
   getAnalysis as getLibrarianAnalysis,
   saveAnalysis as saveLibrarianAnalysis,
-  getChatHistory as getLibrarianChatHistory,
-  saveChatHistory as saveLibrarianChatHistory,
-  clearChatHistory as clearLibrarianChatHistory,
   listConversations,
   createConversation,
   deleteConversation,
@@ -28,10 +25,10 @@ import {
   markFragmentChangeProposalStale,
   ProposalApplyError,
   ProposalValidationError,
-  ProposalRevertConflictError,
   refreshPendingFragmentChangeProposals,
   revertFragmentChangeProposal,
 } from '../librarian/suggestions'
+import { RevertConflictError } from '../fragments/change-apply'
 import { createLogger } from '../logging'
 import { encodeStream } from './encode-stream'
 import type { LibrarianStatusResponse } from '@/contracts/librarian'
@@ -224,7 +221,7 @@ export function librarianRoutes(dataDir: string) {
           proposalIndex: index,
         })
       } catch (error) {
-        if (error instanceof ProposalRevertConflictError) {
+        if (error instanceof RevertConflictError) {
           set.status = 409
           return {
             error: error.message,
@@ -441,83 +438,6 @@ export function librarianRoutes(dataDir: string) {
         contextAfter: t.Optional(t.String()),
       }),
       detail: { summary: 'Transform a prose selection (streaming NDJSON)' },
-    })
-
-    // --- Librarian Chat ---
-    .get('/stories/:storyId/librarian/chat', async ({ params }) => {
-      return getLibrarianChatHistory(dataDir, params.storyId)
-    }, { detail: { summary: 'Get chat history' } })
-
-    .delete('/stories/:storyId/librarian/chat', async ({ params }) => {
-      await clearLibrarianChatHistory(dataDir, params.storyId)
-      return { ok: true }
-    }, { detail: { summary: 'Clear chat history' } })
-
-    .post('/stories/:storyId/librarian/chat', async ({ params, body, set }) => {
-      const requestLogger = logger.child({ storyId: params.storyId })
-      requestLogger.info('Librarian chat request', { messageCount: body.messages.length })
-
-      const story = await getStory(dataDir, params.storyId)
-      if (!story) {
-        set.status = 404
-        return { error: 'Story not found' }
-      }
-
-      if (!body.messages.length) {
-        set.status = 422
-        return { error: 'At least one message is required' }
-      }
-
-      let agent: ReturnType<typeof createAgentInstance> | undefined
-      try {
-        agent = createAgentInstance('librarian.chat', {
-          dataDir,
-          storyId: params.storyId,
-          runId: body.runId,
-        })
-        const { eventStream, completion } = await agent.execute({
-          messages: body.messages,
-          maxSteps: story.settings.maxSteps ?? 10,
-        })
-
-        // Persist chat history after completion (in background)
-        completion.then(async (result) => {
-          requestLogger.info('Librarian chat completed', {
-            stepCount: result.stepCount,
-            finishReason: result.finishReason,
-            toolCallCount: result.toolCalls.length,
-          })
-          const fullHistory = [
-            ...body.messages,
-            {
-              role: 'assistant' as const,
-              content: result.text,
-              ...(result.reasoning ? { reasoning: result.reasoning } : {}),
-            },
-          ]
-          await saveLibrarianChatHistory(dataDir, params.storyId, fullHistory)
-        }).catch((err) => {
-          requestLogger.error('Librarian chat completion error', { error: err instanceof Error ? err.message : String(err) })
-        })
-
-        return new Response(encodeStream(eventStream), {
-          headers: { 'Content-Type': 'application/x-ndjson; charset=utf-8' },
-        })
-      } catch (err) {
-        agent?.fail(err)
-        requestLogger.error('Librarian chat failed', { error: err instanceof Error ? err.message : String(err) })
-        set.status = 500
-        return { error: err instanceof Error ? err.message : 'Chat failed' }
-      }
-    }, {
-      body: t.Object({
-        runId: t.Optional(t.String()),
-        messages: t.Array(t.Object({
-          role: t.Union([t.Literal('user'), t.Literal('assistant')]),
-          content: t.String(),
-        })),
-      }),
-      detail: { summary: 'Chat with the librarian (streaming NDJSON)' },
     })
 
     // --- Conversations ---

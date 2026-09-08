@@ -138,10 +138,12 @@ describe('librarian storage', () => {
         ],
         fragmentChangeProposals: [
           {
+            proposalKind: 'new-fragment',
             operations: [{ operationId: 'op-1', action: 'create_fragment', type: 'knowledge', name: 'Cave', description: 'The dark cave', content: 'A cave in the mountains' }],
             validation: [{ operationId: 'op-1', action: 'create_fragment', status: 'valid' }],
           },
           {
+            proposalKind: 'correction',
             operations: [{ operationId: 'op-2', action: 'replace_text', fragmentId: 'ch-0001', field: 'content', oldText: 'old', newText: 'new', replaceAll: false }],
             validation: [{ operationId: 'op-2', action: 'replace_text', status: 'valid', target: { fragmentId: 'ch-0001', field: 'content' } }],
           },

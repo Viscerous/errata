@@ -17,7 +17,7 @@ import {
 import { contextSignalMap, selectAttentionContext } from '../llm/context-selection'
 import { numberSentences } from '../llm/segments'
 import { baseBlockContext, type AgentBlockContext } from '../agents/agent-block-context'
-import type { Fragment, StoryMeta } from '../fragments/schema'
+import type { Fragment, StoryMeta } from '@/contracts/story'
 import { getStory, getFragment, listFragments } from '../fragments/storage'
 import { getActiveProseIds } from '../fragments/prose-chain'
 import { getFragmentsByTag } from '../fragments/associations'
@@ -147,8 +147,8 @@ export async function buildAnalyzeContext(
   }
   const systemPromptFragments = await loadSystemPromptFragments(dataDir, storyId, getFragmentsByTag, getFragment)
   return {
-    // Start from centralized story context so summary-fragment migration and
-    // summary loading cannot drift from the writer context.
+    // Start from centralized story context so summary loading cannot drift
+    // from the writer context.
     ...baseBlockContext(ctxState, effectiveStory),
     systemPromptFragments,
     allCharacters,

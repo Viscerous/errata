@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { Fragment } from '@/server/fragments/schema'
+import type { Fragment } from '@/contracts/story'
 import type { FragmentContextLane } from '@/server/llm/fragment-context-blocks'
 import { selectAttentionContext } from '@/server/llm/context-selection'
 

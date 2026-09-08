@@ -8,7 +8,7 @@ import {
 } from '@/server/fragments/storage'
 import { saveAgentBlockConfig } from '@/server/agents/agent-block-storage'
 import { pluginRegistry } from '@/server/plugins/registry'
-import type { StoryMeta, Fragment } from '@/server/fragments/schema'
+import type { StoryMeta, Fragment } from '@/contracts/story'
 
 const { mockAgentCtor, mockAgentStream } = vi.hoisted(() => ({
   mockAgentCtor: vi.fn(),

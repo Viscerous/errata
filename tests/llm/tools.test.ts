@@ -9,7 +9,7 @@ import {
   updateStory,
 } from '@/server/fragments/storage'
 import { initProseChain } from '@/server/fragments/prose-chain'
-import type { StoryMeta, Fragment } from '@/server/fragments/schema'
+import type { StoryMeta, Fragment } from '@/contracts/story'
 import { coreProposalToolNames, coreReadToolNames, createFragmentTools } from '@/server/llm/tools'
 import { segmentText } from '@/server/llm/segments'
 import { proposeFragmentChangesSchema, sanitizeTextForToolEcho } from '@/server/fragments/change-operations'

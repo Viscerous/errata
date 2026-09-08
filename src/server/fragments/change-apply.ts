@@ -4,7 +4,7 @@ import {
   restoreFragment,
   updateFragmentVersioned,
 } from './storage'
-import type { Fragment } from './schema'
+import type { Fragment } from '@/contracts/story'
 import type {
   AppliedChange,
   AppliedFieldChange,

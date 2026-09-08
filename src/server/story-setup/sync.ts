@@ -9,7 +9,7 @@ import {
   updateStory,
 } from '../fragments/storage'
 import { addProseSection } from '../fragments/prose-chain'
-import type { Fragment } from '../fragments/schema'
+import type { Fragment } from '@/contracts/story'
 import type { StorySetupDraftFragment } from './schema'
 
 interface SetupStoryDraft {

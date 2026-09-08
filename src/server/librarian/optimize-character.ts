@@ -1,6 +1,6 @@
 import { getFragment } from '../fragments/storage'
 import { createStreamingRunner } from '../agents/create-streaming-runner'
-import type { Fragment } from '../fragments/schema'
+import type { Fragment } from '@/contracts/story'
 import type { AgentStreamResult } from '../agents/stream-types'
 
 export interface OptimizeCharacterOptions {

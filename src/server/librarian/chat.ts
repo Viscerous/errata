@@ -17,12 +17,12 @@ import { getFragmentsByTag } from '../fragments/associations'
 import { inspectGenerationForFragment, type InspectAspect } from './inspect-generation'
 import { runLibrarian } from './agent'
 import { withBranch } from '../fragments/branches'
-import type { ChatStreamEvent, ChatResult } from '../agents/stream-types'
+import type { AgentStreamEvent, AgentStreamResult } from '../agents/stream-types'
 import { type AgentBlockContext, baseBlockContext } from '../agents/agent-block-context'
 import { loadSystemPromptFragments } from '../agents/block-helpers'
 import { renderContinuity } from './continuity-view'
 
-export type { ChatStreamEvent, ChatResult }
+export type { AgentStreamEvent, AgentStreamResult }
 
 const logger = createLogger('librarian-chat')
 
@@ -128,7 +128,7 @@ export async function librarianChat(
   storyId: string,
   opts: ChatOptions,
   execution: { abortSignal?: AbortSignal } = {},
-): Promise<ChatResult> {
+): Promise<AgentStreamResult> {
   return withBranch(dataDir, storyId, () => librarianChatInner(dataDir, storyId, opts, execution))
 }
 
@@ -137,7 +137,7 @@ async function librarianChatInner(
   storyId: string,
   opts: ChatOptions,
   execution: { abortSignal?: AbortSignal },
-): Promise<ChatResult> {
+): Promise<AgentStreamResult> {
   const requestLogger = logger.child({ storyId })
   requestLogger.info('Starting librarian chat...', { messageCount: opts.messages.length })
 

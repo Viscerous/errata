@@ -8,7 +8,7 @@ import {
 } from '@/server/plugins/hooks'
 import type { WritingPlugin, GenerationResult } from '@/server/plugins/types'
 import type { ContextBuildState, ContextMessage } from '@/server/llm/context-builder'
-import type { StoryMeta, Fragment } from '@/server/fragments/schema'
+import type { StoryMeta, Fragment } from '@/contracts/story'
 
 function makeState(overrides: Partial<ContextBuildState> = {}): ContextBuildState {
   const now = new Date().toISOString()

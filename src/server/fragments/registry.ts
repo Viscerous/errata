@@ -1,4 +1,4 @@
-import type { Fragment } from './schema'
+import type { Fragment } from '@/contracts/story'
 
 export interface FragmentTypeDefinition {
   type: string

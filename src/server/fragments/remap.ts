@@ -1,4 +1,4 @@
-import type { Fragment, Associations } from './schema'
+import type { Fragment, Associations } from '@/contracts/story'
 
 /**
  * ID remapping helpers shared by the story-archive importer and any other

@@ -71,11 +71,6 @@ async function readProjectFile(dataDir: string, storyId: string): Promise<Projec
   try {
     const raw = await readFile(path, 'utf-8')
     const parsed = JSON.parse(raw) as ProjectUsage
-    // Migrate older format that lacked byModel at top level or per-source
-    if (!parsed.byModel) parsed.byModel = {}
-    for (const key of Object.keys(parsed.sources)) {
-      if (!parsed.sources[key].byModel) parsed.sources[key].byModel = {}
-    }
     return parsed
   } catch {
     return emptyProjectUsage()

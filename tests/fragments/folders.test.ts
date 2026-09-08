@@ -12,7 +12,7 @@ import {
   assignFragment,
   assignFragmentsBulk,
 } from '@/server/fragments/folders'
-import type { StoryMeta } from '@/server/fragments/schema'
+import type { StoryMeta } from '@/contracts/story'
 
 let dataDir: string
 let cleanup: () => Promise<void>
@@ -179,16 +179,4 @@ describe('folders', () => {
     expect(assignments).toEqual({})
   })
 
-  it('migrates old folders.json without assignments field', async () => {
-    // Simulate old format
-    const { writeFile } = await import('node:fs/promises')
-    const { join } = await import('node:path')
-    const path = join(dataDir, 'stories', 'story-1', 'folders.json')
-    await writeFile(path, JSON.stringify({ folders: [{ id: 'fld-test', name: 'Old', order: 0 }] }))
-
-    const folders = await listFolders(dataDir, 'story-1')
-    expect(folders).toHaveLength(1)
-    const assignments = await getAssignments(dataDir, 'story-1')
-    expect(assignments).toEqual({})
-  })
 })

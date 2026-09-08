@@ -1,4 +1,4 @@
-import type { Fragment } from '../fragments/schema'
+import type { Fragment } from '@/contracts/story'
 import type { ContextBlock } from './context-builder'
 import { fragmentTagPattern } from './fragment-tag'
 

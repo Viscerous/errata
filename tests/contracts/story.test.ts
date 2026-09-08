@@ -1,26 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import {
-  BranchesIndexSchema as ContractBranchesIndexSchema,
-  FragmentSchema as ContractFragmentSchema,
   ProseChainResponseSchema,
   StoredProseChainSchema,
-  StoryMetaSchema as ContractStoryMetaSchema,
-} from '@/contracts/story'
-import {
-  BranchesIndexSchema,
-  FragmentSchema,
-  ProseChainSchema,
   StoryMetaSchema,
-} from '@/server/fragments/schema'
+} from '@/contracts/story'
 
 describe('shared story contracts', () => {
-  it('keeps the original server path as a direct compatibility façade', () => {
-    expect(FragmentSchema).toBe(ContractFragmentSchema)
-    expect(StoryMetaSchema).toBe(ContractStoryMetaSchema)
-    expect(BranchesIndexSchema).toBe(ContractBranchesIndexSchema)
-    expect(ProseChainSchema).toBe(StoredProseChainSchema)
-  })
-
   it('distinguishes stored fragment IDs from the expanded API response', () => {
     const stored = {
       entries: [{ proseFragments: ['pr-a1b2'], active: 'pr-a1b2' }],
@@ -45,7 +30,7 @@ describe('shared story contracts', () => {
   })
 
   it('exposes current story-setting defaults from the canonical schema', () => {
-    const story = ContractStoryMetaSchema.parse({
+    const story = StoryMetaSchema.parse({
       id: 'story-contract',
       name: 'Contract test',
       description: '',
@@ -66,17 +51,17 @@ describe('shared story contracts', () => {
       createdAt: '2026-01-01T00:00:00.000Z',
       updatedAt: '2026-01-01T00:00:00.000Z',
     }
-    const parsed = ContractStoryMetaSchema.parse({
+    const parsed = StoryMetaSchema.parse({
       ...base,
       settings: { modelOverrides: { 'generation.writer': { topP: 0.9, topK: 64 } } },
     })
 
     expect(parsed.settings.modelOverrides['generation.writer']).toMatchObject({ topP: 0.9, topK: 64 })
-    expect(ContractStoryMetaSchema.safeParse({
+    expect(StoryMetaSchema.safeParse({
       ...base,
       settings: { modelOverrides: { generation: { topP: 1.1 } } },
     }).success).toBe(false)
-    expect(ContractStoryMetaSchema.safeParse({
+    expect(StoryMetaSchema.safeParse({
       ...base,
       settings: { modelOverrides: { generation: { topK: 0 } } },
     }).success).toBe(false)

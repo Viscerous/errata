@@ -310,10 +310,12 @@ describe('librarian API routes', () => {
         fragmentChangeProposals: [
           {
             title: 'Add dragon lore',
+            proposalKind: 'new-fragment',
             operations: [{ operationId: 'op-1', action: 'create_fragment', type: 'knowledge', name: 'Dragon Lore', description: 'Dragons breathe fire', content: 'Full details about dragons.' }],
             validation: [{ operationId: 'op-1', action: 'create_fragment', status: 'valid' }],
           },
           {
+            proposalKind: 'new-fragment',
             operations: [{ operationId: 'op-1', action: 'create_fragment', type: 'character', name: 'Hero', description: 'Main character', content: 'Hero backstory.' }],
             validation: [{ operationId: 'op-1', action: 'create_fragment', status: 'valid' }],
           },
@@ -344,6 +346,7 @@ describe('librarian API routes', () => {
       await saveAnalysis(dataDir, storyId, makeAnalysis({
         id: 'analysis-revert-create',
         fragmentChangeProposals: [{
+          proposalKind: 'new-fragment',
           operations: [{ operationId: 'op-1', action: 'create_fragment', type: 'knowledge', name: 'Dragon Lore', description: 'Dragons breathe fire', content: 'Full details about dragons.' }],
           validation: [{ operationId: 'op-1', action: 'create_fragment', status: 'valid' }],
         }],
@@ -398,6 +401,7 @@ describe('librarian API routes', () => {
       await saveAnalysis(dataDir, storyId, makeAnalysis({
         id: 'analysis-target-update',
         fragmentChangeProposals: [{
+          proposalKind: 'correction',
           operations: [{
             operationId: 'op-1',
             action: 'set_fields',
@@ -449,6 +453,7 @@ describe('librarian API routes', () => {
       await saveAnalysis(dataDir, storyId, makeAnalysis({
         id: 'analysis-revert-update',
         fragmentChangeProposals: [{
+          proposalKind: 'correction',
           operations: [{
             operationId: 'op-1',
             action: 'set_fields',
@@ -552,6 +557,7 @@ describe('librarian API routes', () => {
       await saveAnalysis(dataDir, storyId, makeAnalysis({
         id: 'analysis-target-custom-update',
         fragmentChangeProposals: [{
+          proposalKind: 'correction',
           operations: [{
             operationId: 'op-1',
             action: 'set_fields',
@@ -604,6 +610,7 @@ describe('librarian API routes', () => {
       await saveAnalysis(dataDir, storyId, makeAnalysis({
         id: 'analysis-edit-proposal',
         fragmentChangeProposals: [{
+          proposalKind: 'correction',
           operations: [{
             operationId: 'op-1',
             action: 'replace_text',
@@ -655,6 +662,7 @@ describe('librarian API routes', () => {
       await saveAnalysis(dataDir, storyId, makeAnalysis({
         id: 'analysis-stale-proposal',
         fragmentChangeProposals: [{
+          proposalKind: 'correction',
           operations: [{
             operationId: 'op-stale',
             action: 'replace_text',
@@ -688,69 +696,6 @@ describe('librarian API routes', () => {
       expect(data.analysis.fragmentChangeProposals[0].staleReason).toContain('oldText was not found')
     })
 
-    it('marks a duplicated sibling proposal stale on accept and revives it on revert', async () => {
-      const now = new Date().toISOString()
-      await createFragment(dataDir, storyId, {
-        id: 'kn-dup',
-        type: 'knowledge',
-        name: 'Harbor District',
-        description: 'Smuggling hub',
-        content: 'The harbor district hosts the story\'s smuggling operation.',
-        tags: [],
-        refs: [],
-        sticky: false,
-        placement: 'user',
-        createdAt: now,
-        updatedAt: now,
-        order: 0,
-        meta: {},
-      })
-
-      // Two proposals carrying the same fact — the shape a propose-retry used to
-      // leave behind. Accepting one must not leave the other pending, because its
-      // accept can only fail with a repeated-paragraph error.
-      const paragraph = 'The Maritime Heritage Initiative branding is now serving as a cover for the smuggling operation across the harbor district.'
-      const appendProposal = (operationId: string) => ({
-        operations: [{
-          operationId,
-          action: 'append_paragraph' as const,
-          fragmentId: 'kn-dup',
-          field: 'content' as const,
-          text: paragraph,
-        }],
-        validation: [{ operationId, action: 'append_paragraph' as const, status: 'valid' as const, target: { fragmentId: 'kn-dup', field: 'content' as const } }],
-      })
-      await saveAnalysis(dataDir, storyId, makeAnalysis({
-        id: 'analysis-dup-sibling',
-        fragmentChangeProposals: [appendProposal('op-a'), appendProposal('op-b')],
-      }))
-
-      const acceptRes = await app.fetch(
-        new Request(`http://localhost/api/stories/${storyId}/librarian/analyses/analysis-dup-sibling/change-proposals/0/accept`, {
-          method: 'POST',
-        }),
-      )
-      expect(acceptRes.status).toBe(200)
-      const accepted = await acceptRes.json()
-      expect(accepted.analysis.fragmentChangeProposals[0].accepted).toBe(true)
-      expect(accepted.analysis.fragmentChangeProposals[1]).toMatchObject({
-        stale: true,
-        dismissed: true,
-      })
-      expect(accepted.analysis.fragmentChangeProposals[1].staleReason).toContain('repeat the same paragraph')
-
-      // Reverting removes the duplication, so the sibling becomes applicable again.
-      const revertRes = await app.fetch(
-        new Request(`http://localhost/api/stories/${storyId}/librarian/analyses/analysis-dup-sibling/change-proposals/0/revert`, {
-          method: 'POST',
-        }),
-      )
-      expect(revertRes.status).toBe(200)
-      const reverted = await revertRes.json()
-      expect(reverted.analysis.fragmentChangeProposals[1].stale).toBeUndefined()
-      expect(reverted.analysis.fragmentChangeProposals[1].dismissed).toBe(false)
-    })
-
     it('returns 409 when reverting an accepted update after the fragment changed', async () => {
       const now = new Date().toISOString()
       await createFragment(dataDir, storyId, {
@@ -772,6 +717,7 @@ describe('librarian API routes', () => {
       await saveAnalysis(dataDir, storyId, makeAnalysis({
         id: 'analysis-revert-drift',
         fragmentChangeProposals: [{
+          proposalKind: 'correction',
           operations: [{
             operationId: 'op-1',
             action: 'replace_text',
@@ -822,6 +768,7 @@ describe('librarian API routes', () => {
       await saveAnalysis(dataDir, storyId, makeAnalysis({
         id: 'analysis-badidx',
         fragmentChangeProposals: [{
+          proposalKind: 'new-fragment',
           operations: [{ operationId: 'op-1', action: 'create_fragment', type: 'knowledge', name: 'Test', description: 'Test', content: 'Test' }],
           validation: [{ operationId: 'op-1', action: 'create_fragment', status: 'valid' }],
         }],
@@ -841,6 +788,7 @@ describe('librarian API routes', () => {
       await saveAnalysis(dataDir, storyId, makeAnalysis({
         id: 'analysis-negidx',
         fragmentChangeProposals: [{
+          proposalKind: 'new-fragment',
           operations: [{ operationId: 'op-1', action: 'create_fragment', type: 'knowledge', name: 'Test', description: 'Test', content: 'Test' }],
           validation: [{ operationId: 'op-1', action: 'create_fragment', status: 'valid' }],
         }],

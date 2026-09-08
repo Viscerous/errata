@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createStory } from '@/server/fragments/storage'
-import type { Fragment, StoryMeta } from '@/server/fragments/schema'
+import type { Fragment, StoryMeta } from '@/contracts/story'
 import { analysisSourceRevision } from '@/server/librarian/continuity-source'
 import {
   buildSummaryProjection,

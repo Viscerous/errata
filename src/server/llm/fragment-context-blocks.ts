@@ -1,6 +1,6 @@
 import { uniqueFragments } from './utils'
 import { registry } from '../fragments/registry'
-import { FRAGMENT_TYPES, type Fragment, type StoryMeta } from '../fragments/schema'
+import { FRAGMENT_TYPES, type Fragment, type StoryMeta } from '@/contracts/story'
 import type { ContextBlock } from './context-builder'
 import type { AttentionSelection, ContextSelectionSource } from './context-selection'
 

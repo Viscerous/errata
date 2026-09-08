@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { createTempDir, seedTestProvider, makeTestSettings } from '../setup'
 import { createStory, createFragment } from '@/server/fragments/storage'
-import type { StoryMeta, Fragment } from '@/server/fragments/schema'
+import type { StoryMeta, Fragment } from '@/contracts/story'
 import { listActiveAgents } from '@/server/agents/active-registry'
 import { listAgentRuns, clearAgentRuns } from '@/server/agents/traces'
 

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createTempDir, makeTestSettings, seedTestProvider } from '../setup'
 import { createFragment, createStory, getStory, listFragments } from '@/server/fragments/storage'
 import { syncStorySetupSnapshot } from '@/server/story-setup/sync'
-import type { StoryMeta } from '@/server/fragments/schema'
+import type { StoryMeta } from '@/contracts/story'
 
 const { mockAgentCtor, mockAgentStream } = vi.hoisted(() => ({
   mockAgentCtor: vi.fn(),

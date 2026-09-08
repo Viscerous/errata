@@ -31,7 +31,3 @@ export interface AgentStreamResult {
 export interface ResolvedAgentStreamResult extends AgentStreamResult {
   completion: Promise<ResolvedAgentStreamCompletion>
 }
-
-// Backwards-compat aliases
-export type ChatStreamEvent = AgentStreamEvent
-export type ChatResult = AgentStreamResult

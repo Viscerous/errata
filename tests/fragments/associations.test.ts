@@ -11,7 +11,7 @@ import {
   getRefs,
   getBackRefs,
 } from '@/server/fragments/associations'
-import type { StoryMeta } from '@/server/fragments/schema'
+import type { StoryMeta } from '@/contracts/story'
 
 let dataDir: string
 let cleanup: () => Promise<void>

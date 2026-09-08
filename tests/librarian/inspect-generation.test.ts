@@ -3,7 +3,7 @@ import { createTempDir, makeTestSettings } from '../setup'
 import { createStory, createFragment } from '@/server/fragments/storage'
 import { saveGenerationLog, findGenerationLogByFragment, type GenerationLog } from '@/server/llm/generation-logs'
 import { formatGenerationInspection, inspectGenerationForFragment } from '@/server/librarian/inspect-generation'
-import type { StoryMeta, Fragment } from '@/server/fragments/schema'
+import type { StoryMeta, Fragment } from '@/contracts/story'
 
 const storyId = 'story-inspect'
 const now = '2025-01-01T00:00:00.000Z'

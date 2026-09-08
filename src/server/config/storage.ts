@@ -31,13 +31,7 @@ async function readSecretsFile(dataDir: string): Promise<SecretsFile> {
   return SecretsFileSchema.parse(raw ?? {})
 }
 
-/**
- * Join config.json with secrets.json.
- *
- * Configs written before the split still carry their secrets inline; those are
- * honoured as a fallback so an un-migrated install keeps working, and the first
- * write clears them. The secrets file wins wherever it has a value.
- */
+/** Join public configuration with its separately stored secrets. */
 export async function getGlobalConfig(dataDir: string): Promise<GlobalConfig> {
   const [raw, secrets] = await Promise.all([
     readJsonFile(configPath(dataDir)),
@@ -48,10 +42,10 @@ export async function getGlobalConfig(dataDir: string): Promise<GlobalConfig> {
     ...config,
     providers: config.providers.map((provider) => ({
       ...provider,
-      apiKey: secrets.providerApiKeys[provider.id] || provider.apiKey,
+      apiKey: secrets.providerApiKeys[provider.id] ?? '',
     })),
-    sharing: { ...config.sharing, passwordHash: secrets.sharingPasswordHash || config.sharing.passwordHash },
-    erratanet: { ...config.erratanet, token: secrets.erratanetToken || config.erratanet.token },
+    sharing: { ...config.sharing, passwordHash: secrets.sharingPasswordHash },
+    erratanet: { ...config.erratanet, token: secrets.erratanetToken },
   }
 }
 
@@ -82,51 +76,6 @@ export async function mutateGlobalConfig(
     mutate(config)
     await writeGlobalConfigUnlocked(dataDir, config)
     return config
-  })
-}
-
-export interface SecretsMigrationResult {
-  migrated: boolean
-  providerKeys: number
-  erratanetToken: boolean
-  sharingPasswordHash: boolean
-}
-
-function isNonEmptyString(value: unknown): boolean {
-  return typeof value === 'string' && value.length > 0
-}
-
-/** Secrets left inline in a config.json written before the split. */
-function countInlineSecrets(raw: unknown): Omit<SecretsMigrationResult, 'migrated'> {
-  const obj = raw as {
-    providers?: Array<{ apiKey?: unknown }>
-    erratanet?: { token?: unknown }
-    sharing?: { passwordHash?: unknown }
-  } | null
-  const providers = Array.isArray(obj?.providers) ? obj.providers : []
-  return {
-    providerKeys: providers.filter((p) => isNonEmptyString(p?.apiKey)).length,
-    erratanetToken: isNonEmptyString(obj?.erratanet?.token),
-    sharingPasswordHash: isNonEmptyString(obj?.sharing?.passwordHash),
-  }
-}
-
-/**
- * Lift secrets out of a pre-split config.json into secrets.json and rewrite
- * config.json without them.
- *
- * The plaintext is not kept anywhere: the point is that the old file stops
- * holding secrets, and a backup beside it would defeat that.
- */
-export async function migrateLegacyPlaintextSecrets(dataDir: string): Promise<SecretsMigrationResult> {
-  return withStorageLock(configPath(dataDir), async () => {
-    const inline = countInlineSecrets(await readJsonFile(configPath(dataDir)))
-    if (!inline.providerKeys && !inline.erratanetToken && !inline.sharingPasswordHash) {
-      return { migrated: false, ...inline }
-    }
-    // The join folds the inline values in; writing the result splits them out.
-    await writeGlobalConfigUnlocked(dataDir, await getGlobalConfig(dataDir))
-    return { migrated: true, ...inline }
   })
 }
 

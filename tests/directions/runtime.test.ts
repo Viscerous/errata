@@ -4,7 +4,7 @@ import { createStory } from '@/server/fragments/storage'
 import { saveAgentBlockConfig } from '@/server/agents/agent-block-storage'
 import { ensureCoreAgentsRegistered } from '@/server/agents'
 import { proposeDirections } from '@/server/directions/suggest'
-import type { StoryMeta } from '@/server/fragments/schema'
+import type { StoryMeta } from '@/contracts/story'
 
 const { mockAgentConfig, mockStreamArgs } = vi.hoisted(() => ({
   mockAgentConfig: vi.fn(),

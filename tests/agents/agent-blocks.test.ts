@@ -9,7 +9,7 @@ import { ensureCoreAgentsRegistered } from '@/server/agents'
 import { agentBlockRegistry } from '@/server/agents/agent-block-registry'
 import { modelRoleRegistry } from '@/server/agents/model-role-registry'
 import type { AgentBlockContext } from '@/server/agents/agent-block-context'
-import type { Fragment, StoryMeta } from '@/server/fragments/schema'
+import type { Fragment, StoryMeta } from '@/contracts/story'
 import { buildAnalyzeSystemPrompt } from '@/server/librarian/blocks'
 
 const now = new Date().toISOString()
