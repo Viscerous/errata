@@ -192,7 +192,7 @@ describe('Librarian Analyze Blocks', () => {
     const memory = blocks.find((block) => block.id === 'continuity-memory')
     expect(memory?.content).toContain('alice.location | Alice — location | north gate')
     expect(memory?.content).toContain('missing-key | The missing key | dormant')
-    expect(memory?.content).toContain('Thread omission retains prior prominence')
+    expect(memory?.content).toContain('Opening or advancing a thread promotes it automatically')
   })
 
   it('renders recent-context characters in full and drops them from the catalog', () => {

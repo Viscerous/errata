@@ -310,40 +310,14 @@ function sceneNeedsEvidence(scene: SceneInput): boolean {
     || scene.elapsed !== undefined
 }
 
-/** The live registry, so an operation can pick an identity rather than spell one. */
-/** A bare key is accepted so a caller with nothing to number can stay terse. */
-export type ContinuityKeyInput = string | (Omit<RegistryEntry, 'index' | 'label'> & { index?: number; label?: string })
+/** The current live registry; model-facing entry numbers come directly from it. */
+export type ContinuityKeyRegistry = Partial<ContinuityRegistry>
 
-export interface ContinuityKeyRegistry {
-  state?: ContinuityKeyInput[]
-  thread?: ContinuityKeyInput[]
-  knowledge?: ContinuityKeyInput[]
-}
-
-/**
- * Canonicalize the registry once, at the boundary. Every lookup below then reads
- * one shape with normalized keys, instead of each re-deciding what a bare string
- * means and whether a key still needs normalizing.
- */
-function normalizeRegistry(registry: ContinuityKeyRegistry): ContinuityRegistry {
-  const lane = (entries: ContinuityKeyInput[] | undefined): RegistryEntry[] => (
-    (entries ?? []).map((entry, position) => {
-      const reference = typeof entry === 'string' ? { key: entry } : entry
-      return {
-        index: reference.index ?? position + 1,
-        key: normalizeContinuityKey(reference.key),
-        label: reference.label ?? '',
-        ...(reference.scope ? { scope: reference.scope } : {}),
-        ...(reference.subject ? { subject: reference.subject } : {}),
-        ...(reference.facet ? { facet: reference.facet } : {}),
-        ...(reference.slot ? { slot: reference.slot } : {}),
-      }
-    }).filter((entry) => entry.key)
-  )
+function completeRegistry(registry: ContinuityKeyRegistry): ContinuityRegistry {
   return {
-    state: lane(registry.state),
-    thread: lane(registry.thread),
-    knowledge: lane(registry.knowledge),
+    state: registry.state ?? [],
+    thread: registry.thread ?? [],
+    knowledge: registry.knowledge ?? [],
   }
 }
 
@@ -379,8 +353,7 @@ const MAX_DERIVED_KEY_CHARS = 64
  * entry, or spell the key. Every addressable field in the report shares this
  * shape so one idea is not two shapes within one schema.
  */
-function registryAddressFields<const T extends string>(
-  entryField: T,
+function registryAddressFields(
   entryDescription: string,
   keyDescription: string,
 ) {
@@ -390,14 +363,13 @@ function registryAddressFields<const T extends string>(
     // Pointing beats spelling for the same reason it does with sentences: the
     // number is verifiable, where a spelled key is readily invented and matches
     // nothing.
-    [entryField]: entrySchema,
+    entry: entrySchema,
     key: keySchema,
-  } as unknown as Record<T, typeof entrySchema> & { key: typeof keySchema }
+  }
 }
 
 function continuityKeyFields(
   existing: RegistryEntry[] | undefined,
-  entryField: 'stateEntry' | 'threadEntry' | 'knowledgeEntry',
   noun: string,
   example: string,
   creationAction: 'set' | 'open' | 'learn',
@@ -410,7 +382,6 @@ function continuityKeyFields(
     ? ` Reuse when applicable: ${unique.slice(0, MAX_STEERED_REGISTRY_KEYS).join(', ')}.`
     : ''
   return registryAddressFields(
-    entryField,
     `Registry entry to update; omit when ${creationAction} creates one.`,
     `Existing ${noun} key if no entry number is used.${reuse} Omit both to derive a new key; otherwise use snake_case without IDs (for example ${example}).`,
   )
@@ -418,7 +389,7 @@ function continuityKeyFields(
 
 function stateOperationSchemaFor(registry: ContinuityRegistry) {
   return z.object({
-    ...continuityKeyFields(registry.state, 'stateEntry', 'state identity', 'captivity_status', 'set'),
+    ...continuityKeyFields(registry.state, 'state identity', 'captivity_status', 'set'),
     action: z.enum(['set', 'clear']),
     subject: z.object({
       label: z.string().trim().min(1).max(160),
@@ -441,7 +412,7 @@ function stateOperationSchemaFor(registry: ContinuityRegistry) {
 
 function threadOperationSchemaFor(registry: ContinuityRegistry) {
   return z.object({
-    ...continuityKeyFields(registry.thread, 'threadEntry', 'unresolved question', 'who_betrayed_the_house', 'open'),
+    ...continuityKeyFields(registry.thread, 'unresolved question', 'who_betrayed_the_house', 'open'),
     action: z.enum(['open', 'advance', 'resolve', 'abandon']),
     label: z.string().trim().max(240).optional()
       .describe('Optional plain-language question; defaults to the key.'),
@@ -455,30 +426,10 @@ function threadOperationSchemaFor(registry: ContinuityRegistry) {
   })
 }
 
-/**
- * Focus for threads this passage did *not* operate on.
- *
- * It used to cover every live thread, so most focus arrays were just the
- * operation list restated a second time, and an "omit the key when the arrays
- * align one-for-one" rule existed to make that restatement bearable — which
- * silently dropped entries whenever the alignment did not actually hold. An
- * untouched thread is by definition already in the registry, so it is addressed
- * the same way every other continuity identity is.
- */
-const threadFocusSchema = z.object({
-  ...registryAddressFields(
-    'threadEntry',
-    'Registry entry for an untouched thread.',
-    'Existing open thread key if no entry number is used; focus cannot create a thread.',
-  ),
-  visibility: z.enum(['foreground', 'background', 'dormant'])
-    .describe('Set dormant to remove an unresolved thread from immediate writing context.'),
-})
-
 function knowledgeOperationSchemaFor(registry: ContinuityRegistry) {
   return z.object({
     characterId: FragmentIdSchema,
-    ...continuityKeyFields(registry.knowledge, 'knowledgeEntry', 'fact identity', 'queen_identity', 'learn'),
+    ...continuityKeyFields(registry.knowledge, 'fact identity', 'queen_identity', 'learn'),
     action: z.enum(['learn', 'correct', 'forget']),
     fact: z.string().trim().max(400).optional()
       .describe('Durable character-specific learning. Preserve source, inference, and temporal limits; do not turn expressions into general willingness.'),
@@ -488,7 +439,7 @@ function knowledgeOperationSchemaFor(registry: ContinuityRegistry) {
 }
 
 export function buildReportAnalysisInputSchema(input: ContinuityKeyRegistry = {}) {
-  const registry = normalizeRegistry(input)
+  const registry = completeRegistry(input)
   return z.object({
     // Accept verbosity here and normalize it in execute. Rejecting the entire
     // structured report for an overlong summary makes reasoning models retain
@@ -521,8 +472,6 @@ export function buildReportAnalysisInputSchema(input: ContinuityKeyRegistry = {}
       .describe('Persistent conditions: set replaces, clear ends; use scene scope unless it must survive a cut.'),
     threadOperations: z.array(threadOperationSchemaFor(registry)).max(80).optional()
       .describe('Lifecycle changes for unresolved questions; never repurpose keys.'),
-    threadFocus: z.array(threadFocusSchema).max(80).optional()
-      .describe('Prominence changes for untouched threads only; do not repeat threadOperations.'),
     knowledgeOperations: z.array(knowledgeOperationSchemaFor(registry)).max(120).optional()
       .describe('Durable character-specific learning with attributed and temporal limits.'),
   })
@@ -687,11 +636,11 @@ function registryKeyAtIndex(
 /** Resolve the exact state definition carried by an existing registry address. */
 function registeredStateDefinition(
   entries: RegistryEntry[],
-  operation: { stateEntry?: unknown; key?: unknown },
+  operation: { entry?: unknown; key?: unknown },
   resolvedKey: string,
 ): Pick<RegistryEntry, 'subject' | 'facet' | 'slot'> | undefined {
-  const byEntry = typeof operation.stateEntry === 'number' && Number.isInteger(operation.stateEntry)
-    ? entries.filter((candidate) => candidate.index === operation.stateEntry)
+  const byEntry = typeof operation.entry === 'number' && Number.isInteger(operation.entry)
+    ? entries.filter((candidate) => candidate.index === operation.entry)
     : []
   const candidates = byEntry.length > 0
     ? byEntry
@@ -784,7 +733,6 @@ type NormalizedContinuityInput = {
   scene: NonNullable<ReportAnalysisInput['scene']>
   stateOperations: NonNullable<ReportAnalysisInput['stateOperations']>
   threadOperations: NonNullable<ReportAnalysisInput['threadOperations']>
-  threadFocus: NonNullable<ReportAnalysisInput['threadFocus']>
   knowledgeOperations: NonNullable<ReportAnalysisInput['knowledgeOperations']>
 }
 
@@ -821,7 +769,7 @@ function normalizeContinuityProjection(
     const derivedStateIdentity = operation.subject && operation.facet
       ? [derivedContinuityKey(operation.subject.label), operation.facet, operation.slot].filter(Boolean).join('_')
       : undefined
-    const identity = resolveIdentity({ ...operation, entry: operation.stateEntry }, derivedStateIdentity, {
+    const identity = resolveIdentity(operation, derivedStateIdentity, {
       lane: 'state',
       allowDerived,
       structuralDerivation: true,
@@ -898,10 +846,9 @@ function normalizeContinuityProjection(
   // Assembled as the operations resolve, so the fold receives the prominence
   // delta without the model having to state each acted-on thread twice.
   const threadFocus: ThreadFocus[] = []
-  const closedThisPass = new Set<string>()
   for (const { visibility, ...operation } of input.threadOperations) {
     const allowDerived = operation.action === 'open'
-    const identity = resolveIdentity({ ...operation, entry: operation.threadEntry }, operation.label || operation.note, {
+    const identity = resolveIdentity(operation, operation.label || operation.note, {
       lane: 'thread',
       allowDerived,
       live: liveThreads,
@@ -935,8 +882,6 @@ function normalizeContinuityProjection(
     // and cannot be.
     if (operation.action === 'open' || operation.action === 'advance') {
       threadFocus.push({ threadKey, visibility: visibility ?? 'foreground' })
-    } else {
-      closedThisPass.add(threadKey)
     }
   }
 
@@ -949,7 +894,7 @@ function normalizeContinuityProjection(
   const knowledgeOperations: KnowledgeOperation[] = []
   for (const operation of input.knowledgeOperations) {
     const allowDerived = operation.action === 'learn'
-    const identity = resolveIdentity({ ...operation, entry: operation.knowledgeEntry }, operation.fact, {
+    const identity = resolveIdentity(operation, operation.fact, {
       lane: 'knowledge',
       allowDerived,
       live: liveKnowledge,
@@ -985,40 +930,6 @@ function normalizeContinuityProjection(
       acquisition: operation.acquisition ?? 'other',
       ...resolved.evidence,
     })
-  }
-
-  for (const focus of input.threadFocus) {
-    const threadKey = registryKeyAtIndex(registry.thread, focus.threadEntry)
-      || normalizeContinuityKey(focus.key ?? '')
-    if (!threadKey) {
-      skipped.push({
-        kind: 'thread-focus',
-        key: '',
-        reason: 'A thread focus entry must cite a Continuity Registry entry number or name its thread key.',
-      })
-      continue
-    }
-    // Focus adjusts the prominence of a thread that is open after this passage;
-    // it can neither introduce one nor address a thread closed by this passage. Either way the
-    // stored entry would be one the fold can never match — inert, and reported
-    // nowhere. The operations lane closed exactly this hole.
-    if (closedThisPass.has(threadKey)) {
-      skipped.push({
-        kind: 'thread-focus',
-        key: threadKey,
-        reason: `This passage closed ${threadKey}, so it no longer needs a prominence update.`,
-      })
-      continue
-    }
-    if (!liveThreads.has(threadKey)) {
-      skipped.push({
-        kind: 'thread-focus',
-        key: threadKey,
-        reason: `No thread is open under ${threadKey}, so this focus entry would change nothing. Open it with a thread operation, or cite the entry number of the one you mean.`,
-      })
-      continue
-    }
-    threadFocus.push({ threadKey, visibility: focus.visibility })
   }
 
   const storedScene = (scene.evidenceSegments?.length ?? 0) > 0
@@ -1409,7 +1320,7 @@ export function createAnalysisTools(
    */
   const unfinishedProposalToolNames = new Set<string>()
   // Normalized once here; every lookup below reads the same shape and numbering.
-  const continuityRegistry = normalizeRegistry(opts?.continuityKeys ?? {})
+  const continuityRegistry = completeRegistry(opts?.continuityKeys ?? {})
   /** Which continuity lane owns a key, so a correction aimed at one can say so. */
   const continuityKeyOwners = new Map<string, 'state' | 'thread' | 'knowledge'>()
   for (const lane of ['state', 'thread', 'knowledge'] as const) {
@@ -1432,7 +1343,6 @@ export function createAnalysisTools(
           scene = { transition: 'uncertain', evidenceSegments: [] },
           stateOperations = [],
           threadOperations = [],
-          threadFocus = [],
           knowledgeOperations = [],
         } = input
         // Retry payloads are patches. Omission retains accepted work, while an
@@ -1443,7 +1353,6 @@ export function createAnalysisTools(
         if (input.scene !== undefined && !hasSceneClaim(scene)) withdrawnContinuityKinds.add('scene')
         if (input.stateOperations?.length === 0) withdrawnContinuityKinds.add('state')
         if (input.threadOperations?.length === 0) withdrawnContinuityKinds.add('thread')
-        if (input.threadFocus?.length === 0) withdrawnContinuityKinds.add('thread-focus')
         if (input.knowledgeOperations?.length === 0) withdrawnContinuityKinds.add('knowledge')
         const normalizedSummary = normalizeAnalysisSummary(summary)
         // An empty report must not be a *schema* rejection — that makes small
@@ -1461,7 +1370,6 @@ export function createAnalysisTools(
           Number(hasSceneClaim(scene)) +
           stateOperations.length +
           threadOperations.length +
-          threadFocus.length +
           knowledgeOperations.length
         if (signalCount === 0) {
           return {
@@ -1513,7 +1421,6 @@ export function createAnalysisTools(
           scene,
           stateOperations,
           threadOperations,
-          threadFocus,
           knowledgeOperations,
         }, proseSegments, collector.continuityProjection, continuityRegistry)
         collector.continuityProjection = mergeContinuityProjection(
@@ -1540,9 +1447,6 @@ export function createAnalysisTools(
         }
         for (const operation of normalizedProjection.projection.threadOperations) {
           acceptedContinuity.add(`thread\u0000${operation.threadKey}`)
-        }
-        for (const focus of normalizedProjection.projection.threadFocus) {
-          acceptedContinuity.add(`thread-focus\u0000${focus.threadKey}`)
         }
         for (const operation of normalizedProjection.projection.knowledgeOperations) {
           acceptedContinuity.add(`knowledge\u0000${operation.characterId}:${operation.knowledgeKey}`)

@@ -387,7 +387,9 @@ describe('analysis-tools', () => {
       storyId: 'story-test',
       proseFragmentId: 'pr-0001',
       disableDirections: true,
-      continuityKeys: { state: ['victoria_physical_state_post_waters'] },
+      continuityKeys: {
+        state: [{ index: 1, key: 'victoria_physical_state_post_waters', label: 'Victoria physical state' }],
+      },
     })
 
     const atKey = await tools.proposeRecordCorrections.execute!({
@@ -1619,6 +1621,7 @@ describe('continuity keys steered by the live registry', () => {
     const shape = buildReportAnalysisInputSchema(registry).shape as any
     return {
       state: Object.keys(elementShape(shape.stateOperations)),
+      thread: Object.keys(elementShape(shape.threadOperations)),
       knowledge: Object.keys(elementShape(shape.knowledgeOperations)),
     }
   }
@@ -1626,21 +1629,36 @@ describe('continuity keys steered by the live registry', () => {
     (elementShape((buildReportAnalysisInputSchema(registry).shape as any).stateOperations).key.description ?? '') as string
   /* eslint-enable @typescript-eslint/no-explicit-any */
 
-  it('exposes one key field whether or not the registry has entries', () => {
-    for (const registry of [{}, { state: ['captivity_status'] }]) {
-      expect(keyFields(registry).state).toContain('key')
-      expect(keyFields(registry).state).not.toContain('existingKey')
-      expect(keyFields(registry).state).not.toContain('newKey')
+  it('uses the same entry-or-key address in every continuity lane', () => {
+    for (const registry of [{}, {
+      state: [{ index: 1, key: 'captivity_status', label: 'Captivity status' }],
+    }]) {
+      for (const fields of Object.values(keyFields(registry))) {
+        expect(fields).toContain('entry')
+        expect(fields).toContain('key')
+        expect(fields).not.toContain('stateEntry')
+        expect(fields).not.toContain('threadEntry')
+        expect(fields).not.toContain('knowledgeEntry')
+        expect(fields).not.toContain('existingKey')
+        expect(fields).not.toContain('newKey')
+      }
+      expect(Object.keys(buildReportAnalysisInputSchema(registry).shape)).not.toContain('threadFocus')
     }
   })
 
   it('names the live keys at the point of use without making them the only legal values', () => {
-    const schema = buildReportAnalysisInputSchema({ state: ['captivity_status', 'location'] })
+    const registry = {
+      state: [
+        { index: 1, key: 'captivity_status', label: 'Captivity status' },
+        { index: 2, key: 'location', label: 'Location' },
+      ],
+    }
+    const schema = buildReportAnalysisInputSchema(registry)
     const stateOperation = (key: unknown) => ({
       stateOperations: [{ key, action: 'set', subject: { key: 'victoria', label: 'Victoria' }, facet: 'status', value: 'held', evidenceSegments: [1] }],
     })
 
-    expect(stateKeyDescription({ state: ['captivity_status', 'location'] }))
+    expect(stateKeyDescription(registry))
       .toContain('captivity_status, location')
     expect(stateKeyDescription({})).not.toContain('Reuse one of these')
 
@@ -1665,10 +1683,14 @@ describe('continuity keys steered by the live registry', () => {
       dataDir: '/tmp',
       storyId: 'story-test',
       proseFragmentId: 'pr-0001',
-      continuityKeys: { knowledge: ['queen_identity'] },
+      continuityKeys: {
+        knowledge: [{ index: 1, key: 'queen_identity', label: 'Queen identity', scope: 'ch-0001' }],
+      },
     })
 
-    await tools.reportAnalysis.execute!(await buildReportAnalysisInputSchema({ knowledge: ['queen_identity'] }).parseAsync({
+    await tools.reportAnalysis.execute!(await buildReportAnalysisInputSchema({
+      knowledge: [{ index: 1, key: 'queen_identity', label: 'Queen identity', scope: 'ch-0001' }],
+    }).parseAsync({
       summary: 'She is the queen.',
       knowledgeOperations: [{
         characterId: 'ch-0001',
@@ -1731,11 +1753,11 @@ describe('continuity keys steered by the live registry', () => {
       return null
     })
     const continuityKeys = {
-      state: [{ key: 'medicine_track_activation_status', label: 'Medicine track clinical board' }],
-      thread: [{ key: 'dutch_coordination_framework_negotiation', label: 'Dutch coordination framework negotiation' }],
+      state: [{ index: 1, key: 'medicine_track_activation_status', label: 'Medicine track clinical board' }],
+      thread: [{ index: 1, key: 'dutch_coordination_framework_negotiation', label: 'Dutch coordination framework negotiation' }],
       knowledge: [
-        { key: 'alice_corrected_fact', label: 'The board remained active.', scope: 'ch-0001' },
-        { key: 'someone_else_corrected_fact', label: 'The board remained active.', scope: 'ch-0002' },
+        { index: 1, key: 'alice_corrected_fact', label: 'The board remained active.', scope: 'ch-0001' },
+        { index: 2, key: 'someone_else_corrected_fact', label: 'The board remained active.', scope: 'ch-0002' },
       ],
     }
     const tools = createAnalysisTools(collector, {
@@ -1746,14 +1768,14 @@ describe('continuity keys steered by the live registry', () => {
       await buildReportAnalysisInputSchema(continuityKeys).parseAsync({
         summary: 'The board stayed active and coordination advanced.',
         stateOperations: [{
-          stateEntry: 1, action: 'set', subject: { label: 'Medicine track clinical board' }, facet: 'status', value: 'active', evidenceSegments: [1],
+          entry: 1, action: 'set', subject: { label: 'Medicine track clinical board' }, facet: 'status', value: 'active', evidenceSegments: [1],
         }],
         // No threadFocus entry: advancing the thread is what puts it in view.
         threadOperations: [{
-          threadEntry: 1, action: 'advance', label: 'Dutch coordination framework negotiation', relatedFragmentIds: [], evidenceSegments: [2],
+          entry: 1, action: 'advance', label: 'Dutch coordination framework negotiation', relatedFragmentIds: [], evidenceSegments: [2],
         }],
         knowledgeOperations: [{
-          knowledgeEntry: 1, characterId: 'ch-0001', action: 'correct', fact: 'The board remained active.', evidenceSegments: [3],
+          entry: 1, characterId: 'ch-0001', action: 'correct', fact: 'The board remained active.', evidenceSegments: [3],
         }],
       }),
       { toolCallId: 'report', messages: [], abortSignal: undefined as unknown as AbortSignal },
@@ -1845,7 +1867,6 @@ describe('continuity keys steered by the live registry', () => {
       knowledgeOperations: [{
         characterId: 'ch-0001', action: 'forget', fact: 'Who damaged the dike.', evidenceSegments: [2],
       }],
-      threadFocus: [{ threadKey: '', visibility: 'foreground' }],
     }), { toolCallId: 'report', messages: [], abortSignal: undefined as unknown as AbortSignal })
 
     expect(collector.continuityProjection.stateOperations).toEqual([])
@@ -1857,11 +1878,10 @@ describe('continuity keys steered by the live registry', () => {
         'A state clear operation must name the existing key; no unambiguous retry or live-registry match was found.',
         'A thread resolve operation must name the existing key; no unambiguous retry or live-registry match was found.',
         'A knowledge forget operation must name the existing key; no unambiguous retry or live-registry match was found.',
-        'A thread focus entry must cite a Continuity Registry entry number or name its thread key.',
       ])
   })
 
-  it('derives thread focus from the operations and reserves the array for untouched threads', async () => {
+  it('derives thread focus from lifecycle operations', async () => {
     const collector = createEmptyCollector()
     const prose = mockFragment({
       id: 'pr-0001',
@@ -1884,56 +1904,19 @@ describe('continuity keys steered by the live registry', () => {
       await buildReportAnalysisInputSchema(continuityKeys).parseAsync({
         summary: 'The ledger question reopened and the vow was kept.',
         threadOperations: [
-          { threadEntry: 1, action: 'advance', relatedFragmentIds: [], evidenceSegments: [2] },
-          { threadEntry: 2, action: 'resolve', relatedFragmentIds: [], evidenceSegments: [3] },
+          { entry: 1, action: 'advance', relatedFragmentIds: [], evidenceSegments: [2] },
+          { entry: 2, action: 'resolve', relatedFragmentIds: [], evidenceSegments: [3] },
         ],
-        // Only the thread this passage never touched needs stating.
-        threadFocus: [{ threadEntry: 3, visibility: 'background' }],
       }),
       { toolCallId: 'report', messages: [], abortSignal: undefined as unknown as AbortSignal },
     )
 
     expect(result).not.toHaveProperty('skippedContinuity')
     expect(collector.continuityProjection.threadFocus).toEqual([
-      // Advanced, so in view by default and never restated by the model.
       { threadKey: 'ledger_question', visibility: 'foreground' },
-      // Untouched, so pointed at by its registry entry.
-      { threadKey: 'missing_heir', visibility: 'background' },
     ])
-    // A resolved thread is gone; it cannot also be in view.
     expect(collector.continuityProjection.threadFocus.map((f) => f.threadKey)).not.toContain('old_vow')
-  })
-
-  it('refuses a focus entry for a thread that is not open', async () => {
-    const collector = createEmptyCollector()
-    const prose = mockFragment({ id: 'pr-0001', type: 'prose', content: 'The gap closed.' })
-    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => id === 'pr-0001' ? prose : null)
-    const continuityKeys = { thread: [{ index: 1, key: 'ledger_question', label: 'Who keeps the ledger' }] }
-    const tools = createAnalysisTools(collector, {
-      dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001', continuityKeys,
-    })
-
-    const result = await tools.reportAnalysis.execute!(
-      await buildReportAnalysisInputSchema(continuityKeys).parseAsync({
-        summary: 'The gap closed.',
-        threadFocus: [
-          { key: 'ledger_question', visibility: 'background' },
-          { key: 'a_thread_nobody_opened', visibility: 'foreground' },
-        ],
-      }),
-      { toolCallId: 'report', messages: [], abortSignal: undefined as unknown as AbortSignal },
-    )
-
-    // Stored, it would have been an entry the fold could never match: inert, and
-    // reported nowhere. Same hole the operations lane already closed.
-    expect(collector.continuityProjection.threadFocus)
-      .toEqual([{ threadKey: 'ledger_question', visibility: 'background' }])
-    expect((result as { skippedContinuity: Array<{ kind: string; key: string }> }).skippedContinuity)
-      .toEqual([{
-        kind: 'thread-focus',
-        key: 'a_thread_nobody_opened',
-        reason: expect.stringContaining('No thread is open under a_thread_nobody_opened'),
-      }])
+    expect(collector.continuityProjection.threadFocus.map((f) => f.threadKey)).not.toContain('missing_heir')
   })
 
   /**
@@ -1970,7 +1953,6 @@ describe('continuity keys steered by the live registry', () => {
           key: 'broken_seal', action: 'open', label: 'Why the seal was broken',
           note: 'Asked aloud', relatedFragmentIds: [], visibility: 'foreground', evidenceSegments: [2],
         }],
-        threadFocus: [{ threadEntry: 1, visibility: 'background' }],
         knowledgeOperations: [{
           characterId: 'ch-0002', key: 'seal_broken', action: 'learn',
           fact: 'The seal is broken.', acquisition: 'told', evidenceSegments: [3],
@@ -1995,30 +1977,6 @@ describe('continuity keys steered by the live registry', () => {
     const frameFields = ['transition', 'line', 'location', 'time', 'elapsed', 'evidenceSegments', 'evidenceText']
     expect(Object.keys(collector.continuityProjection.scene).filter((f) => !frameFields.includes(f)))
       .toEqual([])
-  })
-
-  it('refuses to keep a thread in view that the same passage closed', async () => {
-    const collector = createEmptyCollector()
-    const prose = mockFragment({ id: 'pr-0001', type: 'prose', content: 'The ledger was found at last.' })
-    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => id === 'pr-0001' ? prose : null)
-    const continuityKeys = { thread: [{ index: 1, key: 'ledger_question', label: 'Who keeps the ledger' }] }
-    const tools = createAnalysisTools(collector, {
-      dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001', continuityKeys,
-    })
-
-    const result = await tools.reportAnalysis.execute!(
-      await buildReportAnalysisInputSchema(continuityKeys).parseAsync({
-        summary: 'The ledger question was answered.',
-        threadOperations: [{ threadEntry: 1, action: 'resolve', relatedFragmentIds: [], evidenceSegments: [1] }],
-        threadFocus: [{ threadEntry: 1, visibility: 'foreground' }],
-      }),
-      { toolCallId: 'report', messages: [], abortSignal: undefined as unknown as AbortSignal },
-    )
-
-    expect(collector.continuityProjection.threadOperations).toHaveLength(1)
-    expect(collector.continuityProjection.threadFocus).toEqual([])
-    expect((result as { skippedContinuity: Array<{ reason: string }> }).skippedContinuity[0].reason)
-      .toContain('closed ledger_question')
   })
 
   it('stores the resolved identity without the addressing that produced it', async () => {
@@ -2100,8 +2058,8 @@ describe('continuity keys steered by the live registry', () => {
       summary: 'The dike closed.',
       // The entry is the identity; repeating its subject and facet is neither
       // necessary nor useful.
-      stateOperations: [{ stateEntry: 1, action: 'set', value: 'closed', scope: 'cross-scene', evidenceSegments: [1] }],
-      threadOperations: [{ threadEntry: 2, action: 'resolve', relatedFragmentIds: [], evidenceSegments: [2] }],
+      stateOperations: [{ entry: 1, action: 'set', value: 'closed', scope: 'cross-scene', evidenceSegments: [1] }],
+      threadOperations: [{ entry: 2, action: 'resolve', relatedFragmentIds: [], evidenceSegments: [2] }],
     }), { toolCallId: 'entry', messages: [], abortSignal: undefined as unknown as AbortSignal })
 
     expect(collector.continuityProjection.stateOperations).toMatchObject([{
@@ -2321,16 +2279,13 @@ describe('continuity keys steered by the live registry', () => {
 
     const rejected = await call({
       threadOperations: [{ key: 'nonexistent_thread', action: 'resolve', evidenceSegments: [1] }],
-      // This is the real Gemma failure shape: a state registry number was put
-      // into the thread-focus lane, where that number has no meaning.
-      threadFocus: [{ threadEntry: 8, visibility: 'foreground' }],
     })
     expect(rejected).toMatchObject({ ok: false, needsCorrection: true })
 
     const omitted = await call({})
     expect(omitted).toMatchObject({ ok: false, needsCorrection: true })
 
-    const withdrawn = await call({ threadOperations: [], threadFocus: [] })
+    const withdrawn = await call({ threadOperations: [] })
     expect(withdrawn).toMatchObject({ ok: true })
     expect(withdrawn).not.toHaveProperty('skippedContinuity')
     expect(collector.continuityProjection.threadOperations).toEqual([])

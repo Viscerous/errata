@@ -804,7 +804,7 @@ function renderContinuityRegistry(source: ContinuitySource, includeAllDetails: b
   )
   return [
     '## Continuity Registry Before This Passage',
-    'These are all identities that already exist in the branch-local ledger. Recent entries include their current value; older entries may be identity-only to keep this index compact. Point at one by its number to change it; only something genuinely new gets a fresh key. Thread omission retains prior prominence; set dormant explicitly to leave immediate context. Resolve or abandon only with explicit source evidence.',
+    'These are all identities that already exist in the branch-local ledger. Recent entries include their current value; older entries may be identity-only to keep this index compact. Point at one by its number to change it; only something genuinely new gets a fresh key. Opening or advancing a thread promotes it automatically. Resolve or abandon only with explicit source evidence.',
     section('### Current state', registry.state),
     section('### Live threads', registry.thread),
     section(
