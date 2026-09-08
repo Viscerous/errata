@@ -575,7 +575,12 @@ describe('analysis-tools', () => {
     // Keys are canonicalized at ingest so near-synonym spellings collapse into
     // one reusable identity; skippedContinuity still echoes what was submitted.
     expect(collector.continuityProjection).toMatchObject({
-      scene: { transition: 'continue', line: 'present' },
+      scene: {
+        transition: 'continue',
+        line: 'present',
+        evidenceSegments: [1],
+        evidenceText: 'Alice entered the north hall.',
+      },
       stateOperations: [{
         stateKey: 'alice_location',
         value: 'north hall',

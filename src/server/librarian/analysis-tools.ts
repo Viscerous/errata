@@ -744,12 +744,18 @@ function normalizeContinuityProjection(
 ): { projection: ContinuityProjection; skipped: Array<Skipped<{ kind: string; key: string }>> } {
   const skipped: Array<Skipped<{ kind: string; key: string }>> = []
   let scene = input.scene
-  if (sceneNeedsEvidence(scene)) {
+  const requiresSceneEvidence = sceneNeedsEvidence(scene)
+  if (requiresSceneEvidence || (scene.evidenceSegments?.length ?? 0) > 0) {
     const resolved = citedEvidence(segments, scene.evidenceSegments ?? [])
     const problem = citationProblem(resolved)
-    if (problem) {
+    if (problem && requiresSceneEvidence) {
       skipped.push({ kind: 'scene', key: scene.transition, reason: problem })
       scene = { transition: 'uncertain', evidenceSegments: [] }
+    } else if (problem) {
+      // A `continue` needs no citation. If the model nevertheless supplied an
+      // unusable one, retain the valid frame operation without persisting half
+      // of the paired evidence contract.
+      scene = { ...scene, evidenceSegments: [] }
     } else {
       scene = { ...scene, ...resolved.evidence }
     }
