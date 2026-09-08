@@ -48,7 +48,7 @@ describe('librarian analyze tool stages', () => {
     )])).toBe(true)
   })
 
-  it('holds incomplete required or attempted work open', () => {
+  it('holds required work open but does not turn an optional proposal into a requirement', () => {
     expect(isAnalyzeWorkflowComplete(tools, [step(
       { toolName: 'reportAnalysis', output: { ok: true } },
     )])).toBe(false)
@@ -56,15 +56,20 @@ describe('librarian analyze tool stages', () => {
       { toolName: 'reportAnalysis', output: { ok: true } },
       { toolName: 'proposeRecordCorrections', output: { ok: false } },
       { toolName: 'proposeDirections', output: { ok: true } },
-    )])).toBe(false)
+    )])).toBe(true)
   })
 
-  it('focuses a rejected report retry on the report contract', () => {
+  it('returns to the primary surface after a rejected report', () => {
     expect(selectAnalyzeToolStage(tools, [
       step({ toolName: 'reportAnalysis', output: { ok: false, skippedContinuity: [{}] } }),
     ])).toEqual({
-      stage: 'recovery',
-      activeTools: ['reportAnalysis'],
+      stage: 'primary',
+      activeTools: [
+        'reportAnalysis',
+        'proposeRecordCorrections',
+        'proposeNewRecords',
+        'proposeDirections',
+      ],
     })
   })
 
@@ -106,13 +111,12 @@ describe('librarian analyze tool stages', () => {
     expect(describeAnalyzeToolStages(available)).toEqual([])
   })
 
-  it('describes the same three surfaces for the context preview', () => {
+  it('describes the same two surfaces for the context preview', () => {
     const stages = describeAnalyzeToolStages(tools)
-    expect(stages.map((stage) => stage.id)).toEqual(['primary', 'inspection', 'recovery'])
+    expect(stages.map((stage) => stage.id)).toEqual(['primary', 'inspection'])
     expect(stages[0].toolNames).not.toContain('readFragments')
     expect(stages[0].toolNames).not.toContain('finishAnalysis')
     expect(stages[1]).toMatchObject({ conditional: true, toolNames: tools })
-    expect(stages[2].toolNames).not.toContain('readFragments')
   })
 
   it('makes the one-request primary surface smaller than the unstaged surface', async () => {

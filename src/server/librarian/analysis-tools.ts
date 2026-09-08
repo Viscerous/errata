@@ -4,7 +4,7 @@ import { z } from 'zod/v4'
 import { suggestionDirectionSchema, type SuggestionDirection } from '../directions/schema'
 import { getFragment } from '../fragments/storage'
 import { FragmentIdSchema, type Fragment } from '@/contracts/story'
-import { numberSentences, resolveSegments, segmentText, stripSegmentMarker, type TextSegment } from '../llm/segments'
+import { numberSentences, resolveSegments, segmentText, type TextSegment } from '../llm/segments'
 import type { LibrarianAnalysis, LibrarianFragmentChangeProposal, LibrarianMention } from './storage'
 import {
   NarrativeDurationInputSchema,
@@ -20,18 +20,11 @@ import {
   type ThreadOperation,
 } from '@/contracts/continuity'
 import { normalizeContinuityKey, scopedContinuityIdentity } from '@/lib/continuity-keys'
-import {
-  correctionShapeError,
-  MAX_CORRECTION_SPAN_CHARS,
-  MAX_NEW_FRAGMENT_CONTENT_CHARS,
-  MIN_CORRECTION_ANCHOR_CHARS,
-} from './correction-limits'
 import { createFragmentTools } from '../llm/tools'
 import {
   createFragmentOperationSchema,
   type FragmentChangeOperation,
   type OperationValidation,
-  fragmentBaseHash,
   operationEchoFields,
   unknownFragmentIdsMessage,
   validateOperations,
@@ -39,52 +32,19 @@ import {
 
 const mentionTextSchema = z.string().trim().min(1).describe('The exact name, title, or key term as it appears in the prose, copied verbatim — no added quotes, no paraphrase')
 
-// Wrapping quotes and edge punctuation a model habitually adds around a term.
-const MENTION_EDGE_TRIM_RE = /^["'‚„“”«»`‘’]+|["'‚„“”«»`‘’.,!?;:]+$/g
-const INLINE_MARKDOWN_RE = /[*_~`]+/g
-
-/**
- * A rendered phrase may be split by inline Markdown in source: the model sees
- * `*Medicine* file` as “Medicine file”, and the highlighter later receives the
- * rendered text in separate nodes. Once removing markup proves the whole phrase
- * is exact, retain the longest source-present word span that can actually bind.
- */
-function markdownAnchoredMention(text: string, proseLower: string): string | null {
-  if (!proseLower.replace(INLINE_MARKDOWN_RE, '').includes(text.toLowerCase())) return null
-  const words = text.split(/\s+/).filter(Boolean)
-  for (let length = words.length; length > 0; length -= 1) {
-    const candidates = Array.from({ length: words.length - length + 1 }, (_, index) => (
-      words.slice(index, index + length).join(' ')
-    )).sort((a, b) => b.length - a.length)
-    const match = candidates.find((candidate) => proseLower.includes(candidate.toLowerCase()))
-    if (match) return match
-  }
-  return null
-}
-
 /**
  * Anchor a reported mention to the prose it annotates: the highlight regex can
- * only bind text that actually occurs in the passage (case-insensitive). Returns
- * the verbatim-usable text — salvaging quote-wrapped reports — or null when the
- * text does not occur (a paraphrase), which the caller echoes back as feedback.
+ * only bind text that actually occurs in the passage (case-insensitive).
  */
 export function anchorMentionText(text: string, proseLower: string): string | null {
   const raw = text.trim()
-  if (raw && proseLower.includes(raw.toLowerCase())) return raw
-  const stripped = raw.replace(MENTION_EDGE_TRIM_RE, '').trim()
-  if (stripped && proseLower.includes(stripped.toLowerCase())) return stripped
-  if (stripped) return markdownAnchoredMention(stripped, proseLower)
-  return null
+  return raw && proseLower.includes(raw.toLowerCase()) ? raw : null
 }
 
 export const mentionInputSchema = z.object({
   fragmentId: FragmentIdSchema.describe('The ID of the mentioned fragment'),
   text: mentionTextSchema,
 })
-
-function mentionKey(mention: LibrarianMention): string {
-  return `${mention.fragmentId}\u0000${mention.text.trim().toLowerCase()}`
-}
 
 /** Map collected mentions to the prose annotation shape used for highlighting. */
 export function toMentionAnnotations(mentions: LibrarianMention[]) {
@@ -132,70 +92,6 @@ export function createEmptyCollector(): AnalysisCollector {
   }
 }
 
-function lastWhitespaceIndex(value: string): number {
-  for (let index = value.length - 1; index >= 0; index -= 1) {
-    if (/\s/.test(value[index])) return index
-  }
-  return -1
-}
-
-/** Keep bounded prose readable and make a clipped tail explicit. */
-function truncateAtWordBoundary(value: string, maxChars: number): { value: string; truncated: boolean } {
-  const trimmed = value.trim()
-  if (trimmed.length <= maxChars) return { value: trimmed, truncated: false }
-  if (maxChars <= 0) return { value: '', truncated: true }
-  if (maxChars === 1) return { value: '…', truncated: true }
-
-  const clipped = trimmed.slice(0, maxChars - 1).trimEnd()
-  const lastWhitespace = lastWhitespaceIndex(clipped)
-  const readable = (lastWhitespace > 0 ? clipped.slice(0, lastWhitespace) : clipped).trimEnd()
-  return { value: `${readable}…`, truncated: true }
-}
-
-/** Prefer a complete sentence when durable summary-like prose must be bounded. */
-function truncateAtSentenceBoundary(value: string, maxChars: number): { value: string; truncated: boolean } {
-  const trimmed = value.trim()
-  if (trimmed.length <= maxChars) return { value: trimmed, truncated: false }
-
-  const clipped = trimmed.slice(0, maxChars)
-  let sentenceEnd = -1
-  for (let index = 0; index < clipped.length; index += 1) {
-    if (!/[.!?]/.test(clipped[index])) continue
-    let end = index + 1
-    while (end < clipped.length && /["'’”)\]]/.test(clipped[end])) end += 1
-    if (end === clipped.length || /\s/.test(clipped[end])) sentenceEnd = end
-  }
-  // Do not turn a long useful summary into a tiny first sentence. If no
-  // reasonably late sentence boundary exists, retain as much as possible and
-  // end at a word boundary instead.
-  if (sentenceEnd >= Math.floor(maxChars / 2)) {
-    return { value: clipped.slice(0, sentenceEnd).trimEnd(), truncated: true }
-  }
-  return truncateAtWordBoundary(trimmed, maxChars)
-}
-
-function normalizeUniqueLines(values: string[] | undefined, maxItems: number, maxItemChars = 200): string[] {
-  const out: string[] = []
-  const seen = new Set<string>()
-  for (const value of values ?? []) {
-    const trimmed = truncateAtWordBoundary(value, maxItemChars).value
-    if (!trimmed) continue
-    const key = trimmed.toLowerCase()
-    if (seen.has(key)) continue
-    seen.add(key)
-    out.push(trimmed)
-    if (out.length >= maxItems) break
-  }
-  return out
-}
-
-function sentenceJoin(values: string[]): string {
-  return values.map((v) => v.endsWith('.') ? v : `${v}.`).join(' ')
-}
-
-/** Events kept per passage, across however many reports build the timeline. */
-const MAX_TIMELINE_EVENTS = 12
-
 /**
  * Analyze is given the prose chain and the rolling summary in its context, so
  * these two would only offer a second copy of what it is already looking at.
@@ -204,11 +100,6 @@ const MAX_TIMELINE_EVENTS = 12
  * is where the valid ones are named.
  */
 const READ_TOOLS_ALREADY_IN_ANALYZE_CONTEXT = ['readProseChain', 'readStorySummary']
-
-/** Last resort when a report carried events but no summary prose. */
-function summaryFromEvents(events: string[]): string {
-  return events.length > 0 ? sentenceJoin(events).trim() : ''
-}
 
 /**
  * Where a passage sits relative to the narrative present is a property of the
@@ -225,26 +116,7 @@ export function timelineEventsFor(
   return events.map((event) => ({ event, position }))
 }
 
-// Two-tier limits: the schema `.max()` is a wide ceiling that rejects only
-// degenerate output (a looping model repeating an array entry hundreds of times)
-// with a clean validation error; the execute path CLIPS anything between the
-// working target and that ceiling, so a merely verbose report never loses the
-// whole batched call over a few extra items. Targets live in execute
-// (normalizeUniqueLines / collector caps); aim guidance lives in `.describe`.
-
-/**
- * Small models sometimes confuse the string[] signal arrays with the
- * contradictions shape ({description, fragmentIds}), or pad arrays with
- * hallucinated `true` values.  This schema coerces recoverable items to
- * strings and silently drops junk so a mostly-correct report isn't lost.
- */
-const coercedStringItem = z.union([
-  z.string().max(400),
-  z.object({ description: z.string() }).transform((obj) => obj.description),
-]).catch('')
-
-const coercedStringArray = z.array(coercedStringItem).max(200).default([])
-  .transform((arr) => arr.filter((item): item is string => typeof item === 'string' && item.length > 0))
+const stringArray = z.array(z.string()).default([])
 
 /**
  * Evidence is a citation, not a quotation. The passage is presented with
@@ -253,20 +125,8 @@ const coercedStringArray = z.array(coercedStringItem).max(200).default([])
  * whole proposal calls whenever the model could not reproduce the span exactly;
  * there is nothing to mis-transcribe here.
  */
-/**
- * How many cited sentences are kept. Brevity is a preference, not an invariant:
- * over-citing costs a longer stored evidence string and nothing else, so the
- * bound is applied when the citation is resolved rather than made a condition of
- * accepting the call. As a schema `.max()` it rejected the whole payload, losing
- * an entire report round trip because one operation cited one sentence too many.
- */
-export const MAX_CITED_SEGMENTS = 8
-
 const proseCitationSchema = z.array(z.number().int().positive()).default([])
   .describe('New-prose sentence numbers.')
-
-/** Conditional maintenance lanes may be abandoned after a failed attempt. */
-const skippedToolNameSchema = z.enum(['proposeRecordCorrections', 'proposeNewRecords'])
 
 // This is intentionally a forgiving, default-heavy LLM input schema. The
 // normalized result is typed by, and storage-validates against, the strict
@@ -290,17 +150,6 @@ const sceneSchema = z.object({
 }).default({ transition: 'uncertain', evidenceSegments: [] })
 
 type SceneInput = z.infer<typeof sceneSchema>
-type SceneClaim = Pick<SceneInput, 'transition' | 'line' | 'location' | 'time' | 'elapsed'>
-
-/** Whether a scene payload says anything beyond the schema's empty default. */
-function hasSceneClaim(scene: SceneClaim): boolean {
-  return scene.transition !== 'uncertain'
-    || (scene.line !== undefined && scene.line !== 'uncertain')
-    || scene.location !== undefined
-    || scene.time !== undefined
-    || scene.elapsed !== undefined
-}
-
 /** Scene claims that must be grounded in the prose rather than inherited. */
 function sceneNeedsEvidence(scene: SceneInput): boolean {
   return (scene.transition !== 'continue' && scene.transition !== 'uncertain')
@@ -441,15 +290,14 @@ function knowledgeOperationSchemaFor(registry: ContinuityRegistry) {
 export function buildReportAnalysisInputSchema(input: ContinuityKeyRegistry = {}) {
   const registry = completeRegistry(input)
   return z.object({
-    // Accept verbosity here and normalize it in execute. Rejecting the entire
-    // structured report for an overlong summary makes reasoning models retain
-    // a large failed tool call and regenerate every otherwise-valid field.
-    summary: z.string().default('').describe('Concise retrospective summary of the new prose as past history.'),
-    events: coercedStringArray
+    // Model-authored report text is stored as supplied; this schema only asks
+    // for the structure required to interpret it.
+    summary: z.string().trim().min(1).describe('Concise retrospective summary of the new prose as past history.'),
+    events: stringArray
       .describe('A few short timeline events; scene metadata supplies when.'),
-    mentions: z.array(mentionInputSchema).max(150).default([])
+    mentions: z.array(mentionInputSchema).default([])
       .describe('Distinct listed-fragment mentions using exact prose text, never bare pronouns.'),
-    candidateFragmentIds: z.array(FragmentIdSchema).max(120).default([])
+    candidateFragmentIds: z.array(FragmentIdSchema).default([])
       .describe('Existing record IDs needing full text for durable-memory or contradiction review.'),
     contradictions: z.array(z.object({
       description: z.string().describe('What the contradiction is'),
@@ -463,16 +311,16 @@ export function buildReportAnalysisInputSchema(input: ContinuityKeyRegistry = {}
         fragmentId: FragmentIdSchema,
         segments: z.array(z.number().int().positive()).default([])
           .describe('Record sentence numbers carrying the incompatible claim.'),
-      })).max(8).default([])
+      })).default([])
         .describe('Conflicting reusable records cited by sentence; ordinary state changes are not contradictions.'),
-    })).max(32).default([]),
-    scene: sceneSchema.optional()
+    })).default([]),
+    scene: sceneSchema
       .describe('Changed scene fields; transition uncertain withdraws the claim.'),
-    stateOperations: z.array(stateOperationSchemaFor(registry)).max(80).optional()
+    stateOperations: z.array(stateOperationSchemaFor(registry)).default([])
       .describe('Persistent conditions: set replaces, clear ends; use scene scope unless it must survive a cut.'),
-    threadOperations: z.array(threadOperationSchemaFor(registry)).max(80).optional()
+    threadOperations: z.array(threadOperationSchemaFor(registry)).default([])
       .describe('Lifecycle changes for unresolved questions; never repurpose keys.'),
-    knowledgeOperations: z.array(knowledgeOperationSchemaFor(registry)).max(120).optional()
+    knowledgeOperations: z.array(knowledgeOperationSchemaFor(registry)).default([])
       .describe('Durable character-specific learning with attributed and temporal limits.'),
   })
 }
@@ -482,28 +330,8 @@ export const reportAnalysisInputSchema = buildReportAnalysisInputSchema()
 
 type ReportAnalysisInput = z.infer<ReturnType<typeof buildReportAnalysisInputSchema>>
 
-function uniqueStrings(values: string[], maxItems: number): string[] {
-  return [...new Set(values)].slice(0, maxItems)
-}
-
-const MAX_STORED_ANALYSIS_SUMMARY_CHARS = 1200
-
-function normalizeAnalysisSummary(value: string): { value: string; truncated: boolean } {
-  return truncateAtSentenceBoundary(value, MAX_STORED_ANALYSIS_SUMMARY_CHARS)
-}
-
-function keepLastByKey<T>(items: T[], keyFor: (item: T) => string, maxItems: number): T[] {
-  const seen = new Set<string>()
-  const out: T[] = []
-  for (let index = items.length - 1; index >= 0; index -= 1) {
-    const item = items[index]
-    const key = keyFor(item)
-    if (seen.has(key)) continue
-    seen.add(key)
-    out.unshift(item)
-    if (out.length >= maxItems) break
-  }
-  return out
+function uniqueStrings(values: string[]): string[] {
+  return [...new Set(values)]
 }
 
 /**
@@ -515,7 +343,7 @@ function citedEvidence(
   segments: TextSegment[],
   cited: number[],
 ): { evidence: CitedEvidence; invalid: number[] } {
-  const resolved = resolveSegments(segments, cited.slice(0, MAX_CITED_SEGMENTS))
+  const resolved = resolveSegments(segments, cited)
   // `evidence` is the storable half and `invalid` the verdict on it. Returned
   // flat, every lane spread the whole thing into its record and carried the
   // verdict into the projection, leaving stored operations with an `invalid: []`
@@ -571,48 +399,6 @@ function citationProblem(
  */
 type Skipped<T> = T & { reason: string }
 
-/**
- * How much of each lane one passage's projection retains. Applied both when a
- * report is normalized and when a retry is folded onto it, so the two cannot
- * drift into disagreeing about how much a passage may hold.
- */
-const PROJECTION_CAPS = { state: 12, thread: 12, focus: 16, knowledge: 24 } as const
-
-const stateKeyOf = (operation: StateOperation) => operation.stateKey
-const threadKeyOf = (operation: ThreadOperation) => operation.threadKey
-const threadFocusKeyOf = (focus: ThreadFocus) => focus.threadKey
-const knowledgeKeyOf = (operation: KnowledgeOperation) => scopedContinuityIdentity(operation.knowledgeKey, operation.characterId)
-
-/**
- * Sentence citations are the stable part of a retry when a small model drops or
- * corrects its key. Use them to recognize the same operation without guessing
- * from mutable prose labels. Empty citations are never identities, and an
- * ambiguous signature deliberately matches nothing.
- */
-function evidenceSignature(operation: { action: string; evidenceSegments: number[] }, scope = ''): string {
-  if (operation.evidenceSegments.length === 0) return ''
-  const evidence = [...new Set(operation.evidenceSegments)].sort((a, b) => a - b).join(',')
-  return `${scope}\u0000${operation.action}\u0000${evidence}`
-}
-
-const stateSignatureOf = (operation: Pick<StateOperation, 'action' | 'evidenceSegments'>) =>
-  evidenceSignature(operation)
-const threadSignatureOf = (operation: Pick<ThreadOperation, 'action' | 'evidenceSegments'>) =>
-  evidenceSignature(operation)
-const knowledgeSignatureOf = (operation: Pick<KnowledgeOperation, 'characterId' | 'action' | 'evidenceSegments'>) =>
-  evidenceSignature(operation, operation.characterId)
-
-function uniquelyMatchingKey<T>(
-  previous: T[],
-  signature: string,
-  signatureOf: (item: T) => string,
-  keyOf: (item: T) => string,
-): string | undefined {
-  if (!signature) return undefined
-  const matches = previous.filter((item) => signatureOf(item) === signature)
-  return matches.length === 1 ? keyOf(matches[0]) : undefined
-}
-
 /** The single key an entry set agrees on, or nothing when it is ambiguous. */
 function soleKey(entries: RegistryEntry[]): string | undefined {
   const keys = new Set(entries.map((entry) => entry.key))
@@ -665,27 +451,22 @@ function registeredStateDefinition(
  * and the caller adds to it as identities appear, so a retried report can still
  * address what its own earlier call opened.
  */
-function resolveIdentity<T>(
+function resolveIdentity(
   operation: { key?: unknown; entry?: unknown; action: string },
   derivedFrom: string | undefined,
   options: {
     lane: 'state' | 'thread' | 'knowledge'
     allowDerived: boolean
     live: Set<string>
-    previous: T[]
     registry: RegistryEntry[]
     scope?: string
     /** The derived fields are declared identity components, not prose wording. */
     structuralDerivation?: boolean
-    signature: string
-    signatureOf: (item: T) => string
-    keyOf: (item: T) => string
   },
 ): { ok: true; key: string } | { ok: false; reason: string } {
   const { lane, allowDerived, registry, scope } = options
   const addressedKey = registryKeyAtIndex(registry, operation.entry, scope)
     || chosenKey(operation)
-    || uniquelyMatchingKey(options.previous, options.signature, options.signatureOf, options.keyOf)
   if (addressedKey) {
     if (allowDerived || options.live.has(scopedContinuityIdentity(addressedKey, scope))) {
       return { ok: true, key: addressedKey }
@@ -708,7 +489,7 @@ function resolveIdentity<T>(
       ok: false,
       reason: allowDerived
         ? `A ${lane} operation needs enough identity to derive a key.`
-        : `A ${lane} ${operation.action} operation must name the existing key; no unambiguous retry or live-registry match was found.`,
+        : `A ${lane} ${operation.action} operation must name an existing key.`,
     }
   }
   if (!options.structuralDerivation
@@ -722,11 +503,8 @@ function resolveIdentity<T>(
 }
 
 /** Identities a non-create action may address, before this pass adds its own. */
-function liveIdentitySet(entries: RegistryEntry[], created: Iterable<string>): Set<string> {
-  return new Set([
-    ...entries.map((entry) => scopedContinuityIdentity(entry.key, entry.scope)),
-    ...created,
-  ])
+function liveIdentitySet(entries: RegistryEntry[]): Set<string> {
+  return new Set(entries.map((entry) => scopedContinuityIdentity(entry.key, entry.scope)))
 }
 
 type NormalizedContinuityInput = {
@@ -739,7 +517,6 @@ type NormalizedContinuityInput = {
 function normalizeContinuityProjection(
   input: NormalizedContinuityInput,
   segments: TextSegment[],
-  previous?: ContinuityProjection,
   registry: ContinuityRegistry = EMPTY_REGISTRY,
 ): { projection: ContinuityProjection; skipped: Array<Skipped<{ kind: string; key: string }>> } {
   const skipped: Array<Skipped<{ kind: string; key: string }>> = []
@@ -763,12 +540,7 @@ function normalizeContinuityProjection(
   if (scene.transition === 'enter-flashback') scene = { ...scene, line: 'flashback' }
   if (scene.transition === 'enter-flash-forward') scene = { ...scene, line: 'flash-forward' }
 
-  // Seeded from what an earlier call of a retried report already created, so a
-  // restated new identity stays addressable across the retry.
-  const liveState = liveIdentitySet(
-    registry.state,
-    (previous?.stateOperations ?? []).filter((op) => op.action === 'set').map((op) => op.stateKey),
-  )
+  const liveState = liveIdentitySet(registry.state)
   const stateOperations: StateOperation[] = []
   for (const operation of input.stateOperations) {
     const allowDerived = operation.action === 'set'
@@ -780,11 +552,7 @@ function normalizeContinuityProjection(
       allowDerived,
       structuralDerivation: true,
       live: liveState,
-      previous: previous?.stateOperations ?? [],
       registry: registry.state,
-      signature: stateSignatureOf(operation),
-      signatureOf: stateSignatureOf,
-      keyOf: stateKeyOf,
     })
     if (!identity.ok) {
       skipped.push({ kind: 'state', key: operation.subject?.label ?? '', reason: identity.reason })
@@ -803,9 +571,6 @@ function normalizeContinuityProjection(
       continue
     }
     const registeredDefinition = registeredStateDefinition(registry.state, operation, stateKey)
-    const priorDefinition = [...(previous?.stateOperations ?? [])].reverse().find((candidate): candidate is Extract<StateOperation, { action: 'set' }> => (
-      candidate.action === 'set' && candidate.stateKey === stateKey
-    ))
     const declaredSubject = operation.subject
       ? {
           key: derivedContinuityKey(operation.subject.label),
@@ -813,13 +578,11 @@ function normalizeContinuityProjection(
           ...(operation.subject.fragmentId ? { fragmentId: operation.subject.fragmentId } : {}),
         }
       : undefined
-    const subject = registeredDefinition?.subject ?? priorDefinition?.subject ?? declaredSubject
-    const facet = registeredDefinition?.facet ?? priorDefinition?.facet ?? operation.facet
+    const subject = registeredDefinition?.subject ?? declaredSubject
+    const facet = registeredDefinition?.facet ?? operation.facet
     const slot = registeredDefinition?.facet
       ? registeredDefinition.slot
-      : priorDefinition
-        ? priorDefinition.slot
-        : operation.slot
+      : operation.slot
     if (operation.action === 'set' && (!subject || !facet)) {
       skipped.push({
         kind: 'state',
@@ -844,10 +607,7 @@ function normalizeContinuityProjection(
         })
   }
 
-  const liveThreads = liveIdentitySet(
-    registry.thread,
-    (previous?.threadOperations ?? []).filter((op) => op.action === 'open').map((op) => op.threadKey),
-  )
+  const liveThreads = liveIdentitySet(registry.thread)
   const threadOperations: ThreadOperation[] = []
   // Assembled as the operations resolve, so the fold receives the prominence
   // delta without the model having to state each acted-on thread twice.
@@ -858,11 +618,7 @@ function normalizeContinuityProjection(
       lane: 'thread',
       allowDerived,
       live: liveThreads,
-      previous: previous?.threadOperations ?? [],
       registry: registry.thread,
-      signature: threadSignatureOf(operation),
-      signatureOf: threadSignatureOf,
-      keyOf: threadKeyOf,
     })
     if (!identity.ok) {
       skipped.push({ kind: 'thread', key: operation.label ?? '', reason: identity.reason })
@@ -881,7 +637,7 @@ function normalizeContinuityProjection(
       action: operation.action,
       ...(operation.label?.trim() ? { label: operation.label } : {}),
       ...(operation.note?.trim() ? { note: operation.note } : {}),
-      relatedFragmentIds: uniqueStrings(operation.relatedFragmentIds, 20),
+      relatedFragmentIds: uniqueStrings(operation.relatedFragmentIds),
       ...resolved.evidence,
     })
     // Acting on a thread puts it in view; a resolved or abandoned one is gone
@@ -891,12 +647,7 @@ function normalizeContinuityProjection(
     }
   }
 
-  const liveKnowledge = liveIdentitySet(
-    registry.knowledge,
-    (previous?.knowledgeOperations ?? [])
-      .filter((op) => op.action === 'learn')
-      .map((op) => scopedContinuityIdentity(op.knowledgeKey, op.characterId)),
-  )
+  const liveKnowledge = liveIdentitySet(registry.knowledge)
   const knowledgeOperations: KnowledgeOperation[] = []
   for (const operation of input.knowledgeOperations) {
     const allowDerived = operation.action === 'learn'
@@ -904,12 +655,8 @@ function normalizeContinuityProjection(
       lane: 'knowledge',
       allowDerived,
       live: liveKnowledge,
-      previous: previous?.knowledgeOperations ?? [],
       registry: registry.knowledge,
       scope: operation.characterId,
-      signature: knowledgeSignatureOf(operation),
-      signatureOf: knowledgeSignatureOf,
-      keyOf: (item) => item.knowledgeKey,
     })
     if (!identity.ok) {
       skipped.push({ kind: 'knowledge', key: operation.characterId, reason: identity.reason })
@@ -951,97 +698,16 @@ function normalizeContinuityProjection(
     projection: {
       version: 2,
       scene: storedScene,
-      stateOperations: keepLastByKey(stateOperations, stateKeyOf, PROJECTION_CAPS.state),
-      threadOperations: threadOperations.slice(0, PROJECTION_CAPS.thread),
-      threadFocus: keepLastByKey(threadFocus, threadFocusKeyOf, PROJECTION_CAPS.focus),
-      knowledgeOperations: keepLastByKey(knowledgeOperations, knowledgeKeyOf, PROJECTION_CAPS.knowledge),
+      stateOperations,
+      threadOperations,
+      threadFocus,
+      knowledgeOperations,
     },
     skipped,
   }
 }
 
-/** `previous` entries `next` said nothing about, followed by everything `next` reported. */
-function uniqueSignatures<T>(items: T[], signatureOf: (item: T) => string): Set<string> {
-  const counts = new Map<string, number>()
-  for (const item of items) {
-    const signature = signatureOf(item)
-    if (signature) counts.set(signature, (counts.get(signature) ?? 0) + 1)
-  }
-  return new Set([...counts].filter(([, count]) => count === 1).map(([signature]) => signature))
-}
-
-function superseded<T>(
-  previous: T[],
-  next: T[],
-  keyOf: (item: T) => string,
-  signatureOf?: (item: T) => string,
-): T[] {
-  const restated = new Set(next.map(keyOf))
-  const aliasedSignatures = new Set<string>()
-  if (signatureOf) {
-    const previousUnique = uniqueSignatures(previous, signatureOf)
-    for (const signature of uniqueSignatures(next, signatureOf)) {
-      if (previousUnique.has(signature)) aliasedSignatures.add(signature)
-    }
-  }
-  return [
-    ...previous.filter((item) => {
-      if (restated.has(keyOf(item))) return false
-      return !signatureOf || !aliasedSignatures.has(signatureOf(item))
-    }),
-    ...next,
-  ]
-}
-
-/**
- * Fold a re-reported projection onto the one already collected. `reportAnalysis`
- * is retried — after a rejected proposal lane, a bad citation, or a model simply
- * calling it again — and the second call is rarely a superset of the first, so
- * plain assignment makes every retry a truncation: valid operations from the
- * first call are replaced by the empty sets a later one did not restate.
- *
- * The new call has full authority over the keys it names and none over the keys
- * it does not — the discipline `hasSummarySignal` already applies to the summary,
- * per key rather than all-or-nothing, since a partial re-report is normal here.
- */
-function mergeContinuityProjection(
-  previous: ContinuityProjection,
-  next: ContinuityProjection,
-): ContinuityProjection {
-  return {
-    ...next,
-    // A bare uncertain scene is the schema default, so it carries no claim and
-    // must not overwrite a scene an earlier retry actually determined.
-    scene: !hasSceneClaim(next.scene)
-      ? previous.scene
-      : next.scene,
-    stateOperations: keepLastByKey(
-      superseded(previous.stateOperations, next.stateOperations, stateKeyOf, stateSignatureOf),
-      stateKeyOf,
-      PROJECTION_CAPS.state,
-    ),
-    // Not collapsed by key: one call may legitimately open and then advance the
-    // same thread.
-    threadOperations: superseded(
-      previous.threadOperations,
-      next.threadOperations,
-      threadKeyOf,
-      threadSignatureOf,
-    ).slice(-PROJECTION_CAPS.thread),
-    threadFocus: keepLastByKey(
-      [...previous.threadFocus, ...next.threadFocus],
-      threadFocusKeyOf,
-      PROJECTION_CAPS.focus,
-    ),
-    knowledgeOperations: keepLastByKey(
-      superseded(previous.knowledgeOperations, next.knowledgeOperations, knowledgeKeyOf, knowledgeSignatureOf),
-      knowledgeKeyOf,
-      PROJECTION_CAPS.knowledge,
-    ),
-  }
-}
-
-const proposalEvidenceSchema = z.array(z.number().int().positive()).default([])
+const proposalEvidenceSchema = z.array(z.number().int().positive()).min(1)
   .describe('New-prose sentence numbers establishing the proposal.')
 
 /**
@@ -1060,8 +726,8 @@ const correctionProposalItemSchema = z.object({
   field: z.enum(['content', 'description']).default('content'),
   segment: z.number().int().positive()
     .describe('The numbered sentence in that fragment to replace.'),
-  newText: z.string().trim().min(1).max(MAX_CORRECTION_SPAN_CHARS)
-    .describe('One corrected replacement sentence, without its number or scene recap.'),
+  newText: z.string().trim().min(1)
+    .describe('Corrected replacement text for the numbered assertion.'),
   reason: z.string().max(500).optional(),
 })
 
@@ -1073,51 +739,29 @@ const newFragmentProposalItemSchema = createFragmentOperationSchema.omit({ actio
  * propose one genuinely new reusable record. Routine events and state changes
  * already have first-class homes in reportAnalysis.
  */
-const MAX_PROPOSAL_TITLE_CHARS = 100
-const MAX_PROPOSAL_RATIONALE_CHARS = 600
-
 export const librarianRecordCorrectionsInputSchema = z.object({
   title: z.string().optional()
-    .describe(`Optional title (aim for ${MAX_PROPOSAL_TITLE_CHARS} characters; longer text is shortened).`),
+    .describe('Optional proposal title.'),
   evidenceSegments: proposalEvidenceSchema
-    .describe('Required on the first attempt; retained for retries.'),
+    .describe('New-prose sentence numbers establishing these corrections.'),
   rationale: z.string().trim().optional()
-    .describe(`Optional shared rationale (aim for ${MAX_PROPOSAL_RATIONALE_CHARS} characters).`),
-  corrections: z.array(correctionProposalItemSchema).max(4).default([])
+    .describe('Optional shared rationale.'),
+  corrections: z.array(correctionProposalItemSchema).min(1)
     .describe('Localized record corrections grounded by reportAnalysis; not prose errors or unresolved conflicts.'),
 })
 
 export const librarianNewRecordsInputSchema = z.object({
   title: z.string().optional()
-    .describe(`Optional title (aim for ${MAX_PROPOSAL_TITLE_CHARS} characters; longer text is shortened).`),
+    .describe('Optional proposal title.'),
   evidenceSegments: proposalEvidenceSchema
-    .describe('Required on the first attempt; retained for retries.'),
+    .describe('New-prose sentence numbers establishing these records.'),
   rationale: z.string().trim().optional()
-    .describe(`Optional shared rationale (aim for ${MAX_PROPOSAL_RATIONALE_CHARS} characters).`),
-  newFragments: z.array(newFragmentProposalItemSchema).max(4).default([])
+    .describe('Optional shared rationale.'),
+  newFragments: z.array(newFragmentProposalItemSchema).min(1)
     .describe('New reusable named records; not event logs, current conditions, scene details, or duplicates.'),
 })
 
-/**
- * A bare tool name is accepted because it is the shape models reach for first,
- * and for a lane that was never called it is complete information — the gate
- * does not require those to be declared at all. Demanding {toolName, reason}
- * for them spent a retry on the bare form models send anyway, and told the gate
- * nothing it went on to use.
- */
-export const librarianFinishAnalysisInputSchema = z.object({
-  // No `completed` list. The gate already knows which calls succeeded — it
-  // watched them — so asking the model to restate it added no information the
-  // gate went on to use and one more way to be wrong. Only what the engine
-  // cannot observe is worth a field, and that is the reason for an abandonment.
-  skipped: z.array(z.union([
-    skippedToolNameSchema,
-    z.object({
-      toolName: skippedToolNameSchema,
-      reason: z.string().trim().min(1).optional(),
-    }),
-  ])).default([]).describe('Unfinished proposal lanes being abandoned; include a reason after a failed call.'),
-})
+export const librarianFinishAnalysisInputSchema = z.object({})
 
 type AnalysisProposalSkipped = Skipped<{
   operationId: string
@@ -1143,33 +787,6 @@ function skippedOperation(
   }
 }
 
-function normalizeForDedupe(text: string): string {
-  return text.trim().replace(/\s+/g, ' ').toLowerCase()
-}
-
-/**
- * Identity of an operation for cross-proposal dedup. A retried batch usually
- * resubmits already-queued operations alongside the fixed one; anything whose
- * key is already queued must not queue again, or the user sees two proposals
- * carrying the same create/append and the second one fails on apply (or worse,
- * a create applies twice). Keys ignore whitespace and case so a lightly
- * reworded resubmission still matches.
- */
-function operationDedupeKey(operation: FragmentChangeOperation): string {
-  switch (operation.action) {
-    case 'create_fragment':
-      return `create|${operation.type}|${normalizeForDedupe(operation.name)}`
-    case 'append_paragraph':
-      return `add|${operation.fragmentId}|${operation.field}|${normalizeForDedupe(operation.text)}`
-    case 'replace_text':
-      return `replace|${operation.fragmentId}|${operation.field}|${normalizeForDedupe(operation.oldText)}|${normalizeForDedupe(operation.newText)}`
-    case 'set_fields':
-      return `set|${operation.fragmentId}|${JSON.stringify(operation.fields)}`
-    case 'archive_fragment':
-      return `archive|${operation.fragmentId}`
-  }
-}
-
 function queueFragmentChangeProposal(params: {
   collector: AnalysisCollector
   title?: string
@@ -1181,35 +798,11 @@ function queueFragmentChangeProposal(params: {
   autoApplySafe?: boolean
   operations: FragmentChangeOperation[]
   validation: OperationValidation[]
-}): { queued: FragmentChangeOperation[]; alreadyQueued: FragmentChangeOperation[] } {
-  const title = params.title
-    ? truncateAtWordBoundary(params.title, MAX_PROPOSAL_TITLE_CHARS).value
-    : ''
-  const rationale = params.rationale
-    ? truncateAtSentenceBoundary(params.rationale, MAX_PROPOSAL_RATIONALE_CHARS).value
-    : ''
-  const eligibilityReason = params.eligibilityReason
-    ? truncateAtSentenceBoundary(params.eligibilityReason, MAX_PROPOSAL_RATIONALE_CHARS).value
-    : ''
-  const queuedKeys = new Set(
-    params.collector.fragmentChangeProposals.flatMap((proposal) =>
-      proposal.operations.map(operationDedupeKey),
-    ),
-  )
-  const queued: FragmentChangeOperation[] = []
-  const alreadyQueued: FragmentChangeOperation[] = []
-  for (const operation of params.operations) {
-    const key = operationDedupeKey(operation)
-    if (queuedKeys.has(key)) {
-      alreadyQueued.push(operation)
-      continue
-    }
-    queuedKeys.add(key)
-    queued.push(operation)
-  }
-  if (queued.length === 0) return { queued, alreadyQueued }
-
-  const queuedIds = new Set(queued.map((operation) => operation.operationId ?? ''))
+}): void {
+  const title = params.title?.trim() ?? ''
+  const rationale = params.rationale?.trim() ?? ''
+  const eligibilityReason = params.eligibilityReason?.trim() ?? ''
+  if (params.operations.length === 0) return
   params.collector.fragmentChangeProposals.push({
     ...(title ? { title } : {}),
     ...(rationale ? { rationale } : {}),
@@ -1218,17 +811,9 @@ function queueFragmentChangeProposal(params: {
     ...(params.evidenceText ? { evidenceText: params.evidenceText } : {}),
     ...(eligibilityReason ? { eligibilityReason } : {}),
     ...(params.autoApplySafe !== undefined ? { autoApplySafe: params.autoApplySafe } : {}),
-    operations: queued,
-    validation: params.validation.filter((result) => queuedIds.has(result.operationId)),
+    operations: params.operations,
+    validation: params.validation,
   })
-  return { queued, alreadyQueued }
-}
-
-type RetainedProposalEvidence = {
-  evidenceSegments: number[]
-  evidenceText: string
-  title?: string
-  rationale?: string
 }
 
 function correctionContractError(operation: FragmentChangeOperation): string | null {
@@ -1237,17 +822,6 @@ function correctionContractError(operation: FragmentChangeOperation): string | n
   }
   if (operation.replaceAll) {
     return 'Corrections cannot replace every occurrence automatically; identify one exact assertion and occurrence.'
-  }
-  if (operation.oldText.length > MAX_CORRECTION_SPAN_CHARS || operation.newText.length > MAX_CORRECTION_SPAN_CHARS) {
-    return `Corrections must stay within ${MAX_CORRECTION_SPAN_CHARS} characters on each side.`
-  }
-  if (operation.oldText.trim().length < MIN_CORRECTION_ANCHOR_CHARS) {
-    return 'Corrections must identify a meaningful existing assertion, not a one- or two-character token.'
-  }
-  const shapeError = correctionShapeError(operation.oldText, operation.newText)
-  if (shapeError) return shapeError
-  if (normalizeForDedupe(operation.oldText) === normalizeForDedupe(operation.newText)) {
-    return 'The replacement does not materially differ from the existing assertion.'
   }
   return null
 }
@@ -1316,32 +890,16 @@ export function createAnalysisTools(
     ? opts.numberedFragmentIds
     : new Set(opts?.numberedFragmentIds ?? [])
   const successfulToolNames = new Set<string>()
-  /** Continuity work rejected by normalization and not yet repaired by identity. */
-  let unresolvedContinuity: Array<Skipped<{ kind: string; key: string }>> = []
-  /**
-   * Proposal lanes whose most recent call left something undone — refused
-   * outright, or queued in part. Record maintenance is optional, so never
-   * calling a lane needs no declaration; walking away from work the lane
-   * reported back does.
-   */
-  const unfinishedProposalToolNames = new Set<string>()
   // Normalized once here; every lookup below reads the same shape and numbering.
   const continuityRegistry = completeRegistry(opts?.continuityKeys ?? {})
-  /** Which continuity lane owns a key, so a correction aimed at one can say so. */
-  const continuityKeyOwners = new Map<string, 'state' | 'thread' | 'knowledge'>()
-  for (const lane of ['state', 'thread', 'knowledge'] as const) {
-    for (const entry of continuityRegistry[lane]) continuityKeyOwners.set(entry.key, lane)
-  }
-  let retainedCorrectionEvidence: RetainedProposalEvidence | null = null
-  let retainedNewRecordEvidence: RetainedProposalEvidence | null = null
 
   if (opts?.includeReportTool !== false) {
     tools.reportAnalysis = tool({
-      description: 'Report all prose findings in one batch. Evidence fields cite numbered sentences. On retry, omitted fields are retained; send [] to withdraw a continuity lane.',
+      description: 'Report all prose findings in one self-contained batch. Evidence fields cite numbered sentences.',
       inputSchema: buildReportAnalysisInputSchema(opts?.continuityKeys ?? {}),
       execute: async (input: ReportAnalysisInput) => {
         const {
-          summary = '',
+          summary,
           events = [],
           mentions = [],
           candidateFragmentIds = [],
@@ -1351,39 +909,6 @@ export function createAnalysisTools(
           threadOperations = [],
           knowledgeOperations = [],
         } = input
-        // Retry payloads are patches. Omission retains accepted work, while an
-        // explicitly empty lane withdraws that lane's rejected attempts. This
-        // is how the model says "that operation should not exist" without a new
-        // tool or a fabricated replacement identity.
-        const withdrawnContinuityKinds = new Set<string>()
-        if (input.scene !== undefined && !hasSceneClaim(scene)) withdrawnContinuityKinds.add('scene')
-        if (input.stateOperations?.length === 0) withdrawnContinuityKinds.add('state')
-        if (input.threadOperations?.length === 0) withdrawnContinuityKinds.add('thread')
-        if (input.knowledgeOperations?.length === 0) withdrawnContinuityKinds.add('knowledge')
-        const normalizedSummary = normalizeAnalysisSummary(summary)
-        // An empty report must not be a *schema* rejection — that makes small
-        // models loop on resubmitting the whole payload. It is an unsuccessful
-        // call with a nudge, which finishAnalysis then reads consistently.
-        // Returning ok:true while withholding the success marker would tell the
-        // model its call succeeded and then, at finish, that it had falsely
-        // claimed that same call.
-        const signalCount =
-          Number(normalizedSummary.value.length > 0) +
-          events.length +
-          mentions.length +
-          candidateFragmentIds.length +
-          contradictions.length +
-          Number(hasSceneClaim(scene)) +
-          stateOperations.length +
-          threadOperations.length +
-          knowledgeOperations.length
-        if (signalCount === 0) {
-          return {
-            ok: false,
-            note: 'Empty report: nothing was recorded. Call again with at least a summary of what the passage does.',
-          }
-        }
-
         const sourceProse = opts?.proseFragmentId
           ? await getFragment(opts.dataDir, opts.storyId, opts.proseFragmentId)
           : null
@@ -1428,60 +953,13 @@ export function createAnalysisTools(
           stateOperations,
           threadOperations,
           knowledgeOperations,
-        }, proseSegments, collector.continuityProjection, continuityRegistry)
-        collector.continuityProjection = mergeContinuityProjection(
-          collector.continuityProjection,
-          normalizedProjection.projection,
-        )
+        }, proseSegments, continuityRegistry)
+        collector.continuityProjection = normalizedProjection.projection
 
-        // Partial acceptance is useful, but it is not completion. Keep rejected
-        // identities outstanding until a later report successfully addresses
-        // each one. This makes a four-item partial failure require four repairs,
-        // rather than letting an unrelated clean retry erase the warning.
-        unresolvedContinuity = unresolvedContinuity.filter((item) => !withdrawnContinuityKinds.has(item.kind))
-        const acceptedContinuity = new Set<string>()
-        const skippedScene = normalizedProjection.skipped.some((item) => item.kind === 'scene')
-        if (!skippedScene && (
-          scene.transition !== 'uncertain'
-          || scene.line !== undefined
-          || scene.location !== undefined
-          || scene.time !== undefined
-          || scene.elapsed !== undefined
-        )) acceptedContinuity.add(`scene\u0000${scene.transition}`)
-        for (const operation of normalizedProjection.projection.stateOperations) {
-          acceptedContinuity.add(`state\u0000${operation.stateKey}`)
-        }
-        for (const operation of normalizedProjection.projection.threadOperations) {
-          acceptedContinuity.add(`thread\u0000${operation.threadKey}`)
-        }
-        for (const operation of normalizedProjection.projection.knowledgeOperations) {
-          acceptedContinuity.add(`knowledge\u0000${operation.characterId}:${operation.knowledgeKey}`)
-        }
-        unresolvedContinuity = unresolvedContinuity.filter((item) => (
-          !acceptedContinuity.has(`${item.kind}\u0000${item.key}`)
-        ))
-        for (const item of normalizedProjection.skipped) {
-          const identity = `${item.kind}\u0000${item.key}`
-          unresolvedContinuity = [
-            ...unresolvedContinuity.filter((candidate) => `${candidate.kind}\u0000${candidate.key}` !== identity),
-            item,
-          ]
-        }
+        collector.events = events
+        collector.summaryUpdate = summary
 
-        // A re-report replaces the summary but only extends the timeline: a
-        // retry aimed at one bad citation must not shorten the record of what
-        // happened. Each call contributes at most the working target, so a
-        // verbose one cannot crowd out the calls after it.
-        const reportedEvents = normalizeUniqueLines(events, 8)
-        collector.events = normalizeUniqueLines([...collector.events, ...reportedEvents], MAX_TIMELINE_EVENTS)
-
-        if (normalizedSummary.value.length > 0) collector.summaryUpdate = normalizedSummary.value
-        else if (!collector.summaryUpdate) collector.summaryUpdate = summaryFromEvents(collector.events)
-
-        // Anchor mentions to the prose: a highlight can only bind text that
-        // actually occurs in the passage. Quote-wrapped reports are salvaged by
-        // stripping; paraphrases are skipped and echoed back so the model can
-        // re-report the exact wording in a later step.
+        // A highlight can only bind text that actually occurs in the passage.
         const skippedMentions: Array<Skipped<{ fragmentId: string; text: string }>> = []
         let anchoredMentions = mentions
         if (opts?.proseFragmentId) {
@@ -1503,24 +981,8 @@ export function createAnalysisTools(
           }
         }
 
-        // Deduplicate by fragment+surface text (multiple terms can resolve to
-        // the same fragment and should all highlight), clipped at the working
-        // cap — dedup first so repeats never crowd out distinct mentions.
-        const seen = new Set(collector.mentions.map(mentionKey))
-        for (const m of anchoredMentions) {
-          if (collector.mentions.length >= 60) break
-          const key = mentionKey(m)
-          if (seen.has(key)) continue
-          seen.add(key)
-          collector.mentions.push(m)
-        }
-        const existingCandidates = new Set(collector.candidateFragmentIds)
-        for (const fragmentId of candidateFragmentIds) {
-          if (collector.candidateFragmentIds.length >= 80) break
-          if (existingCandidates.has(fragmentId)) continue
-          existingCandidates.add(fragmentId)
-          collector.candidateFragmentIds.push(fragmentId)
-        }
+        collector.mentions = anchoredMentions
+        collector.candidateFragmentIds = [...new Set(candidateFragmentIds)]
 
         // Mentions become resolved context for the next writer turn; durable
         // candidates additionally constrain continuity and record maintenance.
@@ -1599,32 +1061,17 @@ export function createAnalysisTools(
           groundedContradictions.push({
             description: contradiction.description,
             ...(contradiction.recordCorrectionReason ? { recordCorrectionReason: contradiction.recordCorrectionReason } : {}),
-            fragmentIds: uniqueStrings(evidenceChecks.map((check) => check.fragmentId), 8),
+            fragmentIds: uniqueStrings(evidenceChecks.map((check) => check.fragmentId)),
             sourceSegments: citedSource.evidence.evidenceSegments,
             sourceEvidenceText: citedSource.evidence.evidenceText,
             conflictingEvidence,
           })
         }
-        const contradictionKey = (contradiction: AnalysisCollector['contradictions'][number]) => (
-          `${normalizeForDedupe(contradiction.description)}\u0000${[...contradiction.fragmentIds].sort().join(',')}`
-        )
-        for (const contradiction of groundedContradictions) {
-          const existing = collector.contradictions.findIndex((item) => contradictionKey(item) === contradictionKey(contradiction))
-          // A re-reported finding replaces its evidence and correction judgment
-          // together. Omitted findings remain; an omitted reason on a restated
-          // finding withdraws its authorization.
-          if (existing >= 0) collector.contradictions[existing] = contradiction
-          else if (collector.contradictions.length < 12) collector.contradictions.push(contradiction)
-        }
+        collector.contradictions = groundedContradictions
 
-        if (unresolvedContinuity.length === 0) successfulToolNames.add('reportAnalysis')
-        else successfulToolNames.delete('reportAnalysis')
+        successfulToolNames.add('reportAnalysis')
         return {
-          ok: unresolvedContinuity.length === 0,
-          ...(unresolvedContinuity.length > 0 ? {
-            needsCorrection: true,
-            note: 'Some continuity operations were not recorded. Repair every item in skippedContinuity before finishing; accepted report data has been retained.',
-          } : {}),
+          ok: true,
           mentionCount: collector.mentions.length,
           candidateFragmentCount: collector.candidateFragmentIds.length,
           contradictionCount: collector.contradictions.length,
@@ -1633,19 +1080,15 @@ export function createAnalysisTools(
           threadOperationCount: collector.continuityProjection.threadOperations.length,
           focusedThreadCount: collector.continuityProjection.threadFocus.length,
           knowledgeOperationCount: collector.continuityProjection.knowledgeOperations.length,
-          ...(normalizedSummary.truncated ? {
-            summaryTruncated: true,
-            summaryNote: `The reported summary was shortened to fit the ${MAX_STORED_ANALYSIS_SUMMARY_CHARS}-character storage limit.`,
-          } : {}),
           ...(resolvedFragments.length > 0 ? {
             resolvedFragments,
             resolvedFragmentNote: 'Full records for what you just reported, not already in your context. Their sentences are numbered for correction targeting. Use them for directions and record maintenance; no further reads are needed for these.',
           } : {}),
           ...(inspectionRequired ? { inspectionRequired: true } : {}),
-          ...(unresolvedContinuity.length > 0 ? { skippedContinuity: unresolvedContinuity } : {}),
+          ...(normalizedProjection.skipped.length > 0 ? { skippedContinuity: normalizedProjection.skipped } : {}),
           ...(skippedMentions.length > 0 ? {
             skippedMentions,
-            skippedMentionNote: 'These texts do not appear verbatim in the prose, so they cannot be highlighted. Report the exact wording the prose uses.',
+            skippedMentionNote: 'These texts do not appear verbatim in the prose and were not stored as highlights.',
           } : {}),
           ...(skippedContradictions.length > 0 ? {
             skippedContradictions,
@@ -1671,95 +1114,47 @@ export function createAnalysisTools(
   if (!opts?.disableSuggestions && opts?.proseFragmentId) {
     const customTypes = opts?.customFragmentTypes ?? []
     const allowedTypes = ['character', 'knowledge', ...customTypes.map(t => t.type)]
-    const resolveEvidence = async (
-      kind: 'correction' | 'new-fragment',
-      cited: number[],
-      title: string | undefined,
-      rationale: string | undefined,
-    ): Promise<{ retained: RetainedProposalEvidence | null; error?: Record<string, unknown> }> => {
-      let retained = kind === 'correction' ? retainedCorrectionEvidence : retainedNewRecordEvidence
-      if (cited.length > 0) {
-        const prose = await getFragment(opts.dataDir, opts.storyId, opts.proseFragmentId!)
-        const resolved = citedEvidence(segmentText(prose?.content ?? ''), cited)
-        const problem = citationProblem(resolved)
-        if (problem) {
-          return {
-            retained: null,
-            error: {
-              ok: false,
-              proposalCount: collector.fragmentChangeProposals.length,
-              queuedOperationCount: 0,
-              invalid: 1,
-              evidenceMatched: false,
-              note: `${problem} Cite sentence numbers from the New Prose Fragment.`,
-            },
-          }
-        }
-        retained = {
-          evidenceSegments: resolved.evidence.evidenceSegments,
-          evidenceText: resolved.evidence.evidenceText,
-          title,
-          rationale,
-        }
-        if (kind === 'correction') retainedCorrectionEvidence = retained
-        else retainedNewRecordEvidence = retained
-      }
-      if (!retained) {
+    const resolveEvidence = async (cited: number[]) => {
+      const prose = await getFragment(opts.dataDir, opts.storyId, opts.proseFragmentId!)
+      const resolved = citedEvidence(segmentText(prose?.content ?? ''), cited)
+      const problem = citationProblem(resolved)
+      if (problem) {
         return {
-          retained: null,
           error: {
             ok: false,
             proposalCount: collector.fragmentChangeProposals.length,
             queuedOperationCount: 0,
             invalid: 1,
             evidenceMatched: false,
-            note: 'Cite the sentence numbers from the New Prose Fragment that establish this change. They are retained if a later retry needs to fix only the operations.',
+            note: `${problem} Cite sentence numbers from the New Prose Fragment.`,
           },
         }
       }
-      return { retained }
+      return { evidence: resolved.evidence }
     }
 
-    /**
-     * Queue everything eligible and report the rest, rather than failing the
-     * batch on its worst member. All-or-nothing loses the sound operations in a
-     * batch to one unusable sibling, and the model reads the resulting
-     * `queuedOperationCount: 0` as a refusal and moves on rather than retrying.
-     * This is how evidence already behaves here — a citation survives a
-     * failed call so that a retry costs less than a redo.
-     */
+    /** A proposal call is one atomic, self-contained author-facing change. */
     const queueValidatedProposal = async (params: {
       toolName: 'proposeRecordCorrections' | 'proposeNewRecords'
       proposalKind: 'correction' | 'new-fragment'
-      retained: RetainedProposalEvidence
+      evidence: CitedEvidence
       title?: string
       rationale?: string
       operations: FragmentChangeOperation[]
-      /** Rejected before this call saw them, merged into the same report. */
       rejected?: AnalysisProposalSkipped[]
     }) => {
       const skipped: AnalysisProposalSkipped[] = [...(params.rejected ?? [])]
-      const eligible: FragmentChangeOperation[] = []
       for (const operation of params.operations) {
         if (operation.action === 'replace_text') {
           const contractError = correctionContractError(operation)
           if (contractError) {
             skipped.push({ operationId: operation.operationId ?? '', action: operation.action, reason: contractError })
-            continue
           }
-        } else if (operation.action === 'create_fragment' && operation.content.length > MAX_NEW_FRAGMENT_CONTENT_CHARS) {
-          skipped.push({
-            operationId: operation.operationId ?? '',
-            action: operation.action,
-            reason: `A new fragment proposed for unattended application must stay within ${MAX_NEW_FRAGMENT_CONTENT_CHARS} characters.`,
-          })
-          continue
         }
-        eligible.push(operation)
       }
 
-      const validation = eligible.length > 0
-        ? await validateOperations(opts.dataDir, opts.storyId, eligible, {
+      const validation = skipped.length === 0
+        ? await validateOperations(opts.dataDir, opts.storyId, params.operations, {
           allowedCreateTypes: allowedTypes,
           createTypeScopeDescription: 'librarian analysis proposals',
         })
@@ -1768,147 +1163,76 @@ export function createAnalysisTools(
         if (result.status !== 'valid') skipped.push(skippedOperation(result))
       }
 
-      if (validation.operations.length === 0) {
+      if (skipped.length > 0 || validation.operations.length !== params.operations.length) {
         return {
           ok: false,
           proposalCount: collector.fragmentChangeProposals.length,
           queuedOperationCount: 0,
           invalid: skipped.length,
           evidenceMatched: true,
-          evidenceRetained: true,
           ...operationEchoFields(validation.results),
           skipped,
-          note: 'No operation was queued. The grounded evidence is retained; fix only the reported operations and retry.',
+          note: 'The proposal was not queued because one or more operations were invalid.',
         }
       }
 
-      const queuedResult = queueFragmentChangeProposal({
+      queueFragmentChangeProposal({
         collector,
-        title: params.title ?? params.retained.title,
-        rationale: params.rationale ?? params.retained.rationale,
+        title: params.title,
+        rationale: params.rationale,
         proposalKind: params.proposalKind,
-        evidenceSegments: params.retained.evidenceSegments,
-        evidenceText: params.retained.evidenceText,
-        eligibilityReason: params.rationale ?? params.retained.rationale,
-        // Semantic contradiction classification remains an LLM judgment. A
-        // structurally grounded mistake is still possible, so canon corrections
-        // stay visible for author review rather than writing unattended. New
-        // named records remain safe to auto-apply.
+        evidenceSegments: params.evidence.evidenceSegments,
+        evidenceText: params.evidence.evidenceText,
+        eligibilityReason: params.rationale,
         autoApplySafe: params.proposalKind === 'new-fragment',
         operations: validation.operations,
         validation: validation.results,
       })
-      const duplicate = validation.operations.length > 0 && queuedResult.queued.length === 0
       successfulToolNames.add(params.toolName)
-      // Only a fully accepted call is done with its citation; otherwise it stays
-      // for the narrower retry, which would otherwise cost a fresh report.
-      if (skipped.length === 0) {
-        if (params.proposalKind === 'correction') retainedCorrectionEvidence = null
-        else retainedNewRecordEvidence = null
-      }
       return {
         ok: true,
         proposalCount: collector.fragmentChangeProposals.length,
-        queuedOperationCount: queuedResult.queued.length,
-        invalid: skipped.length,
+        queuedOperationCount: validation.operations.length,
+        invalid: 0,
         evidenceMatched: true,
         autoApplySafe: params.proposalKind === 'new-fragment',
-        ...(skipped.length > 0 ? { evidenceRetained: true } : {}),
-        ...(duplicate ? { duplicate: true, note: 'An identical fragment change proposal was already queued; not queued again.' } : {}),
-        ...(skipped.length > 0 && !duplicate ? {
-          note: 'The eligible operations were queued. The rest are reported above with the grounded evidence retained; resubmit only those, addressed as each reason directs.',
-        } : {}),
         ...operationEchoFields(validation.results),
-        skipped,
       }
-    }
-
-    // Every proposal-lane return path funnels through here so finishAnalysis can
-    // tell "never attempted" from "attempted and left work behind". A partly
-    // queued call counts as the latter: the queued operations are safe, and the
-    // rejected ones would otherwise vanish with nothing asking after them.
-    const recordProposalOutcome = <T extends { ok: boolean; invalid?: number }>(
-      toolName: 'proposeRecordCorrections' | 'proposeNewRecords',
-      result: T,
-    ): T => {
-      if (result.ok && !result.invalid) unfinishedProposalToolNames.delete(toolName)
-      else unfinishedProposalToolNames.add(toolName)
-      return result
     }
 
     tools.proposeRecordCorrections = tool({
       description: 'Queue author-reviewed corrections for reusable records proven wrong by a grounded reportAnalysis finding. Do not rewrite prose or unresolved conflicts.',
       inputSchema: librarianRecordCorrectionsInputSchema,
-      execute: async ({ title, evidenceSegments = [], rationale, corrections = [] }) => {
-        const record = <T extends { ok: boolean; invalid?: number }>(result: T) => recordProposalOutcome('proposeRecordCorrections', result)
-        const evidence = await resolveEvidence('correction', evidenceSegments, title, rationale)
-        if (evidence.error) return record(evidence.error as { ok: boolean })
-        if (corrections.length === 0) {
-          return record({
-            ok: false,
-            proposalCount: collector.fragmentChangeProposals.length,
-            queuedOperationCount: 0,
-            invalid: 1,
-            evidenceMatched: true,
-            evidenceRetained: true,
-            note: 'Citation retained. Resubmit with at least one correction; evidenceSegments, title, and rationale may be omitted on the retry.',
-          })
-        }
+      execute: async ({ title, evidenceSegments, rationale, corrections }) => {
+        const evidence = await resolveEvidence(evidenceSegments)
+        if (evidence.error) return evidence.error
         // Resolve each cited sentence into the exact span it addresses. The
         // model never states the old text, so it cannot get it wrong; an
         // unresolvable citation is reported against the numbering it saw.
         const unresolved: AnalysisProposalSkipped[] = []
         const operations: FragmentChangeOperation[] = []
-        const resolved: Array<{
-          fragmentId: string
-          target: Fragment
-          field: 'content' | 'description'
-          current: string
-          segment: TextSegment
-          segments: TextSegment[]
-          newText: string
-          reason?: string
-          wholeField: boolean
-        }> = []
         for (const correction of corrections) {
           const field = correction.field ?? 'content'
           const target = await getFragment(opts.dataDir, opts.storyId, correction.fragmentId)
           const current = target?.[field]
           if (!target || typeof current !== 'string') {
-            // Continuity memory names its keys the way the catalog names
-            // records, so aiming a correction at one is a category error the
-            // framework invited rather than a misread instruction. Saying only
-            // that the target could not be read costs a whole extra report round
-            // trip while the model works the distinction out unaided.
-            const asContinuityKey = continuityKeyOwners.get(normalizeContinuityKey(correction.fragmentId))
             unresolved.push({
               operationId: '',
               action: 'replace_text',
-              reason: asContinuityKey
-                ? `${correction.fragmentId} is a ${asContinuityKey} key in continuity memory, not a reusable record. Change it with a reportAnalysis ${asContinuityKey} operation instead.`
-                : `There is no reusable record ${correction.fragmentId}${field === 'content' ? '' : ` with a ${field} field`}. Correct only records whose numbered sentences you were shown.`,
+              reason: `There is no reusable record ${correction.fragmentId}${field === 'content' ? '' : ` with a ${field} field`}.`,
             })
             continue
           }
-          // A record merely recognised from the catalog would otherwise be
-          // corrected at whichever sentence happens to hold the cited position.
           if (!numberedFragmentIds.has(correction.fragmentId)) {
             unresolved.push({
               operationId: '',
               action: 'replace_text',
-              reason: `You have not been shown ${correction.fragmentId} with its sentences numbered, so its sentence numbers are not yours to cite. Read it with readFragments and correct the sentence you are shown.`,
+              reason: `${correction.fragmentId} has not been shown with numbered sentences.`,
             })
             continue
           }
           const segments = segmentText(current)
           const segment = segments.find((candidate) => candidate.index === correction.segment)
-          // A single-sentence field is still correctable. Replacing the whole of
-          // one is a rewrite rather than a localized edit, so it is held back
-          // from *unattended* application in `unattendedProposalError`, which
-          // re-checks against the record as it stands at apply time. Refusing it
-          // outright here instead would put descriptions — capped at 250
-          // characters, usually one sentence, and the field the catalog shows —
-          // beyond correction entirely.
           if (!segment) {
             unresolved.push({
               operationId: '',
@@ -1917,147 +1241,47 @@ export function createAnalysisTools(
             })
             continue
           }
-          const groundedTarget = collector.contradictions.some((contradiction) => (
-            contradiction.conflictingEvidence?.some((conflict) => (
-              conflict.fragmentId === correction.fragmentId
-              && conflict.segments.includes(correction.segment)
-            ))
-          ))
-          if (!groundedTarget) {
-            unresolved.push({
-              operationId: '',
-              action: 'replace_text',
-              reason: `${correction.fragmentId} sentence ${correction.segment} was not cited as the conflicting side of a grounded reportAnalysis contradiction. Record ordinary progression in continuity state; correct canon only through a reported contradiction.`,
-            })
-            continue
-          }
-          const correctionAuthorized = collector.contradictions.some((contradiction) => (
-            contradiction.recordCorrectionReason?.trim()
-            && contradiction.conflictingEvidence?.some((conflict) => (
-              conflict.fragmentId === correction.fragmentId
-              && conflict.segments.includes(correction.segment)
-            ))
-          ))
-          if (!correctionAuthorized) {
-            unresolved.push({
-              operationId: '',
-              action: 'replace_text',
-              reason: 'The conflict is recorded for review, but does not authorize changing this record. Supply recordCorrectionReason in reportAnalysis only if evidence establishes that the record itself is wrong; otherwise leave the finding for prose review.',
-            })
-            continue
-          }
-          // The record was shown numbered, so the model writes the marker back
-          // with its replacement; it is presentation, never content.
-          resolved.push({
-            fragmentId: correction.fragmentId,
-            target,
-            field,
-            current,
-            segment,
-            segments,
-            newText: stripSegmentMarker(correction.newText),
-            reason: correction.reason,
-            // Replacing the only sentence of a field rewrites the whole field.
-            wholeField: current.trim() === segment.text.trim(),
-          })
-        }
-
-        // One event is one proposal, so a record's edits stay together. How many
-        // writes they take is the engine's problem: `set_fields` carries a base
-        // hash and the shared validator will not let it share a fragment with
-        // localized edits, so when any field of a record is replaced outright,
-        // every edit to that record composes into one `set_fields`.
-        const byFragment = new Map<string, typeof resolved>()
-        for (const item of resolved) {
-          byFragment.set(item.fragmentId, [...(byFragment.get(item.fragmentId) ?? []), item])
-        }
-
-        for (const [fragmentId, items] of byFragment) {
-          if (!items.some((item) => item.wholeField)) {
-            for (const item of items) {
-              const twins = item.segments.filter((candidate) => candidate.text === item.segment.text)
-              operations.push({
-                action: 'replace_text',
-                fragmentId,
-                field: item.field,
-                oldText: item.segment.text,
-                newText: item.newText,
-                replaceAll: false,
-                // A sentence can repeat verbatim; the citation already says which.
-                ...(twins.length > 1
-                  ? { occurrence: twins.findIndex((candidate) => candidate.index === item.segment.index) + 1 }
-                  : {}),
-                ...(item.reason ? { reason: item.reason } : {}),
-              })
-            }
-            continue
-          }
-
-          // Splice each cited span out of the field it belongs to, last first,
-          // so an earlier replacement cannot shift the offsets of a later one.
-          const fields: Record<string, string> = {}
-          for (const item of items) {
-            const edits = items.filter((other) => other.field === item.field)
-            if (fields[item.field] !== undefined) continue
-            fields[item.field] = edits
-              .slice()
-              .sort((a, b) => b.segment.start - a.segment.start)
-              .reduce(
-                (text, edit) => text.slice(0, edit.segment.start) + edit.newText + text.slice(edit.segment.end),
-                item.current,
-              )
-          }
-          const reasons = items.map((item) => item.reason).filter((reason): reason is string => !!reason)
+          const twins = segments.filter((candidate) => candidate.text === segment.text)
           operations.push({
-            action: 'set_fields',
-            fragmentId,
-            baseHash: fragmentBaseHash(items[0].target),
-            fields,
-            ...(reasons.length > 0 ? { reason: reasons.join(' ') } : {}),
+            action: 'replace_text',
+            fragmentId: correction.fragmentId,
+            field,
+            oldText: segment.text,
+            newText: correction.newText,
+            replaceAll: false,
+            ...(twins.length > 1
+              ? { occurrence: twins.findIndex((candidate) => candidate.index === segment.index) + 1 }
+              : {}),
+            ...(correction.reason ? { reason: correction.reason } : {}),
           })
         }
-        // Unresolvable targets are reported alongside whatever did resolve, not
-        // instead of it. Each carries its own diagnosis, so the shared note
-        // stays generic; a blanket line about sentence numbers would mislabel a
-        // wrong-target failure.
-        return record(await queueValidatedProposal({
+
+        return queueValidatedProposal({
           toolName: 'proposeRecordCorrections',
           proposalKind: 'correction',
-          retained: evidence.retained!,
+          evidence: evidence.evidence!,
           title,
           rationale,
           operations,
           rejected: unresolved,
-        }))
+        })
       },
     })
 
     tools.proposeNewRecords = tool({
       description: `Queue new reusable named records established by the prose; not events, temporary conditions, unnamed scenery, or feelings. Allowed type values: ${allowedTypes.join(', ')}.`,
       inputSchema: librarianNewRecordsInputSchema,
-      execute: async ({ title, evidenceSegments = [], rationale, newFragments = [] }) => {
-        const record = <T extends { ok: boolean; invalid?: number }>(result: T) => recordProposalOutcome('proposeNewRecords', result)
-        const evidence = await resolveEvidence('new-fragment', evidenceSegments, title, rationale)
-        if (evidence.error) return record(evidence.error as { ok: boolean })
-        if (newFragments.length === 0) {
-          return record({
-            ok: false,
-            proposalCount: collector.fragmentChangeProposals.length,
-            queuedOperationCount: 0,
-            invalid: 1,
-            evidenceMatched: true,
-            evidenceRetained: true,
-            note: 'Citation retained. Resubmit with at least one new reusable record; evidenceSegments, title, and rationale may be omitted on the retry.',
-          })
-        }
-        return record(await queueValidatedProposal({
+      execute: async ({ title, evidenceSegments, rationale, newFragments }) => {
+        const evidence = await resolveEvidence(evidenceSegments)
+        if (evidence.error) return evidence.error
+        return queueValidatedProposal({
           toolName: 'proposeNewRecords',
           proposalKind: 'new-fragment',
-          retained: evidence.retained!,
+          evidence: evidence.evidence!,
           title,
           rationale,
           operations: newFragments.map((operation) => ({ ...operation, action: 'create_fragment' as const })),
-        }))
+        })
       },
     })
   }
@@ -2078,51 +1302,23 @@ export function createAnalysisTools(
 
   if (opts?.includeFinishTool !== false) {
     tools.finishAnalysis = tool({
-      description: 'End the analysis after required calls succeed and any failed proposal lane is retried or abandoned.',
+      description: 'End the analysis after the required calls succeed.',
       inputSchema: librarianFinishAnalysisInputSchema,
-      execute: async ({ skipped = [] }) => {
-        const abandoned = skipped.map((entry) => (
-          typeof entry === 'string' ? { toolName: entry } : entry
-        ))
-        const skippedNames = new Set<string>(abandoned.map((entry) => entry.toolName))
+      execute: async () => {
         const missingRequired: string[] = []
         if (tools.reportAnalysis && !successfulToolNames.has('reportAnalysis')) missingRequired.push('reportAnalysis')
-        // Record maintenance is optional, so a lane that was never called needs
-        // no declaration. Requiring one anyway spends an extra finish round trip
-        // whenever a successful correction is not accompanied by a skip note for
-        // the untouched discovery lane. Only a lane left with work outstanding
-        // must be retried or explicitly abandoned, and there the reason is
-        // load-bearing: it is the only record of why a known-wrong proposal was
-        // dropped rather than fixed.
-        const unexplained: string[] = []
-        for (const proposalToolName of ['proposeRecordCorrections', 'proposeNewRecords']) {
-          if (!tools[proposalToolName] || !unfinishedProposalToolNames.has(proposalToolName)) continue
-          if (!skippedNames.has(proposalToolName)) {
-            missingRequired.push(proposalToolName)
-            continue
-          }
-          const declared = abandoned.find((entry) => entry.toolName === proposalToolName)
-          if (!declared?.reason) unexplained.push(proposalToolName)
-        }
         if (tools.proposeDirections && !successfulToolNames.has('proposeDirections')) {
           missingRequired.push('proposeDirections')
         }
 
-        if (missingRequired.length > 0 || unexplained.length > 0) {
+        if (missingRequired.length > 0) {
           return {
             ok: false,
             missingRequired,
-            ...(unexplained.length > 0 ? { unexplained } : {}),
-            ...(unresolvedContinuity.length > 0 ? {
-              continuityNeedsCorrection: true,
-              skippedContinuity: unresolvedContinuity,
-            } : {}),
-            note: unresolvedContinuity.length > 0
-              ? 'Finish only after reportAnalysis repairs every rejected continuity item. Accepted report data is already retained, so retry only the missing operations plus enough summary to make a non-empty report.'
-              : 'Finish only after required tools succeed. A proposal call that failed or was only partly queued must be retried, or listed under skipped as {toolName, reason} saying why the rest was abandoned; a lane you never needed requires nothing.',
+            note: 'Finish only after required tools succeed.',
           }
         }
-        return { ok: true, completed: [...successfulToolNames], skipped: abandoned }
+        return { ok: true, completed: [...successfulToolNames] }
       },
     })
   }

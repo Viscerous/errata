@@ -4,7 +4,6 @@ import { createStory, createFragment } from '@/server/fragments/storage'
 import {
   validateOperations,
   fragmentBaseHash,
-  MAX_LOCALIZED_EDIT_CHARS,
 } from '@/server/fragments/change-operations'
 import { getFragment } from '@/server/fragments/storage'
 import type { Fragment, StoryMeta } from '@/contracts/story'
@@ -44,7 +43,7 @@ function makeKnowledge(content: string): Fragment {
   }
 }
 
-describe('change-operation content integrity guards', () => {
+describe('change-operation state integrity', () => {
   let dataDir: string
   let cleanup: () => Promise<void>
 
@@ -78,7 +77,7 @@ describe('change-operation content integrity guards', () => {
     })
   })
 
-  it('rejects replace_text when oldText is the whole current field', async () => {
+  it('allows replace_text to replace a whole current field', async () => {
     const current = 'Status: Active Elicitation.\n\nCurrent Lure: Victoria will approach Thorne through the preservation project.'
     await createFragment(dataDir, 'story-guards', makeKnowledge(current))
 
@@ -91,18 +90,10 @@ describe('change-operation content integrity guards', () => {
       replaceAll: false,
     }])
 
-    expect(results[0].status).toBe('invalid')
-    const error = results[0].errors?.[0]
-    expect(error).toMatchObject({
-      code: 'whole_field_replace_text',
-      nextAction: 'readFragments',
-    })
-    expect(error!.message).toContain('whole-field rewrite')
-    expect(error!.message).toContain('set_fields with baseHash')
-    expect(error!.message).toContain('smaller replace_text operations')
+    expect(results[0].status).toBe('valid')
   })
 
-  it('rejects an oversized localized edit and directs the model to set_fields', async () => {
+  it('does not impose a content-size policy on a valid exact edit', async () => {
     await createFragment(dataDir, 'story-guards', makeKnowledge('Opening context.\n\nShort body to revise.\n\nClosing context.'))
 
     const { results } = await validateOperations(dataDir, 'story-guards', [{
@@ -110,20 +101,14 @@ describe('change-operation content integrity guards', () => {
       fragmentId: 'kn-guard01',
       field: 'content',
       oldText: 'Short body to revise.',
-      newText: 'x'.repeat(MAX_LOCALIZED_EDIT_CHARS + 1),
+      newText: 'x'.repeat(4001),
       replaceAll: false,
     }])
 
-    expect(results[0].status).toBe('invalid')
-    const error = results[0].errors?.find(e => e.code === 'localized_edit_too_large')
-    expect(error).toBeDefined()
-    expect(error!.message).toContain('newText is the complete replacement for oldText')
-    expect(error!.message).toContain('surrounding text is already preserved')
-    expect(error!.message).toContain('do not restate the whole fragment')
-    expect(error!.message).toContain('set_fields')
+    expect(results[0].status).toBe('valid')
   })
 
-  it('set_fields with baseHash remains exempt from the localized size cap', async () => {
+  it('keeps stale-write protection for whole-field rewrites', async () => {
     await createFragment(dataDir, 'story-guards', makeKnowledge('Old body.'))
     const target = await getFragment(dataDir, 'story-guards', 'kn-guard01')
 

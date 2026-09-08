@@ -16,16 +16,8 @@ describe('generation output commit assessment', () => {
       })
     },
   )
-
-  it.each([
-    '.thought\nReady to write.',
-    '<think>Plan the answer first.</think>',
-    '<analysis>We need produce prose.</analysis>',
-    '```reasoning\nFirst plan the scene.\n```',
-  ])('rejects a leaked reasoning prefix', (text) => {
-    expect(assessGenerationForCommit(text, 'stop')).toMatchObject({
-      accepted: false,
-      code: 'reasoning_leak',
-    })
+  it('does not judge model content after a successful stream', () => {
+    expect(assessGenerationForCommit('<think>Plan the scene.</think>\nThe door opens.', 'stop'))
+      .toEqual({ accepted: true })
   })
 })

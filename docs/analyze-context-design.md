@@ -91,20 +91,12 @@ character-only special case.
   a citation to byte-identical source text, so evidence cannot be paraphrased,
   mis-quoted, or reworded — those failures are not expressible. It is also
   cheaper: an integer instead of a few hundred output characters per operation.
-- A resolved citation is retained across a failed retry, so the model can
-  resubmit only corrected operation fields. Rationale and title are optional.
 - **Correction scope is structural.** A correction is `{fragmentId, field,
   segment, newText}`; the server derives the exact `oldText` and any
-  disambiguating occurrence. A copied paragraph or an episode recap is not
-  expressible, and `oldText was not found` cannot occur. Growth relative to the
-  replaced sentence remains as a backstop against a single sentence being
-  inflated into a scene summary. Replacing the *only* sentence in a record is
-  refused: that is a whole-field rewrite, which stays barred for unattended
-  application, and it goes to author review instead.
+  disambiguating occurrence. The model therefore supplies one address and one
+  replacement rather than coordinating an anchor with a copied `oldText`.
 - `autoApplyLibrarianSuggestions` remains a supported unattended mode. Auto-apply
-  independently re-checks exact source evidence, allowed operation kinds, and
-  localized operation limits, reading the same limit constants as the tool
-  contract so the two cannot drift.
+  independently re-checks exact source evidence and allowed operation kinds.
 - Analyze no longer exposes direct write tools. Every model-authored change goes
   through the change-proposal queue before it can be accepted or auto-applied.
 - Routine events, current conditions, relationship movement, and open threads
@@ -117,34 +109,14 @@ The broader `proposeFragmentChanges` operation vocabulary remains available to
 explicit editing surfaces such as Librarian Chat. This restriction applies to
 automatic online prose analysis, whose outputs may be applied unattended.
 
-### Reject on correctness, clip on preference
+### Validation boundary
 
-A schema rejection throws away the whole call. On a small model that is the most
-expensive failure the loop has: the batched report has to be reasoned out and
-emitted again from scratch, and any lane already completed is usually re-run
-alongside it. So the input contract only refuses what it cannot interpret, and
-anything merely more verbose than wanted is accepted and bounded on the way in.
-
-- Citation counts are clipped at `MAX_CITED_SEGMENTS` when the citation is
-  resolved, not capped in the schema. Over-citing costs a longer stored evidence
-  string and nothing else.
-- Mention and candidate lists take a verbose-but-sane ceiling and are clipped in
-  `execute`; only a degenerate repeat is rejected.
-- Summary and timeline prose are shortened at sentence or word boundaries, with
-  an ellipsis when a partial tail is omitted, so stored diagnostics do not end
-  in a misleading word fragment.
-- Proposal titles and rationales are preference-sized metadata. Overlong values
-  are accepted and shortened in `execute` rather than invalidating otherwise
-  grounded operations.
-- `finishAnalysis` accepts an abandoned lane as a bare tool name, because that is
-  complete information for a lane never called — and the gate does not require
-  those to be declared at all. It still demands a reason for abandoning a lane
-  left in a failed state, which is the one case where the reason is load-bearing.
-
-The inverse also holds: a bound worth enforcing belongs in the schema, where the
-model cannot express the violation, rather than in a check that discards work
-after the fact. Continuity operations missing a citation are the open case —
-they are currently dropped with a note, which loses durable memory silently.
+The model-facing schemas require only enough structure to interpret a result.
+The server does not shorten, rewrite, or infer missing model-authored content.
+Proposal calls are self-contained and atomic: evidence and every requested
+operation validate together, or nothing from that call is queued. Structural
+state checks remain at the boundary—valid IDs, resolvable sentence addresses,
+existing identities for non-creating continuity actions, and exact edit targets.
 
 ## Current state vs the principle
 
@@ -169,9 +141,8 @@ The current policy is semantic first, with no numeric context caps chosen yet:
   was explicitly marked as a durable-review candidate, a conditional inspection
   stage exposes the full surface so the finding can be amended. Resolving a
   mention for future writer context does not create this extra request. Failed
-  reports and proposals enter a focused recovery stage, where `finishAnalysis`
-  remains available for the exceptional case that requires an explicit
-  abandonment reason. This hybrid follows the stored trace evidence: most runs
+  reports and proposals return to the same primary surface; there is no
+  model-specific recovery schema. This hybrid follows the stored trace evidence: most runs
   already produced report, directions, and finish in one response, so isolating
   observation would have added latency to the common path. A repeated
   `readFragments` request for an available record returns its ID under
@@ -191,7 +162,7 @@ The current policy is semantic first, with no numeric context caps chosen yet:
   calls; directions cannot be abandoned as an optional skip. The dedicated `directions.suggest`
   runner remains available for guided/on-demand suggestions even when automatic
   directions are disabled.
-- **Lane completion is explicit.** Observation is required, record maintenance
+- **Lane completion is observable.** Observation is required, record maintenance
   is conditional, and automatic directions are required-or-disabled. If a
   later model or tool step fails after a valid observation, that source-linked
   observation is saved with incomplete lane state before the run reports its
@@ -202,10 +173,8 @@ The current policy is semantic first, with no numeric context caps chosen yet:
   sides, so a variant or drifted spelling lands on the identity it meant instead
   of being refused. A key carrying no alphanumeric content is not an identity and
   is skipped with a reason rather than admitted.
-- **Finishing** distinguishes an optional lane never used from one abandoned in
-  a failed state. Never calling `proposeRecordCorrections` or `proposeNewRecords`
-  needs no declaration; leaving a failed call unretried and undeclared is
-  refused.
+- **Finishing** checks only required successful calls. Proposal lanes are
+  optional and carry no hidden retry or abandonment state.
 - **Writer** tiers characters, knowledge, and custom context from sticky and
   recent-context signals, including recent annotations and a one-turn receipt
   bridge for explicit reads/tags.

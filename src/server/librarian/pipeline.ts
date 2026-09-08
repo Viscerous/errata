@@ -85,7 +85,7 @@ export interface LibrarianPipelineResult {
   finishReason: string
   stepCount: number
   analyzeLanes: LibrarianAnalyzeLaneStatus
-  /** True only after finishAnalysis accepted the complete workflow. */
+  /** True after required observation and direction work completes. */
   workflowComplete: boolean
   /** Set when the observation was recoverable but a required/started tail did not finish. */
   completionError?: string
@@ -170,32 +170,12 @@ function booleanToolResultField(result: unknown, field: string): boolean | undef
   return typeof value === 'boolean' ? value : undefined
 }
 
-function lastToolResultFailed(
-  toolCalls: Array<{ toolName: string; result: unknown }>,
-  toolNames: Set<string>,
-): boolean {
-  const lastResults = new Map<string, unknown>()
-  for (const call of toolCalls) {
-    if (toolNames.has(call.toolName)) lastResults.set(call.toolName, call.result)
-  }
-  return [...lastResults.values()].some((result) => booleanToolResultField(result, 'ok') === false)
-}
-
 function analyzeLaneStatus(args: {
   collector: AnalysisCollector
   disableDirections: boolean
   disableSuggestions: boolean
-  toolCalls: Array<{ toolName: string; result: unknown }>
-  passFailed: boolean
   observationComplete: boolean
 }): LibrarianAnalyzeLaneStatus {
-  const proposalToolNames = new Set(['proposeRecordCorrections', 'proposeNewRecords'])
-  const proposalCalls = args.toolCalls.filter((call) => proposalToolNames.has(call.toolName))
-  const finishSucceeded = toolCallSucceeded(args.toolCalls, 'finishAnalysis')
-  const proposalIncomplete = args.passFailed
-    ? proposalCalls.length > 0 || args.collector.fragmentChangeProposals.length > 0
-    : lastToolResultFailed(proposalCalls, proposalToolNames) && !finishSucceeded
-
   return {
     observation: {
       requirement: 'required',
@@ -205,11 +185,9 @@ function analyzeLaneStatus(args: {
       ? { requirement: 'disabled', completion: 'disabled' }
       : {
           requirement: 'conditional',
-          completion: proposalIncomplete
-            ? 'incomplete'
-            : proposalCalls.length > 0 || args.collector.fragmentChangeProposals.length > 0
-              ? 'complete'
-              : 'not-needed',
+          completion: args.collector.fragmentChangeProposals.length > 0
+            ? 'complete'
+            : 'not-needed',
         },
     directions: args.disableDirections
       ? { requirement: 'disabled', completion: 'disabled' }
@@ -241,13 +219,6 @@ interface OnlinePassOutcome {
   toolCalls: OnlineToolCall[]
   workflowComplete: boolean
   error?: unknown
-}
-
-function toolCallSucceeded(
-  toolCalls: Array<{ toolName: string; result: unknown }>,
-  toolName: string,
-): boolean {
-  return toolCalls.some((call) => call.toolName === toolName && booleanToolResultField(call.result, 'ok') === true)
 }
 
 function registerFullContextFragments(
@@ -500,8 +471,6 @@ export async function runLibrarianPipeline(input: LibrarianPipelineInput): Promi
     collector,
     disableDirections,
     disableSuggestions,
-    toolCalls: analyzeOutcome.toolCalls,
-    passFailed,
     observationComplete: observationPresent,
   })
   let completionError: string | undefined
@@ -509,8 +478,6 @@ export async function runLibrarianPipeline(input: LibrarianPipelineInput): Promi
     completionError = analyzeOutcome.pass.error ?? 'Analyze stopped after completing its observation lane'
   } else if (analyzeLanes.directions.completion === 'incomplete') {
     completionError = 'Analyze ended without completing automatic directions required by the story setting'
-  } else if (analyzeLanes.recordMaintenance.completion === 'incomplete') {
-    completionError = 'Analyze ended with an unresolved record-maintenance attempt'
   } else if (passFailed) {
     completionError = analyzeOutcome.pass.error ?? 'Analyze stopped without successfully finishing'
   }

@@ -283,7 +283,7 @@ describe('generation endpoint', () => {
     })
   })
 
-  it('quarantines leaked reasoning sentinels even when the provider reports stop', async () => {
+  it('commits successful model content without judging its syntax', async () => {
     mockAgentStream.mockResolvedValue(
       createMockStreamResult('.thought\nReady. Proceed. Final check. Ready.') as any,
     )
@@ -295,18 +295,19 @@ describe('generation endpoint', () => {
     })
 
     const streamed = await res.text()
-    expect(streamed).toContain('"code":"reasoning_leak"')
-    expect(await listFragments(dataDir, storyId, 'prose')).toHaveLength(0)
-    expect(getPendingCount()).toBe(0)
+    expect(streamed).not.toContain('"type":"generation-rejected"')
+    const prose = await listFragments(dataDir, storyId, 'prose')
+    expect(prose).toHaveLength(1)
+    expect(prose[0].content).toBe('.thought\nReady. Proceed. Final check. Ready.')
+    expect(getPendingCount()).toBe(1)
 
     const { listGenerationLogs, getGenerationLog } = await import('@/server/llm/generation-logs')
     const logs = await listGenerationLogs(dataDir, storyId)
     const log = await getGenerationLog(dataDir, storyId, logs[0].id)
     expect(log).toMatchObject({
-      fragmentId: null,
+      fragmentId: prose[0].id,
       finishReason: 'stop',
-      commitStatus: 'rejected',
-      rejectionCode: 'reasoning_leak',
+      commitStatus: 'committed',
     })
   })
 

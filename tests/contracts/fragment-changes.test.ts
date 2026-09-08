@@ -4,7 +4,7 @@ import {
 } from '@/contracts/fragment-changes'
 
 describe('shared fragment-change contracts', () => {
-  it('preserves operation defaults and model-text normalization', () => {
+  it('preserves operation defaults and model-authored text', () => {
     const operation = fragmentChangeOperationSchema.parse({
       action: 'replace_text',
       fragmentId: 'ch-a1b2',
@@ -15,7 +15,7 @@ describe('shared fragment-change contracts', () => {
     expect(operation).toMatchObject({
       action: 'replace_text',
       field: 'content',
-      newText: 'Revised\ntext',
+      newText: 'Revised\\ntext',
       replaceAll: false,
     })
   })

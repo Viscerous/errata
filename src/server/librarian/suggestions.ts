@@ -3,7 +3,7 @@ import {
   updateFragment,
 } from '../fragments/storage'
 import type { Fragment } from '@/contracts/story'
-import type { FragmentChangeOperation, OperationValidation } from '../fragments/change-operations'
+import type { OperationValidation } from '../fragments/change-operations'
 import {
   fragmentBaseHash,
   recommendedReadFragmentIds,
@@ -17,12 +17,6 @@ import {
 } from '../fragments/change-apply'
 import type { LibrarianAnalysis } from './storage'
 import { evidenceAppearsInText } from './evidence'
-import {
-  correctionShapeError,
-  MAX_CORRECTION_SPAN_CHARS,
-  MAX_NEW_FRAGMENT_CONTENT_CHARS,
-  MIN_CORRECTION_ANCHOR_CHARS,
-} from './correction-limits'
 
 export interface ApplyFragmentChangeProposalResult {
   appliedResults: OperationValidation[]
@@ -94,70 +88,6 @@ function sourceFragmentIdForProposal(
   return proposal.sourceFragmentId ?? analysis.fragmentId ?? null
 }
 
-function identityWords(value: string): string {
-  return value.toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
-}
-
-function namesIdentity(text: string, identity: string): boolean {
-  const words = identityWords(identity)
-  if (words.length < 3) return false
-  return ` ${identityWords(text)} `.includes(` ${words} `)
-}
-
-/**
- * Keep character corrections from crossing entity boundaries unattended. This
- * is deliberately an apply-time guard rather than another model contract: a
- * mistaken proposal remains visible for review, while no extra fields or retry
- * loop are imposed on smaller models.
- */
-async function unattendedCharacterCorrectionError(
-  dataDir: string,
-  storyId: string,
-  analysis: LibrarianAnalysis,
-  proposal: LibrarianAnalysis['fragmentChangeProposals'][number],
-  operation: Extract<FragmentChangeOperation, { action: 'replace_text' }>,
-): Promise<string | null> {
-  const target = await getFragment(dataDir, storyId, operation.fragmentId)
-  if (!target || target.type !== 'character') return null
-
-  const claim = [proposal.title, proposal.rationale, operation.reason, operation.newText]
-    .filter((value): value is string => Boolean(value?.trim()))
-    .join(' ')
-  const targetAliases = [
-    target.name,
-    ...analysis.mentions
-      .filter((mention) => mention.fragmentId === target.id)
-      .map((mention) => mention.text),
-  ]
-  const namesTarget = targetAliases.some((alias) => namesIdentity(claim, alias))
-
-  const otherCharacterIds = [...new Set(
-    analysis.mentions
-      .map((mention) => mention.fragmentId)
-      .filter((fragmentId) => fragmentId !== target.id),
-  )]
-  for (const fragmentId of otherCharacterIds) {
-    const other = await getFragment(dataDir, storyId, fragmentId)
-    if (!other || other.type !== 'character') continue
-    const aliases = [
-      other.name,
-      ...analysis.mentions
-        .filter((mention) => mention.fragmentId === fragmentId)
-        .map((mention) => mention.text),
-    ]
-    if (!namesTarget && aliases.some((alias) => namesIdentity(claim, alias))) {
-      return `The correction names ${other.name} but targets the character record for ${target.name}.`
-    }
-  }
-
-  const replacesFirstAssertion = operation.field === 'content'
-    && target.content.trimStart().startsWith(operation.oldText.trim())
-  if (replacesFirstAssertion && !namesTarget) {
-    return `The first assertion of ${target.name}'s character record cannot be replaced unattended without retaining ${target.name}'s identity.`
-  }
-  return null
-}
-
 async function unattendedProposalError(
   dataDir: string,
   storyId: string,
@@ -175,30 +105,9 @@ async function unattendedProposalError(
   }
 
   for (const operation of proposal.operations) {
-    if (operation.action === 'create_fragment') {
-      if (operation.content.length > MAX_NEW_FRAGMENT_CONTENT_CHARS) {
-        return 'A new fragment proposed for unattended application exceeded the minimal content limit.'
-      }
-      continue
-    }
+    if (operation.action === 'create_fragment') continue
     if (operation.action !== 'replace_text' || operation.replaceAll) {
       return 'Unattended record maintenance may only create reusable fragments or replace exact existing assertions.'
-    }
-    const characterCorrectionError = await unattendedCharacterCorrectionError(
-      dataDir,
-      storyId,
-      analysis,
-      proposal,
-      operation,
-    )
-    if (characterCorrectionError) return characterCorrectionError
-    if (
-      operation.oldText.trim().length < MIN_CORRECTION_ANCHOR_CHARS
-      || operation.oldText.length > MAX_CORRECTION_SPAN_CHARS
-      || operation.newText.length > MAX_CORRECTION_SPAN_CHARS
-      || correctionShapeError(operation.oldText, operation.newText) !== null
-    ) {
-      return 'An unattended correction exceeded the minimal localized-edit limits.'
     }
   }
   return null

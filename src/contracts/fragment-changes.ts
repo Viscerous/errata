@@ -19,43 +19,9 @@ export const editableFieldSchema = z.enum(['name', 'description', 'content'])
 export type EditableField = z.infer<typeof editableFieldSchema>
 
 const operationIdSchema = z.string().min(1).max(80).optional()
-const REASONING_ARTIFACT_TAGS = ['think', 'thinking', 'reasoning']
 
-/**
- * Remove reasoning-tag artifacts that small models sometimes leak into generated
- * text. Fresh writes truncate an unclosed reasoning dump; model-facing echoes do
- * not, because a stray opening tag in stored prose must not hide later content.
- */
-function stripReasoningArtifacts(value: string, { truncateUnclosed = true } = {}): string {
-  let next = value
-  for (const tag of REASONING_ARTIFACT_TAGS) {
-    next = next.replace(new RegExp(`<${tag}\\b[^>]*>[\\s\\S]*?<\\/${tag}>`, 'gi'), '')
-    if (truncateUnclosed) {
-      next = next
-        .replace(new RegExp(`<${tag}\\b[^>]*>[\\s\\S]*$`, 'gi'), '')
-        .replace(new RegExp(`<\\/${tag}>`, 'gi'), '')
-    }
-  }
-  return next
-}
-
-/** Strip model reasoning tags without truncating legitimate stored text. */
-export function sanitizeTextForToolEcho(text: string): string {
-  return stripReasoningArtifacts(text, { truncateUnclosed: false })
-}
-
-function normalizeLlmEscapedText(value: string): string {
-  const unescaped = value
-    .replace(/(?:\\r)?\\n/g, '\n')
-    .replace(/\\"/g, '"')
-    .replace(/\\'/g, "'")
-  return stripReasoningArtifacts(unescaped)
-}
-
-/** Normalize literal escaped newlines and reasoning artifacts without trimming. */
-export const llmRawTextSchema = z.string().transform((value) =>
-  normalizeLlmEscapedText(value)
-)
+/** Model-authored content is stored exactly as supplied by the tool call. */
+export const llmRawTextSchema = z.string()
 
 export const llmInsertTextSchema = llmRawTextSchema.refine((value) => value.length >= 1, {
   message: 'String must contain at least 1 character.',
@@ -65,20 +31,11 @@ const exactAnchorTextSchema = z.string().refine((value) => value.trim().length >
   message: 'oldText must contain the exact existing text to find and replace.',
 })
 
-export const llmTextSchema = z.string().transform((value) =>
-  normalizeLlmEscapedText(value).trim()
-).refine((value) => value.length >= 1, { message: 'String must contain at least 1 character.' })
+export const llmTextSchema = z.string().trim().min(1)
 
-export const llmNameSchema = z.string().transform((value) =>
-  stripReasoningArtifacts(value)
-    .replace(/\\"/g, '"')
-    .replace(/\\'/g, "'")
-    .trim()
-).pipe(z.string().min(1).max(100))
+export const llmNameSchema = z.string().trim().min(1).max(100)
 
-export const llmDescriptionSchema = z.string().transform((value) =>
-  normalizeLlmEscapedText(value).trim()
-).pipe(z.string().max(250))
+export const llmDescriptionSchema = z.string().trim().max(250)
 
 const fieldUpdatesSchema = z.object({
   name: llmNameSchema.describe(FRAGMENT_NAME_DESCRIPTION).optional(),

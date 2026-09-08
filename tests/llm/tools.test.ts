@@ -12,7 +12,7 @@ import { initProseChain } from '@/server/fragments/prose-chain'
 import type { StoryMeta, Fragment } from '@/contracts/story'
 import { coreProposalToolNames, coreReadToolNames, createFragmentTools } from '@/server/llm/tools'
 import { segmentText } from '@/server/llm/segments'
-import { proposeFragmentChangesSchema, sanitizeTextForToolEcho } from '@/server/fragments/change-operations'
+import { proposeFragmentChangesSchema } from '@/server/fragments/change-operations'
 
 function makeStory(): StoryMeta {
   const now = new Date().toISOString()
@@ -53,19 +53,6 @@ function makeFragment(overrides: Partial<Fragment> = {}): Fragment {
 async function execTool<T = any>(toolDef: any, args: Record<string, unknown>): Promise<T> {
   return toolDef.execute!(args, { toolCallId: 'tc-1', messages: [] })
 }
-
-describe('sanitizeTextForToolEcho', () => {
-  it('removes complete reasoning-tag pairs', () => {
-    expect(sanitizeTextForToolEcho('A <think>hmm, plotting</think> B')).toBe('A  B')
-  })
-
-  it('does not truncate on an unclosed reasoning tag in legitimate content', () => {
-    // A stray '<thinking' inside real content must not eat everything after it
-    // (the write-path schema strips aggressively; echoes must not).
-    const text = 'She was <thinking about the war and everything that came after.'
-    expect(sanitizeTextForToolEcho(text)).toBe(text)
-  })
-})
 
 describe('LLM tools', () => {
   let dataDir: string
@@ -156,7 +143,7 @@ describe('LLM tools', () => {
    * come from there too. Sanitizing before segmenting would renumber everything
    * after a leaked reasoning block and point the correction at the wrong line.
    */
-  it('keeps read numbering aligned with stored content when an echo is sanitized', async () => {
+  it('keeps read numbering aligned with stored content without rewriting it', async () => {
     const content = 'One stands. <think>drifting</think>Two waits. Three leaves.'
     await createFragment(dataDir, storyId, makeFragment({ id: 'kn-0001', type: 'knowledge', content }))
     const tools = createFragmentTools(dataDir, storyId, { numberedFragmentIds: new Set() })
@@ -164,7 +151,7 @@ describe('LLM tools', () => {
     const result = await execTool(tools.readFragments, { fragmentIds: ['kn-0001'] })
     const lines: string[] = result.fragments[0].content.split('\n')
 
-    expect(result.fragments[0].content).not.toContain('<think>')
+    expect(result.fragments[0].content).toContain('<think>drifting</think>')
     // Same count and order as the segmentation a correction is resolved against.
     const stored = await getFragment(dataDir, storyId, 'kn-0001')
     expect(lines).toHaveLength(segmentText(stored!.content).length)
@@ -285,7 +272,7 @@ describe('LLM tools', () => {
     expect(fragments[0]).toMatchObject({ name: 'Moon Ritual', content: 'Moon ritual requires silver ash and river water.' })
   })
 
-  it('rejects fragment names that copy generated IDs or id labels', async () => {
+  it('accepts model-authored names while retaining the non-empty schema', async () => {
     await createFragment(dataDir, storyId, makeFragment({ id: 'ch-0001', type: 'character', name: 'Alice' }))
     const tools = createFragmentTools(dataDir, storyId, { readOnly: false })
 
@@ -298,8 +285,7 @@ describe('LLM tools', () => {
         content: 'Elias Thorne is a rival patron.',
       }],
     })
-    expect(createProposal.ok).toBe(false)
-    expect(createProposal.operations[0].errors[0].code).toBe('fragment_name_invalid')
+    expect(createProposal.ok).toBe(true)
     await expect(proposeFragmentChangesSchema.parseAsync({
       operations: [{
         action: 'create_fragment',
@@ -319,8 +305,7 @@ describe('LLM tools', () => {
         fields: { name: 'ch-alice' },
       }],
     })
-    expect(updateProposal.ok).toBe(false)
-    expect(updateProposal.operations[0].errors[0].code).toBe('fragment_name_invalid')
+    expect(updateProposal.ok).toBe(true)
   })
 
   it('rejects replace_text proposals with an empty oldText anchor', async () => {
@@ -385,7 +370,7 @@ describe('LLM tools', () => {
     expect(updated?.content).toBe('Alice has hazel eyes. Alice left the guard.')
   })
 
-  it('strips leaked reasoning tags from model-facing diff previews', async () => {
+  it('returns stored text unchanged in reads and diff previews', async () => {
     await createFragment(dataDir, storyId, makeFragment({
       id: 'ch-0001',
       type: 'character',
@@ -394,7 +379,7 @@ describe('LLM tools', () => {
     const tools = createFragmentTools(dataDir, storyId, { readOnly: false })
 
     const read = await execTool<any>(tools.readFragments, { fragmentIds: ['ch-0001'] })
-    expect(read.fragments[0].content).toBe('Alice has blue eyes.')
+    expect(read.fragments[0].content).toBe('<think>previous hidden reasoning</think>Alice has blue eyes.')
 
     const proposal = await execTool<any>(tools.editFragments, {
       operations: [{
@@ -407,8 +392,8 @@ describe('LLM tools', () => {
     })
 
     const diff = proposal.operations[0].diffs[0]
-    expect(diff.before).toBe('Alice has blue eyes.')
-    expect(diff.after).toBe('Alice has hazel eyes.')
+    expect(diff.before).toBe('<think>previous hidden reasoning</think>Alice has blue eyes.')
+    expect(diff.after).toBe('<think>previous hidden reasoning</think>Alice has hazel eyes.')
   })
 
   it('supports mid-content replace and append operations in one proposal', async () => {
@@ -432,15 +417,15 @@ describe('LLM tools', () => {
     expect(updated?.content).toBe('Opening.\nMiddle.\nClosing.\n\nAfterword.')
   })
 
-  it('sanitizes double-escaped quotes and newlines in operations schema', async () => {
+  it('does not rewrite model-authored operation text', async () => {
     const parsed = await proposeFragmentChangesSchema.parseAsync({
       operations: [
         {
           action: 'create_fragment',
           type: 'knowledge',
-          name: '<think>draft name</think>Reinier\\\'s Protocol',
+          name: '<think>draft name</think>Protocol',
           description: 'A description with \\"quotes\\"',
-          content: '<think>private reasoning</think>Authentication:\\n- Verbal: \\"Challenge\\".\\n- Reply: \\"Answer\\".',
+          content: '<think>private reasoning</think>Authentication:\\nChallenge.',
         },
         {
           action: 'append_paragraph',
@@ -459,16 +444,16 @@ describe('LLM tools', () => {
     })
 
     const createOp = parsed.operations[0] as any
-    expect(createOp.name).toBe("Reinier's Protocol")
-    expect(createOp.description).toBe('A description with "quotes"')
-    expect(createOp.content).toBe('Authentication:\n- Verbal: "Challenge".\n- Reply: "Answer".')
+    expect(createOp.name).toBe('<think>draft name</think>Protocol')
+    expect(createOp.description).toBe('A description with \\"quotes\\"')
+    expect(createOp.content).toBe('<think>private reasoning</think>Authentication:\\nChallenge.')
 
     const appendOp = parsed.operations[1] as any
-    expect(appendOp.text).toBe('Some appended text.')
+    expect(appendOp.text).toBe('\\n\\n<thinking>hidden</thinking>Some appended text.\\n\\n')
 
     const replaceOp = parsed.operations[2] as any
     expect(replaceOp.oldText).toBe('<think>literal anchor</think>')
-    expect(replaceOp.newText).toBe('Visible replacement.')
+    expect(replaceOp.newText).toBe('<reasoning>hidden</reasoning>Visible replacement.')
   })
 
   it('rejects ambiguous exact edits unless occurrence or replaceAll is provided', async () => {

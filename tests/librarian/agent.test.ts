@@ -313,7 +313,7 @@ describe('librarian agent', () => {
 
     mockStreamWithToolCalls([
       { toolName: 'reportAnalysis', args: { summary: 'Alice drew her sword.' } },
-      { toolName: 'reportAnalysis', args: { mentions: [{ fragmentId: 'ch-0001', text: 'Alice' }] } },
+      { toolName: 'reportAnalysis', args: { summary: 'Alice drew her sword.', mentions: [{ fragmentId: 'ch-0001', text: 'Alice' }] } },
     ])
 
     const analysis = await runLibrarian(dataDir, storyId, 'pr-0001')
@@ -496,7 +496,7 @@ describe('librarian agent', () => {
 
     mockStreamWithToolCalls([
       { toolName: 'reportAnalysis', args: { summary: 'Alice confronted a dragon.' } },
-      { toolName: 'reportAnalysis', args: { mentions: [{ fragmentId: 'ch-0001', text: 'Alice' }] } },
+      { toolName: 'reportAnalysis', args: { summary: 'Alice confronted a dragon.', mentions: [{ fragmentId: 'ch-0001', text: 'Alice' }] } },
     ])
 
     const analysis = await runLibrarian(dataDir, storyId, 'pr-0001')
@@ -526,6 +526,7 @@ describe('librarian agent', () => {
       {
         toolName: 'reportAnalysis',
         args: {
+          summary: 'A forbidden book pulsed on the altar.',
           mentions: [
             { fragmentId: 'kn-0001', text: 'Necronomicon' },
             { fragmentId: 'kn-0001', text: 'spellbook' },
@@ -576,7 +577,7 @@ describe('librarian agent', () => {
 
     mockStreamWithToolCalls([
       { toolName: 'reportAnalysis', args: { summary: 'They entered an underground market.' } },
-      { toolName: 'reportAnalysis', args: { mentions: [{ fragmentId: 'loc-0001', text: 'Ash Market' }] } },
+      { toolName: 'reportAnalysis', args: { summary: 'They entered an underground market.', mentions: [{ fragmentId: 'loc-0001', text: 'Ash Market' }] } },
     ])
 
     const analysis = await runLibrarian(dataDir, storyId, 'pr-0001')
@@ -1072,14 +1073,14 @@ describe('librarian agent', () => {
     // First run
     mockStreamWithToolCalls([
       { toolName: 'reportAnalysis', args: { summary: 'Alice entered the castle.' } },
-      { toolName: 'reportAnalysis', args: { mentions: [{ fragmentId: 'ch-0001', text: 'Alice' }] } },
+      { toolName: 'reportAnalysis', args: { summary: 'Alice entered the castle.', mentions: [{ fragmentId: 'ch-0001', text: 'Alice' }] } },
     ])
     await runLibrarian(dataDir, storyId, 'pr-0001')
 
     // Second run
     mockStreamWithToolCalls([
       { toolName: 'reportAnalysis', args: { summary: 'Alice found the treasure room.' } },
-      { toolName: 'reportAnalysis', args: { mentions: [{ fragmentId: 'ch-0001', text: 'Alice' }] } },
+      { toolName: 'reportAnalysis', args: { summary: 'Alice found the treasure room.', mentions: [{ fragmentId: 'ch-0001', text: 'Alice' }] } },
     ])
     await runLibrarian(dataDir, storyId, 'pr-0002')
 
@@ -1109,13 +1110,13 @@ describe('librarian agent', () => {
 
     mockStreamWithToolCalls([
       { toolName: 'reportAnalysis', args: { summary: 'Alice entered the castle.' } },
-      { toolName: 'reportAnalysis', args: { mentions: [{ fragmentId: 'ch-0001', text: 'Alice' }] } },
+      { toolName: 'reportAnalysis', args: { summary: 'Alice entered the castle.', mentions: [{ fragmentId: 'ch-0001', text: 'Alice' }] } },
     ])
     await runLibrarian(dataDir, storyId, 'pr-0001')
 
     mockStreamWithToolCalls([
       { toolName: 'reportAnalysis', args: { summary: 'Bob entered the castle.' } },
-      { toolName: 'reportAnalysis', args: { mentions: [{ fragmentId: 'ch-0002', text: 'Bob' }] } },
+      { toolName: 'reportAnalysis', args: { summary: 'Bob entered the castle.', mentions: [{ fragmentId: 'ch-0002', text: 'Bob' }] } },
     ])
     await runLibrarian(dataDir, storyId, 'pr-0001')
 
@@ -1152,6 +1153,7 @@ describe('librarian agent', () => {
       {
         toolName: 'reportAnalysis',
         args: {
+          summary: 'Alice stared at the stranger.',
           contradictions: [{
             description: 'Alice was described as having blue eyes, but new prose says green eyes.',
             fragmentIds: ['pr-0001'],
@@ -1458,16 +1460,7 @@ describe('librarian agent', () => {
     expect((await getFragment(dataDir, storyId, 'ch-0001'))?.content).toBe(victoriaContent)
   })
 
-  /**
-   * A description is capped at 250 characters and is usually one sentence, so
-   * every correction to one replaces the whole field. Refusing that when the
-   * proposal was made destroyed it outright — a kill test in which the
-   * groundskeeper died produced exactly the right description edit and the
-   * engine dropped it, telling the model to "leave this to author review" while
-   * ensuring no author would ever see it. The rewrite is held back from the
-   * *unattended* write instead, where the record can be judged as it stands.
-   */
-  it('proposes a whole-field description fix but leaves the write to the author', async () => {
+  it('proposes an exact description fix but leaves the write to the author', async () => {
     await createStory(dataDir, makeStory({
       settings: {
         autoApplyLibrarianSuggestions: true,
@@ -1512,20 +1505,17 @@ describe('librarian agent', () => {
 
     const analysis = await runLibrarian(dataDir, storyId, 'pr-0001')
 
-    // The correction survives as work the author can accept, carried by the
-    // operation that can express a whole-field change safely.
     expect(analysis.fragmentChangeProposals).toHaveLength(1)
     const operation = analysis.fragmentChangeProposals[0].operations[0]
     expect(operation).toMatchObject({
-      action: 'set_fields',
+      action: 'replace_text',
       fragmentId: 'ch-0001',
-      fields: { description: 'Never served as captain of the guard at Valdris.' },
+      field: 'description',
+      oldText: 'Captain of the guard at Valdris.',
+      newText: 'Never served as captain of the guard at Valdris.',
     })
-    // The hash pins the record it was written against, so a concurrent edit
-    // makes the proposal stale rather than silently overwriting the author.
-    expect(operation).toHaveProperty('baseHash', expect.any(String))
-    // ...but a whole-field rewrite is never written unattended, and it stays
-    // pending rather than being dismissed as stale on the author's behalf.
+    // Corrections remain author-reviewed even when their exact anchor spans the
+    // whole current field.
     expect(analysis.fragmentChangeProposals[0].autoApplied).not.toBe(true)
     expect(analysis.fragmentChangeProposals[0].stale).toBeUndefined()
     expect(analysis.fragmentChangeProposals[0].dismissed).not.toBe(true)
@@ -1533,14 +1523,7 @@ describe('librarian agent', () => {
       .toBe('Captain of the guard at Valdris.')
   })
 
-  /**
-   * One event is one proposal, and a death makes both a body sentence and the
-   * description above it wrong at once. `set_fields` cannot share a fragment
-   * with localized edits, so the record's edits compose into a single write
-   * rather than being split across proposals or refused — the 31B produced
-   * exactly this shape and lost four operations to the conflict.
-   */
-  it('composes a record whose edits span a sentence and its whole description', async () => {
+  it('keeps independent exact corrections together in one proposal', async () => {
     await createStory(dataDir, makeStory({
       settings: { autoApplyLibrarianSuggestions: true },
     }))
@@ -1591,15 +1574,20 @@ describe('librarian agent', () => {
 
     expect(analysis.fragmentChangeProposals).toHaveLength(1)
     const operations = analysis.fragmentChangeProposals[0].operations
-    expect(operations).toHaveLength(1)
+    expect(operations).toHaveLength(2)
     expect(operations[0]).toMatchObject({
-      action: 'set_fields',
+      action: 'replace_text',
       fragmentId: 'ch-0001',
-      fields: {
-        description: 'Never served as captain of the guard at Valdris.',
-        // The untouched sentences survive the compose; only the cited span moved.
-        content: 'Alice has never served as captain of the guard. She trained under Bren. She keeps the east gate.',
-      },
+      field: 'content',
+      oldText: 'Alice is captain of the guard.',
+      newText: 'Alice has never served as captain of the guard.',
+    })
+    expect(operations[1]).toMatchObject({
+      action: 'replace_text',
+      fragmentId: 'ch-0001',
+      field: 'description',
+      oldText: 'Captain of the guard at Valdris.',
+      newText: 'Never served as captain of the guard at Valdris.',
     })
   })
 
@@ -1721,6 +1709,7 @@ describe('librarian agent', () => {
       {
         toolName: 'reportAnalysis',
         args: {
+          summary: 'The hero defeated the dragon and the village celebrated.',
           events: ['Hero defeated the dragon', 'Village celebration'],
           scene: { transition: 'enter-flashback', line: 'flashback', evidenceSegments: [1] },
         },
@@ -1837,7 +1826,7 @@ describe('librarian agent', () => {
     expect(await listAnalyses(dataDir, storyId)).toHaveLength(0)
   })
 
-  it('derives summary from structured reportAnalysis payload when summary text is empty', async () => {
+  it('requires reportAnalysis to provide its own summary', async () => {
     await createStory(dataDir, makeStory())
     await createFragment(dataDir, storyId, makeFragment({ id: 'pr-0001' }))
     await setupProseChain(dataDir, storyId, ['pr-0001'])
@@ -1852,13 +1841,10 @@ describe('librarian agent', () => {
       },
     ])
 
-    const analysis = await runLibrarian(dataDir, storyId, 'pr-0001')
-    expect(analysis.summaryUpdate).toBe('Alice entered the vault.')
-    expect(analysis.sourceRevision?.contentHash).toMatch(/^[a-f0-9]{64}$/)
-    expect(analysis.continuityProjection).toMatchObject({
-      version: 2,
-      scene: { transition: 'uncertain' },
-    })
+    await expect(runLibrarian(dataDir, storyId, 'pr-0001')).rejects.toThrow(
+      'without completing the required observation lane',
+    )
+    expect(await listAnalyses(dataDir, storyId)).toHaveLength(0)
   })
 
   it('uses prompt with correct structure', async () => {

@@ -3,7 +3,7 @@
  * one story. Each sample starts from identical persisted state, so model
  * behaviour can be compared without mutating the author's data.
  *
- *   bun scripts/benchmark-analyze.ts --story=story-id --fragment=pr-id \
+ *   bun run benchmark:analyze -- --story=story-id --fragment=pr-id \
  *     --model="Model name" --runs=3 --label=staged
  */
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'

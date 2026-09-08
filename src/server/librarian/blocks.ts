@@ -81,7 +81,7 @@ export function buildAnalyzeSystemPrompt(opts?: {
   disabledTools?: Iterable<string>;
   enabledTools?: Iterable<string>;
 }): string {
-  // Keep only cross-tool workflow here. Field semantics and retry contracts
+  // Keep only cross-tool workflow here. Field semantics and validation contracts
   // belong to the tool that receives them.
   const disabledTools = new Set(opts?.disabledTools ?? [])
   const enabledTools = opts?.enabledTools ? new Set(opts.enabledTools) : null

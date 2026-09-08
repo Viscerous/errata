@@ -234,7 +234,7 @@ export interface GenerationLog {
   finishReason: string
   stepsExceeded: boolean
   commitStatus?: 'committed' | 'rejected'
-  rejectionCode?: 'empty_output' | 'incomplete_finish' | 'reasoning_leak'
+  rejectionCode?: 'empty_output' | 'incomplete_finish'
   rejectionReason?: string
   totalUsage?: { inputTokens: number; outputTokens: number }
   reasoning?: string
@@ -299,7 +299,7 @@ export interface BlockPreviewResponse {
   }>
   /** Per-request tool surfaces for agents whose tool loop is staged. */
   toolStages: Array<{
-    id: 'primary' | 'inspection' | 'recovery'
+    id: 'primary' | 'inspection'
     label: string
     description: string
     conditional: boolean
@@ -388,7 +388,7 @@ export type ChatEvent =
    * Every cancellable streaming route reports the same flag.
    */
   | { type: 'finish'; finishReason: string; stepCount: number; stopped?: boolean }
-  | { type: 'generation-rejected'; reason: string; code: 'empty_output' | 'incomplete_finish' | 'reasoning_leak'; finishReason: string }
+  | { type: 'generation-rejected'; reason: string; code: 'empty_output' | 'incomplete_finish'; finishReason: string }
   | { type: 'prewriter-directions'; directions: SuggestionDirection[] }
   | { type: 'clarify-questions'; questions: ClarifyQuestion[]; round: number }
 

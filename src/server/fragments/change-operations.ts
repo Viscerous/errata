@@ -1,5 +1,4 @@
 import { createHash } from 'node:crypto'
-import { sanitizeTextForToolEcho } from '@/contracts/fragment-changes'
 import type {
   DiffPreview,
   EditableField,
@@ -7,7 +6,6 @@ import type {
   OperationError,
   OperationValidation,
 } from '@/contracts/fragment-changes'
-import { PREFIXES } from '@/lib/fragment-ids'
 import type { Fragment } from '@/contracts/story'
 import {
   archiveFragment,
@@ -40,7 +38,6 @@ export {
   operationsInputSchema,
   proposeFragmentChangesSchema,
   replaceTextOperationSchema,
-  sanitizeTextForToolEcho,
 } from '@/contracts/fragment-changes'
 export type {
   DiffPreview,
@@ -62,36 +59,6 @@ export interface ApplyOperationsOptions extends ValidationOptions {
   reason?: string
   createMetaSource?: string
   onFragmentUpdated?: (before: Fragment, after: Fragment) => void | Promise<void>
-}
-
-const FRAGMENT_ID_LABEL_RE = /^([a-z][a-z0-9]{1,7})-[a-z0-9][a-z0-9-]*\s*:/i
-const FRAGMENT_ID_LIKE_RE = /^([a-z][a-z0-9]{1,7})-[a-z0-9][a-z0-9-]*$/i
-const BUILTIN_FRAGMENT_PREFIXES = new Set(Object.values(PREFIXES).map(prefix => prefix.toLowerCase()))
-
-function fragmentPrefixForType(type: string): string {
-  return (PREFIXES[type] ?? registry.getType(type)?.prefix ?? type.slice(0, 4)).toLowerCase()
-}
-
-function isReservedFragmentPrefix(prefix: string, expectedPrefix: string): boolean {
-  const normalized = prefix.toLowerCase()
-  return normalized === expectedPrefix || BUILTIN_FRAGMENT_PREFIXES.has(normalized) || registry.getTypeByPrefix(normalized) !== undefined
-}
-
-export function fragmentNameError(type: string, name: string): string | null {
-  const trimmed = name.trim()
-  if (!trimmed) return null
-
-  const expectedPrefix = fragmentPrefixForType(type)
-  const labelMatch = trimmed.match(FRAGMENT_ID_LABEL_RE)
-  const idLikeMatch = trimmed.match(FRAGMENT_ID_LIKE_RE)
-  if (
-    (labelMatch && isReservedFragmentPrefix(labelMatch[1] ?? '', expectedPrefix))
-    || (idLikeMatch && isReservedFragmentPrefix(idLikeMatch[1] ?? '', expectedPrefix))
-  ) {
-    return 'Use the fragment human-readable name, for example "Elias Thorne". Fragment IDs are generated separately.'
-  }
-
-  return null
 }
 
 function editableSnapshot(fragment: Fragment) {
@@ -223,17 +190,6 @@ export function recommendedReadFragmentIds(results: OperationValidation[]): stri
   return [...ids]
 }
 
-export function sanitizeOperationValidationsForTool(results: OperationValidation[]): OperationValidation[] {
-  return results.map((result) => ({
-    ...result,
-    diffs: result.diffs?.map((diff) => ({
-      ...diff,
-      before: sanitizeTextForToolEcho(diff.before),
-      after: sanitizeTextForToolEcho(diff.after),
-    })),
-  }))
-}
-
 /**
  * Common echo fields shared by every propose/validate/apply tool result so all
  * surfaces answer the model in the same shape. Callers add their own `ok` and any
@@ -247,7 +203,7 @@ export function operationEchoFields(results: OperationValidation[]): {
   return {
     valid: results.filter((result) => result.status === 'valid').length,
     readFragmentIds: recommendedReadFragmentIds(results),
-    operations: sanitizeOperationValidationsForTool(results),
+    operations: results,
   }
 }
 
@@ -279,48 +235,8 @@ async function isKnownFragmentType(dataDir: string, storyId: string, type: strin
   return story?.settings.customFragmentTypes?.some((t) => t.type === type) ?? false
 }
 
-/**
- * A localized edit larger than this is almost certainly a whole-rewrite (or a
- * looping model restating the body); those belong in `set_fields`, which is
- * `baseHash`-guarded. `set_fields.content` itself is exempt.
- */
-export const MAX_LOCALIZED_EDIT_CHARS = 4000
-
-function localizedEditSizeError(
-  fragmentId: string,
-  operation: Exclude<FragmentChangeOperation, { action: 'create_fragment' | 'archive_fragment' | 'set_fields' }>,
-): OperationError | null {
-  const text = operation.action === 'replace_text' ? operation.newText : operation.text
-  if (text.length <= MAX_LOCALIZED_EDIT_CHARS) return null
-  return makeOperationError(
-    'localized_edit_too_large',
-    operation.action === 'replace_text'
-      ? `replace_text.newText for ${fragmentId} is ${text.length} characters, which is far beyond a localized edit. newText is the complete replacement for oldText; surrounding text is already preserved, so do not restate the whole fragment. Use append_paragraph for a new end topic, or set_fields with baseHash for a complete rewrite.`
-      : `${operation.action} text for ${fragmentId} is ${text.length} characters, which is far beyond a localized edit. Use shorter appended text, split the update into focused proposals, or use set_fields with baseHash for a complete rewrite.`,
-    'readFragments',
-  )
-}
-
-function wholeFieldReplaceTextError(
-  fragmentId: string,
-  field: EditableField,
-  current: string,
-  oldText: string,
-): OperationError | null {
-  if (current.trim().length === 0 || current.trim() !== oldText.trim()) return null
-  return makeOperationError(
-    'whole_field_replace_text',
-    `replace_text.oldText matches the entire current ${fragmentId}.${field}. This is a whole-field rewrite; use set_fields with baseHash, or split the update into smaller replace_text operations.`,
-    'readFragments',
-  )
-}
-
-function validateDraftFields(fragmentId: string, type: string, draft: Pick<Fragment, EditableField>): OperationError[] {
+function validateDraftFields(fragmentId: string, draft: Pick<Fragment, EditableField>): OperationError[] {
   const errors: OperationError[] = []
-  const nameError = fragmentNameError(type, draft.name)
-  if (nameError) {
-    errors.push(makeOperationError('fragment_name_invalid', `${nameError} Target: ${fragmentId}.`))
-  }
   if (draft.name.length > 100) {
     errors.push(makeOperationError('name_too_long', `Name for ${fragmentId} exceeds 100 characters.`))
   }
@@ -442,13 +358,6 @@ function applyOperationToDraft(
         )],
       }
     }
-    const wholeFieldError = wholeFieldReplaceTextError(
-      fragmentId,
-      operation.field,
-      fieldValue(draft, operation.field),
-      operation.oldText,
-    )
-    if (wholeFieldError) return { draft, errors: [wholeFieldError] }
     const replacement = replaceExactText({
       fragmentId,
       field: operation.field,
@@ -518,10 +427,6 @@ async function validateCreateOperation(
   }
   if (operation.name.trim().length === 0) {
     errors.push(makeOperationError('name_empty', 'Fragment name cannot be empty.'))
-  }
-  const nameError = fragmentNameError(operation.type, operation.name)
-  if (nameError) {
-    errors.push(makeOperationError('fragment_name_invalid', nameError))
   }
   if (operation.name.length > 100) {
     errors.push(makeOperationError('name_too_long', 'Fragment name exceeds 100 characters.'))
@@ -690,22 +595,13 @@ export async function validateOperations(
           validation.diffs = applied.diffs
         }
       } else if (operation.action !== 'archive_fragment') {
-        const wholeFieldError = operation.action === 'replace_text'
-          ? wholeFieldReplaceTextError(fragmentId, operation.field, fieldValue(draft, operation.field), operation.oldText)
-          : null
-        const oversize = wholeFieldError ? null : localizedEditSizeError(fragmentId, operation)
-        if (wholeFieldError || oversize) {
+        const applied = applyOperationToDraft(fragmentId, draft, operation)
+        if (applied.errors) {
           validation.status = 'invalid'
-          validation.errors = [wholeFieldError ?? oversize!]
+          validation.errors = applied.errors
         } else {
-          const applied = applyOperationToDraft(fragmentId, draft, operation)
-          if (applied.errors) {
-            validation.status = 'invalid'
-            validation.errors = applied.errors
-          } else {
-            draft = applied.draft
-            validation.diffs = applied.diffs
-          }
+          draft = applied.draft
+          validation.diffs = applied.diffs
         }
       }
 
@@ -715,7 +611,7 @@ export async function validateOperations(
       results.set(operation.operationId ?? '', validation)
     }
 
-    const fieldErrors = validateDraftFields(fragmentId, target.type, draft)
+    const fieldErrors = validateDraftFields(fragmentId, draft)
     const protection = checkFragmentWrite(target, { content: draft.content })
     if (!protection.allowed) {
       fieldErrors.push(makeOperationError('protected_fragment', protection.reason ?? 'Fragment is protected.'))

@@ -3,10 +3,6 @@
 export const ANALYZE_REPORT_TOOL = 'reportAnalysis'
 const ANALYZE_FINISH_TOOL = 'finishAnalysis'
 const ANALYZE_DIRECTION_TOOL = 'proposeDirections'
-const ANALYZE_PROPOSAL_TOOLS = new Set([
-  'proposeRecordCorrections',
-  'proposeNewRecords',
-])
 const ANALYZE_INSPECTION_TOOLS = new Set([
   'readFragments',
   'findFragments',
@@ -14,7 +10,7 @@ const ANALYZE_INSPECTION_TOOLS = new Set([
   'listFragmentTypes',
 ])
 
-export type AnalyzeToolStage = 'primary' | 'inspection' | 'recovery'
+export type AnalyzeToolStage = 'primary' | 'inspection'
 
 export interface AnalyzeToolResult {
   toolName: string
@@ -82,11 +78,6 @@ export function isAnalyzeWorkflowComplete(
     if (!directions || !outputOk(directions.output)) return false
   }
 
-  for (const toolName of ANALYZE_PROPOSAL_TOOLS) {
-    const proposal = lastResult(results, toolName)
-    if (proposal && !outputOk(proposal.output)) return false
-  }
-
   return true
 }
 
@@ -104,9 +95,6 @@ export function selectAnalyzeToolStage(
   }
 
   const latestReport = lastResult(results, ANALYZE_REPORT_TOOL)
-  if (latestReport && !outputOk(latestReport.output)) {
-    return { stage: 'recovery', activeTools: [ANALYZE_REPORT_TOOL] }
-  }
 
   if (latestReport && hasResolvedFragments(latestReport.output)) {
     const reportIndex = results.lastIndexOf(latestReport)
@@ -119,13 +107,7 @@ export function selectAnalyzeToolStage(
     }
   }
 
-  return {
-    stage: 'recovery',
-    activeTools: availableTools.filter((name) => (
-      !ANALYZE_INSPECTION_TOOLS.has(name)
-      && name !== ANALYZE_REPORT_TOOL
-    )),
-  }
+  return { stage: 'primary', activeTools: primaryTools(availableTools) }
 }
 
 export interface AnalyzeStageDefinition {
@@ -153,13 +135,6 @@ export function describeAnalyzeToolStages(availableTools: readonly string[]): An
       description: 'Used only when the report loads additional record bodies that may change the findings.',
       conditional: true,
       toolNames: [...availableTools],
-    },
-    {
-      id: 'recovery',
-      label: 'Recovery',
-      description: 'Focused retry or explicit close after rejected or incomplete work.',
-      conditional: true,
-      toolNames: availableTools.filter((name) => !ANALYZE_INSPECTION_TOOLS.has(name)),
     },
   ]
 }

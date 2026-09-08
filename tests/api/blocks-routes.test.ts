@@ -67,14 +67,12 @@ describe('Context previews preserve agent access boundaries', () => {
     const preview = await (await api(`/stories/${storyId}/agent-blocks/librarian.analyze/preview`)).json()
 
     expect(preview.toolStages.map((stage: { id: string }) => stage.id))
-      .toEqual(['primary', 'inspection', 'recovery'])
+      .toEqual(['primary', 'inspection'])
     const primary = preview.toolStages.find((stage: { id: string }) => stage.id === 'primary')
     const inspection = preview.toolStages.find((stage: { id: string }) => stage.id === 'inspection')
-    const recovery = preview.toolStages.find((stage: { id: string }) => stage.id === 'recovery')
     expect(primary.toolNames).toContain('reportAnalysis')
     expect(primary.toolNames).not.toContain('finishAnalysis')
     expect(primary.estimatedTokens).toBeLessThan(inspection.estimatedTokens)
-    expect(recovery.estimatedTokens).toBeLessThan(inspection.estimatedTokens)
     expect(inspection.conditional).toBe(true)
   })
 

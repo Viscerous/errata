@@ -22,8 +22,6 @@ import {
   fragmentBaseHash,
   proposeFragmentChangesSchema,
   recommendedReadFragmentIds,
-  sanitizeOperationValidationsForTool,
-  sanitizeTextForToolEcho,
   truncateText,
 } from '../fragments/change-operations'
 import { applyOperationsWithSnapshot, type AppliedChange } from '../fragments/change-apply'
@@ -39,7 +37,6 @@ export {
   SET_FIELDS_DESCRIPTION,
   fragmentBaseHash,
   fragmentChangeOperationSchema,
-  fragmentNameError,
 } from '../fragments/change-operations'
 
 /**
@@ -146,8 +143,8 @@ function summarizeFragment(fragment: Fragment) {
   return {
     id: fragment.id,
     type: fragment.type,
-    name: sanitizeTextForToolEcho(fragment.name),
-    description: sanitizeTextForToolEcho(fragment.description),
+    name: fragment.name,
+    description: fragment.description,
     archived: fragment.archived ?? false,
     sticky: fragment.sticky,
     tags: fragment.tags,
@@ -161,8 +158,8 @@ function fullFragmentForTool(fragment: Fragment, numbered: boolean) {
   return {
     ...summarizeFragment(fragment),
     content: numbered
-      ? numberSentences(fragment.content, sanitizeTextForToolEcho)
-      : sanitizeTextForToolEcho(fragment.content),
+      ? numberSentences(fragment.content)
+      : fragment.content,
     meta: fragment.meta,
   }
 }
@@ -198,7 +195,7 @@ function editResponse(
     applied: appliedResults.filter((result) => result.status === 'applied').length,
     skipped: appliedResults.filter((result) => result.status !== 'applied').length,
     readFragmentIds: recommendedReadFragmentIds(appliedResults),
-    operations: sanitizeOperationValidationsForTool(appliedResults),
+    operations: appliedResults,
     appliedChanges,
     ...extra,
   }
@@ -296,9 +293,9 @@ export function createFragmentTools(
           matches.push({
             id: fragment.id,
             type: fragment.type,
-            name: sanitizeTextForToolEcho(fragment.name),
+            name: fragment.name,
             field,
-            excerpt: sanitizeTextForToolEcho(excerptAround(value, index, query.length)),
+            excerpt: excerptAround(value, index, query.length),
             baseHash: fragmentBaseHash(fragment),
             ...(segment !== null ? { segment } : {}),
           })
@@ -366,7 +363,7 @@ export function createFragmentTools(
         fragments: active.slice(offset).map((fragment, position) => ({
           index: offset + position,
           ...summarizeFragment(fragment),
-          ...(includeContent ? { content: sanitizeTextForToolEcho(fragment.content) } : {}),
+          ...(includeContent ? { content: fragment.content } : {}),
         })),
         total: active.length,
         truncated: offset > 0,

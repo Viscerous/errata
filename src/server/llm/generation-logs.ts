@@ -33,7 +33,7 @@ export interface GenerationLog {
   finishReason: string
   stepsExceeded: boolean
   commitStatus?: 'committed' | 'rejected'
-  rejectionCode?: 'empty_output' | 'incomplete_finish' | 'reasoning_leak'
+  rejectionCode?: 'empty_output' | 'incomplete_finish'
   rejectionReason?: string
   totalUsage?: TokenUsage
   reasoning?: string

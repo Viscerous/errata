@@ -21,6 +21,7 @@
     "docs:sync": "bun scripts/sync-docs-from-commits.ts",
     "audit:analyses": "bun scripts/audit-analyses.ts",
     "audit:prompts": "vite-node scripts/audit-generation-prompts.ts",
+    "benchmark:analyze": "vite-node scripts/benchmark-analyze.ts",
     "typecheck": "tsc --noEmit && tsc -p desktop/tsconfig.json --noEmit",
     "lint:architecture": "bun scripts/lint-architecture.ts",
     "check:contracts": "vitest run --config vitest.config.ts tests/contracts",
