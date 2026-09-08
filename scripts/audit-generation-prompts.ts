@@ -106,7 +106,6 @@ const surfaces = [
     blocks: createGenerationInputBlocks({
       authorInput,
       inputMode: 'play',
-      inputBlockId: 'author-story-turn',
       inputOrder: 300,
     }),
   },
@@ -120,7 +119,6 @@ const rows = surfaces.map((surface) => {
     inputBlocks: surface.blocks.map(block => block.id).join(', ') || '(none)',
     inputCopies: audit.authorInputOccurrences,
     outputContracts: audit.playOutputContractBlocks,
-    turnDelimiters: `${audit.openingStoryTurnTags}/${audit.closingStoryTurnTags}`,
     inputCharacters: audit.characters,
   }
 })

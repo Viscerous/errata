@@ -29,8 +29,6 @@ describe('generation input prompt contract', () => {
     expect(auditGenerationInputSurface(blocks, AUTHOR_INPUT)).toMatchObject({
       authorInputOccurrences: 1,
       playOutputContractBlocks: 0,
-      openingStoryTurnTags: 0,
-      closingStoryTurnTags: 0,
     })
   })
 
@@ -41,11 +39,10 @@ describe('generation input prompt contract', () => {
     })
 
     expect(blocks.map(block => block.id)).toEqual(['play-output-contract', 'author-input'])
+    expect(blocks.find(block => block.id === 'author-input')?.content).toBe(AUTHOR_INPUT)
     expect(auditGenerationInputSurface(blocks, AUTHOR_INPUT)).toMatchObject({
       authorInputOccurrences: 1,
       playOutputContractBlocks: 1,
-      openingStoryTurnTags: 1,
-      closingStoryTurnTags: 1,
     })
   })
 
@@ -56,14 +53,10 @@ describe('generation input prompt contract', () => {
     expect(auditGenerationInputSurface(direct, AUTHOR_INPUT)).toMatchObject({
       authorInputOccurrences: 1,
       playOutputContractBlocks: 0,
-      openingStoryTurnTags: 0,
-      closingStoryTurnTags: 0,
     })
     expect(auditGenerationInputSurface(play, AUTHOR_INPUT)).toMatchObject({
       authorInputOccurrences: 1,
       playOutputContractBlocks: 0,
-      openingStoryTurnTags: 1,
-      closingStoryTurnTags: 1,
     })
     expect(play[0].content).toContain('Plan from its endpoint.')
   })
@@ -75,14 +68,10 @@ describe('generation input prompt contract', () => {
     expect(auditGenerationInputSurface(direct, AUTHOR_INPUT)).toMatchObject({
       authorInputOccurrences: 0,
       playOutputContractBlocks: 0,
-      openingStoryTurnTags: 0,
-      closingStoryTurnTags: 0,
     })
     expect(auditGenerationInputSurface(play, AUTHOR_INPUT)).toMatchObject({
       authorInputOccurrences: 1,
       playOutputContractBlocks: 1,
-      openingStoryTurnTags: 1,
-      closingStoryTurnTags: 1,
     })
   })
 
@@ -93,7 +82,7 @@ describe('generation input prompt contract', () => {
     })
     const brief = createWriterBriefBlocks([], 'Continue the exchange.', undefined, AUTHOR_INPUT)
 
-    expect(brief.find(block => block.id === 'author-story-turn')?.content)
+    expect(brief.find(block => block.id === 'author-input')?.content)
       .toBe(standard.find(block => block.id === 'author-input')?.content)
     expect(brief.find(block => block.id === 'play-output-contract')?.content)
       .toBe(standard.find(block => block.id === 'play-output-contract')?.content)

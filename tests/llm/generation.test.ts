@@ -571,6 +571,39 @@ describe('generation endpoint', () => {
     })
   })
 
+  it('switches between Direct and Play within one story without changing the manuscript contract', async () => {
+    const direction = 'Bring the storm closer.'
+    const authorTurn = 'I close the shutters and turn from the window.'
+    mockAgentStream
+      .mockResolvedValueOnce(createMockStreamResult('Thunder rolls over the hills.') as any)
+      .mockResolvedValueOnce(createMockStreamResult('The room falls into blue-grey shadow.') as any)
+
+    for (const body of [
+      { input: direction, inputMode: 'direct' },
+      { input: authorTurn, inputMode: 'play' },
+    ]) {
+      const res = await api(`/stories/${storyId}/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...body, saveResult: true }),
+      })
+      expect(res.status).toBe(200)
+      await res.text()
+      await new Promise((resolve) => setTimeout(resolve, 100))
+    }
+
+    const fragments = await listFragments(dataDir, storyId, 'prose')
+    expect(fragments.map((fragment) => fragment.content)).toEqual(expect.arrayContaining([
+      'Thunder rolls over the hills.',
+      `${authorTurn}\n\nThe room falls into blue-grey shadow.`,
+    ]))
+    expect(fragments.some((fragment) => fragment.content.includes(direction))).toBe(false)
+    expect(fragments.map((fragment) => fragment.meta.generatedFromMode)).toEqual(expect.arrayContaining([
+      'direct',
+      'play',
+    ]))
+  })
+
   it('rejects a Play response that only echoes the authored turn', async () => {
     await updateStory(dataDir, makeStory({ authorInputMode: 'play' }))
     const authorTurn = 'I close the ledger and stand.'

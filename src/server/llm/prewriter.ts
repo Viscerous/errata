@@ -523,8 +523,6 @@ export function createWriterBriefBlocks(
   blocks.push(...createGenerationInputBlocks({
     authorInput: authorStoryTurn ?? '',
     inputMode: 'play',
-    modelId,
-    inputBlockId: 'author-story-turn',
     inputOrder: 300,
   }))
 

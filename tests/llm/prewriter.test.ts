@@ -315,12 +315,11 @@ describe('prewriter', () => {
     it('preserves an author story turn verbatim beside the prewriter brief', () => {
       const turn = 'I step closer. "Tell me the truth," I say.'
       const blocks = createWriterBriefBlocks([], 'Keep the exchange tense.', undefined, turn)
-      const storyTurn = blocks.find((block) => block.id === 'author-story-turn')!
+      const storyTurn = blocks.find((block) => block.id === 'author-input')!
       const contract = blocks.find((block) => block.id === 'play-output-contract')!
 
       expect(storyTurn.role).toBe('user')
-      expect(storyTurn.content).toContain(turn)
-      expect(storyTurn.content).toContain('<author-story-turn>')
+      expect(storyTurn.content).toBe(turn)
       expect(contract.role).toBe('system')
       expect(contract.content).toContain('Return only new prose that follows it.')
       expect(storyTurn.order).toBeGreaterThan(blocks.find((block) => block.id === 'writing-brief')!.order)

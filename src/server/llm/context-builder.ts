@@ -656,7 +656,6 @@ export function createDefaultBlocks(state: ContextBuildState): ContextBlock[] {
   blocks.push(...createGenerationInputBlocks({
     authorInput,
     inputMode: authorInputMode,
-    modelId: state.modelId,
   }))
 
   return blocks

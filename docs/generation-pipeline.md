@@ -52,9 +52,14 @@ delimit Direct and Play input:
   verbatim turn plus the continuation-only output contract. The turn is
   committed immediately before the generated continuation.
 
-The `<author-story-turn>` delimiter is model-visible and intentional: it marks
-the exact manuscript span without changing it. Internal block bookkeeping is
-not sent to the model.
+The story setting chooses the composer default, but each generation request
+carries its resolved mode and the relationship can change between turns.
+Previously committed prose does not change meaning: every saved fragment is
+already canonical manuscript, whichever input mode produced it.
+
+The Writer receives the Play turn as raw final user text. Its system contract,
+not an inline delimiter, establishes that the text is manuscript rather than a
+direction. Internal block bookkeeping is not sent to the model.
 
 Run `bun run audit:prompts` for a compact Direct/Play × standard/planner/brief
 matrix. Add `--verbose` to print the exact input-related blocks. This command is

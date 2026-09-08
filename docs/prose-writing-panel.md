@@ -107,7 +107,8 @@ Each story has a primary writing relationship selected under **Settings > Genera
   and is not included in the manuscript or exports. This is the former Freeform
   behavior.
 
-The relationship is story-level rather than a casual per-turn switch. The
+The story stores the composer's default relationship, which can be changed at
+any time; each generation request records the mode it actually used. The
 composer also exposes two auxiliary surfaces:
 
 - **Guided** — displays direction suggestion cards from the librarian's latest analysis. Clicking a card fills the generation input with its instruction. A refresh button requests new suggestions on demand.
@@ -121,9 +122,9 @@ same Play turn cannot acquire different framing in those paths. A staged Play
 turn appears once in the planner request and once in the later Writer request;
 those are separate model calls, not duplicate text within one prompt. Direct
 input is prompt-only, while Play input is committed manuscript and therefore
-appears in story export as part of the generated passage. The
-`<author-story-turn>` delimiter is intentional model-facing structure; internal
-context-block bookkeeping is stripped before the request is sent. The
+appears in story export as part of the generated passage. The Writer receives
+that turn as raw final user text; internal context-block bookkeeping is stripped
+before the request is sent. The
 composer’s **Context** action compiles a live receipt showing
 the request payload proportions and largest sources, ordered blocks with
 per-block size, exact compiled messages, and each tool's description plus

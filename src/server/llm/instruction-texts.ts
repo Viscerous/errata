@@ -10,7 +10,7 @@ export const GENERATION_SYSTEM_PROMPT = [
 ].join('\n')
 
 export const PLAY_CONTINUATION_SYSTEM_PROMPT = [
-  'PLAY OUTPUT CONTRACT: The author\'s story turn is already-authored manuscript text. The application will place it immediately before your response.',
+  'PLAY OUTPUT CONTRACT: The user context ends with an already-authored manuscript turn. The application will place that turn immediately before your response.',
   'Return only new prose that follows it. Do not repeat or paraphrase the turn, and do not add actions or dialogue on the author\'s behalf.',
 ].join('\n')
 

@@ -922,9 +922,7 @@ describe('context blocks', () => {
       const block = blocks.find(candidate => candidate.id === 'author-input')!
       const contract = blocks.find(candidate => candidate.id === 'play-output-contract')!
 
-      expect(block.content).toContain('## Author Story Turn')
-      expect(block.content).toContain('<author-story-turn>')
-      expect(block.content).toContain(turn)
+      expect(block.content).toBe(turn)
       expect(block.content).not.toContain('## Author Direction')
       expect(contract.role).toBe('system')
       expect(contract.content).toContain('Return only new prose that follows it.')
