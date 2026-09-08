@@ -583,39 +583,10 @@ generation           → ['generation']
 `getModel(dataDir, storyId, { role })` in `src/server/llm/client.ts` resolves a model by walking the fallback chain (agents call it through `resolveAgentRuntime()`, which bundles the story-level `disableThinking`/`generationLimits` knobs into the same resolution):
 
 1. **Story `modelOverrides` map** — For each key in the chain, check `story.settings.modelOverrides[key]` for a `providerId`/`modelId` pair.
-2. **Legacy field map** — If no override matched, check legacy per-field story settings (e.g. `librarianProviderId`, `characterChatModelId`). See backward compatibility below.
-3. **Global default** — If the story has no match, fall back to `globalConfig.defaultProviderId`.
-4. **Error** — If nothing is configured, throw with a descriptive message.
+2. **Global default** — If the story has no match, fall back to `globalConfig.defaultProviderId`.
+3. **Error** — If nothing is configured, throw with a descriptive message.
 
 The first non-null `providerId` found wins. If the match includes a `modelId`, that model is used; otherwise the provider's `defaultModel` is used.
-
-### Backward Compatibility
-
-Two compatibility layers normalize old configuration formats:
-
-**`OVERRIDE_KEY_ALIASES`** — Normalizes old camelCase keys in `modelOverrides` to dot-separated agent names:
-
-| Old key | Normalized to |
-|---|---|
-| `characterChat` | `character-chat.chat` |
-| `librarianChat` | `librarian.chat` |
-| `librarianRefine` | `librarian.refine` |
-| `proseTransform` | `librarian.prose-transform` |
-| `prewriter` | `generation.prewriter` |
-
-If both old and new key forms exist, the new-style key takes priority.
-
-**`LEGACY_FIELD_MAP`** — Maps fallback chain keys to old per-field story JSON property names:
-
-| Key | `providerId` field | `modelId` field |
-|---|---|---|
-| `generation` | `providerId` | `modelId` |
-| `librarian` | `librarianProviderId` | `librarianModelId` |
-| `character-chat` | `characterChatProviderId` | `characterChatModelId` |
-| `librarian.prose-transform` | `proseTransformProviderId` | `proseTransformModelId` |
-| `librarian.chat` | `librarianChatProviderId` | `librarianChatModelId` |
-| `librarian.refine` | `librarianRefineProviderId` | `librarianRefineModelId` |
-| `directions` | `directionsProviderId` | `directionsModelId` |
 
 ### Namespace vs Per-Agent
 

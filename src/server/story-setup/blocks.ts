@@ -68,7 +68,7 @@ export function createStorySetupBlocks(ctx: AgentBlockContext): ContextBlock[] {
   const blocks: ContextBlock[] = [{
     id: 'story-setup-instructions',
     role: 'system',
-    content: `${instructionRegistry.resolve('story-setup.system', ctx.modelId)}${existingStory}${materialPolicy}${existingFragments}${toolPolicy}`,
+    content: `${instructionRegistry.resolve('story-setup.system')}${existingStory}${materialPolicy}${existingFragments}${toolPolicy}`,
     order: 100,
     source: 'builtin',
   }]

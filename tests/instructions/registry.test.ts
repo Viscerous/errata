@@ -18,16 +18,6 @@ describe('InstructionRegistry', () => {
       )
     })
 
-    it('resolve with no modelId returns default', () => {
-      instructionRegistry.registerDefault('test.key', 'default text')
-      expect(instructionRegistry.resolve('test.key')).toBe('default text')
-      expect(instructionRegistry.resolve('test.key', undefined)).toBe('default text')
-    })
-
-    it('resolve with unmatched modelId returns default', () => {
-      instructionRegistry.registerDefault('test.key', 'default text')
-      expect(instructionRegistry.resolve('test.key', 'some-model')).toBe('default text')
-    })
   })
 
   describe('getDefault', () => {

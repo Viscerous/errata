@@ -20,7 +20,7 @@ function makeStory(): StoryMeta {
     coverImage: null,
     createdAt: now,
     updatedAt: now,
-    settings: makeTestSettings({ librarianProviderId: null, librarianModelId: null }),
+    settings: makeTestSettings(),
   }
 }
 
@@ -84,10 +84,10 @@ describe('llm client model resolution', () => {
     }))
 
     const story = makeStory()
-    story.settings.providerId = 'gen'
-    story.settings.modelId = 'gen-model'
-    story.settings.librarianProviderId = 'lib'
-    story.settings.librarianModelId = 'lib-model'
+    story.settings.modelOverrides = {
+      generation: { providerId: 'gen', modelId: 'gen-model' },
+      librarian: { providerId: 'lib', modelId: 'lib-model' },
+    }
     await createStory(dataDir, story)
 
     const resolved = await getModel(dataDir, story.id, { role: 'librarian' })
@@ -115,8 +115,9 @@ describe('llm client model resolution', () => {
     }))
 
     const story = makeStory()
-    story.settings.providerId = 'gen'
-    story.settings.modelId = 'gen-model'
+    story.settings.modelOverrides = {
+      generation: { providerId: 'gen', modelId: 'gen-model' },
+    }
     await createStory(dataDir, story)
 
     const resolved = await getModel(dataDir, story.id, { role: 'librarian' })
@@ -217,20 +218,6 @@ describe('llm client model resolution', () => {
 
     expect(writer).toMatchObject({ topP: 0.9, topK: 64 })
     expect(analyze).toMatchObject({ topP: 0.9, topK: 20 })
-  })
-
-  it('prefers canonical role overrides to legacy aliases regardless of property order', async () => {
-    await seedTestProvider(dataDir)
-    const story = makeStory()
-    story.settings.modelOverrides = {
-      prewriter: { topK: 64 },
-      'generation.prewriter': { topK: 20 },
-    }
-    await createStory(dataDir, story)
-
-    const resolved = await getModel(dataDir, story.id, { role: 'generation.prewriter' })
-
-    expect(resolved.topK).toBe(20)
   })
 
   it('translates canonical topK only at the OpenAI-compatible provider boundary', async () => {

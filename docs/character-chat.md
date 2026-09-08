@@ -119,8 +119,7 @@ Character chat resolves models with role `character-chat.chat` (`src/server/llm/
 1. `story.settings.modelOverrides['character-chat.chat']`
 2. `story.settings.modelOverrides['character-chat']`
 3. `story.settings.modelOverrides['generation']`
-4. Legacy `characterChatProviderId` / `characterChatModelId` fields, then legacy generation fields
-5. Global default provider
+4. Global default provider
 
 Temperature follows the same fallback chain, so character chat can inherit or override provider/model temperature independently of prose generation.
 

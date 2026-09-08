@@ -106,7 +106,7 @@ export function fragmentRoutes(dataDir: string) {
         set.status = 422
         return { error: 'Invalid fragment bundle' }
       }
-      if (bundle.blockConfig || bundle.agentBlockConfigs) {
+      if ((bundle as unknown as { blockConfig?: unknown }).blockConfig || bundle.agentBlockConfigs) {
         set.status = 422
         return { error: 'Refusing bundle: block configuration is not allowed' }
       }

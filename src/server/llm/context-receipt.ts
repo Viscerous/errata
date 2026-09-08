@@ -132,24 +132,12 @@ export function createContextReceipt(params: {
 }
 
 /**
- * The pre-receipt provenance field. Read only as a fallback for passages
- * written before receipts existed, and only for auditing — never for the
- * bridge, because it recorded plain full presentation and reviving it there
- * would restore the self-renewing working set receipts exist to end.
- */
-function legacyWriterContextIds(fragment: Fragment | null | undefined): string[] {
-  const value = fragment?.meta?.writerContextIds
-  if (!Array.isArray(value)) return []
-  return [...new Set(value.filter((id): id is string => typeof id === 'string'))]
-}
-
-/**
  * Full/read provenance for auditing the passage against the same durable
  * records its generation used. Catalog rows are deliberately excluded.
  */
 export function contextReceiptProvenanceIds(fragment: Fragment | null | undefined): string[] {
   const receipt = readContextReceipt(fragment)
-  if (!receipt) return legacyWriterContextIds(fragment)
+  if (!receipt) return []
   return [...new Set(
     receipt.entries
       .filter((entry) => entry.access === 'full' || entry.access === 'read')

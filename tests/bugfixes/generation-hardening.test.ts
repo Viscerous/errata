@@ -16,7 +16,7 @@ function makeStory(overrides: Partial<StoryMeta> = {}): StoryMeta {
     coverImage: null,
     createdAt: now,
     updatedAt: now,
-    settings: makeTestSettings({ librarianProviderId: null, librarianModelId: null }),
+    settings: makeTestSettings(),
     ...overrides,
   }
 }
@@ -201,8 +201,9 @@ describe('getModel provider fallback', () => {
     }))
 
     const story = makeStory()
-    story.settings.providerId = 'old'
-    story.settings.modelId = 'old-model'
+    story.settings.modelOverrides = {
+      generation: { providerId: 'old', modelId: 'old-model' },
+    }
     await createStory(dataDir, story)
 
     const resolved = await getModel(dataDir, story.id, { role: 'generation' })
@@ -232,7 +233,9 @@ describe('getModel provider fallback', () => {
     }))
 
     const story = makeStory()
-    story.settings.providerId = 'old'
+    story.settings.modelOverrides = {
+      generation: { providerId: 'old' },
+    }
     await createStory(dataDir, story)
 
     await expect(getModel(dataDir, story.id, { role: 'generation' })).rejects.toThrow(/No LLM provider/)

@@ -339,7 +339,6 @@ export interface ExportedAgentConfig {
 
 // Config export/import types
 export interface ExportedConfigs {
-  blockConfig?: BlockConfig
   agentBlockConfigs?: Record<string, AgentBlockConfig>
 }
 

@@ -160,7 +160,7 @@ Each block has:
 ### Conventions
 
 - The first block should always be `id: 'instructions'` with `role: 'system'`, resolving from the instruction registry.
-- Use `instructionRegistry.resolve(key, ctx.modelId)` (or the `instructionsBlock` helper) instead of the raw constant — this enables per-model overrides.
+- Use `instructionRegistry.resolve(key)` (or the `instructionsBlock` helper) instead of the raw constant so the prompt remains visible in the instruction inventory.
 - `AgentBlockContext` is a superset type. Use only the fields your agent needs. If you need a new field, add it to the interface in `agent-block-context.ts`.
 - System blocks appear before user blocks in the compiled output. Within each role, blocks are sorted by `order`.
 
@@ -424,7 +424,7 @@ export async function myAgent(dataDir, storyId, opts): Promise<AgentStreamResult
 | Step | Why |
 |---|---|
 | `withBranch()` | Wraps execution in branch isolation so fragment writes are tracked |
-| Model resolved early | `modelId` must be available when `compileAgentContext` calls `createDefaultBlocks`, which calls `instructionRegistry.resolve(key, modelId)` |
+| Model resolved early | `compileAgentContext` and the eventual call use the same resolved runtime and sampling settings |
 | `resolveAgentRuntime` | One call for the role's model plus `disableThinking`/`generationLimits` — see `llm/client.ts` |
 | `excludeFragmentId` | Prevents the target fragment from appearing in context twice — the agent reads it via tools instead |
 | `compileAgentContext` | Handles the full block lifecycle: load block definition + config → `createDefaultBlocks()` with `ctx.disabledTools`/`ctx.enabledTools` → `applyBlockConfig()` (user overrides) → `compileBlocks()` → filter tools by `disabledTools` |

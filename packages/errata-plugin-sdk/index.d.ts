@@ -4,8 +4,13 @@ export interface StorySettings {
   outputFormat: 'plaintext' | 'markdown'
   enabledPlugins: string[]
   maxSteps: number
-  providerId: string | null
-  modelId: string | null
+  modelOverrides: Record<string, {
+    providerId?: string | null
+    modelId?: string | null
+    temperature?: number | null
+    topP?: number | null
+    topK?: number | null
+  }>
   contextOrderMode: 'simple' | 'advanced'
   fragmentOrder: string[]
 }

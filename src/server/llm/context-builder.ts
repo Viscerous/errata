@@ -556,7 +556,7 @@ export function createDefaultBlocks(state: ContextBuildState): ContextBlock[] {
   blocks.push({
     id: 'instructions',
     role: 'system',
-    content: instructionRegistry.resolve('generation.system', state.modelId),
+    content: instructionRegistry.resolve('generation.system'),
     order: 100,
     source: 'builtin',
   })

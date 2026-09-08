@@ -29,7 +29,7 @@ const GENERATION_PREVIEW_INPUT = '(your direction for the next passage will appe
 function createGenerationBlocks(ctx: AgentBlockContext): ContextBlock[] {
   if (ctx.story.settings.generationMode === 'prewriter') {
     const placeholderBrief = '(The prewriter will generate a brief at generation time.)'
-    return createWriterBriefBlocks(ctx.proseFragments, placeholderBrief, ctx.modelId)
+    return createWriterBriefBlocks(ctx.proseFragments, placeholderBrief)
   }
   // The context is already a ContextBuildState (AgentBlockContext extends it), so
   // render it directly — no reconstruction, nothing to drop.

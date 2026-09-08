@@ -7,7 +7,6 @@ import {
   parseErrataExport,
   readFileAsText,
   importFragmentEntry,
-  isBlockConfigEmpty,
   isAgentBlockConfigEmpty,
   type ErrataExportData,
   type FragmentClipboardData,
@@ -51,40 +50,27 @@ export function FragmentImportDialog({
   const [parseError, setParseError] = useState<string | null>(null)
   const [selectedIndices, setSelectedIndices] = useState<Set<number>>(new Set())
   const [dragOver, setDragOver] = useState(false)
-  const [importBlockConfig, setImportBlockConfig] = useState(true)
   const [importAgentConfigs, setImportAgentConfigs] = useState<Set<string>>(new Set())
 
   const bundleConfigs = useMemo(() => {
     if (!parsed || !isBundle(parsed)) return null
-    const hasBlockConfig = !!parsed.blockConfig && !isBlockConfigEmpty(parsed.blockConfig)
     const agentNames = parsed.agentBlockConfigs
       ? Object.entries(parsed.agentBlockConfigs)
           .filter(([, cfg]) => !isAgentBlockConfigEmpty(cfg))
           .map(([name]) => name)
       : []
-    if (!hasBlockConfig && agentNames.length === 0) return null
-    return { hasBlockConfig, agentNames }
+    return agentNames.length > 0 ? { agentNames } : null
   }, [parsed])
 
   const scriptImportWarning = useMemo(() => {
     if (!parsed || !isBundle(parsed)) return null
 
-    const hasGenerationScript = !!(
-      importBlockConfig &&
-      parsed.blockConfig?.customBlocks.some((block) => block.type === 'script')
-    )
-
     const agentScripts = Object.entries(parsed.agentBlockConfigs ?? {})
       .filter(([name, config]) => importAgentConfigs.has(name) && config.customBlocks.some((block) => block.type === 'script'))
       .map(([name]) => name)
 
-    if (!hasGenerationScript && agentScripts.length === 0) return null
-
-    return {
-      hasGenerationScript,
-      agentScripts,
-    }
-  }, [parsed, importBlockConfig, importAgentConfigs])
+    return agentScripts.length > 0 ? { agentScripts } : null
+  }, [parsed, importAgentConfigs])
 
   useEffect(() => {
     if (!open) {
@@ -93,7 +79,6 @@ export function FragmentImportDialog({
       setParseError(null)
       setSelectedIndices(new Set())
       setDragOver(false)
-      setImportBlockConfig(true)
       setImportAgentConfigs(new Set())
       return
     }
@@ -123,7 +108,6 @@ export function FragmentImportDialog({
   }, [open, initialData])
 
   function initConfigSelections(data: FragmentBundleData) {
-    setImportBlockConfig(!!data.blockConfig && !isBlockConfigEmpty(data.blockConfig))
     const agents = data.agentBlockConfigs
       ? Object.entries(data.agentBlockConfigs)
           .filter(([, cfg]) => !isAgentBlockConfigEmpty(cfg))
@@ -218,15 +202,10 @@ export function FragmentImportDialog({
           results.push(await importFragmentEntry(storyId, entry))
         }
 
-        const hasConfigsToImport =
-          (importBlockConfig && data.blockConfig) ||
-          importAgentConfigs.size > 0
+        const hasConfigsToImport = importAgentConfigs.size > 0
 
         if (hasConfigsToImport) {
           const payload: ImportConfigsPayload = {}
-          if (importBlockConfig && data.blockConfig) {
-            payload.blockConfig = data.blockConfig
-          }
           if (importAgentConfigs.size > 0 && data.agentBlockConfigs) {
             const selected: Record<string, AgentBlockConfig> = {}
             for (const name of importAgentConfigs) {
@@ -341,8 +320,6 @@ export function FragmentImportDialog({
             onDeselectAll={() => setSelectedIndices(new Set())}
             onClear={() => { setParsed(null); setJsonText(''); setSelectedIndices(new Set()) }}
             bundleConfigs={bundleConfigs}
-            importBlockConfig={importBlockConfig}
-            onToggleBlockConfig={() => setImportBlockConfig((v) => !v)}
             importAgentConfigs={importAgentConfigs}
             onToggleAgentConfig={(name) => {
               setImportAgentConfigs((prev) => {
@@ -458,8 +435,6 @@ export function BundlePreview({
   onDeselectAll,
   onClear,
   bundleConfigs,
-  importBlockConfig,
-  onToggleBlockConfig,
   importAgentConfigs,
   onToggleAgentConfig,
   scriptImportWarning,
@@ -470,12 +445,10 @@ export function BundlePreview({
   onSelectAll: () => void
   onDeselectAll: () => void
   onClear: () => void
-  bundleConfigs?: { hasBlockConfig: boolean; agentNames: string[] } | null
-  importBlockConfig?: boolean
-  onToggleBlockConfig?: () => void
+  bundleConfigs?: { agentNames: string[] } | null
   importAgentConfigs?: Set<string>
   onToggleAgentConfig?: (name: string) => void
-  scriptImportWarning?: { hasGenerationScript: boolean; agentScripts: string[] } | null
+  scriptImportWarning?: { agentScripts: string[] } | null
 }) {
   const allSelected = data.fragments.length === selectedIndices.size
 
@@ -571,29 +544,8 @@ export function BundlePreview({
                   This pack includes script blocks. They execute JavaScript during generation, so only import from trusted sources.
                 </p>
                 <p className="mt-1 text-[0.625rem] leading-relaxed text-amber-600/80 dark:text-amber-400/80">
-                  {scriptImportWarning.hasGenerationScript ? 'Includes generation script blocks.' : ''}
-                  {scriptImportWarning.hasGenerationScript && scriptImportWarning.agentScripts.length > 0 ? ' ' : ''}
-                  {scriptImportWarning.agentScripts.length > 0
-                    ? `Includes agent scripts: ${scriptImportWarning.agentScripts.map((name) => formatAgentName(name)).join(', ')}.`
-                    : ''}
+                  Includes agent scripts: {scriptImportWarning.agentScripts.map((name) => formatAgentName(name)).join(', ')}.
                 </p>
-              </div>
-            )}
-            {bundleConfigs.hasBlockConfig && (
-              <div
-                onClick={onToggleBlockConfig}
-                className={`flex items-center gap-2.5 w-full py-1.5 text-left transition-colors hover:bg-accent/30 cursor-pointer ${
-                  importBlockConfig ? '' : 'opacity-50'
-                }`}
-                role="button"
-                tabIndex={0}
-                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggleBlockConfig?.() } }}
-              >
-                <Checkbox checked={importBlockConfig} className="size-3.5 shrink-0" tabIndex={-1} />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm truncate leading-tight">Generation blocks</p>
-                  <p className="text-[0.6875rem] text-muted-foreground truncate">Custom blocks and overrides for generation context</p>
-                </div>
               </div>
             )}
             {bundleConfigs.agentNames.map((name) => (

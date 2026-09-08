@@ -71,12 +71,8 @@ export function FragmentExportPanel({ storyId, storyName, onClose }: FragmentExp
 
   const configSummary = useMemo(() => {
     if (!exportedConfigs) return null
-    const customBlockCount = exportedConfigs.blockConfig?.customBlocks.length ?? 0
-    const overrideCount = Object.keys(exportedConfigs.blockConfig?.overrides ?? {}).length
     const agentCount = Object.keys(exportedConfigs.agentBlockConfigs ?? {}).length
-    const hasBlockConfig = customBlockCount > 0 || overrideCount > 0
-    if (!hasBlockConfig && agentCount === 0) return null
-    return { customBlockCount, overrideCount, agentCount, hasBlockConfig }
+    return agentCount > 0 ? { agentCount } : null
   }, [exportedConfigs])
 
   const { data: imageFragments } = useQuery(q.fragments(storyId, branchId, 'image'))
@@ -143,13 +139,8 @@ export function FragmentExportPanel({ storyId, storyName, onClose }: FragmentExp
 
   const bundleConfigs = useMemo(() => {
     if (!includeConfigs || !exportedConfigs) return undefined
-    const hasBlock = !!exportedConfigs.blockConfig
     const hasAgent = !!exportedConfigs.agentBlockConfigs && Object.keys(exportedConfigs.agentBlockConfigs).length > 0
-    if (!hasBlock && !hasAgent) return undefined
-    return {
-      blockConfig: exportedConfigs.blockConfig,
-      agentBlockConfigs: exportedConfigs.agentBlockConfigs,
-    }
+    return hasAgent ? { agentBlockConfigs: exportedConfigs.agentBlockConfigs } : undefined
   }, [includeConfigs, exportedConfigs])
 
   const handleDownload = useCallback(() => {
@@ -334,10 +325,7 @@ export function FragmentExportPanel({ storyId, storyName, onClose }: FragmentExp
         </div>
         {includeConfigs && configSummary && (
           <p className="text-[0.625rem] text-muted-foreground mt-1.5 ml-6">
-            {[
-              configSummary.hasBlockConfig && `${configSummary.customBlockCount} custom block${configSummary.customBlockCount !== 1 ? 's' : ''}, ${configSummary.overrideCount} override${configSummary.overrideCount !== 1 ? 's' : ''}`,
-              configSummary.agentCount > 0 && `${configSummary.agentCount} agent config${configSummary.agentCount !== 1 ? 's' : ''}`,
-            ].filter(Boolean).join(', ')}
+            {configSummary.agentCount} agent config{configSummary.agentCount !== 1 ? 's' : ''}
           </p>
         )}
         {includeConfigs && !configSummary && exportedConfigs && (

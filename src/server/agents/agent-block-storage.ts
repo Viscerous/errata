@@ -13,44 +13,6 @@ import { writeJsonAtomic, withStorageLock } from '../fs-utils'
 export { AgentBlockConfigSchema }
 export type { AgentBlockConfig, AgentBlockConfigInput }
 
-const DISABLED_TOOL_MIGRATIONS: Record<string, string[]> = {
-  getFragment: ['readFragments'],
-  searchFragments: ['findFragments'],
-  getStorySummary: ['readStorySummary'],
-  updateStorySummary: ['editFragments'],
-  createFragment: ['editFragments'],
-  updateFragment: ['editFragments'],
-  editFragment: ['editFragments'],
-  deleteFragment: ['editFragments'],
-  suggestFragment: ['editFragments'],
-  suggestEdit: ['editFragments'],
-  // Legacy write-tool names → the single direct edit tools.
-  proposeProseChanges: ['editProse'],
-  applyProposedChanges: ['editFragments'],
-  updateSummary: ['reportAnalysis'],
-  reportMentions: ['reportAnalysis'],
-  reportContradictions: ['reportAnalysis'],
-  reportTimeline: ['reportAnalysis'],
-  suggestDirections: ['proposeDirections'],
-  askQuestions: ['askClarifyingQuestions'],
-  reanalyzeFragment: ['invokeAgent'],
-  optimizeCharacter: ['invokeAgent'],
-  inspectGeneration: ['inspectRun'],
-}
-
-function normalizeDisabledTools(disabledTools: string[]): string[] {
-  const normalized = new Set<string>()
-  for (const toolName of disabledTools) {
-    const replacement = DISABLED_TOOL_MIGRATIONS[toolName]
-    if (replacement) {
-      for (const migrated of replacement) normalized.add(migrated)
-    } else {
-      normalized.add(toolName)
-    }
-  }
-  return [...normalized]
-}
-
 async function agentBlockConfigPath(dataDir: string, storyId: string, agentName: string): Promise<string> {
   const root = await getContentRoot(dataDir, storyId)
   return join(root, 'agent-blocks', `${agentName}.json`)
@@ -70,7 +32,7 @@ async function readAgentBlockConfig(path: string): Promise<AgentBlockConfig> {
   try {
     const raw = await readFile(path, 'utf-8')
     const parsed = AgentBlockConfigSchema.parse(JSON.parse(raw))
-    return { ...parsed, disabledTools: normalizeDisabledTools(parsed.disabledTools) }
+    return parsed
   } catch (error) {
     throw new Error(`Unable to read agent block configuration at ${path}; the original file was left untouched`, { cause: error })
   }
@@ -79,7 +41,7 @@ async function readAgentBlockConfig(path: string): Promise<AgentBlockConfig> {
 async function writeAgentBlockConfig(path: string, config: AgentBlockConfigInput): Promise<void> {
   await mkdir(dirname(path), { recursive: true })
   const parsed = AgentBlockConfigSchema.parse(config)
-  await writeJsonAtomic(path, { ...parsed, disabledTools: normalizeDisabledTools(parsed.disabledTools) })
+  await writeJsonAtomic(path, parsed)
 }
 
 export async function saveAgentBlockConfig(dataDir: string, storyId: string, agentName: string, config: AgentBlockConfigInput): Promise<void> {
@@ -168,7 +130,7 @@ export async function updateAgentDisabledTools(
   disabledTools: string[],
 ): Promise<AgentBlockConfig> {
   return (await mutateAgentBlockConfig(dataDir, storyId, agentName, (config) => {
-    config.disabledTools = normalizeDisabledTools(disabledTools)
+    config.disabledTools = disabledTools
     return config
   }))!
 }

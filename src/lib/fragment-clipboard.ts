@@ -1,4 +1,4 @@
-import { api, type Fragment, type BlockConfig, type AgentBlockConfig } from '@/lib/api'
+import { api, type Fragment, type AgentBlockConfig } from '@/lib/api'
 import { parseVisualRefs, type BoundaryBox } from '@/lib/fragment-visuals'
 import { randomToken } from '@/lib/client-ids'
 import { copyText, readClipboardText } from '@/lib/clipboard'
@@ -54,7 +54,6 @@ export interface FragmentBundleData {
   exportedAt: string
   storyName?: string
   fragments: FragmentExportEntry[]
-  blockConfig?: BlockConfig
   agentBlockConfigs?: Record<string, AgentBlockConfig>
 }
 
@@ -125,7 +124,6 @@ export function serializeFragment(
 }
 
 export interface BundleConfigsOption {
-  blockConfig?: BlockConfig
   agentBlockConfigs?: Record<string, AgentBlockConfig>
 }
 
@@ -160,18 +158,9 @@ export function serializeBundle(
     exportedAt: new Date().toISOString(),
     ...(storyName ? { storyName } : {}),
     fragments: entries,
-    ...(configs?.blockConfig && !isBlockConfigEmpty(configs.blockConfig) ? { blockConfig: configs.blockConfig } : {}),
     ...(configs?.agentBlockConfigs && Object.keys(configs.agentBlockConfigs).length > 0 ? { agentBlockConfigs: configs.agentBlockConfigs } : {}),
   }
   return JSON.stringify(data, null, 2)
-}
-
-export function isBlockConfigEmpty(config: BlockConfig): boolean {
-  return (
-    config.customBlocks.length === 0 &&
-    Object.keys(config.overrides).length === 0 &&
-    config.blockOrder.length === 0
-  )
 }
 
 export function isAgentBlockConfigEmpty(config: AgentBlockConfig): boolean {

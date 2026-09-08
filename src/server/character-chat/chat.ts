@@ -7,18 +7,18 @@ import type { ChatStreamEvent, ChatResult } from '../agents/stream-types'
 
 export { type ChatStreamEvent, type ChatResult }
 
-function buildPersonaDescription(persona: PersonaMode, personaCharacterName?: string, personaCharacterDescription?: string, modelId?: string): string {
+function buildPersonaDescription(persona: PersonaMode, personaCharacterName?: string, personaCharacterDescription?: string): string {
   switch (persona.type) {
     case 'character': {
-      const template = instructionRegistry.resolve('character-chat.persona.character', modelId)
+      const template = instructionRegistry.resolve('character-chat.persona.character')
       return template
         .replace(/\{\{personaName\}\}/g, personaCharacterName ?? 'another character')
         .replace(/\{\{personaDescription\}\}/g, personaCharacterDescription ?? '')
     }
     case 'stranger':
-      return instructionRegistry.resolve('character-chat.persona.stranger', modelId)
+      return instructionRegistry.resolve('character-chat.persona.stranger')
     case 'custom': {
-      const template = instructionRegistry.resolve('character-chat.persona.custom', modelId)
+      const template = instructionRegistry.resolve('character-chat.persona.custom')
       return template.replace(/\{\{prompt\}\}/g, persona.prompt)
     }
   }
@@ -61,13 +61,12 @@ export const characterChat = createStreamingRunner<CharacterChatOptions, { chara
     proseBeforeFragmentId: opts.storyPointFragmentId ?? undefined,
   }),
 
-  extraContext: async ({ opts, validated, modelId }) => ({
+  extraContext: async ({ opts, validated }) => ({
     character: validated.character,
     personaDescription: buildPersonaDescription(
       opts.persona,
       validated.personaCharacterName,
       validated.personaCharacterDescription,
-      modelId,
     ),
   }),
 

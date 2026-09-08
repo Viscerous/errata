@@ -118,11 +118,7 @@ export async function importStoryFromZip(
     name: originalMeta.name + ' (imported)',
     createdAt: now,
     updatedAt: now,
-    settings: {
-      ...originalMeta.settings,
-      providerId: null,
-      modelId: null,
-    },
+    settings: originalMeta.settings,
   })
 
   // Create story (sets up branches/main/ + branches.json)

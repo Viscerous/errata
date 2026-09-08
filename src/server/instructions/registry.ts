@@ -4,8 +4,7 @@
  * at startup and resolve them at request time.
  *
  * Model-specific JSON overrides (`data/instruction-sets/*.json`) were removed:
- * per-agent block configuration supersedes them. `resolve` keeps its optional
- * `modelId` parameter for call-site compatibility, but ignores it.
+ * per-agent block configuration supersedes them.
  */
 export type InstructionKind = 'system' | 'contract' | 'template'
 
@@ -28,7 +27,7 @@ class InstructionRegistry {
     this.defaults.set(key, { key, text, ...metadata })
   }
 
-  resolve(key: string, _modelId?: string): string {
+  resolve(key: string): string {
     const entry = this.defaults.get(key)
     if (entry === undefined) {
       throw new Error(`Instruction key "${key}" not registered`)

@@ -382,7 +382,6 @@ export async function runGeneration(
               const writerBlocks = createWriterBriefBlocks(
                 ctxState.proseFragments,
                 prewriterResult.brief,
-                resolvedModelId,
                 inputMode === 'play' ? body.input : undefined,
               )
               let finalWriterBlocks = await applyBlockConfig(writerBlocks, agentConfig, scriptContext)
@@ -573,11 +572,7 @@ export async function runGeneration(
 
           const isRegenOrRefine = (mode === 'regenerate' || mode === 'refine') && existingFragment
           const id = generateFragmentId('prose')
-          const inheritedMeta = isRegenOrRefine
-            ? Object.fromEntries(
-                Object.entries(existingFragment!.meta).filter(([key]) => key !== 'writerContextIds'),
-              )
-            : {}
+          const inheritedMeta = isRegenOrRefine ? existingFragment!.meta : {}
 
           const fragment: Fragment = {
             id,

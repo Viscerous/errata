@@ -326,7 +326,7 @@ export function createLibrarianChatBlocks(ctx: AgentBlockContext): ContextBlock[
   blocks.push({
     id: 'instructions',
     role: 'system',
-    content: instructionRegistry.resolve('librarian.chat.system', ctx.modelId),
+    content: instructionRegistry.resolve('librarian.chat.system'),
     order: 100,
     source: 'builtin',
   })

@@ -314,7 +314,7 @@ describe('prewriter', () => {
 
     it('preserves an author story turn verbatim beside the prewriter brief', () => {
       const turn = 'I step closer. "Tell me the truth," I say.'
-      const blocks = createWriterBriefBlocks([], 'Keep the exchange tense.', undefined, turn)
+      const blocks = createWriterBriefBlocks([], 'Keep the exchange tense.', turn)
       const storyTurn = blocks.find((block) => block.id === 'author-input')!
       const contract = blocks.find((block) => block.id === 'play-output-contract')!
 

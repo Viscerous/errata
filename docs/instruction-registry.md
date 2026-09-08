@@ -16,7 +16,7 @@ The singleton `instructionRegistry` is exported from `src/server/instructions/in
 | Method | Signature | Description |
 |---|---|---|
 | `registerDefault` | `(key: string, text: string, metadata?) => void` | Register default text and its `usedBy`/`kind` inventory metadata. Called at module init. |
-| `resolve` | `(key: string, modelId?: string) => string` | Return the registered default. The `modelId` parameter is accepted for call-site compatibility but ignored. Throws if key is unregistered. |
+| `resolve` | `(key: string) => string` | Return the registered default. Throws if key is unregistered. |
 | `getDefault` | `(key: string) => string \| undefined` | Return the default text, or undefined for unknown keys. |
 | `listKeys` | `() => string[]` | List all registered instruction keys. |
 | `listEntries` | `() => RegisteredInstruction[]` | List text plus ownership/kind metadata for inspection. |

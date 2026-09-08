@@ -44,9 +44,9 @@ const runDirectionProposal = createStreamingRunner<DirectionProposalInput>({
   maxSteps: 1,
   toolChoice: 'none',
   readOnly: 'none',
-  messages: ({ compiled, opts, story, modelId }) => {
+  messages: ({ compiled, opts, story }) => {
     const count = opts.count ?? 4
-    const resolvedTemplate = instructionRegistry.resolve('directions.suggest-template', modelId)
+    const resolvedTemplate = instructionRegistry.resolve('directions.suggest-template')
     const promptTemplate = story.settings.guidedSuggestPrompt || resolvedTemplate
     const prompt = promptTemplate.replace(/\{\{count\}\}/g, String(count))
     const contextMessage = compiled.messages.find(message => message.role === 'user')

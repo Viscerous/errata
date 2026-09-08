@@ -155,7 +155,7 @@ export function buildFragmentPack(opts: {
   const bundle = parseBundle(opts.bundleJson)
 
   // Trust gate: MVP packs are fragments + assets only.
-  if (bundle.blockConfig) {
+  if ((bundle as unknown as { blockConfig?: unknown }).blockConfig) {
     throw new Error('Refusing to pack: bundle carries a blockConfig (not allowed in MVP packs)')
   }
   if (bundle.agentBlockConfigs && Object.keys(bundle.agentBlockConfigs).length > 0) {
@@ -202,7 +202,7 @@ export function buildFragmentPack(opts: {
     }),
   }
   // blockConfig / agentBlockConfigs are guaranteed absent by the trust gate above.
-  delete strippedBundle.blockConfig
+  delete (strippedBundle as unknown as Record<string, unknown>).blockConfig
   delete strippedBundle.agentBlockConfigs
 
   // Derive manifest facets from the (stripped) bundle.

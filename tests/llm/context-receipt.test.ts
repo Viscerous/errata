@@ -124,27 +124,14 @@ describe('context receipts', () => {
     expect(contextReceiptProvenanceIds(fragment)).toEqual(['ch-0001', 'kn-0003', 'ch-0004'])
   })
 
-  // Passages written before receipts existed still carry the old field. Ninety-
-  // nine of them are in the dev data alone, and dropping it outright would have
-  // silently cost every pre-upgrade passage its provenance on re-analysis.
-  it('falls back to the pre-receipt provenance field, but never for the bridge', () => {
-    const legacy = prose({ writerContextIds: ['ch-0001', 'kn-0002', 'ch-0001'] })
-
-    expect(contextReceiptProvenanceIds(legacy)).toEqual(['ch-0001', 'kn-0002'])
-    // The old field recorded plain full presentation; renewing it here would
-    // restore the self-renewing working set receipts exist to end.
-    expect(contextReceiptBridgeIds(legacy)).toEqual([])
-  })
-
-  it('prefers the receipt over the legacy field when a passage carries both', () => {
-    const both = prose({
-      writerContextIds: ['ch-9999'],
+  it('uses the receipt as the sole provenance source', () => {
+    const fragment = prose({
       contextReceipt: {
         version: 1,
         entries: [{ fragmentId: 'ch-0001', access: 'full', actor: 'writer', reason: 'recent-context' }],
       },
     })
 
-    expect(contextReceiptProvenanceIds(both)).toEqual(['ch-0001'])
+    expect(contextReceiptProvenanceIds(fragment)).toEqual(['ch-0001'])
   })
 })

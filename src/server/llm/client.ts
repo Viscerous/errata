@@ -15,44 +15,7 @@ import { createLogger } from '../logging'
 import type { SamplingSettings, StoryMeta } from '../fragments/schema'
 import { isGeminiProvider, normalizeGeminiBaseURL } from '../config/provider-urls'
 
-// Normalize old camelCase modelOverrides keys to dot-separated agent names
-const OVERRIDE_KEY_ALIASES: Record<string, string> = {
-  characterChat: 'character-chat.chat',
-  librarianChat: 'librarian.chat',
-  librarianRefine: 'librarian.refine',
-  proseTransform: 'librarian.prose-transform',
-  prewriter: 'generation.prewriter',
-}
-
-/** Apply key aliases to a modelOverrides map, returning a normalized copy */
 type ModelOverride = StoryMeta['settings']['modelOverrides'][string]
-
-function normalizeOverrideKeys(
-  overrides: Record<string, ModelOverride>,
-): Record<string, ModelOverride> {
-  const result: Record<string, ModelOverride> = {}
-  for (const [key, value] of Object.entries(overrides)) {
-    const normalizedKey = OVERRIDE_KEY_ALIASES[key] ?? key
-    const legacyAlias = normalizedKey !== key
-    // A canonical key always wins, regardless of JSON property order. A legacy
-    // alias only fills the slot when no canonical value has been seen.
-    if (!legacyAlias || !(normalizedKey in result)) {
-      result[normalizedKey] = value
-    }
-  }
-  return result
-}
-
-// Legacy field name mapping for backward compat with old story JSON files
-const LEGACY_FIELD_MAP: Record<string, { providerId: string; modelId: string }> = {
-  generation: { providerId: 'providerId', modelId: 'modelId' },
-  librarian: { providerId: 'librarianProviderId', modelId: 'librarianModelId' },
-  'character-chat': { providerId: 'characterChatProviderId', modelId: 'characterChatModelId' },
-  'librarian.prose-transform': { providerId: 'proseTransformProviderId', modelId: 'proseTransformModelId' },
-  'librarian.chat': { providerId: 'librarianChatProviderId', modelId: 'librarianChatModelId' },
-  'librarian.refine': { providerId: 'librarianRefineProviderId', modelId: 'librarianRefineModelId' },
-  directions: { providerId: 'directionsProviderId', modelId: 'directionsModelId' },
-}
 
 // Provider cache includes every setting baked into the provider instance. The
 // name matters because it also defines the providerOptions namespace.
@@ -169,7 +132,7 @@ export interface GetModelOptions {
 
 /**
  * Resolve the model to use for a given story.
- * Checks modelOverrides map first, then legacy fields, walking the role's fallback chain.
+ * Walks the role's fallback chain through the story's model overrides.
  */
 export async function getModel(dataDir: string, storyId?: string, opts: GetModelOptions = {}): Promise<ResolvedModel> {
   const role = opts.role ?? 'generation'
@@ -185,8 +148,7 @@ export async function getModel(dataDir: string, storyId?: string, opts: GetModel
   if (storyId) {
     const story = await getStory(dataDir, storyId)
     if (story?.settings) {
-      const overrides = normalizeOverrideKeys(story.settings.modelOverrides ?? {})
-      const settings = story.settings as Record<string, unknown>
+      const overrides: Record<string, ModelOverride> = story.settings.modelOverrides ?? {}
 
       for (const r of chain) {
         const override = overrides[r]
@@ -195,7 +157,6 @@ export async function getModel(dataDir: string, storyId?: string, opts: GetModel
       }
 
       for (const r of chain) {
-        // Check modelOverrides map first
         const override = overrides[r]
         if (!targetModelId && override?.modelId) {
           targetModelId = override.modelId
@@ -207,16 +168,6 @@ export async function getModel(dataDir: string, storyId?: string, opts: GetModel
             targetTemperature = override.temperature
           }
           break
-        }
-        // Fall back to legacy fields
-        const legacy = LEGACY_FIELD_MAP[r]
-        if (legacy) {
-          const pid = settings[legacy.providerId] as string | null | undefined
-          if (pid) {
-            targetProviderId = pid
-            targetModelId = (settings[legacy.modelId] as string | null | undefined) ?? null
-            break
-          }
         }
       }
 

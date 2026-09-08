@@ -148,24 +148,6 @@ describe('Agent Block Config Storage', () => {
     expect(config.disabledTools).toEqual(['reportAnalysis', 'proposeRecordCorrections'])
   })
 
-  it('migrates deprecated disabled tool names', async () => {
-    const config = await updateAgentDisabledTools(dataDir, STORY_ID, AGENT_NAME, [
-      'getFragment',
-      'editFragment',
-      'proposeProseChanges',
-      'suggestDirections',
-      'reanalyzeFragment',
-    ])
-
-    expect(config.disabledTools).toEqual([
-      'readFragments',
-      'editFragments',
-      'editProse',
-      'proposeDirections',
-      'invokeAgent',
-    ])
-  })
-
   it('isolates configs between agents', async () => {
     await saveAgentBlockConfig(dataDir, STORY_ID, 'librarian.analyze', {
       customBlocks: [],

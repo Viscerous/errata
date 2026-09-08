@@ -426,13 +426,13 @@ export async function runPrewriter(args: RunPrewriterArgs): Promise<PrewriterRes
  * These blocks define the prewriter's prompt structure and can be
  * customized by users via the block editor.
  */
-export function createPrewriterBlocks(_ctx: AgentBlockContext): ContextBlock[] {
-  const planningContinuity = renderContinuity(_ctx, 'generation.prewriter')
+export function createPrewriterBlocks(ctx: AgentBlockContext): ContextBlock[] {
+  const planningContinuity = renderContinuity(ctx, 'generation.prewriter')
   return [
     {
       id: 'instructions',
       role: 'system' as const,
-      content: instructionRegistry.resolve('generation.prewriter.system', _ctx.modelId),
+      content: instructionRegistry.resolve('generation.prewriter.system'),
       order: 100,
       source: 'builtin',
     },
@@ -487,7 +487,6 @@ export async function buildPrewriterPreviewContext(dataDir: string, storyId: str
 export function createWriterBriefBlocks(
   proseFragments: Fragment[],
   brief: string,
-  modelId?: string,
   authorStoryTurn?: string,
 ): ContextBlock[] {
   const blocks: ContextBlock[] = []
@@ -499,7 +498,7 @@ export function createWriterBriefBlocks(
   blocks.push({
     id: 'instructions',
     role: 'system' as const,
-    content: instructionRegistry.resolve('generation.writer-brief.system', modelId),
+    content: instructionRegistry.resolve('generation.writer-brief.system'),
     order: 100,
     source: 'builtin',
   })

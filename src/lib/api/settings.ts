@@ -8,9 +8,6 @@ export const settings = {
     outputFormat?: 'plaintext' | 'markdown'
     maxSteps?: number
     modelOverrides?: StoryMeta['settings']['modelOverrides']
-    // Legacy fields (backward compat)
-    providerId?: string | null
-    modelId?: string | null
     authorInputMode?: AuthorInputMode
     generationMode?: 'standard' | 'prewriter'
     clarifyBeforeGenerate?: boolean

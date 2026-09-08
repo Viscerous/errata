@@ -29,8 +29,6 @@ export const AgentBlockConfigSchema = BlockConfigSchema.extend({
 })
 
 export const ImportConfigsPayloadSchema = z.object({
-  // Accepted only so old exports can be diagnosed and ignored explicitly.
-  blockConfig: BlockConfigSchema.optional(),
   agentBlockConfigs: z.record(z.string(), AgentBlockConfigSchema).optional(),
 })
 

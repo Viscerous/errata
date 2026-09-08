@@ -43,9 +43,9 @@ export async function runBeforeContext(
     'beforeContext',
     plugins,
     ctx,
-    // Cast needed: plugin SDK's ContextBuildState has a narrower StorySettings type
-    // than the local one, but plugins pass through the full object unchanged.
-    (hook, state) => hook(state as Parameters<typeof hook>[0]) as ContextBuildState | Promise<ContextBuildState>,
+    // The public plugin shape is intentionally narrower than the server's state.
+    // Plugins pass the full object through, so this boundary owns the conversion.
+    (hook, state) => hook(state as unknown as Parameters<typeof hook>[0]) as unknown as ContextBuildState | Promise<ContextBuildState>,
     logger.child({ storyId: ctx.story.id }),
   )
 }

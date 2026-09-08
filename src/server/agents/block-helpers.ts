@@ -23,11 +23,11 @@ import { renderSummaryProjection, type SummaryReader } from '../librarian/summar
 // ─── Block helpers ───
 
 /** System instructions block resolved from the instruction registry. */
-export function instructionsBlock(key: string, ctx: AgentBlockContext): ContextBlock {
+export function instructionsBlock(key: string, _ctx: AgentBlockContext): ContextBlock {
   return {
     id: 'instructions',
     role: 'system',
-    content: instructionRegistry.resolve(key, ctx.modelId),
+    content: instructionRegistry.resolve(key),
     order: 100,
     source: 'builtin',
   }

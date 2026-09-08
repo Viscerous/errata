@@ -148,9 +148,6 @@ export function storyRoutes(dataDir: string) {
         ...(body.outputFormat !== undefined ? { outputFormat: body.outputFormat } : {}),
         ...(body.maxSteps !== undefined ? { maxSteps: body.maxSteps } : {}),
         ...(body.modelOverrides !== undefined ? { modelOverrides: body.modelOverrides } : {}),
-        // Legacy fields (kept for backward compat with older clients)
-        ...(body.providerId !== undefined ? { providerId: body.providerId } : {}),
-        ...(body.modelId !== undefined ? { modelId: body.modelId } : {}),
         ...(body.authorInputMode !== undefined ? { authorInputMode: body.authorInputMode } : {}),
         ...(body.generationMode !== undefined ? { generationMode: body.generationMode } : {}),
         ...(body.clarifyBeforeGenerate !== undefined ? { clarifyBeforeGenerate: body.clarifyBeforeGenerate } : {}),
@@ -202,9 +199,6 @@ export function storyRoutes(dataDir: string) {
           topP: t.Optional(t.Union([t.Number({ minimum: 0, maximum: 1 }), t.Null()])),
           topK: t.Optional(t.Union([t.Integer({ minimum: 1, maximum: 1000 }), t.Null()])),
         }))),
-        // Legacy fields (backward compat)
-        providerId: t.Optional(t.Union([t.String(), t.Null()])),
-        modelId: t.Optional(t.Union([t.String(), t.Null()])),
         authorInputMode: t.Optional(t.Union([t.Literal('direct'), t.Literal('play')])),
         generationMode: t.Optional(t.Union([t.Literal('standard'), t.Literal('prewriter')])),
         clarifyBeforeGenerate: t.Optional(t.Boolean()),

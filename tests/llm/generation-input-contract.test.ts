@@ -63,7 +63,7 @@ describe('generation input prompt contract', () => {
 
   it('keeps Direct input out of the brief writer while carrying Play manuscript once', () => {
     const direct = createWriterBriefBlocks([], 'Follow the author request precisely.')
-    const play = createWriterBriefBlocks([], 'Continue the exchange.', undefined, AUTHOR_INPUT)
+    const play = createWriterBriefBlocks([], 'Continue the exchange.', AUTHOR_INPUT)
 
     expect(auditGenerationInputSurface(direct, AUTHOR_INPUT)).toMatchObject({
       authorInputOccurrences: 0,
@@ -80,7 +80,7 @@ describe('generation input prompt contract', () => {
       authorInput: AUTHOR_INPUT,
       inputMode: 'play',
     })
-    const brief = createWriterBriefBlocks([], 'Continue the exchange.', undefined, AUTHOR_INPUT)
+    const brief = createWriterBriefBlocks([], 'Continue the exchange.', AUTHOR_INPUT)
 
     expect(brief.find(block => block.id === 'author-input')?.content)
       .toBe(standard.find(block => block.id === 'author-input')?.content)

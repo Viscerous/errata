@@ -363,19 +363,6 @@ describe('Bundle export/import routes', () => {
     expect(saved.config.customBlocks[0].id).toBe('cb-imp001')
   })
 
-  it('POST /import-configs silently ignores legacy blockConfig payloads', async () => {
-    const storyId = await createStory()
-    const res = await apiJson(`/stories/${storyId}/import-configs`, {
-      blockConfig: {
-        customBlocks: [{ id: 'cb-legacy', name: 'Legacy', role: 'user', order: 0, enabled: true, type: 'simple', content: 'x' }],
-        overrides: {},
-        blockOrder: [],
-      },
-    })
-    expect(res.status).toBe(200)
-    expect((await res.json()).ok).toBe(true)
-  })
-
   it('POST /import-configs returns 404 for missing story', async () => {
     const res = await apiJson('/stories/nonexistent/import-configs', {})
     expect(res.status).toBe(404)

@@ -150,11 +150,11 @@ describe('buildFragmentPack -> unwrapPack', () => {
 
   it('rejects a bundle that carries a blockConfig', () => {
     const bundle = makeBundle()
-    ;(bundle as FragmentBundleData).blockConfig = {
+    ;(bundle as FragmentBundleData & { blockConfig?: unknown }).blockConfig = {
       customBlocks: [],
       overrides: {},
       blockOrder: ['anything'],
-    } as FragmentBundleData['blockConfig']
+    }
 
     expect(() => buildFragmentPack({ bundleJson: bundle, manifestInput })).toThrow(/blockConfig/)
   })

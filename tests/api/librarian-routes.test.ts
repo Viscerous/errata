@@ -78,7 +78,7 @@ describe('librarian API routes', () => {
       coverImage: null,
       createdAt: '2025-01-01T00:00:00.000Z',
       updatedAt: '2025-01-01T00:00:00.000Z',
-      settings: makeTestSettings({ librarianProviderId: null, librarianModelId: null }),
+      settings: makeTestSettings(),
     })
   })
 

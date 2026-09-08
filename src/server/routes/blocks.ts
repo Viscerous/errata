@@ -82,8 +82,6 @@ export function blockRoutes(dataDir: string) {
         return { error: 'Invalid block configuration bundle', issues: parsed.error.issues }
       }
 
-      // Legacy blockConfig is accepted for archive compatibility, but there is
-      // no generation-wide destination after the per-agent migration.
       const { agentBlockConfigs } = parsed.data
 
       if (agentBlockConfigs) {

@@ -84,7 +84,7 @@ export const StoryMetaSchema = z.object({
       generationLimits: z.object({
         maxOutputTokens: z.int().min(256).optional(),
       }).optional(),
-      // Canonical model overrides map: { [roleKey]: { providerId?, modelId? } }
+      // Per-role model overrides: { [roleKey]: { providerId?, modelId? } }
       modelOverrides: z.record(z.string(), z.object({
         providerId: z.string().nullable().optional(),
         modelId: z.string().nullable().optional(),
@@ -92,21 +92,6 @@ export const StoryMetaSchema = z.object({
         topP: z.number().min(0).max(1).nullable().optional(),
         topK: z.number().int().min(1).max(1000).nullable().optional(),
       })).default({}),
-      // Legacy per-role fields (read for migration, no longer written)
-      providerId: z.string().nullable().optional(),
-      modelId: z.string().nullable().optional(),
-      librarianProviderId: z.string().nullable().optional(),
-      librarianModelId: z.string().nullable().optional(),
-      characterChatProviderId: z.string().nullable().optional(),
-      characterChatModelId: z.string().nullable().optional(),
-      proseTransformProviderId: z.string().nullable().optional(),
-      proseTransformModelId: z.string().nullable().optional(),
-      librarianChatProviderId: z.string().nullable().optional(),
-      librarianChatModelId: z.string().nullable().optional(),
-      librarianRefineProviderId: z.string().nullable().optional(),
-      librarianRefineModelId: z.string().nullable().optional(),
-      directionsProviderId: z.string().nullable().optional(),
-      directionsModelId: z.string().nullable().optional(),
       // Story-level contract for interpreting the primary writing composer.
       // Direct input is prompt-only; Play input becomes canonical manuscript.
       authorInputMode: z.enum(['direct', 'play']).default('direct'),

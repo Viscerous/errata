@@ -17,7 +17,7 @@ export function createCharacterChatBlocks(ctx: AgentBlockContext): ContextBlock[
   blocks.push({
     id: 'instructions',
     role: 'system',
-    content: instructionRegistry.resolve('character-chat.system', ctx.modelId),
+    content: instructionRegistry.resolve('character-chat.system'),
     order: 100,
     source: 'builtin',
   })
