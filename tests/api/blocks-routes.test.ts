@@ -77,6 +77,22 @@ describe('Context previews preserve agent access boundaries', () => {
     expect(recovery.estimatedTokens).toBeLessThan(inspection.estimatedTokens)
     expect(inspection.conditional).toBe(true)
   })
+
+  it('shows the exact read-only Story Setup tool surface', async () => {
+    const storyId = await createStory()
+    const preview = await (await api(`/stories/${storyId}/agent-blocks/story-setup.chat/preview`)).json()
+
+    expect(preview.tools).toHaveLength(1)
+    expect(preview.tools[0]).toMatchObject({
+      name: 'updateStorySetup',
+      enabled: true,
+      description: expect.stringContaining('without changing the story'),
+    })
+    expect(JSON.parse(preview.tools[0].schema).properties).toEqual({
+      checklist: expect.any(Object),
+    })
+    expect(preview.toolCharacters).toBe(preview.tools[0].characters)
+  })
 })
 
 describe('Per-agent config export/import routes', () => {

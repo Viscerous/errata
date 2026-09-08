@@ -12,6 +12,61 @@ function resolveStorySetupMode(opts: StorySetupChatOptions): 'assess' | 'continu
   return opts.mode ?? (opts.messages.some(message => message.role === 'user') ? 'continue' : 'assess')
 }
 
+export function createStorySetupTools(dataDir: string, storyId: string, mode: 'assess' | 'continue') {
+  if (mode === 'assess') {
+    return {
+      updateStorySetup: tool({
+        description: 'Report the seven checklist items from the existing story material without changing the story.',
+        inputSchema: StorySetupAssessmentSchema,
+        execute: async ({ checklist }) => {
+          try {
+            const setupFragments = await listStorySetupFragments(dataDir, storyId)
+            return {
+              saved: false,
+              checklist,
+              covered: checklist.filter(item => item.status === 'covered').length,
+              story: null,
+              fragments: setupFragments.map(fragment => ({
+                id: fragment.id,
+                key: fragment.meta.storySetupKey as string,
+                type: fragment.type,
+                name: fragment.name,
+                description: fragment.description,
+                content: fragment.content,
+              })),
+            }
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error)
+            throw new Error(`Errata could not assess the existing setup: ${message}. Retry updateStorySetup.`)
+          }
+        },
+      }),
+    }
+  }
+
+  return {
+    updateStorySetup: tool({
+      description: 'Save the working story details and complete setup-fragment snapshot, and replace the visible checklist before asking the writer the next question.',
+      inputSchema: StorySetupSnapshotSchema,
+      execute: async ({ story, checklist, fragments }) => {
+        try {
+          const saved = await syncStorySetupSnapshot(dataDir, storyId, { story: story ?? null, fragments })
+          return {
+            saved: true,
+            checklist,
+            covered: checklist.filter(item => item.status === 'covered').length,
+            story: saved.story,
+            fragments: saved.fragments,
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          throw new Error(`Errata rejected the story setup snapshot: ${message}. Correct it and call updateStorySetup again.`)
+        }
+      },
+    }),
+  }
+}
+
 const runStorySetupChat = createStreamingRunner<StorySetupChatOptions>({
   name: 'story-setup.chat',
   role: 'story-setup.chat',
@@ -23,61 +78,7 @@ const runStorySetupChat = createStreamingRunner<StorySetupChatOptions>({
       storySetupReadOnly: resolveStorySetupMode(opts) === 'assess',
     }
   },
-  tools: ({ dataDir, storyId, opts }) => {
-    const mode = resolveStorySetupMode(opts)
-    if (mode === 'assess') {
-      return {
-        updateStorySetup: tool({
-          description: 'Report the seven checklist items from the existing story material without changing the story.',
-          inputSchema: StorySetupAssessmentSchema,
-          execute: async ({ checklist }) => {
-            try {
-              const setupFragments = await listStorySetupFragments(dataDir, storyId)
-              return {
-                saved: false,
-                checklist,
-                covered: checklist.filter(item => item.status === 'covered').length,
-                story: null,
-                fragments: setupFragments.map(fragment => ({
-                  id: fragment.id,
-                  key: fragment.meta.storySetupKey as string,
-                  type: fragment.type,
-                  name: fragment.name,
-                  description: fragment.description,
-                  content: fragment.content,
-                })),
-              }
-            } catch (error) {
-              const message = error instanceof Error ? error.message : String(error)
-              throw new Error(`Errata could not assess the existing setup: ${message}. Retry updateStorySetup.`)
-            }
-          },
-        }),
-      }
-    }
-
-    return {
-      updateStorySetup: tool({
-        description: 'Save the working story details and complete setup-fragment snapshot, and replace the visible checklist before asking the writer the next question.',
-        inputSchema: StorySetupSnapshotSchema,
-        execute: async ({ story, checklist, fragments }) => {
-          try {
-            const saved = await syncStorySetupSnapshot(dataDir, storyId, { story: story ?? null, fragments })
-            return {
-              saved: true,
-              checklist,
-              covered: checklist.filter(item => item.status === 'covered').length,
-              story: saved.story,
-              fragments: saved.fragments,
-            }
-          } catch (error) {
-            const message = error instanceof Error ? error.message : String(error)
-            throw new Error(`Errata rejected the story setup snapshot: ${message}. Correct it and call updateStorySetup again.`)
-          }
-        },
-      }),
-    }
-  },
+  tools: ({ dataDir, storyId, opts }) => createStorySetupTools(dataDir, storyId, resolveStorySetupMode(opts)),
   toolChoice: 'auto',
   maxSteps: 3,
   messages: ({ compiled, opts }) => {

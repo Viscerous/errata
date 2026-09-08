@@ -263,7 +263,7 @@ const coercedStringArray = z.array(coercedStringItem).max(200).default([])
 export const MAX_CITED_SEGMENTS = 8
 
 const proseCitationSchema = z.array(z.number().int().positive()).default([])
-  .describe(`New-prose sentence numbers; cite only those needed (first ${MAX_CITED_SEGMENTS} kept).`)
+  .describe('New-prose sentence numbers.')
 
 /** Conditional maintenance lanes may be abandoned after a failed attempt. */
 const skippedToolNameSchema = z.enum(['proposeRecordCorrections', 'proposeNewRecords'])
@@ -411,8 +411,8 @@ function continuityKeyFields(
     : ''
   return registryAddressFields(
     entryField,
-    `Existing Continuity Registry entry changed here; omit only when ${creationAction} creates a new one.`,
-    `Existing ${noun} key when no entry number is used.${reuse} For a new identity, omit both fields to derive a key; if supplied, use snake_case without IDs (for example ${example}).`,
+    `Registry entry to update; omit when ${creationAction} creates one.`,
+    `Existing ${noun} key if no entry number is used.${reuse} Omit both to derive a new key; otherwise use snake_case without IDs (for example ${example}).`,
   )
 }
 
@@ -423,7 +423,7 @@ function stateOperationSchemaFor(registry: ContinuityRegistry) {
     subject: z.object({
       label: z.string().trim().min(1).max(160),
       fragmentId: FragmentIdSchema.optional(),
-    }).optional().describe('Subject label and optional record ID, only for a new set.'),
+    }).optional().describe('Subject and optional record ID for a new set.'),
     facet: z.string().trim().min(1).max(100).optional()
       .describe('One stable question for a new set, such as location, attire, or injury; avoid catch-all status.'),
     slot: z.string().trim().min(1).max(100).optional()
@@ -468,8 +468,8 @@ function threadOperationSchemaFor(registry: ContinuityRegistry) {
 const threadFocusSchema = z.object({
   ...registryAddressFields(
     'threadEntry',
-    'Existing Continuity Registry thread this passage did not act on.',
-    'Existing open thread key when no entry number is used; focus cannot create a thread.',
+    'Registry entry for an untouched thread.',
+    'Existing open thread key if no entry number is used; focus cannot create a thread.',
   ),
   visibility: z.enum(['foreground', 'background', 'dormant'])
     .describe('Set dormant to remove an unresolved thread from immediate writing context.'),
@@ -493,9 +493,9 @@ export function buildReportAnalysisInputSchema(input: ContinuityKeyRegistry = {}
     // Accept verbosity here and normalize it in execute. Rejecting the entire
     // structured report for an overlong summary makes reasoning models retain
     // a large failed tool call and regenerate every otherwise-valid field.
-    summary: z.string().default('').describe('Concise retrospective summary of the new prose, as past history (max 1200 characters kept).'),
+    summary: z.string().default('').describe('Concise retrospective summary of the new prose as past history.'),
     events: coercedStringArray
-      .describe('A few short events for the timeline; scene metadata supplies when (first 8 kept).'),
+      .describe('A few short timeline events; scene metadata supplies when.'),
     mentions: z.array(mentionInputSchema).max(150).default([])
       .describe('Distinct listed-fragment mentions using exact prose text, never bare pronouns.'),
     candidateFragmentIds: z.array(FragmentIdSchema).max(120).default([])
@@ -511,20 +511,20 @@ export function buildReportAnalysisInputSchema(input: ContinuityKeyRegistry = {}
       conflictingEvidence: z.array(z.object({
         fragmentId: FragmentIdSchema,
         segments: z.array(z.number().int().positive()).default([])
-          .describe(`Record sentence numbers carrying the incompatible claim (first ${MAX_CITED_SEGMENTS} kept).`),
+          .describe('Record sentence numbers carrying the incompatible claim.'),
       })).max(8).default([])
         .describe('Conflicting reusable records cited by sentence; ordinary state changes are not contradictions.'),
     })).max(32).default([]),
     scene: sceneSchema.optional()
-      .describe('Changed scene fields. On retry omit to retain; send transition uncertain to withdraw.'),
+      .describe('Changed scene fields; transition uncertain withdraws the claim.'),
     stateOperations: z.array(stateOperationSchemaFor(registry)).max(80).optional()
-      .describe('Persistent conditions: set replaces, clear ends; use scene scope unless it must survive a cut. On retry omit to retain, [] to withdraw.'),
+      .describe('Persistent conditions: set replaces, clear ends; use scene scope unless it must survive a cut.'),
     threadOperations: z.array(threadOperationSchemaFor(registry)).max(80).optional()
-      .describe('Lifecycle changes for unresolved questions; never repurpose keys. On retry omit to retain, [] to withdraw.'),
+      .describe('Lifecycle changes for unresolved questions; never repurpose keys.'),
     threadFocus: z.array(threadFocusSchema).max(80).optional()
-      .describe('Prominence changes for untouched threads only; do not repeat threadOperations. On retry omit to retain, [] to withdraw.'),
+      .describe('Prominence changes for untouched threads only; do not repeat threadOperations.'),
     knowledgeOperations: z.array(knowledgeOperationSchemaFor(registry)).max(120).optional()
-      .describe('Durable character-specific learning, with attributed and temporal limits. On retry omit to retain, [] to withdraw.'),
+      .describe('Durable character-specific learning with attributed and temporal limits.'),
   })
 }
 
@@ -1125,7 +1125,7 @@ function mergeContinuityProjection(
 }
 
 const proposalEvidenceSchema = z.array(z.number().int().positive()).default([])
-  .describe(`New-prose sentence numbers establishing the proposal (first ${MAX_CITED_SEGMENTS} kept).`)
+  .describe('New-prose sentence numbers establishing the proposal.')
 
 /**
  * A correction names the sentence it replaces rather than reproducing it.
@@ -1420,7 +1420,7 @@ export function createAnalysisTools(
 
   if (opts?.includeReportTool !== false) {
     tools.reportAnalysis = tool({
-      description: 'Report all prose findings in one batch. On retry, supplied values update the report and omitted data is retained; send [] to withdraw a continuity lane or an uncertain scene to withdraw its claim.',
+      description: 'Report all prose findings in one batch. Evidence fields cite numbered sentences. On retry, omitted fields are retained; send [] to withdraw a continuity lane.',
       inputSchema: buildReportAnalysisInputSchema(opts?.continuityKeys ?? {}),
       execute: async (input: ReportAnalysisInput) => {
         const {

@@ -5,7 +5,7 @@ import { modelRoleRegistry } from '../agents/model-role-registry'
 import { instructionRegistry } from '../instructions'
 import type { AgentDefinition } from '../agents/types'
 import { STORY_SETUP_SYSTEM_PROMPT, buildStorySetupPreviewContext, createStorySetupBlocks } from './blocks'
-import { storySetupChat } from './chat'
+import { createStorySetupTools, storySetupChat } from './chat'
 
 const StorySetupChatInputSchema = z.object({
   messages: z.array(z.object({
@@ -52,6 +52,7 @@ export function registerStorySetupAgents(): void {
     description: 'Helps the writer shape an idea before creating starter fragments.',
     createDefaultBlocks: createStorySetupBlocks,
     availableTools: ['updateStorySetup'],
+    resolveTools: ({ dataDir, storyId }) => createStorySetupTools(dataDir, storyId, 'assess'),
     buildPreviewContext: buildStorySetupPreviewContext,
   })
 
