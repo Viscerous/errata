@@ -1,10 +1,9 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { flushSync } from 'react-dom'
-import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query'
+import { useQueryClient, useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { Button } from '@/components/ui/button'
-import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
-import { PenLine, ArrowRight, Pause, Compass, RefreshCw, Loader2, PenSquare, Type } from 'lucide-react'
+import { PenLine, Loader2, Type } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { invalidateStoryContent } from '@/lib/branch-cache'
 import { qk, useActiveBranchId } from '@/lib/query-keys'
@@ -15,17 +14,13 @@ import { mergeDirectionSuggestions } from './direction-suggestions'
 import { composeGeneratedProse, type AuthorInputMode } from '@/contracts/generation'
 import { ContextPreviewDialog } from '@/components/generation/ContextPreviewDialog'
 import { GUIDED_CONTINUE_PROMPT, GUIDED_SCENE_SETTING_PROMPT } from '@/lib/guided-prompts'
+import { GenerationProviderSelect } from './GenerationProviderSelect'
+import { GuidedGenerationControls } from './GuidedGenerationControls'
+import { consumeGenerationStream, type ThoughtStep } from './generation-stream'
 
 // A round high enough that the server withholds the ask tool and must write —
 // used by "Skip & write" to proceed without answering.
 const FORCE_PROCEED_ROUND = 99
-
-export type ThoughtStep =
-  | { type: 'reasoning'; text: string }
-  | { type: 'prewriter-text'; text: string }
-  | { type: 'tool-call'; id: string; toolName: string; args: Record<string, unknown> }
-  | { type: 'tool-result'; id: string; toolName: string; result: unknown }
-  | { type: 'phase'; phase: string }
 
 type InputMode = 'primary' | 'guided' | 'compose'
 
@@ -107,17 +102,6 @@ export function InlineGenerationInput({
   const [manualAnchor, setManualAnchor] = useState<string | undefined>(undefined)
   const [isFetchingSuggestions, setIsFetchingSuggestions] = useState(false)
   const [suggestionError, setSuggestionError] = useState<string | null>(null)
-  const [activeSuggestionIndex, setActiveSuggestionIndex] = useState<number | null>(null)
-  /**
-   * Whether the pressed card was already expanded when the press started.
-   *
-   * Live state can't answer that: pressing a button focuses it, focus expands the
-   * card, so by click time it always reads "open" and the first tap would commit
-   * unseen. Snapshotted on pointerdown, which precedes the focus. Null means no
-   * pointer was involved, where current state is honest — Tab focused the card in
-   * its own interaction.
-   */
-  const pressStartedExpandedRef = useRef<boolean | null>(null)
 
   // Query latest analysis for auto-populated directions
   const { data: analysesList } = useQuery({
@@ -168,16 +152,6 @@ export function InlineGenerationInput({
     }))
   }, [manualSuggestions, manualAnchor, analysisDirections, latestFragmentId, liveDirectionsAreCurrent, latestAnalysisId, invalidatedAnalysisId])
 
-  const updateActiveSuggestion = useCallback((nextIndex: number | null) => {
-    setActiveSuggestionIndex(nextIndex)
-  }, [])
-
-  useEffect(() => {
-    if (activeSuggestionIndex !== null && activeSuggestionIndex >= suggestions.length) {
-      updateActiveSuggestion(null)
-    }
-  }, [activeSuggestionIndex, suggestions.length, updateActiveSuggestion])
-
   const handleModeChange = (newMode: InputMode) => {
     setMode(newMode)
     if (newMode === 'primary') setInputModeOverride(null)
@@ -189,23 +163,8 @@ export function InlineGenerationInput({
     queryKey: ['story', storyId],
     queryFn: () => api.stories.get(storyId),
   })
-  const { data: globalConfig } = useQuery({
-    queryKey: ['global-config'],
-    queryFn: () => api.config.getProviders(),
-  })
   const storyInputMode: AuthorInputMode = story?.settings.authorInputMode ?? 'direct'
   const effectiveInputMode = inputModeOverride ?? storyInputMode
-  const providerMutation = useMutation({
-    mutationFn: (data: { providerId: string | null; modelId: string | null }) => {
-      const overrides = story?.settings.modelOverrides ?? {}
-      return api.settings.update(storyId, {
-        modelOverrides: { ...overrides, generation: { providerId: data.providerId, modelId: data.modelId } },
-      })
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['story', storyId] })
-    },
-  })
 
   // Auto-resize textareas
   useEffect(() => {
@@ -222,23 +181,18 @@ export function InlineGenerationInput({
     el.style.height = Math.min(el.scrollHeight, 400) + 'px'
   }, [composeInput])
 
-  const prewriterDirectionsRef = useRef<SuggestionDirection[] | null>(null)
-
   const handleGenerateWithInput = useCallback(async (generationInput: string, inputMode: AuthorInputMode = 'direct', clarifications: Clarification[] = [], round = 0) => {
     if (!generationInput.trim() || isGenerating) return
 
     onGenerationStart(generationInput, inputMode)
     setError(null)
     setPendingQuestions(null)
-    prewriterDirectionsRef.current = null
     genCtxRef.current = { input: generationInput, inputMode, clarifications, round }
 
     const ac = new AbortController()
     abortRef.current = ac
     const runId = generateRunId()
     runIdRef.current = runId
-    let askedQuestions: ClarifyQuestion[] | null = null
-
     /**
      * A run torn down on request. Refresh — a stop can land after tool writes —
      * but leave the prompt in the composer, since no passage was committed.
@@ -259,113 +213,35 @@ export function InlineGenerationInput({
       }
       const stream = await api.generation.generateAndSave(storyId, generationInput, ac.signal, opts)
 
-      const reader = stream.getReader()
-      let accumulatedText = ''
-      let accumulatedReasoning = ''
-      let rejectionReason: string | null = null
-      let stopped = false
-      const thoughtSteps: ThoughtStep[] = []
-      let thoughtsDirty = false
-      let rafScheduled = false
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-
-        if (value.type === 'text') {
-          accumulatedText += value.text
-        } else if (value.type === 'reasoning') {
-          accumulatedReasoning += value.text
-          const last = thoughtSteps[thoughtSteps.length - 1]
-          if (last && last.type === 'reasoning') {
-            last.text = accumulatedReasoning
-          } else {
-            thoughtSteps.push({ type: 'reasoning', text: accumulatedReasoning })
-          }
-          thoughtsDirty = true
-        } else if (value.type === 'tool-call') {
-          accumulatedReasoning = ''
-          thoughtSteps.push({ type: 'tool-call', id: value.id, toolName: value.toolName, args: value.args })
-          thoughtsDirty = true
-        } else if (value.type === 'tool-result') {
-          thoughtSteps.push({ type: 'tool-result', id: value.id, toolName: value.toolName, result: value.result })
-          thoughtsDirty = true
-        } else if (value.type === 'prewriter-text') {
-          const last = thoughtSteps[thoughtSteps.length - 1]
-          if (last && last.type === 'prewriter-text') {
-            last.text += value.text
-          } else {
-            accumulatedReasoning = ''
-            thoughtSteps.push({ type: 'prewriter-text', text: value.text })
-          }
-          thoughtsDirty = true
-        } else if (value.type === 'prewriter-reset') {
-          // Prewriter re-wrote the brief in a new step — clear the live block so
-          // it refills with the final version instead of showing it twice.
-          const last = thoughtSteps[thoughtSteps.length - 1]
-          if (last && last.type === 'prewriter-text') {
-            last.text = ''
-          }
-          thoughtsDirty = true
-        } else if (value.type === 'prewriter-directions') {
-          prewriterDirectionsRef.current = value.directions
-        } else if (value.type === 'clarify-questions') {
-          askedQuestions = value.questions
-        } else if (value.type === 'generation-rejected') {
-          rejectionReason = value.reason
-        } else if (value.type === 'finish') {
-          stopped = value.stopped === true
-        } else if (value.type === 'phase') {
-          accumulatedReasoning = ''
-          thoughtSteps.push({ type: 'phase', phase: value.phase })
-          thoughtsDirty = true
-        }
-
-        if (!rafScheduled) {
-          rafScheduled = true
-          const textSnapshot = accumulatedText
-          const stepsSnapshot = thoughtsDirty ? [...thoughtSteps] : null
-          thoughtsDirty = false
-          requestAnimationFrame(() => {
-            onGenerationStream(textSnapshot
-              ? composeGeneratedProse(generationInput, textSnapshot, inputMode)
-              : '')
-            if (stepsSnapshot) onGenerationThoughts?.(stepsSnapshot)
-            rafScheduled = false
-          })
-        }
-      }
-
-      // Final flush
-      onGenerationStream(accumulatedText
-        ? composeGeneratedProse(generationInput, accumulatedText, inputMode)
-        : '')
-      if (thoughtSteps.length > 0) onGenerationThoughts?.([...thoughtSteps])
+      const result = await consumeGenerationStream(stream, ({ text, thoughts }) => {
+        onGenerationStream(text ? composeGeneratedProse(generationInput, text, inputMode) : '')
+        if (thoughts.length > 0) onGenerationThoughts?.(thoughts)
+      })
 
       // The prewriter asked clarifying questions instead of writing — surface
       // them and wait for answers (no prose was produced this round).
-      if (askedQuestions) {
-        setPendingQuestions(askedQuestions)
+      if (result.questions) {
+        setPendingQuestions(result.questions)
         onGenerationComplete()
         return
       }
 
-      if (rejectionReason) {
-        setError(rejectionReason)
+      if (result.rejectionReason) {
+        setError(result.rejectionReason)
         onGenerationError()
         return
       }
 
       // A stopped run closes its stream as cleanly as a finished one, so the
       // flag — not the end of the stream — is what says a run produced prose.
-      if (stopped) {
+      if (result.stopped) {
         await finishStopped()
         return
       }
 
       await invalidateStoryContent(queryClient, storyId)
 
-      if (prewriterDirectionsRef.current?.length) {
+      if (result.directions?.length) {
         // Anchor to the passage that was just written (now the head) — read it
         // from the chain refreshed by invalidateStoryContent above, since the
         // latestFragmentId prop may not have propagated yet in this callback.
@@ -373,7 +249,7 @@ export function InlineGenerationInput({
           qk.proseChain(storyId, branchId),
         )
         setManualAnchor(chain?.entries.at(-1)?.active ?? latestFragmentId)
-        setManualSuggestions(prewriterDirectionsRef.current)
+        setManualSuggestions(result.directions)
       }
 
       setInput('')
@@ -452,7 +328,6 @@ export function InlineGenerationInput({
     setManualAnchor(undefined)
     setManualSuggestions(null)
     setSuggestions([])
-    updateActiveSuggestion(null)
     try {
       const result = await api.generation.proposeDirections(storyId)
       // proposeDirections is computed from the current story state, i.e. the
@@ -466,20 +341,25 @@ export function InlineGenerationInput({
     }
   }
 
-  // Resolve current model label
-  const generationProviderId = story?.settings.modelOverrides?.generation?.providerId ?? null
-  const modelLabel = (() => {
-    if (!globalConfig) return null
-    const providers = globalConfig.providers.filter(p => p.enabled)
-    if (generationProviderId) {
-      const p = providers.find(p => p.id === generationProviderId)
-      if (p) return p.defaultModel
-    }
-    const defaultP = globalConfig.defaultProviderId
-      ? providers.find(p => p.id === globalConfig.defaultProviderId)
-      : null
-    return defaultP?.defaultModel ?? ''
-  })()
+  const handleChooseSuggestion = (suggestion: SuggestionDirection) => {
+    setManualSuggestions(null)
+    setSuggestions([])
+    void handleGenerateWithInput(suggestion.instruction)
+  }
+
+  const handleEditSuggestion = (suggestion: SuggestionDirection) => {
+    // iOS opens the keyboard only when focus remains in the click task, so mount
+    // the primary textarea synchronously before focusing it.
+    flushSync(() => {
+      setInput(suggestion.instruction)
+      setInputModeOverride('direct')
+      setMode('primary')
+      try { localStorage.setItem(STORAGE_KEY, 'primary') } catch {}
+    })
+    const textarea = textareaRef.current
+    textarea?.focus()
+    textarea?.setSelectionRange(textarea.value.length, textarea.value.length)
+  }
 
   return (
     <div className="relative" data-component-id="inline-generation-root">
@@ -512,16 +392,18 @@ export function InlineGenerationInput({
         )}
       >
         {/* Mode toggle */}
-        <div className="flex items-center gap-0.5 px-3 pt-2.5 pb-1">
+        <div className="flex items-center gap-0.5 px-3 pb-1 pt-2.5" role="tablist" aria-label="Writing mode">
           <button
             type="button"
             onClick={() => handleModeChange('primary')}
+            role="tab"
+            aria-selected={mode === 'primary'}
             aria-label={storyInputMode === 'play' ? 'Write a canonical Play turn' : 'Direct the writing assistant'}
             title={storyInputMode === 'play'
               ? 'Story setting: your input becomes manuscript prose and is included in exports'
               : 'Story setting: your input directs the assistant and stays out of the manuscript'}
             className={cn(
-              'px-2.5 py-1 text-[0.6875rem] font-sans rounded-md transition-all duration-200',
+              'rounded-md px-2.5 py-1 text-ui-label transition-colors duration-200',
               mode === 'primary'
                 ? 'text-foreground/80 bg-muted/60 font-medium'
                 : 'text-muted-foreground hover:text-foreground/60 hover:bg-muted/30',
@@ -534,8 +416,10 @@ export function InlineGenerationInput({
           <button
             type="button"
             onClick={() => handleModeChange('guided')}
+            role="tab"
+            aria-selected={mode === 'guided'}
             className={cn(
-              'px-2.5 py-1 text-[0.6875rem] font-sans rounded-md transition-all duration-200',
+              'rounded-md px-2.5 py-1 text-ui-label transition-colors duration-200',
               mode === 'guided'
                 ? 'text-foreground/80 bg-muted/60 font-medium'
                 : 'text-muted-foreground hover:text-foreground/60 hover:bg-muted/30',
@@ -546,10 +430,12 @@ export function InlineGenerationInput({
           <button
             type="button"
             onClick={() => handleModeChange('compose')}
+            role="tab"
+            aria-selected={mode === 'compose'}
             aria-label="Write prose directly"
             title="Add your prose to the story without generation"
             className={cn(
-              'px-2.5 py-1 text-[0.6875rem] font-sans rounded-md transition-all duration-200',
+              'rounded-md px-2.5 py-1 text-ui-label transition-colors duration-200',
               mode === 'compose'
                 ? 'text-foreground/80 bg-muted/60 font-medium'
                 : 'text-muted-foreground hover:text-foreground/60 hover:bg-muted/30',
@@ -584,233 +470,16 @@ export function InlineGenerationInput({
 
         {/* Guided mode */}
         {mode === 'guided' && (
-          <div className="px-2.5 pt-1 pb-1.5">
-            {/* Quick action buttons */}
-            <div className="flex gap-1.5 mb-1.5">
-              <button
-                type="button"
-                disabled={isGenerating}
-                onClick={() => handleGenerateWithInput(story?.settings.guidedContinuePrompt || GUIDED_CONTINUE_PROMPT)}
-                className={cn(
-                  'group flex-1 flex items-center gap-2 px-2.5 py-1.5 rounded-md border transition-all duration-200 text-left',
-                  'border-border/30 hover:border-primary/30 hover:bg-primary/[0.04]',
-                  'disabled:opacity-40 disabled:pointer-events-none',
-                )}
-              >
-                <div className="shrink-0 size-6 rounded bg-primary/10 flex items-center justify-center transition-colors group-hover:bg-primary/15">
-                  <ArrowRight className="size-3.5 text-primary/70" />
-                </div>
-                <div className="min-w-0">
-                  <div className="text-[0.75rem] font-medium text-foreground/85 font-sans leading-tight truncate">Continue</div>
-                  <div className="hidden sm:block text-[0.625rem] text-muted-foreground leading-tight mt-0.5 truncate">Advance plot</div>
-                </div>
-              </button>
-              <button
-                type="button"
-                disabled={isGenerating}
-                onClick={() => handleGenerateWithInput(story?.settings.guidedSceneSettingPrompt || GUIDED_SCENE_SETTING_PROMPT)}
-                className={cn(
-                  'group flex-1 flex items-center gap-2 px-2.5 py-1.5 rounded-md border transition-all duration-200 text-left',
-                  'border-border/30 hover:border-primary/30 hover:bg-primary/[0.04]',
-                  'disabled:opacity-40 disabled:pointer-events-none',
-                )}
-              >
-                <div className="shrink-0 size-6 rounded bg-primary/10 flex items-center justify-center transition-colors group-hover:bg-primary/15">
-                  <Pause className="size-3.5 text-primary/70" />
-                </div>
-                <div className="min-w-0">
-                  <div className="text-[0.75rem] font-medium text-foreground/85 font-sans leading-tight truncate">Scene-setting</div>
-                  <div className="hidden sm:block text-[0.625rem] text-muted-foreground leading-tight mt-0.5 truncate">Atmosphere</div>
-                </div>
-              </button>
-            </div>
-
-            {/* Suggest directions */}
-            {suggestions.length === 0 && !isFetchingSuggestions && (
-              <button
-                type="button"
-                disabled={isGenerating}
-                onClick={handleFetchSuggestions}
-                className={cn(
-                  'w-full flex items-center justify-center gap-2 py-1.5 rounded-md transition-all duration-200',
-                  'text-[0.75rem] font-sans text-muted-foreground hover:text-foreground/70',
-                  'border border-dashed border-border/40 hover:border-primary/25 hover:bg-primary/[0.02]',
-                  'disabled:opacity-40 disabled:pointer-events-none',
-                )}
-              >
-                <Compass className="size-3.5" />
-                Suggest directions
-              </button>
-            )}
-
-            {/* Loading state */}
-            {isFetchingSuggestions && (
-              <div className="flex items-center justify-center gap-2 py-4">
-                <Loader2 className="size-4 text-primary/50 animate-spin" />
-                <span className="text-[0.75rem] text-muted-foreground font-sans italic">Imagining possibilities...</span>
-              </div>
-            )}
-
-            {/* Suggestion cards */}
-            {suggestions.length > 0 && !isFetchingSuggestions && (
-              <div className="relative">
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-[0.625rem] text-muted-foreground font-sans uppercase tracking-wider">Directions</span>
-                  <button
-                    type="button"
-                    disabled={isGenerating}
-                    onClick={handleFetchSuggestions}
-                    aria-label="Refresh directions"
-                    className="size-7 flex items-center justify-center rounded text-muted-foreground hover:text-foreground transition-colors disabled:opacity-30"
-                  >
-                    <RefreshCw className="size-3" />
-                  </button>
-                </div>
-                <div
-                  className="flex flex-col gap-1"
-                  // Only a mouse previews on hover. A pointer that arrives by
-                  // touching fires enter at contact and leave on release, both
-                  // before the click — one press would expand, collapse, commit.
-                  onPointerLeave={(event) => {
-                    if (event.pointerType === 'mouse') updateActiveSuggestion(null)
-                  }}
-                  onBlur={(event) => {
-                    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
-                      updateActiveSuggestion(null)
-                    }
-                  }}
-                >
-                  {suggestions.map((s, i) => {
-                    const isExpanded = activeSuggestionIndex === i
-                    const chooseSuggestion = () => {
-                      setManualSuggestions(null)
-                      setSuggestions([])
-                      handleGenerateWithInput(s.instruction)
-                    }
-
-                    /**
-                     * One rule for every pointer, hence no device branch: a card
-                     * commits only if it was already showing what it will do.
-                     * Hover satisfies that ahead of a click; a touch expands
-                     * first and commits on the second tap. A finger that misses
-                     * the edit control then merely opens a collapsed card.
-                     */
-                    const activateSuggestion = () => {
-                      const wasExpanded = pressStartedExpandedRef.current ?? isExpanded
-                      pressStartedExpandedRef.current = null
-                      if (wasExpanded) chooseSuggestion()
-                      else updateActiveSuggestion(i)
-                    }
-                    // Ahead of the focus this same press will trigger.
-                    const recordPressStart = () => { pressStartedExpandedRef.current = isExpanded }
-
-                    return (
-                      <div
-                        key={i}
-                        onPointerEnter={(event) => {
-                          if (event.pointerType === 'mouse') updateActiveSuggestion(i)
-                        }}
-                        onFocus={() => updateActiveSuggestion(i)}
-                        className={cn(
-                          'group/card w-full overflow-hidden rounded-md border bg-card/90',
-                          'transition-[border-color,background-color,box-shadow] duration-200',
-                          'border-border/25 hover:border-primary/25 hover:bg-card hover:shadow-md',
-                          'focus-within:border-primary/25 focus-within:bg-card focus-within:shadow-md',
-                          isExpanded && 'border-primary/25 bg-card shadow-md',
-                          isGenerating && 'opacity-40',
-                        )}
-                      >
-                        {/* Top bar (one-line layout) */}
-                        <div className="flex w-full items-stretch min-h-8 pointer-coarse:min-h-11">
-                          <button
-                            type="button"
-                            disabled={isGenerating}
-                            onPointerDown={recordPressStart}
-                            onClick={activateSuggestion}
-                            aria-expanded={isExpanded}
-                            className="flex-1 text-left px-2.5 py-1.5 min-w-0"
-                          >
-                            <div className="flex min-w-0 items-baseline gap-2">
-                              <span className="shrink-0 text-[0.75rem] font-medium text-foreground/80 font-sans leading-tight group-hover/card:text-foreground/90 transition-colors">
-                                {s.title}
-                              </span>
-                              <span
-                                className={cn(
-                                  'min-w-0 truncate text-[0.6875rem] text-muted-foreground leading-tight transition-[opacity,max-width] duration-300 ease-in-out',
-                                  isExpanded
-                                    ? 'opacity-0 max-w-0 pointer-events-none'
-                                    : 'opacity-100 max-w-full',
-                                )}
-                              >
-                                {s.description}
-                              </span>
-                            </div>
-                          </button>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <button
-                                type="button"
-                                disabled={isGenerating}
-                                onClick={() => {
-                                  // The textarea mounts with the mode change, and iOS
-                                  // opens the keyboard only for a focus() inside the
-                                  // gesture's own task — which a rAF callback is not.
-                                  // flushSync commits the mount while the click still owns
-                                  // the task.
-                                  // The textarea mounts with the mode change, and iOS
-                                  // opens the keyboard only for a focus() inside the
-                                  // gesture's own task — which a rAF callback is not.
-                                  // flushSync commits the mount while the click still owns
-                                  // the task.
-                                  flushSync(() => {
-                                    setInput(s.instruction)
-                                    // A suggested direction stays an instruction even
-                                    // when the story's primary contract is Play.
-                                    setInputModeOverride('direct')
-                                    setMode('primary')
-                                    try { localStorage.setItem(STORAGE_KEY, 'primary') } catch {}
-                                  })
-                                  const el = textareaRef.current
-                                  el?.focus()
-                                  // Editing continues at the end, not in front of the text.
-                                  el?.setSelectionRange(el.value.length, el.value.length)
-                                }}
-                                aria-label={`Edit ${s.title} before sending`}
-                                // 32px suits a cursor; 44px is the WCAG 2.5.5 floor.
-                                className="shrink-0 flex items-center justify-center w-8 pointer-coarse:w-11 border-l border-border/20 text-muted-foreground/40 hover:text-foreground/60 hover:bg-muted/30 transition-colors rounded-r-md"
-                              >
-                                <PenSquare className="size-3.5" />
-                              </button>
-                            </TooltipTrigger>
-                            <TooltipContent side="left">Edit before sending</TooltipContent>
-                          </Tooltip>
-                        </div>
-                        {/* Bottom expanded description */}
-                        <div
-                          className={cn(
-                            'grid overflow-hidden transition-[grid-template-rows] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]',
-                            isExpanded ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]',
-                          )}
-                        >
-                          <div className="min-h-0 overflow-hidden">
-                            <button
-                              type="button"
-                              disabled={isGenerating}
-                              onPointerDown={recordPressStart}
-                              onClick={activateSuggestion}
-                              className="block w-full px-2.5 pb-2 text-left text-[0.6875rem] text-muted-foreground leading-normal whitespace-normal break-words disabled:cursor-default"
-                            >
-                              {s.description}
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
-              </div>
-            )}
-          </div>
+          <GuidedGenerationControls
+            suggestions={suggestions}
+            isGenerating={isGenerating}
+            isFetchingSuggestions={isFetchingSuggestions}
+            onContinue={() => void handleGenerateWithInput(story?.settings.guidedContinuePrompt || GUIDED_CONTINUE_PROMPT)}
+            onSceneSetting={() => void handleGenerateWithInput(story?.settings.guidedSceneSettingPrompt || GUIDED_SCENE_SETTING_PROMPT)}
+            onRefresh={() => void handleFetchSuggestions()}
+            onChoose={handleChooseSuggestion}
+            onEdit={handleEditSuggestion}
+          />
         )}
 
         {/* Compose mode */}
@@ -847,46 +516,12 @@ export function InlineGenerationInput({
                 disabled={isGenerating}
               />
             )}
-            {mode !== 'compose' && globalConfig && (
-              <div className="relative group/model">
-                <select
-                  data-component-id="inline-generation-provider-select"
-                  name="generation-provider"
-                  aria-label="Generation model"
-                  value={generationProviderId ?? ''}
-                  onChange={(e) => {
-                    const providerId = e.target.value || null
-                    providerMutation.mutate({ providerId, modelId: null })
-                  }}
-                  disabled={providerMutation.isPending || isGenerating}
-                  className="text-[0.625rem] text-foreground/60 bg-muted/50 hover:bg-muted/70 border border-border/40 hover:border-border/60 rounded-md outline-none cursor-pointer transition-all duration-200 appearance-none pl-2 pr-5 py-1 font-mono max-w-[180px] truncate disabled:opacity-30 disabled:cursor-default focus:ring-1 focus:ring-primary/20 focus:border-primary/30"
-                  style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2.5' stroke-linecap='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 6px center' }}
-                  title={modelLabel ?? undefined}
-                >
-                  {(() => {
-                    const providers = globalConfig.providers.filter(p => p.enabled)
-                    const defaultProvider = globalConfig.defaultProviderId
-                      ? providers.find(p => p.id === globalConfig.defaultProviderId)
-                      : null
-                    return (
-                      <>
-                        <option value="">
-                          {defaultProvider
-                            ? `${defaultProvider.defaultModel}`
-                            : `No provider`}
-                        </option>
-                        {providers
-                          .filter(p => p.id !== globalConfig.defaultProviderId)
-                          .map(p => (
-                            <option key={p.id} value={p.id}>
-                              {p.defaultModel}
-                            </option>
-                          ))}
-                      </>
-                    )
-                  })()}
-                </select>
-              </div>
+            {mode !== 'compose' && (
+              <GenerationProviderSelect
+                storyId={storyId}
+                disabled={isGenerating}
+                componentId="inline-generation-provider-select"
+              />
             )}
           </div>
 

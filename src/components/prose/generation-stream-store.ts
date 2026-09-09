@@ -1,4 +1,4 @@
-import type { ThoughtStep } from './InlineGenerationInput'
+import type { ThoughtStep } from './generation-stream'
 
 export interface GenerationStreamSnapshot {
   text: string

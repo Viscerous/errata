@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo, memo } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { api, type Fragment, type ProseChainResponseEntry } from '@/lib/api'
 import { copyText } from '@/lib/clipboard'
 import { invalidateStoryContent } from '@/lib/branch-cache'
@@ -9,12 +9,13 @@ import { ChevronRail } from './ChevronRail'
 import { ProseImageHeader } from './ProseImageHeader'
 import { resolveHeaderImage } from '@/lib/fragment-visuals'
 import { GenerationThoughts } from './GenerationThoughts'
-import { type ThoughtStep } from './InlineGenerationInput'
+import { consumeGenerationStream, type ThoughtStep } from './generation-stream'
 import { buildAnnotationHighlighter, filterMentionAnnotations, formatDialogue, composeTextTransforms, stripEmphasisInDialogue, type Annotation } from '@/lib/fragment-mentions'
 import { RefreshCw, Undo2, PenLine, Bug, Trash2, GitBranch, MessageSquare, ChevronLeft, ChevronRight, Info, BookOpen, Volume2, Square } from 'lucide-react'
 import { Caption } from '@/components/ui/prose-text'
 import { useConfirm } from '@/components/ui/confirm-dialog'
 import { useTtsSettings, useIsReadingFragment, playFragment, stopTts } from '@/lib/tts'
+import { GenerationProviderSelect } from './GenerationProviderSelect'
 
 interface ProseBlockProps {
   storyId: string
@@ -40,65 +41,6 @@ interface ProseBlockProps {
   mediaById?: Map<string, Fragment>
   scrollAnchorId?: string
   expandThoughtsByDefault?: boolean
-}
-
-/** Isolated sub-component so query cache subscriptions don't force ProseBlock re-renders */
-function ProviderQuickSwitch({
-  storyId,
-  isStreamingAction,
-}: {
-  storyId: string
-  isStreamingAction: boolean
-}) {
-  const queryClient = useQueryClient()
-  const { data: story } = useQuery({
-    queryKey: ['story', storyId],
-    queryFn: () => api.stories.get(storyId),
-  })
-  const { data: globalConfig } = useQuery({
-    queryKey: ['global-config'],
-    queryFn: () => api.config.getProviders(),
-  })
-  const providerMutation = useMutation({
-    mutationFn: (data: { providerId: string | null; modelId: string | null }) => {
-      const overrides = story?.settings.modelOverrides ?? {}
-      return api.settings.update(storyId, {
-        modelOverrides: { ...overrides, generation: { providerId: data.providerId, modelId: data.modelId } },
-      })
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['story', storyId] })
-    },
-  })
-
-  if (!globalConfig) return null
-
-  const providers = globalConfig.providers.filter(p => p.enabled)
-  const defaultProvider = globalConfig.defaultProviderId
-    ? providers.find(p => p.id === globalConfig.defaultProviderId)
-    : null
-
-  return (
-    <select
-      value={story?.settings.modelOverrides?.generation?.providerId ?? ''}
-      onChange={(e) => {
-        const providerId = e.target.value || null
-        providerMutation.mutate({ providerId, modelId: null })
-      }}
-      disabled={providerMutation.isPending || isStreamingAction}
-      className="text-[0.625rem] text-muted-foreground bg-transparent hover:bg-muted/40 border border-border/30 hover:border-border/50 rounded outline-none cursor-pointer transition-all appearance-none pl-1.5 pr-4 py-0.5 font-mono max-w-[140px] truncate disabled:opacity-30 focus:ring-1 focus:ring-primary/20"
-      style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='7' height='7' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2.5' stroke-linecap='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 4px center' }}
-    >
-      <option value="">
-        {defaultProvider ? defaultProvider.defaultModel : 'No provider'}
-      </option>
-      {providers
-        .filter(p => p.id !== globalConfig.defaultProviderId)
-        .map(p => (
-          <option key={p.id} value={p.id}>{p.defaultModel}</option>
-        ))}
-    </select>
-  )
 }
 
 export const ProseBlock = memo(function ProseBlock({
@@ -207,134 +149,6 @@ export const ProseBlock = memo(function ProseBlock({
     switchMutation.mutate(chainEntry.proseFragments[nextIdx].id)
   }
 
-  const handleQuickRegenerate = async () => {
-    if (!canQuickRegenerate || isStreamingAction) return
-
-    setActionMode(null)
-    setIsStreamingAction(true)
-    setStreamedActionText('')
-    setActionThoughtSteps([])
-
-    try {
-      const stream = await api.generation.regenerate(storyId, fragment.id, quickRegenerateInput)
-      const reader = stream.getReader()
-      let accumulated = ''
-      let accumulatedReasoning = ''
-      const steps: ThoughtStep[] = []
-      let stepsDirty = false
-      let rafScheduled = false
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        if (value.type === 'text') {
-          accumulated += value.text
-        } else if (value.type === 'reasoning') {
-          accumulatedReasoning += value.text
-          const last = steps[steps.length - 1]
-          if (last && last.type === 'reasoning') {
-            last.text = accumulatedReasoning
-          } else {
-            steps.push({ type: 'reasoning', text: accumulatedReasoning })
-          }
-          stepsDirty = true
-        } else if (value.type === 'tool-call') {
-          accumulatedReasoning = ''
-          steps.push({ type: 'tool-call', id: value.id, toolName: value.toolName, args: value.args })
-          stepsDirty = true
-        } else if (value.type === 'tool-result') {
-          steps.push({ type: 'tool-result', id: value.id, toolName: value.toolName, result: value.result })
-          stepsDirty = true
-        }
-        if (!rafScheduled) {
-          rafScheduled = true
-          const snapshot = accumulated
-          const stepsSnapshot = stepsDirty ? [...steps] : null
-          stepsDirty = false
-          requestAnimationFrame(() => {
-            setStreamedActionText(snapshot)
-            if (stepsSnapshot) setActionThoughtSteps(stepsSnapshot)
-            rafScheduled = false
-          })
-        }
-      }
-
-      setStreamedActionText(accumulated)
-      if (steps.length > 0) setActionThoughtSteps([...steps])
-      await invalidateStoryContent(queryClient, storyId)
-      handleActionComplete()
-    } catch {
-      setIsStreamingAction(false)
-      setStreamedActionText('')
-      setActionThoughtSteps([])
-    }
-  }
-
-  const handleActionSubmit = async () => {
-    if (!actionInput.trim() || isStreamingAction) return
-
-    setActionMode(null)
-    setShowActions(false)
-    setIsStreamingAction(true)
-    setStreamedActionText('')
-    setActionThoughtSteps([])
-
-    try {
-      const stream = await api.generation.regenerate(storyId, fragment.id, actionInput)
-
-      const reader = stream.getReader()
-      let accumulated = ''
-      let accumulatedReasoning = ''
-      const steps: ThoughtStep[] = []
-      let stepsDirty = false
-      let rafScheduled = false
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        if (value.type === 'text') {
-          accumulated += value.text
-        } else if (value.type === 'reasoning') {
-          accumulatedReasoning += value.text
-          const last = steps[steps.length - 1]
-          if (last && last.type === 'reasoning') {
-            last.text = accumulatedReasoning
-          } else {
-            steps.push({ type: 'reasoning', text: accumulatedReasoning })
-          }
-          stepsDirty = true
-        } else if (value.type === 'tool-call') {
-          accumulatedReasoning = ''
-          steps.push({ type: 'tool-call', id: value.id, toolName: value.toolName, args: value.args })
-          stepsDirty = true
-        } else if (value.type === 'tool-result') {
-          steps.push({ type: 'tool-result', id: value.id, toolName: value.toolName, result: value.result })
-          stepsDirty = true
-        }
-        if (!rafScheduled) {
-          rafScheduled = true
-          const snapshot = accumulated
-          const stepsSnapshot = stepsDirty ? [...steps] : null
-          stepsDirty = false
-          requestAnimationFrame(() => {
-            setStreamedActionText(snapshot)
-            if (stepsSnapshot) setActionThoughtSteps(stepsSnapshot)
-            rafScheduled = false
-          })
-        }
-      }
-
-      setStreamedActionText(accumulated)
-      if (steps.length > 0) setActionThoughtSteps([...steps])
-      await invalidateStoryContent(queryClient, storyId)
-      handleActionComplete()
-    } catch {
-      setIsStreamingAction(false)
-      setStreamedActionText('')
-      setActionThoughtSteps([])
-    }
-  }
-
   const handleActionComplete = () => {
     setActionMode(null)
     setEditingPrompt(false)
@@ -346,60 +160,19 @@ export const ProseBlock = memo(function ProseBlock({
     undoTimerRef.current = setTimeout(() => setShowUndo(false), 10000)
   }
 
-  const handlePromptSubmit = async () => {
-    if (!actionInput.trim() || isStreamingAction) return
-    setEditingPrompt(false)
-    setShowActions(false)
+  const runRegeneration = async (instruction: string) => {
+    if (!instruction.trim() || isStreamingAction) return
+
     setIsStreamingAction(true)
     setStreamedActionText('')
     setActionThoughtSteps([])
 
     try {
-      const stream = await api.generation.regenerate(storyId, fragment.id, actionInput)
-      const reader = stream.getReader()
-      let accumulated = ''
-      let accumulatedReasoning = ''
-      const steps: ThoughtStep[] = []
-      let stepsDirty = false
-      let rafScheduled = false
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        if (value.type === 'text') {
-          accumulated += value.text
-        } else if (value.type === 'reasoning') {
-          accumulatedReasoning += value.text
-          const last = steps[steps.length - 1]
-          if (last && last.type === 'reasoning') {
-            last.text = accumulatedReasoning
-          } else {
-            steps.push({ type: 'reasoning', text: accumulatedReasoning })
-          }
-          stepsDirty = true
-        } else if (value.type === 'tool-call') {
-          accumulatedReasoning = ''
-          steps.push({ type: 'tool-call', id: value.id, toolName: value.toolName, args: value.args })
-          stepsDirty = true
-        } else if (value.type === 'tool-result') {
-          steps.push({ type: 'tool-result', id: value.id, toolName: value.toolName, result: value.result })
-          stepsDirty = true
-        }
-        if (!rafScheduled) {
-          rafScheduled = true
-          const snapshot = accumulated
-          const stepsSnapshot = stepsDirty ? [...steps] : null
-          stepsDirty = false
-          requestAnimationFrame(() => {
-            setStreamedActionText(snapshot)
-            if (stepsSnapshot) setActionThoughtSteps(stepsSnapshot)
-            rafScheduled = false
-          })
-        }
-      }
-
-      setStreamedActionText(accumulated)
-      if (steps.length > 0) setActionThoughtSteps([...steps])
+      const stream = await api.generation.regenerate(storyId, fragment.id, instruction)
+      await consumeGenerationStream(stream, ({ text, thoughts }) => {
+        setStreamedActionText(text)
+        if (thoughts.length > 0) setActionThoughtSteps(thoughts)
+      })
       await invalidateStoryContent(queryClient, storyId)
       handleActionComplete()
     } catch {
@@ -407,6 +180,26 @@ export const ProseBlock = memo(function ProseBlock({
       setStreamedActionText('')
       setActionThoughtSteps([])
     }
+  }
+
+  const handleQuickRegenerate = async () => {
+    if (!canQuickRegenerate || isStreamingAction) return
+    setActionMode(null)
+    await runRegeneration(quickRegenerateInput)
+  }
+
+  const handleActionSubmit = async () => {
+    if (!actionInput.trim() || isStreamingAction) return
+    setActionMode(null)
+    setShowActions(false)
+    await runRegeneration(actionInput)
+  }
+
+  const handlePromptSubmit = async () => {
+    if (!actionInput.trim() || isStreamingAction) return
+    setEditingPrompt(false)
+    setShowActions(false)
+    await runRegeneration(actionInput)
   }
 
   // Pre-strip markdown emphasis from inside dialogue so markdown parsing
@@ -483,17 +276,20 @@ export const ProseBlock = memo(function ProseBlock({
                   }}
                 />
                 <div className="flex items-center gap-2 mt-1.5">
-                  <ProviderQuickSwitch storyId={storyId} isStreamingAction={isStreamingAction} />
-                  <span className="text-[0.625rem] text-muted-foreground">
+                  <GenerationProviderSelect storyId={storyId} disabled={isStreamingAction} className="max-w-[140px]" />
+                  <span className="text-ui-label text-muted-foreground">
                     Enter &middot; Esc
                   </span>
-                  <button
-                    className="ml-auto text-[0.625rem] px-1.5 py-0.5 rounded text-primary/70 hover:text-primary hover:bg-primary/10 transition-colors font-medium disabled:opacity-30"
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="xs"
+                    className="ml-auto text-primary/70 hover:bg-primary/10 hover:text-primary"
                     disabled={!actionInput.trim()}
                     onClick={handlePromptSubmit}
                   >
                     Regenerate
-                  </button>
+                  </Button>
                 </div>
               </div>
             </div>
@@ -517,7 +313,7 @@ export const ProseBlock = memo(function ProseBlock({
               </Caption>
               <RefreshCw className="size-3 shrink-0 mt-1 opacity-0 group-hover/prompt:opacity-40 transition-opacity" />
               {hasMultiple && (
-                <span className="text-[0.625rem] font-mono text-muted-foreground shrink-0 ml-auto mt-0.5">{variationIndex + 1}/{variationCount}</span>
+                <span className="ml-auto mt-0.5 shrink-0 font-mono text-ui-label text-muted-foreground">{variationIndex + 1}/{variationCount}</span>
               )}
             </button>
           ) : (
@@ -525,7 +321,7 @@ export const ProseBlock = memo(function ProseBlock({
               <div className="w-0.5 min-h-[1.25rem] rounded-full bg-border/30 shrink-0 mt-0.5" />
               <Caption asChild size="sm" className="font-display italic truncate"><span>{fragment.description}</span></Caption>
               {hasMultiple && (
-                <span className="text-[0.625rem] font-mono text-muted-foreground shrink-0 ml-auto mt-0.5">{variationIndex + 1}/{variationCount}</span>
+                <span className="ml-auto mt-0.5 shrink-0 font-mono text-ui-label text-muted-foreground">{variationIndex + 1}/{variationCount}</span>
               )}
             </div>
           )}
@@ -623,23 +419,28 @@ export const ProseBlock = memo(function ProseBlock({
                 }}
               />
               <div className="flex items-center justify-between px-3 py-1.5 border-t border-border/20">
-                <span className="text-[0.6rem] text-muted-foreground/50 font-mono tracking-wide">
+                <span className="font-mono text-ui-label tracking-wide text-muted-foreground/50">
                   ESC &middot; CTRL+ENTER
                 </span>
                 <div className="flex items-center gap-1">
-                  <button
-                    className="px-2 py-0.5 rounded-md text-[0.6875rem] text-muted-foreground hover:text-foreground transition-colors"
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="xs"
+                    className="text-muted-foreground"
                     onClick={() => { setActionMode(null); setActionInput('') }}
                   >
                     Cancel
-                  </button>
-                  <button
-                    className="px-2.5 py-0.5 rounded-md text-[0.6875rem] font-medium bg-foreground/[0.07] hover:bg-foreground/[0.12] text-foreground disabled:opacity-30 transition-all"
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="xs"
                     disabled={!actionInput.trim()}
                     onClick={handleActionSubmit}
                   >
                     Regenerate
-                  </button>
+                  </Button>
                 </div>
               </div>
             </div>
@@ -648,67 +449,88 @@ export const ProseBlock = memo(function ProseBlock({
             <div className="flex flex-col rounded-xl border border-border/30 bg-popover/95 backdrop-blur-md shadow-lg shadow-black/[0.06] overflow-hidden min-w-0">
               {/* Top tier — ID, variation, secondary icon actions */}
               <div className="flex items-center gap-1.5 px-2.5 py-1 min-w-0">
-                <button
-                  className="text-[0.625rem] font-mono text-muted-foreground/60 hover:text-foreground transition-colors shrink-0 select-all"
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="xs"
+                  className="h-6 shrink-0 select-all px-1 font-mono text-ui-label text-muted-foreground/60"
                   onClick={(e) => { e.stopPropagation(); void copyText(fragment.id) }}
                   title="Copy ID"
                 >
                   {fragment.id}
-                </button>
+                </Button>
                 {hasMultiple && (
                   <>
                     <div className="w-px h-3 bg-border/20" />
                     <div className="inline-flex items-center gap-0 shrink-0">
-                      <button
-                        className="p-0.5 rounded text-muted-foreground/50 hover:text-foreground hover:bg-accent/60 transition-all disabled:opacity-25"
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-xs"
+                        className="text-muted-foreground/50"
                         disabled={!canPrev || switchMutation.isPending}
                         onClick={() => switchVariation(-1)}
                         title="Previous variation"
                       >
                         <ChevronLeft className="size-3" />
-                      </button>
-                      <span className="text-[0.5625rem] font-mono text-muted-foreground/50 tabular-nums min-w-[1.5rem] text-center">{variationIndex + 1}/{variationCount}</span>
-                      <button
-                        className="p-0.5 rounded text-muted-foreground/50 hover:text-foreground hover:bg-accent/60 transition-all disabled:opacity-25"
+                      </Button>
+                      <span className="min-w-[1.75rem] text-center font-mono text-ui-label tabular-nums text-muted-foreground/50">{variationIndex + 1}/{variationCount}</span>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-xs"
+                        className="text-muted-foreground/50"
                         disabled={!canNext || switchMutation.isPending}
                         onClick={() => switchVariation(1)}
                         title="Next variation"
                       >
                         <ChevronRight className="size-3" />
-                      </button>
+                      </Button>
                     </div>
                   </>
                 )}
                 <div className="ml-auto flex items-center gap-0.5 shrink-0">
                   {onBranchFrom && sectionIndex >= 0 && (
-                    <button
-                      className="p-1 rounded-md text-muted-foreground/50 hover:text-foreground hover:bg-accent/60 transition-all"
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-xs"
+                      className="text-muted-foreground/50"
                       onClick={() => { onBranchFrom(sectionIndex); setShowActions(false) }}
                       title="Split from here"
                       data-component-id={`prose-${fragment.id}-branch`}
                     >
                       <GitBranch className="size-3" />
-                    </button>
+                    </Button>
                   )}
-                  <button
-                    className="p-1 rounded-md text-muted-foreground/50 hover:text-foreground hover:bg-accent/60 transition-all"
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-xs"
+                    className="text-muted-foreground/50"
                     onClick={() => { onSelect(fragment); setShowActions(false) }}
                     title="Details"
                   >
                     <Info className="size-3" />
-                  </button>
+                  </Button>
                   {!!fragment.meta?.generatedFrom && onDebugLog && (
-                    <button
-                      className="p-1 rounded-md text-muted-foreground/50 hover:text-foreground hover:bg-accent/60 transition-all"
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-xs"
+                      className="text-muted-foreground/50"
                       onClick={() => { onDebugLog(fragment.id); setShowActions(false) }}
                       title="Debug log"
                     >
                       <Bug className="size-3" />
-                    </button>
+                    </Button>
                   )}
                   {sectionIndex >= 0 && (
-                    <button
-                      className="p-1 rounded-md text-muted-foreground/50 hover:text-destructive hover:bg-destructive/10 transition-all disabled:opacity-25"
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-xs"
+                      className="text-muted-foreground/50 hover:bg-destructive/10 hover:text-destructive"
                       disabled={deleteMutation.isPending}
                       onClick={async () => {
                         if (await confirm({ title: 'Remove this passage?', description: 'It will be archived.', confirmText: 'Remove', destructive: true })) {
@@ -720,7 +542,7 @@ export const ProseBlock = memo(function ProseBlock({
                       data-component-id={`prose-${fragment.id}-remove`}
                     >
                       <Trash2 className="size-3" />
-                    </button>
+                    </Button>
                   )}
                 </div>
               </div>
@@ -729,17 +551,23 @@ export const ProseBlock = memo(function ProseBlock({
               {/* Bottom tier — primary actions. Wraps so the last action
                   (Read aloud) isn't clipped on narrow / mobile widths. */}
               <div className="flex flex-wrap items-center gap-px px-1 py-0.5">
-                <button
-                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[0.6875rem] text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-all disabled:opacity-25"
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 px-2.5 text-ui-label text-muted-foreground"
                   onClick={() => { if (onEdit) { onEdit(fragment.id, window.getSelection()?.toString() || undefined); setShowActions(false) } }}
                   disabled={!onEdit}
                   data-component-id={`prose-${fragment.id}-edit`}
                 >
                   <PenLine className="size-3.5" />
                   Edit
-                </button>
-                <button
-                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[0.6875rem] text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-all disabled:opacity-25"
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 px-2.5 text-ui-label text-muted-foreground"
                   onClick={() => {
                     setShowActions(false)
                     handleQuickRegenerate()
@@ -749,47 +577,55 @@ export const ProseBlock = memo(function ProseBlock({
                 >
                   <RefreshCw className="size-3.5" />
                   Redo
-                </button>
+                </Button>
                 {onAskLibrarian && (
                   <>
-                    <button
-                      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[0.6875rem] text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-all"
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 px-2.5 text-ui-label text-muted-foreground"
                       onClick={() => { onAskLibrarian(fragment.id, `refine ${fragment.id}: `); setShowActions(false) }}
                       data-component-id={`prose-${fragment.id}-refine`}
                     >
                       <MessageSquare className="size-3.5" />
                       Refine
-                    </button>
-                    <button
-                      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[0.6875rem] text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-all"
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 px-2.5 text-ui-label text-muted-foreground"
                       onClick={() => { onAskLibrarian(fragment.id); setShowActions(false) }}
                       data-component-id={`prose-${fragment.id}-ask`}
                     >
                       <MessageSquare className="size-3.5" />
                       Ask
-                    </button>
+                    </Button>
                   </>
                 )}
                 {onAnalyze && (
-                  <button
-                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[0.6875rem] text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-all"
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2.5 text-ui-label text-muted-foreground"
                     onClick={() => { onAnalyze(fragment.id); setShowActions(false) }}
                     data-component-id={`prose-${fragment.id}-analyze`}
                   >
                     <BookOpen className="size-3.5" />
                     Analyze
-                  </button>
+                  </Button>
                 )}
-                <button
-                  aria-disabled={!ttsSettings.enabled || undefined}
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  disabled={!ttsSettings.enabled}
                   title={ttsSettings.enabled ? undefined : 'Enable Read aloud in Settings to use this'}
-                  className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[0.6875rem] transition-all ${
-                    !ttsSettings.enabled
-                      ? 'text-muted-foreground/40 cursor-not-allowed'
-                      : isReadingThis
-                        ? 'text-primary'
-                        : 'text-muted-foreground hover:text-foreground hover:bg-accent/60'
-                  }`}
+                  className={isReadingThis
+                    ? 'h-7 px-2.5 text-ui-label text-primary'
+                    : 'h-7 px-2.5 text-ui-label text-muted-foreground'}
                   onClick={() => {
                     if (!ttsSettings.enabled) return
                     if (isReadingThis) stopTts()
@@ -800,7 +636,7 @@ export const ProseBlock = memo(function ProseBlock({
                 >
                   {isReadingThis ? <Square className="size-3.5" /> : <Volume2 className="size-3.5" />}
                   {isReadingThis ? 'Stop' : 'Read aloud'}
-                </button>
+                </Button>
               </div>
             </div>
           )}

@@ -6,7 +6,7 @@ import {
   ChainOfThoughtStep,
 } from '@/components/ui/chain-of-thought'
 import { Loader2, Brain, Wrench, CheckCircle2, PenLine, FileText } from 'lucide-react'
-import { type ThoughtStep } from './InlineGenerationInput'
+import { type ThoughtStep } from './generation-stream'
 
 // Streaming text box that follows the bottom while active, unless the user scrolled up
 function StreamingText({ text, active, className }: { text: string; active: boolean; className?: string }) {
@@ -56,9 +56,9 @@ function GenerationThoughtStepList({
   isThinking: boolean
 }) {
   const toolResults = useMemo(() => {
-    const results = new Map<string, Extract<ThoughtStep, { type: 'tool-result' }>>()
+    const results = new Map<string, Extract<ThoughtStep, { type: 'tool-result' | 'tool-error' }>>()
     for (const step of steps) {
-      if (step.type === 'tool-result') results.set(step.id, step)
+      if (step.type === 'tool-result' || step.type === 'tool-error') results.set(step.id, step)
     }
     return results
   }, [steps])
@@ -128,7 +128,7 @@ function GenerationThoughtStepList({
               status={isActive ? 'active' : 'complete'}
               description={
                 result
-                  ? summarizeToolResult(result.result)
+                  ? result.type === 'tool-error' ? `Error: ${result.error}` : summarizeToolResult(result.result)
                   : undefined
               }
             />
