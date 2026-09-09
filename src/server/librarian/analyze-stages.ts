@@ -1,7 +1,7 @@
 /** Tool exposure and deterministic completion for the adaptive Analyze loop. */
 
 export const ANALYZE_REPORT_TOOL = 'reportAnalysis'
-const ANALYZE_FINISH_TOOL = 'finishAnalysis'
+const ANALYZE_INSPECTION_DONE_TOOL = 'finishInspection'
 const ANALYZE_DIRECTION_TOOL = 'proposeDirections'
 const ANALYZE_INSPECTION_TOOLS = new Set([
   'readFragments',
@@ -49,14 +49,14 @@ function lastResult(results: readonly AnalyzeToolResult[], toolName: string): An
 function primaryTools(availableTools: readonly string[]): string[] {
   return availableTools.filter((name) => (
     !ANALYZE_INSPECTION_TOOLS.has(name)
-    && name !== ANALYZE_FINISH_TOOL
+    && name !== ANALYZE_INSPECTION_DONE_TOOL
   ))
 }
 
 /**
  * The normal path ends after one model response: report, optional proposals,
- * and directions can be emitted together. A final model-authored finish marker
- * adds no information, so successful required work is a deterministic stop.
+ * and directions can be emitted together. Only an inspection that leaves the
+ * report unchanged needs an explicit close signal.
  */
 export function isAnalyzeWorkflowComplete(
   availableTools: readonly string[],
@@ -65,7 +65,7 @@ export function isAnalyzeWorkflowComplete(
   const results = flattenResults(steps)
   if (results.length === 0) return false
 
-  const finish = lastResult(results, ANALYZE_FINISH_TOOL)
+  const finish = lastResult(results, ANALYZE_INSPECTION_DONE_TOOL)
   if (finish && outputOk(finish.output)) return true
 
   if (availableTools.includes(ANALYZE_REPORT_TOOL)) {
@@ -99,7 +99,7 @@ export function selectAnalyzeToolStage(
   if (latestReport && hasResolvedFragments(latestReport.output)) {
     const reportIndex = results.lastIndexOf(latestReport)
     const closedInspection = results.slice(reportIndex + 1).some((result) => (
-      result.toolName === ANALYZE_FINISH_TOOL
+      result.toolName === ANALYZE_INSPECTION_DONE_TOOL
       || result.toolName === ANALYZE_REPORT_TOOL
     ))
     if (!closedInspection) {

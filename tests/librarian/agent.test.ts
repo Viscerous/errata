@@ -120,12 +120,12 @@ function mockStreamWithToolCalls(toolCalls: Array<{ toolName: string; args: Reco
           const output: unknown = await toolDef.execute(tc.args)
           yield { type: 'tool-result' as const, toolCallId: id, toolName: tc.toolName, output }
         }
-        if (!toolCalls.some((tc) => tc.toolName === 'finishAnalysis') && tools.finishAnalysis?.execute) {
+        if (!toolCalls.some((tc) => tc.toolName === 'finishInspection') && tools.finishInspection?.execute) {
           const id = `call-${callId++}`
           const input = {}
-          yield { type: 'tool-call' as const, toolCallId: id, toolName: 'finishAnalysis', input }
-          const output: unknown = await tools.finishAnalysis.execute(input)
-          yield { type: 'tool-result' as const, toolCallId: id, toolName: 'finishAnalysis', output }
+          yield { type: 'tool-call' as const, toolCallId: id, toolName: 'finishInspection', input }
+          const output: unknown = await tools.finishInspection.execute(input)
+          yield { type: 'tool-result' as const, toolCallId: id, toolName: 'finishInspection', output }
         }
         yield { type: 'finish' as const, finishReason: 'stop' }
       })(),
@@ -372,8 +372,8 @@ describe('librarian agent', () => {
             output: await tools.reportAnalysis.execute(input),
           }
           const finishInput = {}
-          yield { type: 'tool-call' as const, toolCallId: 'call-finish', toolName: 'finishAnalysis', input: finishInput }
-          yield { type: 'tool-result' as const, toolCallId: 'call-finish', toolName: 'finishAnalysis', output: await tools.finishAnalysis.execute(finishInput) }
+          yield { type: 'tool-call' as const, toolCallId: 'call-finish', toolName: 'finishInspection', input: finishInput }
+          yield { type: 'tool-result' as const, toolCallId: 'call-finish', toolName: 'finishInspection', output: await tools.finishInspection.execute(finishInput) }
           yield { type: 'finish' as const, finishReason: 'stop' }
         })(),
       }
@@ -438,12 +438,12 @@ describe('librarian agent', () => {
         yield { type: 'tool-call' as const, toolCallId: 'read', toolName: 'readFragments', input: readInput }
         yield { type: 'tool-result' as const, toolCallId: 'read', toolName: 'readFragments', output: duplicateReadResult }
         const finishInput = {}
-        yield { type: 'tool-call' as const, toolCallId: 'finish', toolName: 'finishAnalysis', input: finishInput }
+        yield { type: 'tool-call' as const, toolCallId: 'finish', toolName: 'finishInspection', input: finishInput }
         yield {
           type: 'tool-result' as const,
           toolCallId: 'finish',
-          toolName: 'finishAnalysis',
-          output: await tools.finishAnalysis.execute(finishInput),
+          toolName: 'finishInspection',
+          output: await tools.finishInspection.execute(finishInput),
         }
         await opts?.onStepFinish?.({
           stepNumber: 1,
@@ -632,7 +632,7 @@ describe('librarian agent', () => {
     const analyzePass = analysis.passes?.find((pass) => pass.name === 'analyze')
     expect(analyzePass?.status).toBe('complete')
     expect(analyzePass?.diagnostics?.directionToolCallCount).toBe(1)
-    expect(analyzePass?.diagnostics?.finishToolCallCount).toBe(0)
+    expect(analyzePass?.diagnostics?.inspectionFinishToolCallCount).toBe(0)
     expect(analysis.directions).toEqual(directions)
     expect(analysis.analyzeLanes?.directions).toEqual({ requirement: 'required', completion: 'complete' })
   })
@@ -899,7 +899,7 @@ describe('librarian agent', () => {
         ),
       },
       {
-        toolName: 'finishAnalysis',
+        toolName: 'finishInspection',
         args: {
           completed: ['reportAnalysis'],
           skipped: [{ toolName: 'proposeRecordCorrections', reason: 'The correction target was invalid.' }],
@@ -958,8 +958,8 @@ describe('librarian agent', () => {
             yield { type: 'tool-result' as const, toolCallId: 'call-observe', toolName: 'reportAnalysis', output: await tools.reportAnalysis.execute(input) }
           }
           const finishInput = {}
-          yield { type: 'tool-call' as const, toolCallId: 'call-finish', toolName: 'finishAnalysis', input: finishInput }
-          yield { type: 'tool-result' as const, toolCallId: 'call-finish', toolName: 'finishAnalysis', output: await tools.finishAnalysis.execute(finishInput) }
+          yield { type: 'tool-call' as const, toolCallId: 'call-finish', toolName: 'finishInspection', input: finishInput }
+          yield { type: 'tool-result' as const, toolCallId: 'call-finish', toolName: 'finishInspection', output: await tools.finishInspection.execute(finishInput) }
           yield { type: 'finish' as const, finishReason: 'stop' }
         })(),
       }
@@ -1038,8 +1038,8 @@ describe('librarian agent', () => {
             yield { type: 'tool-result' as const, toolCallId: 'call-observe', toolName: 'reportAnalysis', output: await tools.reportAnalysis.execute(input) }
           }
           const finishInput = {}
-          yield { type: 'tool-call' as const, toolCallId: 'call-finish', toolName: 'finishAnalysis', input: finishInput }
-          yield { type: 'tool-result' as const, toolCallId: 'call-finish', toolName: 'finishAnalysis', output: await tools.finishAnalysis.execute(finishInput) }
+          yield { type: 'tool-call' as const, toolCallId: 'call-finish', toolName: 'finishInspection', input: finishInput }
+          yield { type: 'tool-result' as const, toolCallId: 'call-finish', toolName: 'finishInspection', output: await tools.finishInspection.execute(finishInput) }
           yield { type: 'finish' as const, finishReason: 'stop' }
         })(),
       }

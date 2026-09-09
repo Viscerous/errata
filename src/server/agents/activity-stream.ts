@@ -2,8 +2,12 @@
 // (story, agent), replayable from the start and followed live.
 
 import type { AgentStreamEvent } from './stream-types'
+import type { LibrarianAnalysisProgress } from '@/contracts/librarian'
 
-export type ActivityStreamEvent = AgentStreamEvent | { type: 'error'; error: string }
+export type ActivityStreamEvent =
+  | AgentStreamEvent
+  | { type: 'error'; error: string }
+  | { type: 'analysis-progress'; progress: LibrarianAnalysisProgress }
 
 export interface ActivityBuffer {
   key: string

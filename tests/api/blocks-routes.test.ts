@@ -71,7 +71,7 @@ describe('Context previews preserve agent access boundaries', () => {
     const primary = preview.toolStages.find((stage: { id: string }) => stage.id === 'primary')
     const inspection = preview.toolStages.find((stage: { id: string }) => stage.id === 'inspection')
     expect(primary.toolNames).toContain('reportAnalysis')
-    expect(primary.toolNames).not.toContain('finishAnalysis')
+    expect(primary.toolNames).not.toContain('finishInspection')
     expect(primary.estimatedTokens).toBeLessThan(inspection.estimatedTokens)
     expect(inspection.conditional).toBe(true)
   })

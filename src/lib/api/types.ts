@@ -5,6 +5,7 @@ import type {
 } from '@/contracts/block-config'
 import type { Fragment as StoryFragment, SamplingSettings } from '@/contracts/story'
 import type { PresetId, ProviderModelInfo } from '@/contracts/providers'
+import type { LibrarianAnalysisProgress } from '@/contracts/librarian'
 export type { ProviderModelInfo } from '@/contracts/providers'
 export type {
   AgentBlockConfig,
@@ -27,6 +28,8 @@ export type {
 export type {
   LibrarianAcceptChangeProposalResponse,
   LibrarianAnalysis,
+  LibrarianAnalysisProgress,
+  LibrarianAnalysisProgressStage,
   LibrarianAnalysisSummary,
   LibrarianAnalyzeLaneCompletion,
   LibrarianAnalyzeLaneRequirement,
@@ -379,6 +382,7 @@ export type ChatEvent =
   | { type: 'tool-call'; id: string; toolName: string; args: Record<string, unknown> }
   | { type: 'tool-result'; id: string; toolName: string; result: unknown }
   | { type: 'tool-error'; id: string; toolName: string; error: string }
+  | { type: 'analysis-progress'; progress: LibrarianAnalysisProgress }
   | { type: 'phase'; phase: string }
   /**
    * A run ended. `stopped` marks the ones the server tore down on request:

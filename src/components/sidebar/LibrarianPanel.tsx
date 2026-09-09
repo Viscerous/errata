@@ -3,10 +3,12 @@ import { createPortal } from 'react-dom'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 import {
   api,
+  type ChatEvent,
   type ConversationMeta,
   type CustomFragmentType,
   type Fragment,
   type LibrarianAnalysis,
+  type LibrarianAnalysisProgress,
   type LibrarianAnalysisSummary,
   type LibrarianStatusResponse,
 } from '@/lib/api'
@@ -81,6 +83,61 @@ function readSavedTab(storyId: string): TabValue {
   const saved = window.localStorage.getItem(tabStorageKey(storyId))
   if (saved === 'story' || saved === 'summaries') return saved
   return 'chat'
+}
+
+/** Follow the semantic Analyze snapshots carried beside the ordinary tool trace. */
+function useLiveAnalysisProgress(storyId: string, active: boolean) {
+  const queryClient = useQueryClient()
+  const [progress, setProgress] = useState<LibrarianAnalysisProgress | null>(null)
+
+  useEffect(() => {
+    if (!active) return
+    let cancelled = false
+    let reader: ReadableStreamDefaultReader<ChatEvent> | null = null
+    setProgress(null)
+
+    async function follow() {
+      let stream: ReadableStream<ChatEvent> | null = null
+      while (!cancelled && !stream) {
+        try {
+          stream = await api.agents.streamActivity(storyId, 'librarian.analyze')
+        } catch {
+          await new Promise((resolve) => setTimeout(resolve, 300))
+        }
+      }
+      if (cancelled || !stream) return
+
+      reader = stream.getReader()
+      try {
+        while (!cancelled) {
+          const event = await reader.read()
+          if (event.done) break
+          if (event.value.type === 'analysis-progress') setProgress(event.value.progress)
+        }
+      } catch {
+        // The status poll and the next run reconnect independently.
+      }
+
+      if (!cancelled) {
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: ['librarian-analyses', storyId] }),
+          queryClient.invalidateQueries({ queryKey: ['librarian-analysis-index', storyId] }),
+          queryClient.invalidateQueries({ queryKey: ['librarian-status', storyId] }),
+          queryClient.invalidateQueries({ queryKey: ['fragments', storyId] }),
+        ])
+        if (!cancelled) setProgress(null)
+      }
+    }
+
+    void follow()
+    return () => {
+      cancelled = true
+      setProgress(null)
+      void reader?.cancel()
+    }
+  }, [active, queryClient, storyId])
+
+  return progress
 }
 
 export function LibrarianPanel({ storyId, askFragmentId, askPrefill, onAskFragmentConsumed }: LibrarianPanelProps) {
@@ -392,8 +449,10 @@ function OperationDiffPreview({ items }: { items: ProposalDiffItem[] }) {
 function StoryContent({ storyId, status, onOpenChat }: LibrarianPanelProps & { status: LibrarianStatusResponse | undefined; onOpenChat?: (message: string) => void }) {
   const [refineTarget, setRefineTarget] = useState<{ fragmentId: string; fragmentName: string; instructions?: string } | null>(null)
   const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [liveExpanded, setLiveExpanded] = useState(true)
   const [showAllAnalyses, setShowAllAnalyses] = useState(false)
   const branchId = useActiveBranchId(storyId)
+  const liveProgress = useLiveAnalysisProgress(storyId, status?.runStatus === 'running')
 
   const { data: characters } = useQuery(q.fragments(storyId, branchId, 'character'))
   const { data: guidelines } = useQuery(q.fragments(storyId, branchId, 'guideline'))
@@ -440,8 +499,38 @@ function StoryContent({ storyId, status, onOpenChat }: LibrarianPanelProps & { s
     return found?.name ?? id
   }
 
-  const totalContradictions = analyses?.reduce((n, a) => n + a.contradictionCount, 0) ?? 0
-  const totalSuggestions = analyses?.reduce((n, a) => n + a.pendingSuggestionCount, 0) ?? 0
+  useEffect(() => {
+    if (liveProgress) setLiveExpanded(true)
+  }, [liveProgress?.fragmentId])
+
+  const liveAnalysis = useMemo<LibrarianAnalysis | null>(() => liveProgress ? {
+    id: `live-${liveProgress.fragmentId}`,
+    createdAt: new Date().toISOString(),
+    fragmentId: liveProgress.fragmentId,
+    summaryUpdate: liveProgress.summaryUpdate,
+    continuityProjection: liveProgress.continuityProjection,
+    mentions: liveProgress.mentions,
+    contradictions: liveProgress.contradictions,
+    fragmentChangeProposals: liveProgress.fragmentChangeProposals,
+    timelineEvents: liveProgress.timelineEvents,
+    directions: liveProgress.directions,
+  } : null, [liveProgress])
+  const liveSummary = useMemo<LibrarianAnalysisSummary | null>(() => liveAnalysis && liveProgress ? {
+    id: liveAnalysis.id,
+    createdAt: liveAnalysis.createdAt,
+    fragmentId: liveAnalysis.fragmentId,
+    contradictionCount: liveAnalysis.contradictions.length,
+    suggestionCount: liveAnalysis.fragmentChangeProposals.length,
+    pendingSuggestionCount: liveAnalysis.fragmentChangeProposals.length,
+    timelineEventCount: liveAnalysis.timelineEvents.length,
+    directionsCount: liveAnalysis.directions?.length ?? 0,
+    hasContinuityProjection: true,
+  } : null, [liveAnalysis, liveProgress])
+
+  const totalContradictions = (analyses?.reduce((n, a) => n + a.contradictionCount, 0) ?? 0)
+    + (liveSummary?.contradictionCount ?? 0)
+  const totalSuggestions = (analyses?.reduce((n, a) => n + a.pendingSuggestionCount, 0) ?? 0)
+    + (liveSummary?.pendingSuggestionCount ?? 0)
   const hasMentions = status && Object.keys(status.recentMentions ?? {}).length > 0
   const hasTimeline = status && (status.timeline?.length ?? 0) > 0
   const hasFindings = totalContradictions > 0 || totalSuggestions > 0
@@ -467,6 +556,25 @@ function StoryContent({ storyId, status, onOpenChat }: LibrarianPanelProps & { s
                   {totalSuggestions} suggestion{totalSuggestions !== 1 ? 's' : ''}
                 </Badge>
               )}
+            </div>
+          </section>
+        )}
+
+        {liveAnalysis && liveSummary && liveProgress && (
+          <section>
+            <SectionLabel>Analysis in progress</SectionLabel>
+            <div className="mt-1.5">
+              <AnalysisItem
+                storyId={storyId}
+                summary={liveSummary}
+                expanded={liveExpanded}
+                analysis={liveAnalysis}
+                onToggle={() => setLiveExpanded((current) => !current)}
+                charName={charName}
+                fragmentById={fragmentById}
+                customTypeByType={customTypeByType}
+                provisionalStage={liveProgress.stage}
+              />
             </div>
           </section>
         )}
@@ -800,6 +908,7 @@ function AnalysisItem({
   charName,
   fragmentById,
   customTypeByType,
+  provisionalStage,
 }: {
   storyId: string
   summary: LibrarianAnalysisSummary
@@ -810,6 +919,7 @@ function AnalysisItem({
   charName: (id: string) => string
   fragmentById: Map<string, Fragment>
   customTypeByType: Map<string, CustomFragmentType>
+  provisionalStage?: LibrarianAnalysisProgress['stage']
 }) {
   const queryClient = useQueryClient()
   const [editingSummary, setEditingSummary] = useState(false)
@@ -896,6 +1006,13 @@ function AnalysisItem({
     ?? dismissProposalMutation.error
 
   const pendingSuggestions = summary.pendingSuggestionCount
+  const provisionalLabel = provisionalStage === 'inspection'
+    ? 'Checking records'
+    : provisionalStage === 'record-maintenance'
+      ? 'Reviewing memory'
+      : provisionalStage === 'directions'
+        ? 'Adding directions'
+        : 'Analyzing'
   const mentionGroups = useMemo(
     () => buildMentionGroups(
       [...new Set((analysis?.mentions ?? []).map(mention => mention.fragmentId))]
@@ -907,7 +1024,10 @@ function AnalysisItem({
   )
 
   return (
-    <div className="rounded-md border border-border/25 overflow-hidden">
+    <div className={cn(
+      'rounded-md border overflow-hidden',
+      provisionalStage ? 'border-blue-400/25 bg-blue-400/[0.03]' : 'border-border/25',
+    )}>
       <div className="w-full flex items-center gap-1.5 px-2.5 py-2 text-[0.6875rem] hover:bg-accent/30 transition-colors">
         <button
           type="button"
@@ -919,7 +1039,14 @@ function AnalysisItem({
             : <ChevronRight className="size-3 text-muted-foreground shrink-0" />
           }
           <span className="font-mono text-foreground/60 truncate">{summary.fragmentId}</span>
-          <span className="text-muted-foreground shrink-0">{timeStr}</span>
+          {provisionalStage ? (
+            <span className="inline-flex items-center gap-1 text-blue-500/80 shrink-0">
+              <span className="size-1.5 rounded-full bg-blue-400 animate-pulse" />
+              {provisionalLabel}
+            </span>
+          ) : (
+            <span className="text-muted-foreground shrink-0">{timeStr}</span>
+          )}
           <div className="ml-auto flex gap-1 shrink-0 items-center">
             {summary.continuityStale && (
               <span
@@ -941,13 +1068,15 @@ function AnalysisItem({
             )}
           </div>
         </button>
-        <button
-          type="button"
-          className="size-5 shrink-0 inline-flex items-center justify-center text-muted-foreground hover:text-destructive transition-colors rounded"
-          onClick={() => deleteMutation.mutate()}
-        >
-          <Trash2 className="size-3" />
-        </button>
+        {!provisionalStage && (
+          <button
+            type="button"
+            className="size-5 shrink-0 inline-flex items-center justify-center text-muted-foreground hover:text-destructive transition-colors rounded"
+            onClick={() => deleteMutation.mutate()}
+          >
+            <Trash2 className="size-3" />
+          </button>
+        )}
       </div>
 
       {expanded && analysis && (
@@ -955,7 +1084,7 @@ function AnalysisItem({
           <div>
             <div className="flex items-center justify-between gap-2">
               <AnalysisFieldLabel>Summary update</AnalysisFieldLabel>
-              {!editingSummary ? (
+              {provisionalStage ? null : !editingSummary ? (
                 <Button
                   size="sm"
                   variant="ghost"
@@ -1088,7 +1217,7 @@ function AnalysisItem({
                           </p>
                         )}
                       </div>
-                      <div className="flex items-center gap-0.5 shrink-0">
+                      {!provisionalStage && <div className="flex items-center gap-0.5 shrink-0">
                         {onOpenChat && (
                           <Button
                             size="sm"
@@ -1118,7 +1247,7 @@ function AnalysisItem({
                         >
                           <X className="size-2.5" />
                         </Button>
-                      </div>
+                      </div>}
                     </div>
                   </div>
                 )
@@ -1195,7 +1324,7 @@ function AnalysisItem({
                         >
                           {proposal.stale ? 'no longer applicable' : 'dismissed'}
                         </span>
-                      ) : (!proposal.accepted || canRevert) && (
+                      ) : !provisionalStage && (!proposal.accepted || canRevert) && (
                         <div className="flex gap-0.5 shrink-0">
                           {!proposal.accepted && (
                             <>

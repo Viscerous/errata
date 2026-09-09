@@ -68,7 +68,7 @@ describe('toolResultOutcome', () => {
 
   it('treats a plain success as a success', () => {
     expect(toolResultOutcome({ ok: true, queuedOperationCount: 1 })).toEqual({ ok: true, dropped: 0, reasons: [] })
-    // Read tools and finishAnalysis return payloads with no `ok` field at all.
+    // Read tools return payloads with no `ok` field at all.
     expect(toolResultOutcome({ matches: [], total: 0 })).toEqual({ ok: true, dropped: 0, reasons: [] })
     expect(toolResultOutcome(undefined)).toEqual({ ok: true, dropped: 0, reasons: [] })
   })

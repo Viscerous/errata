@@ -158,7 +158,7 @@ describe('compileAgentContext', () => {
         inputSchema: z.object({}),
         execute: async () => ({ ok: true }),
       }),
-      finishAnalysis: tool({
+      finishInspection: tool({
         description: 'Finish analysis',
         inputSchema: z.object({}),
         execute: async () => ({ ok: true }),
@@ -174,11 +174,11 @@ describe('compileAgentContext', () => {
     const result = await compileAgentContext(dataDir, STORY_ID, 'librarian.analyze', makeContext(), tools)
     const instructions = result.blocks.find((block) => block.id === 'instructions')!
 
-    expect(Object.keys(result.tools)).toEqual(['reportAnalysis', 'finishAnalysis'])
+    expect(Object.keys(result.tools)).toEqual(['reportAnalysis', 'finishInspection'])
     expect(instructions.content).toContain('Before calling **reportAnalysis**')
     expect(instructions.content).not.toContain('optional record-maintenance proposals')
     expect(instructions.content).not.toContain('Suggest next directions')
-    expect(instructions.content).not.toContain('finishAnalysis')
+    expect(instructions.content).not.toContain('finishInspection')
   })
 
   it('applies block overrides from config', async () => {

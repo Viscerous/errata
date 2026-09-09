@@ -131,6 +131,29 @@ export interface LibrarianAnalysis {
   }>
 }
 
+export type LibrarianAnalysisProgressStage =
+  | 'observation'
+  | 'inspection'
+  | 'record-maintenance'
+  | 'directions'
+
+/**
+ * Normalized analysis state that is safe to display while Analyze is still
+ * running. It is deliberately not durable story memory; the completed
+ * LibrarianAnalysis remains the commit boundary.
+ */
+export interface LibrarianAnalysisProgress {
+  fragmentId: string
+  stage: LibrarianAnalysisProgressStage
+  summaryUpdate: string
+  continuityProjection: ContinuityProjection
+  mentions: LibrarianMention[]
+  contradictions: LibrarianContradiction[]
+  fragmentChangeProposals: LibrarianFragmentChangeProposal[]
+  timelineEvents: LibrarianAnalysis['timelineEvents']
+  directions: LibrarianDirection[]
+}
+
 export interface LibrarianAnalysisSummary {
   id: string
   createdAt: string

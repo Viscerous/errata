@@ -14,7 +14,7 @@ const tools = [
   'proposeRecordCorrections',
   'proposeNewRecords',
   'proposeDirections',
-  'finishAnalysis',
+  'finishInspection',
 ]
 
 function step(...toolResults: Array<{ toolName: string; output: unknown }>): AnalyzeStep {
@@ -98,12 +98,12 @@ describe('librarian analyze tool stages', () => {
     ]
     expect(selectAnalyzeToolStage(tools, inspected)).toMatchObject({ stage: 'inspection' })
 
-    const closed = [...inspected, step({ toolName: 'finishAnalysis', output: { ok: true } })]
+    const closed = [...inspected, step({ toolName: 'finishInspection', output: { ok: true } })]
     expect(isAnalyzeWorkflowComplete(tools, closed)).toBe(true)
   })
 
   it('uses the un-staged surface when the report tool is disabled', () => {
-    const available = ['readFragments', 'finishAnalysis']
+    const available = ['readFragments', 'finishInspection']
     expect(selectAnalyzeToolStage(available, [])).toEqual({
       stage: 'primary',
       activeTools: available,
@@ -115,7 +115,7 @@ describe('librarian analyze tool stages', () => {
     const stages = describeAnalyzeToolStages(tools)
     expect(stages.map((stage) => stage.id)).toEqual(['primary', 'inspection'])
     expect(stages[0].toolNames).not.toContain('readFragments')
-    expect(stages[0].toolNames).not.toContain('finishAnalysis')
+    expect(stages[0].toolNames).not.toContain('finishInspection')
     expect(stages[1]).toMatchObject({ conditional: true, toolNames: tools })
   })
 

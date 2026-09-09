@@ -135,7 +135,7 @@ The current policy is semantic first, with no numeric context caps chosen yet:
   context and conversation stay in one agent run, while the tool schemas
   exposed to each model request change with the workflow. The primary request
   contains reporting, optional record proposals, and directions, preserving the
-  common one-response path; read tools and the explicit finish tool are absent.
+  common one-response path; read tools and `finishInspection` are absent.
   Once the required tools succeed, the server ends the run without asking the
   model to restate that it is finished. If a report newly resolves a record that
   was explicitly marked as a durable-review candidate, a conditional inspection
@@ -143,7 +143,7 @@ The current policy is semantic first, with no numeric context caps chosen yet:
   mention for future writer context does not create this extra request. Failed
   reports and proposals return to the same primary surface; there is no
   model-specific recovery schema. This hybrid follows the stored trace evidence: most runs
-  already produced report, directions, and finish in one response, so isolating
+  already produced report and directions in one response, so isolating
   observation would have added latency to the common path. A repeated
   `readFragments` request for an available record returns its ID under
   `alreadyAvailable` instead of echoing the body again. Pass diagnostics retain
@@ -158,8 +158,9 @@ The current policy is semantic first, with no numeric context caps chosen yet:
   `reportAnalysis` loads every referenced fragment to validate its ID and makes
   records not already in the initial prompt available to subsequent model
   steps. Deterministic completion still requires successful directions when
-  enabled, and the exceptional `finishAnalysis` path rejects falsely completed
-  calls; directions cannot be abandoned as an optional skip. The dedicated `directions.suggest`
+  enabled. Normal runs stop deterministically after their required calls;
+  `finishInspection` only closes an inspection that leaves the report unchanged.
+  Directions cannot be abandoned as an optional skip. The dedicated `directions.suggest`
   runner remains available for guided/on-demand suggestions even when automatic
   directions are disabled.
 - **Lane completion is observable.** Observation is required, record maintenance
@@ -167,6 +168,11 @@ The current policy is semantic first, with no numeric context caps chosen yet:
   later model or tool step fails after a valid observation, that source-linked
   observation is saved with incomplete lane state before the run reports its
   failure; expensive factual work is not discarded with the tail.
+- **Visibility is progressive; persistence is atomic.** Each successful semantic
+  tool publishes the normalized collector as a live `analysis-progress` event.
+  The Story panel replaces that provisional snapshot as later tools refine it,
+  while analysis history, annotations, and continuity state are written only
+  after the run reaches its existing commit boundary.
 - **Continuity keys are steered, not enumerated.** State, thread, and knowledge
   operations each take a single `key`. The live registry is named inside that
   field's description, and reuse is settled server-side by canonicalizing both

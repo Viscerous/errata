@@ -5,7 +5,13 @@ import { suggestionDirectionSchema, type SuggestionDirection } from '../directio
 import { getFragment } from '../fragments/storage'
 import { FragmentIdSchema, type Fragment } from '@/contracts/story'
 import { numberSentences, resolveSegments, segmentText, type TextSegment } from '../llm/segments'
-import type { LibrarianAnalysis, LibrarianFragmentChangeProposal, LibrarianMention } from './storage'
+import type {
+  LibrarianAnalysis,
+  LibrarianAnalysisProgress,
+  LibrarianAnalysisProgressStage,
+  LibrarianFragmentChangeProposal,
+  LibrarianMention,
+} from './storage'
 import {
   NarrativeDurationInputSchema,
   NarrativeTimeInputSchema,
@@ -761,7 +767,7 @@ export const librarianNewRecordsInputSchema = z.object({
     .describe('New reusable named records; not event logs, current conditions, scene details, or duplicates.'),
 })
 
-export const librarianFinishAnalysisInputSchema = z.object({})
+export const librarianFinishInspectionInputSchema = z.object({})
 
 type AnalysisProposalSkipped = Skipped<{
   operationId: string
@@ -869,10 +875,10 @@ export function createAnalysisTools(
     disableSuggestions?: boolean;
     includeReadTools?: boolean;
     includeReportTool?: boolean;
-    includeFinishTool?: boolean;
     numberedFragmentIds?: Set<string> | readonly string[];
     continuityKeys?: ContinuityKeyRegistry;
     customFragmentTypes?: Array<{ type: string; name: string }>;
+    onProgress?: (progress: LibrarianAnalysisProgress) => void;
   },
 ) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -892,6 +898,23 @@ export function createAnalysisTools(
   const successfulToolNames = new Set<string>()
   // Normalized once here; every lookup below reads the same shape and numbering.
   const continuityRegistry = completeRegistry(opts?.continuityKeys ?? {})
+  const emitProgress = (stage: LibrarianAnalysisProgressStage) => {
+    if (!opts?.onProgress || !opts.proseFragmentId || !successfulToolNames.has('reportAnalysis')) return
+    opts.onProgress(structuredClone({
+      fragmentId: opts.proseFragmentId,
+      stage,
+      summaryUpdate: collector.summaryUpdate,
+      continuityProjection: collector.continuityProjection,
+      mentions: collector.mentions,
+      contradictions: collector.contradictions,
+      fragmentChangeProposals: collector.fragmentChangeProposals.map((proposal) => ({
+        ...proposal,
+        sourceFragmentId: opts.proseFragmentId,
+      })),
+      timelineEvents: timelineEventsFor(collector.events, collector.continuityProjection.scene),
+      directions: collector.directions,
+    }))
+  }
 
   if (opts?.includeReportTool !== false) {
     tools.reportAnalysis = tool({
@@ -1070,6 +1093,7 @@ export function createAnalysisTools(
         collector.contradictions = groundedContradictions
 
         successfulToolNames.add('reportAnalysis')
+        emitProgress(inspectionRequired ? 'inspection' : 'observation')
         return {
           ok: true,
           mentionCount: collector.mentions.length,
@@ -1189,6 +1213,7 @@ export function createAnalysisTools(
         validation: validation.results,
       })
       successfulToolNames.add(params.toolName)
+      emitProgress('record-maintenance')
       return {
         ok: true,
         proposalCount: collector.fragmentChangeProposals.length,
@@ -1295,33 +1320,32 @@ export function createAnalysisTools(
       execute: async ({ directions }) => {
         collector.directions = directions
         successfulToolNames.add('proposeDirections')
+        emitProgress('directions')
         return { ok: true }
       },
     })
   }
 
-  if (opts?.includeFinishTool !== false) {
-    tools.finishAnalysis = tool({
-      description: 'End the analysis after the required calls succeed.',
-      inputSchema: librarianFinishAnalysisInputSchema,
-      execute: async () => {
-        const missingRequired: string[] = []
-        if (tools.reportAnalysis && !successfulToolNames.has('reportAnalysis')) missingRequired.push('reportAnalysis')
-        if (tools.proposeDirections && !successfulToolNames.has('proposeDirections')) {
-          missingRequired.push('proposeDirections')
-        }
+  tools.finishInspection = tool({
+    description: 'End record inspection when the records did not change the last report. If they changed a finding, call reportAnalysis again instead.',
+    inputSchema: librarianFinishInspectionInputSchema,
+    execute: async () => {
+      const missingRequired: string[] = []
+      if (tools.reportAnalysis && !successfulToolNames.has('reportAnalysis')) missingRequired.push('reportAnalysis')
+      if (tools.proposeDirections && !successfulToolNames.has('proposeDirections')) {
+        missingRequired.push('proposeDirections')
+      }
 
-        if (missingRequired.length > 0) {
-          return {
-            ok: false,
-            missingRequired,
-            note: 'Finish only after required tools succeed.',
-          }
+      if (missingRequired.length > 0) {
+        return {
+          ok: false,
+          missingRequired,
+          note: 'Finish inspection only after required report and direction tools succeed.',
         }
-        return { ok: true, completed: [...successfulToolNames] }
-      },
-    })
-  }
+      }
+      return { ok: true, completed: [...successfulToolNames] }
+    },
+  })
 
   return tools
 }
@@ -1346,6 +1370,7 @@ export function createLibrarianOnlineTools(
     numberedFragmentIds?: Set<string> | readonly string[]
     continuityKeys?: ContinuityKeyRegistry
     customFragmentTypes?: Array<{ type: string; name: string }>
+    onProgress?: (progress: LibrarianAnalysisProgress) => void
   },
 ): ToolSet {
   return createAnalysisTools(collector, {

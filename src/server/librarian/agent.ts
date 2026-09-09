@@ -123,7 +123,9 @@ async function runLibrarianInner(
   const liveBuffer = getActivityBuffer(storyId, 'librarian.analyze')
   const traceEvents: ActivityStreamEvent[] = []
   const emit = (event: ActivityStreamEvent) => {
-    appendToStoredTrace(traceEvents, event)
+    // Progress snapshots are a live projection of the collector. Persisting
+    // them would duplicate the completed analysis inside its diagnostic trace.
+    if (event.type !== 'analysis-progress') appendToStoredTrace(traceEvents, event)
     if (liveBuffer) pushActivityEvent(liveBuffer, event)
   }
 

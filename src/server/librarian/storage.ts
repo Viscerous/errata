@@ -17,6 +17,8 @@ import type {
 
 export type {
   LibrarianAnalysis,
+  LibrarianAnalysisProgress,
+  LibrarianAnalysisProgressStage,
   LibrarianAnalysisSummary,
   LibrarianAnalyzeLaneCompletion,
   LibrarianAnalyzeLaneRequirement,

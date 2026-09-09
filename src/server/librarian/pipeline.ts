@@ -298,6 +298,7 @@ async function runOnlineAnalyzePass(
       numberedFragmentIds,
       continuityKeys: continuityRegistry(context),
       customFragmentTypes: story.settings.customFragmentTypes,
+      onProgress: (progress) => emit({ type: 'analysis-progress', progress }),
     })
     const compiled = await compileAgentContext(
       dataDir,
@@ -363,7 +364,7 @@ async function runOnlineAnalyzePass(
       proposalQueuedOperationCount: proposalToolResults.reduce<number>((sum, result) => sum + numericToolResultField(result, 'queuedOperationCount'), 0),
       proposalInvalidOperationCount: proposalToolResults.reduce<number>((sum, result) => sum + numericToolResultField(result, 'invalid'), 0),
       directionToolCallCount: toolCallNames.filter((name) => name === 'proposeDirections').length,
-      finishToolCallCount: toolCallNames.filter((name) => name === 'finishAnalysis').length,
+      inspectionFinishToolCallCount: toolCallNames.filter((name) => name === 'finishInspection').length,
       workflowComplete,
       attentionCandidateIds: context.attentionCandidateIds,
       initialCandidateFragments: initialCandidates,

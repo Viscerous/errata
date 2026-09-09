@@ -47,21 +47,10 @@ interface BranchTally {
 const branchTallies: BranchTally[] = []
 /** Reason text with ids and numbers masked, so near-identical losses group. */
 const byReason = new Map<string, { count: number; analyses: Set<string>; sample: string; where: string }>()
-/** finishAnalysis.skipped is the model declaring intent, not the engine refusing. */
-const declaredSkips = new Map<string, number>()
 const toolErrorsByTool = new Map<string, { count: number; recovered: number; sample: string; where: string }>()
 
 function record(where: string, toolName: string, result: unknown): number {
   const outcome = toolResultOutcome(result)
-  // A lane the analyst chose to leave alone is a decision, not a loss — but
-  // only if the call declaring it was accepted. A refused finishAnalysis
-  // declared nothing, so its entries fall through and count as lost.
-  if (toolName === 'finishAnalysis' && outcome.ok) {
-    for (const reason of outcome.reasons) {
-      declaredSkips.set(reason, (declaredSkips.get(reason) ?? 0) + 1)
-    }
-    return 0
-  }
   const note = (key: string, sample: string) => {
     const entry = byReason.get(key)
     if (entry) {
@@ -231,13 +220,5 @@ if (toolErrorsByTool.size > 0) {
     console.info(`  ${pad(entry.count, 4)}  ${pad(entry.recovered, 4)} recovered  ${toolName}`)
     console.info(`        ${entry.sample.replace(/\s+/g, ' ').slice(0, 100)}`)
     console.info(`        first seen in ${entry.where}`)
-  }
-}
-
-if (declaredSkips.size > 0) {
-  const total = [...declaredSkips.values()].reduce((a, b) => a + b, 0)
-  console.info(`\nDeclared skips (the analyst's own choice, not a loss): ${total}\n`)
-  for (const [reason, count] of [...declaredSkips].sort((a, b) => b[1] - a[1]).slice(0, 8)) {
-    console.info(`  ${pad(count, 4)}  ${reason.slice(0, 100)}`)
   }
 }
