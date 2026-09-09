@@ -17,13 +17,12 @@ import { cn } from '@/lib/utils'
 import { useHelp } from '@/hooks/use-help'
 
 /**
- * SettingsSection: section wrapper for the scroll-snap settings layout.
+ * SettingsSection: content-sized section wrapper for the settings layout.
  *
  * The root is a <section> that carries the caller's id plus data-toc and
  * data-toc-group attributes so the SettingsView table-of-contents scroll-spy
- * (which queries [data-toc]) can find and label it. It snaps to the top, fills
- * most of the settings viewport so short sections leave breathing room below,
- * and reserves scroll-margin for accurate jump targets.
+ * (which queries [data-toc]) can find and label it. Sections reserve a small
+ * scroll margin for accurate jumps but otherwise occupy only their content.
  */
 export function SettingsSection({
   id,
@@ -43,7 +42,7 @@ export function SettingsSection({
       id={id}
       data-toc={label}
       data-toc-group={group}
-      className={cn('snap-start scroll-mt-2 min-h-[80vh] space-y-3', className)}
+      className={cn('scroll-mt-6 space-y-3', className)}
     >
       {children}
     </section>

@@ -489,7 +489,7 @@ export function SettingsPanel({
   }
 
   return (
-    <div className="p-4 space-y-4" data-component-id="settings-panel-root">
+    <div className="space-y-10 p-5 sm:p-6" data-component-id="settings-panel-root">
       {/* Appearance */}
       <SettingsSection id="set-appearance" label="Appearance" group="Interface">
         <SectionHeading label="Appearance" />

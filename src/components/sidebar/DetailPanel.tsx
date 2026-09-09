@@ -5,6 +5,8 @@ import type { SidebarSection } from './StorySidebar'
 import { getPluginPanel } from '@/lib/plugin-panels'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { Spinner } from '@/components/ui/async-view'
+import { WorkspaceHeader, WorkspaceTitle, WorkspaceToolbar } from '@/components/ui/workspace'
 import { X, ChevronsLeftRight, ChevronsRightLeft } from 'lucide-react'
 import { componentId } from '@/lib/dom-ids'
 
@@ -81,7 +83,7 @@ const SECTION_LIST_IDS: Record<string, string> = {
 }
 
 function PanelLoading() {
-  return <div className="flex h-full items-center justify-center text-xs text-muted-foreground">Loading panel…</div>
+  return <div className="flex h-full items-center justify-center"><Spinner label="Loading panel" /></div>
 }
 
 export function DetailPanel({
@@ -329,18 +331,18 @@ export function DetailPanel({
     return (
       <div
         ref={containerRef}
-        className={`fixed inset-0 z-40 flex flex-col bg-background transition-opacity duration-200 ${visible ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+        className={`fixed inset-0 z-40 flex flex-col bg-panel transition-opacity duration-200 ${visible ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
         onTransitionEnd={handleTransitionEnd}
         data-cuelume-surface="bloom"
         data-cuelume-close="none"
         data-component-id="detail-panel-root"
       >
-        <div className="flex items-center justify-between px-4 py-3 border-b border-border/50" data-component-id="detail-panel-header">
-          <h2 className="font-display text-lg truncate">{title}</h2>
-          <Button size="icon" variant="ghost" className="size-9 text-muted-foreground hover:text-foreground" onClick={onClose} data-component-id="detail-panel-close">
+        <WorkspaceHeader data-component-id="detail-panel-header">
+          <WorkspaceTitle>{title}</WorkspaceTitle>
+          <Button size="icon-sm" variant="ghost" onClick={onClose} aria-label="Close panel" data-component-id="detail-panel-close">
             <X className="size-5" />
           </Button>
-        </div>
+        </WorkspaceHeader>
         <div className="flex-1 overflow-hidden" data-component-id="detail-panel-content">
           {panelContent}
         </div>
@@ -353,7 +355,7 @@ export function DetailPanel({
     <div
       ref={containerRef}
       onTransitionEnd={handleTransitionEnd}
-      className="border-r border-border/50 flex flex-col bg-background shrink-0 overflow-hidden transition-[width,opacity] duration-200 ease-out"
+      className="flex shrink-0 flex-col overflow-hidden border-r border-border/50 bg-panel transition-[width,opacity] duration-200 ease-out"
       style={{ width: visible ? effectiveWidth : 0, opacity: visible ? 1 : 0 }}
       data-cuelume-surface="bloom"
       data-cuelume-close="none"
@@ -361,14 +363,13 @@ export function DetailPanel({
     >
       <div className="flex flex-col h-full" style={{ width: effectiveWidth, minWidth: effectiveWidth }} data-component-id={componentId('detail-panel-section', activeSection)}>
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-border/50" data-component-id="detail-panel-header">
-          <h2 className="font-display text-lg truncate">{title}</h2>
-          <div className="flex items-center gap-0.5 shrink-0">
+        <WorkspaceHeader data-component-id="detail-panel-header">
+          <WorkspaceTitle>{title}</WorkspaceTitle>
+          <WorkspaceToolbar>
             {isLibrarian && (
               <Button
-                size="icon"
                 variant="ghost"
-                className="size-7 text-muted-foreground hover:text-foreground"
+                size="icon-xs"
                 onClick={() => setExpanded((e) => !e)}
                 title={expanded ? 'Collapse panel' : 'Expand panel'}
                 aria-label={expanded ? 'Collapse librarian panel' : 'Expand librarian panel'}
@@ -377,11 +378,11 @@ export function DetailPanel({
                 {expanded ? <ChevronsRightLeft className="size-4" /> : <ChevronsLeftRight className="size-4" />}
               </Button>
             )}
-            <Button size="icon" variant="ghost" className="size-7 text-muted-foreground hover:text-foreground" onClick={onClose} data-component-id="detail-panel-close">
+            <Button size="icon-xs" variant="ghost" onClick={onClose} aria-label="Close panel" data-component-id="detail-panel-close">
               <X className="size-4" />
             </Button>
-          </div>
-        </div>
+          </WorkspaceToolbar>
+        </WorkspaceHeader>
 
         {/* Content */}
         <div className="flex-1 overflow-hidden" data-component-id="detail-panel-content">

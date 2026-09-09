@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { Button } from '@/components/ui/button'
+import { WorkspaceHeader, WorkspaceTitle } from '@/components/ui/workspace'
 import { SettingsPanel } from './SettingsPanel'
 import type { StoryMeta } from '@/lib/api'
 
@@ -137,7 +139,7 @@ export function SettingsView({
         tabIndex={-1}
         onTransitionEnd={(e) => { if (e.target === e.currentTarget) onTransitionEnd() }}
         className={cn(
-          'fixed inset-y-0 left-0 z-50 flex w-full flex-col border-r border-border/50 bg-background shadow-[8px_0_40px_-12px_rgba(0,0,0,0.35)] outline-none',
+          'fixed inset-y-0 left-0 z-50 flex w-full flex-col border-r border-border/50 bg-panel shadow-[8px_0_40px_-12px_rgba(0,0,0,0.35)] outline-none',
           'sm:w-[min(46rem,55vw)]',
           'transition-transform duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none',
           visible ? 'translate-x-0' : '-translate-x-full',
@@ -145,17 +147,17 @@ export function SettingsView({
         data-component-id="settings-view-root"
       >
         {/* Header */}
-        <div className="flex shrink-0 items-center justify-between border-b border-border/50 px-6 py-4">
-          <h2 className="font-display text-lg">Settings</h2>
-          <button
-            type="button"
+        <WorkspaceHeader>
+          <WorkspaceTitle>Settings</WorkspaceTitle>
+          <Button
+            variant="ghost"
+            size="icon-sm"
             onClick={onClose}
             aria-label="Close"
-            className="grid size-7 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
           >
             <X className="size-4" />
-          </button>
-        </div>
+          </Button>
+        </WorkspaceHeader>
 
         {/* Body: TOC + scrollable content */}
         <div className="flex min-h-0 flex-1">
@@ -190,7 +192,7 @@ export function SettingsView({
 
           <div
             ref={scrollRef}
-            className="min-w-0 flex-1 snap-y snap-proximity overflow-y-auto"
+            className="min-w-0 flex-1 overflow-y-auto"
             data-slot="settings-scroll"
           >
             <SettingsPanel
@@ -201,10 +203,9 @@ export function SettingsView({
               onTogglePluginSidebar={onTogglePluginSidebar}
               pluginSidebarVisibility={pluginSidebarVisibility}
             />
-            {/* Small tail so the final section's top can still reach the
-                activation line; the min-h-[80vh] sections supply the rest of the
-                height the TOC jump + scroll-spy need. */}
-            <div aria-hidden className="h-[12vh]" />
+            {/* Enough tail for the final compact section to become the active
+                TOC item without turning every category into a full page. */}
+            <div aria-hidden className="h-24" />
           </div>
         </div>
       </div>

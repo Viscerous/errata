@@ -502,7 +502,7 @@ function StoryEditorPage() {
   }
 
   return (
-    <SidebarProvider className="!min-h-dvh !max-h-dvh overflow-hidden" data-component-id="story-editor-root">
+    <SidebarProvider className="!min-h-dvh !max-h-dvh overflow-hidden bg-workspace" data-component-id="story-editor-root">
       <StorySidebar
         storyId={storyId}
         story={story}
@@ -546,10 +546,10 @@ function StoryEditorPage() {
       />
 
       {/* Main Content */}
-      <SidebarInset className="overflow-hidden min-h-0 relative" data-component-id="main-prose-pane">
+      <SidebarInset className="relative min-h-0 overflow-hidden bg-workspace" data-component-id="main-prose-pane">
         {/* Mobile sidebar trigger — visible only below md breakpoint */}
         <div className="md:hidden absolute top-3 left-3 z-20">
-          <SidebarTrigger className="size-9 bg-background/80 backdrop-blur-sm border border-border/40 shadow-sm" />
+          <SidebarTrigger className="size-9 border border-border/50 bg-elevated/90 shadow-sm backdrop-blur-md" />
         </div>
 
         {/* Mobile view entry — jump to character chat (prose view only; the
@@ -561,7 +561,7 @@ function StoryEditorPage() {
             <Button
               variant="ghost"
               size="icon"
-              className="size-9 bg-background/80 backdrop-blur-sm border border-border/40 shadow-sm"
+              className="size-9 border border-border/50 bg-elevated/90 shadow-sm backdrop-blur-md"
               onClick={() => setMainView('character-chat')}
               title="Character chat"
               aria-label="Open character chat"
@@ -591,18 +591,20 @@ function StoryEditorPage() {
         }`}>
           {/* Outline collapse — before view group when expanded */}
           {outlineOpen && (
-            <button
+            <Button
+              variant="secondary"
+              size="icon-xs"
               onClick={() => setOutlineOpen(false)}
               title="Collapse outline"
+              aria-label="Collapse outline"
               data-component-id="prose-outline-toggle"
-              className="flex items-center justify-center size-7 rounded-md bg-accent text-foreground hover:bg-accent/80 transition-colors duration-200"
             >
               <List className="size-3.5" />
-            </button>
+            </Button>
           )}
 
           {/* View toggle group */}
-          <div className={`flex items-center gap-0.5 bg-background/80 backdrop-blur-sm border border-border/40 rounded-lg p-0.5 shadow-sm ${
+          <div className={`flex items-center gap-0.5 rounded-lg border border-border/50 bg-elevated/90 p-0.5 shadow-sm backdrop-blur-md ${
             outlineOpen ? 'flex-1' : ''
           }`}>
             {outlineOpen ? (
@@ -655,14 +657,16 @@ function StoryEditorPage() {
           {/* Outline expand — after view group when collapsed, centered in the w-7 rail */}
           {!outlineOpen && (
             <div className="w-7 flex justify-center">
-              <button
+              <Button
+                variant="ghost"
+                size="icon-xs"
                 onClick={() => setOutlineOpen(true)}
                 title="Expand outline"
+                aria-label="Expand outline"
                 data-component-id="prose-outline-toggle"
-                className="flex items-center justify-center size-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors duration-200"
               >
                 <List className="size-3.5" />
-              </button>
+              </Button>
             </div>
           )}
         </div>}
@@ -741,7 +745,7 @@ function StoryEditorPage() {
           </div>
         )}
         {workspaceSurface?.kind === 'prose-editor' && (
-          <div className="absolute inset-0 z-30 bg-background" data-component-id="overlay-prose-writing-panel">
+          <div className="absolute inset-0 z-30 bg-workspace" data-component-id="overlay-prose-writing-panel">
             <ProseWritingPanel
               storyId={storyId}
               fragmentId={workspaceSurface.fragmentId}

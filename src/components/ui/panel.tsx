@@ -21,7 +21,7 @@ function Panel({
   return (
     <div
       data-slot="panel"
-      className={cn("flex h-full min-h-0 flex-col", className)}
+      className={cn("flex h-full min-h-0 flex-col bg-panel", className)}
       {...props}
     >
       {loading ? (
@@ -40,7 +40,7 @@ function PanelHeader({ className, ...props }: React.ComponentProps<"div">) {
     <div
       data-slot="panel-header"
       className={cn(
-        "shrink-0 flex items-center justify-between gap-4 px-5 py-5 border-b border-border/60",
+        "flex min-h-12 shrink-0 items-center justify-between gap-4 border-b border-border/50 bg-panel/90 px-5 py-2.5 backdrop-blur-md",
         className
       )}
       {...props}
@@ -112,7 +112,7 @@ function PanelFooter({ className, ...props }: React.ComponentProps<"div">) {
     <div
       data-slot="panel-footer"
       className={cn(
-        "shrink-0 flex items-center gap-2 px-5 py-3 border-t border-border/60",
+        "flex min-h-9 shrink-0 items-center gap-2 border-t border-border/40 bg-panel-muted/80 px-5 py-2",
         className
       )}
       {...props}

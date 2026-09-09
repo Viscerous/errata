@@ -5,6 +5,7 @@ import StarterKit from '@tiptap/starter-kit'
 import { api, type Fragment } from '@/lib/api'
 import { q, useActiveBranchId } from '@/lib/query-keys'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { FloatingElement } from '@/components/tiptap/FloatingElement'
@@ -26,7 +27,16 @@ import {
 } from 'lucide-react'
 import { useWritingTransforms, useTransformContext, TRANSFORM_CONTEXT_CHARS } from '@/lib/theme'
 import { cn } from '@/lib/utils'
-import { Caption } from '@/components/ui/prose-text'
+import { Caption, Eyebrow, Metric } from '@/components/ui/prose-text'
+import {
+  WorkspaceDivider,
+  WorkspaceFooter,
+  WorkspaceHeader,
+  WorkspaceRail,
+  WorkspaceRailHeader,
+  WorkspaceToolbar,
+} from '@/components/ui/workspace'
+import { PassageListItem } from '@/components/prose/PassageListItem'
 
 type SelectionTransformMode = 'rewrite' | 'expand' | 'compress' | 'custom'
 
@@ -70,11 +80,6 @@ function readingTime(words: number): string {
   return `${minutes}m`
 }
 
-function preview(content: string): string {
-  const line = content.replace(/\n+/g, ' ').trim()
-  return line.length > 60 ? line.slice(0, 60) + '\u2026' : line
-}
-
 const PassageItem = memo(function PassageItem({
   fragment,
   isActive,
@@ -88,77 +93,43 @@ const PassageItem = memo(function PassageItem({
 }) {
   const wc = wordCount(fragment.content)
   return (
-    <button
+    <PassageListItem
       data-passage-id={fragment.id}
       onClick={() => onSwitch(fragment.id)}
-      className={cn(
-        'w-full text-left rounded-lg px-2.5 py-2 mb-0.5 transition-all duration-150 group/item',
-        isActive
-          ? 'bg-primary/[0.08] ring-1 ring-primary/15'
-          : 'hover:bg-accent/50',
-      )}
-    >
-      <div className="flex items-center justify-between mb-0.5">
-        <span className={cn(
-          'text-[0.625rem] font-mono',
-          isActive ? 'text-primary/70' : 'text-muted-foreground',
-        )}>
-          {proseNumber}
-        </span>
-        <span className={cn(
-          'text-[0.5625rem] font-mono tabular-nums',
-          isActive ? 'text-primary/40' : 'text-muted-foreground group-hover/item:text-muted-foreground',
-        )}>
-          {wc}w
-        </span>
-      </div>
-      {fragment.description && (
-        <span className={cn(
-          'block text-[0.625rem] italic truncate mb-0.5',
-          isActive
-            ? 'text-muted-foreground'
-            : 'text-muted-foreground group-hover/item:text-muted-foreground',
-        )}>
-          {fragment.description.slice(0, 50)}{fragment.description.length > 50 ? '\u2026' : ''}
-        </span>
-      )}
-      <span className={cn(
-        'block text-[0.6875rem] leading-snug font-prose line-clamp-2',
-        isActive
-          ? 'text-foreground/70'
-          : 'text-muted-foreground group-hover/item:text-muted-foreground',
-      )}>
-        {preview(fragment.content)}
-      </span>
-    </button>
+      className="mb-1"
+      fragment={fragment}
+      number={proseNumber}
+      active={isActive}
+      meta={`${wc}w`}
+    />
   )
 })
 
 function SaveIndicator({ saveState, isDirty }: { saveState: 'idle' | 'saving' | 'saved'; isDirty: boolean }) {
   if (saveState === 'saving') {
     return (
-      <span className="flex items-center gap-1.5 text-[0.625rem] text-muted-foreground animate-in fade-in duration-150">
+      <Metric className="flex items-center gap-1.5 animate-in fade-in duration-150">
         <Loader2 className="size-2.5 animate-spin" />
         <span className="hidden sm:inline">Saving</span>
-      </span>
+      </Metric>
     )
   }
   if (saveState === 'saved') {
     return (
-      <span className="flex items-center gap-1.5 text-[0.625rem] text-emerald-500/70 animate-in fade-in duration-150">
+      <Metric className="flex items-center gap-1.5 text-emerald-600/80 animate-in fade-in duration-150 dark:text-emerald-400/80">
         <Check className="size-2.5" />
         <span className="hidden sm:inline">Saved</span>
-      </span>
+      </Metric>
     )
   }
   if (isDirty) {
     return (
       <Tooltip>
         <TooltipTrigger asChild>
-          <span className="flex items-center gap-1.5 text-[0.625rem] text-amber-500/60">
+          <Metric className="flex items-center gap-1.5 text-amber-600/80 dark:text-amber-400/80">
             <Circle className="size-1.5 fill-current" />
             <span className="hidden sm:inline">Unsaved</span>
-          </span>
+          </Metric>
         </TooltipTrigger>
         <TooltipContent side="bottom">Ctrl+S to save</TooltipContent>
       </Tooltip>
@@ -538,7 +509,7 @@ export function ProseWritingPanel({
   }
 
   // Editor stats
-  const [editorStats, setEditorStats] = useState({ chars: 0, words: 0, tokens: 0, paragraphs: 0 })
+  const [editorStats, setEditorStats] = useState({ words: 0, tokens: 0 })
   useEffect(() => {
     if (!editor) return
     const update = () => {
@@ -546,8 +517,7 @@ export function ProseWritingPanel({
       const chars = text.length
       const words = text.trim() ? text.trim().split(/\s+/).length : 0
       const tokens = Math.ceil(chars / 4)
-      const paragraphs = text.trim() ? text.trim().split(/\n\n+/).length : 0
-      setEditorStats({ chars, words, tokens, paragraphs })
+      setEditorStats({ words, tokens })
     }
     update()
     editor.on('update', update)
@@ -582,11 +552,11 @@ export function ProseWritingPanel({
   const isDirty = dirtyRef.current
 
   return (
-    <div className="flex h-full" data-component-id="prose-writing-panel">
+    <div className="flex h-full bg-workspace" data-component-id="prose-writing-panel">
       {/* Editor area */}
-      <div className="flex flex-1 flex-col min-w-0">
+      <div className="flex min-w-0 flex-1 flex-col bg-panel">
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-border/50 px-4 py-2.5 sm:px-6 shrink-0">
+        <WorkspaceHeader>
           <div className="flex items-center gap-3 min-w-0">
             <Wand2 className="size-4 text-primary/60 shrink-0" />
             {currentFragment?.description ? (
@@ -600,45 +570,39 @@ export function ProseWritingPanel({
             )}
             <SaveIndicator saveState={saveState} isDirty={isDirty} />
           </div>
-          <div className="flex items-center gap-1 shrink-0">
+          <WorkspaceToolbar>
             {/* Passage navigation */}
             <div className="hidden sm:flex items-center gap-0.5 mr-1">
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <button
-                    className={cn(
-                      'size-7 flex items-center justify-center rounded-md transition-colors',
-                      prevFragment
-                        ? 'text-muted-foreground hover:text-foreground hover:bg-accent/60'
-                        : 'text-muted-foreground cursor-default',
-                    )}
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
                     onClick={navigatePrev}
                     disabled={!prevFragment}
+                    aria-label={prevFragment ? 'Previous passage' : 'First passage'}
                   >
                     <ChevronUp className="size-3.5" />
-                  </button>
+                  </Button>
                 </TooltipTrigger>
                 <TooltipContent side="bottom">
                   {prevFragment ? 'Previous passage (Alt+\u2191)' : 'First passage'}
                 </TooltipContent>
               </Tooltip>
-              <span className="text-[0.625rem] font-mono text-muted-foreground tabular-nums min-w-[2.5ch] text-center">
+              <Metric className="min-w-[2.5ch] text-center">
                 {currentProseIndex + 1}
-              </span>
+              </Metric>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <button
-                    className={cn(
-                      'size-7 flex items-center justify-center rounded-md transition-colors',
-                      nextFragment
-                        ? 'text-muted-foreground hover:text-foreground hover:bg-accent/60'
-                        : 'text-muted-foreground cursor-default',
-                    )}
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
                     onClick={navigateNext}
                     disabled={!nextFragment}
+                    aria-label={nextFragment ? 'Next passage' : 'Last passage'}
                   >
                     <ChevronDown className="size-3.5" />
-                  </button>
+                  </Button>
                 </TooltipTrigger>
                 <TooltipContent side="bottom">
                   {nextFragment ? 'Next passage (Alt+\u2193)' : 'Last passage'}
@@ -649,33 +613,36 @@ export function ProseWritingPanel({
             {/* Sidebar toggle */}
             <Tooltip>
               <TooltipTrigger asChild>
-                <button
-                  className="hidden sm:flex size-7 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors"
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  className="hidden sm:flex"
                   onClick={() => setSidebarCollapsed(v => !v)}
+                  aria-label={sidebarCollapsed ? 'Show passages' : 'Hide passages'}
                 >
                   {sidebarCollapsed ? <PanelRightOpen className="size-3.5" /> : <PanelRightClose className="size-3.5" />}
-                </button>
+                </Button>
               </TooltipTrigger>
               <TooltipContent side="bottom">
                 {sidebarCollapsed ? 'Show passages' : 'Hide passages'}
               </TooltipContent>
             </Tooltip>
 
-            <div className="w-px h-4 bg-border/30 mx-1" />
+            <WorkspaceDivider />
 
             <Button
               size="sm"
               variant="ghost"
-              className="h-7 px-2 text-xs gap-1.5 text-muted-foreground hover:text-foreground"
+              className="h-7 px-2"
               onClick={handleSave}
               disabled={saveState === 'saving' || isTransformingSelection || !editor}
             >
               Ctrl+S
             </Button>
             <Button
-              size="sm"
               variant="ghost"
-              className="size-7 p-0 text-muted-foreground hover:text-foreground"
+              size="icon-xs"
+              aria-label="Close writing panel"
               onClick={() => {
                 if (dirtyRef.current && editor && currentFragment) {
                   const content = getEditorText()
@@ -690,8 +657,8 @@ export function ProseWritingPanel({
             >
               <X className="size-4" />
             </Button>
-          </div>
-        </div>
+          </WorkspaceToolbar>
+        </WorkspaceHeader>
 
         {/* Editor with context strips */}
         <div className="relative min-h-0 flex-1 overflow-y-auto">
@@ -702,7 +669,7 @@ export function ProseWritingPanel({
             placement="top"
             offsetValue={8}
           >
-            <div className="rounded-xl border border-border/60 bg-popover/95 shadow-2xl backdrop-blur-md w-[min(34rem,calc(100vw-2rem))]">
+            <div className="w-[min(34rem,calc(100vw-2rem))] overflow-hidden rounded-lg border border-border/60 bg-elevated/95 shadow-xl backdrop-blur-md">
               {/* Primary transforms */}
               <div className="flex items-center gap-0.5 p-1.5">
                 <Button
@@ -775,9 +742,9 @@ export function ProseWritingPanel({
               {/* Reasoning stream */}
               {(isTransformingSelection || selectionTransformReasoning.trim()) && (
                 <div className="border-t border-border/50 px-2.5 py-2">
-                  <p className="mb-1 text-[0.625rem] uppercase tracking-wide text-muted-foreground">Reasoning</p>
+                  <Eyebrow asChild><p className="mb-1">Reasoning</p></Eyebrow>
                   <div className="max-h-36 overflow-y-auto overscroll-contain pr-1">
-                    <p className="text-[0.6875rem] leading-relaxed text-muted-foreground whitespace-pre-wrap">
+                    <p className="text-ui-caption leading-relaxed text-muted-foreground whitespace-pre-wrap">
                       {selectionTransformReasoning.trim() || 'Thinking\u2026'}
                     </p>
                   </div>
@@ -829,60 +796,60 @@ export function ProseWritingPanel({
         </div>
 
         {/* Footer */}
-        <div className="shrink-0 border-t border-border/30 px-4 py-2 sm:px-6 flex items-center justify-between gap-4">
-          <span className="text-[0.625rem] text-muted-foreground hidden sm:inline">
+        <WorkspaceFooter>
+          <Metric className="hidden sm:inline">
             Ctrl+S save &middot; Esc close &middot; Alt+&uarr;&darr; passages
-          </span>
-          <span className="text-[0.625rem] text-muted-foreground sm:hidden">
+          </Metric>
+          <Metric className="sm:hidden">
             Ctrl+S &middot; Esc
-          </span>
-          <span className="text-[0.625rem] text-muted-foreground font-mono tabular-nums">
-            {editorStats.words.toLocaleString()}w
-            &middot; {editorStats.chars.toLocaleString()}c
-            &middot; ~{editorStats.tokens.toLocaleString()}t
-            &middot; {editorStats.paragraphs}&para;
+          </Metric>
+          <Metric className="ml-auto whitespace-nowrap">
+            {editorStats.words.toLocaleString()} words
+            &middot; ~{editorStats.tokens.toLocaleString()} tokens
             &middot; {readingTime(editorStats.words)} read
-          </span>
-        </div>
+          </Metric>
+        </WorkspaceFooter>
       </div>
 
       {/* Passage sidebar — right side */}
-      <div
+      <WorkspaceRail
         className={cn(
-          'hidden sm:flex shrink-0 flex-col border-l border-border/40 bg-background/95 transition-[width] duration-200 ease-out overflow-hidden',
+          'hidden overflow-hidden transition-[width] duration-200 ease-out sm:flex',
           sidebarCollapsed ? 'w-0 border-l-0' : 'w-60',
         )}
       >
         {/* Sidebar header with search */}
-        <div className="shrink-0 px-3 pt-4 pb-2">
-          <div className="flex items-center justify-between mb-2.5">
-            <h3 className="text-[0.625rem] uppercase tracking-[0.15em] text-muted-foreground font-medium">
-              Passages
-            </h3>
-            <span className="text-[0.625rem] font-mono text-muted-foreground tabular-nums">
+        <WorkspaceRailHeader>
+          <div className="mb-2.5 flex items-center justify-between">
+            <Eyebrow>Passages</Eyebrow>
+            <Metric>
               {proseItems.length}
-            </span>
+            </Metric>
           </div>
           <div className="relative">
             <Search className="absolute left-2 top-1/2 -translate-y-1/2 size-3 text-muted-foreground" />
-            <input
+            <Input
               ref={searchInputRef}
               type="text"
               value={sidebarSearch}
               onChange={(e) => setSidebarSearch(e.target.value)}
               placeholder="Filter"
-              className="w-full bg-muted/30 hover:bg-muted/50 focus:bg-muted/50 border border-transparent focus:border-border/40 rounded-md pl-7 pr-2 py-1.5 text-[0.6875rem] text-foreground placeholder:text-muted-foreground outline-none transition-all"
+              className="h-8 bg-elevated/70 pl-7 pr-7 text-ui-caption shadow-none"
             />
             {sidebarSearch && (
-              <button
-                className="absolute right-1.5 top-1/2 -translate-y-1/2 size-4 flex items-center justify-center rounded text-muted-foreground hover:text-foreground transition-colors"
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                className="absolute right-1 top-1/2 size-6 -translate-y-1/2"
                 onClick={() => setSidebarSearch('')}
+                aria-label="Clear passage filter"
               >
                 <X className="size-2.5" />
-              </button>
+              </Button>
             )}
           </div>
-        </div>
+        </WorkspaceRailHeader>
 
         <ScrollArea ref={sidebarScrollRef} className="flex-1 min-h-0">
           <div className="px-1.5 pb-2">
@@ -917,13 +884,13 @@ export function ProseWritingPanel({
             })}
 
             {sidebarSearch && filteredItems.length === 0 && (
-              <p className="text-[0.6875rem] text-muted-foreground text-center py-6 italic">
+              <p className="py-6 text-center text-ui-caption italic text-muted-foreground">
                 No matches
               </p>
             )}
           </div>
         </ScrollArea>
-      </div>
+      </WorkspaceRail>
     </div>
   )
 }

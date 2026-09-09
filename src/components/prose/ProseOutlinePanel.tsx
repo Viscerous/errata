@@ -2,9 +2,14 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
+import { Button } from '@/components/ui/button'
+import { Eyebrow } from '@/components/ui/prose-text'
+import { WorkspaceFooter, WorkspaceRail, WorkspaceRailHeader, WorkspaceToolbar } from '@/components/ui/workspace'
 import { Bookmark, ArrowUpDown, ArrowDown, GripVertical, X } from 'lucide-react'
 import type { Fragment } from '@/lib/api'
 import { invalidateStoryContent } from '@/lib/branch-cache'
+import { PassageListItem } from '@/components/prose/PassageListItem'
+import { cn } from '@/lib/utils'
 
 interface ProseOutlinePanelProps {
   storyId: string
@@ -116,51 +121,44 @@ export function ProseOutlinePanel({
     }
   }, [open, activeIndex])
 
-  // Extract a short preview from fragment content
-  const preview = (content: string) => {
-    const line = content.replace(/\n+/g, ' ').trim()
-    return line.length > 60 ? line.slice(0, 60) + '...' : line
-  }
-
   // Track prose numbering (skip markers in the count)
   let proseCounter = 0
 
   return (
     <>
       {/* Outline panel */}
-      <div
+      <WorkspaceRail
         data-component-id="prose-outline-panel"
-        className={
+        className={cn(
           mobile
-            ? 'flex flex-col w-full h-full overflow-hidden'
-            : `shrink-0 flex flex-col border-l border-border/40 bg-background/95 backdrop-blur-sm transition-all duration-250 ease-out overflow-hidden ${
+            ? 'h-full w-full overflow-hidden border-l-0 bg-panel'
+            : `overflow-hidden backdrop-blur-sm transition-all duration-250 ease-out ${
                 open ? 'w-56' : 'w-7'
-              }`
-        }
+              }`,
+        )}
       >
         {(open || mobile) ? (
           /* --- Expanded view --- */
           <>
             {/* Header — on desktop top padding clears the floating toolbar;
                 in the mobile overlay there is none. */}
-            <div className={`shrink-0 px-4 ${mobile ? 'pt-4' : 'pt-12'} pb-3 flex items-center justify-between`}>
-              <h3 className={`uppercase tracking-[0.15em] text-muted-foreground font-medium ${mobile ? 'text-xs' : 'text-[0.625rem]'}`}>
-                Passages
-              </h3>
-              <div className="flex items-center gap-1">
+            <WorkspaceRailHeader className={cn(
+              'flex items-center justify-between border-b-0 px-4 pb-3',
+              mobile ? 'pt-4' : 'pt-12',
+            )}>
+              <Eyebrow>Passages</Eyebrow>
+              <WorkspaceToolbar>
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <button
+                    <Button
+                      type="button"
+                      variant={editMode ? 'secondary' : 'ghost'}
+                      size="icon-xs"
                       onClick={toggleEditMode}
                       aria-label={editMode ? 'Exit reorder mode' : 'Reorder sections'}
-                      className={`flex items-center justify-center size-7 rounded transition-colors duration-200 ${
-                        editMode
-                          ? 'text-primary bg-accent/70'
-                          : 'text-muted-foreground hover:text-foreground hover:bg-accent/40'
-                      }`}
                     >
                       <ArrowUpDown className="size-3" />
-                    </button>
+                    </Button>
                   </TooltipTrigger>
                   <TooltipContent side="left" className="text-[0.625rem]">
                     {editMode ? 'Exit reorder mode' : 'Reorder sections'}
@@ -168,45 +166,54 @@ export function ProseOutlinePanel({
                 </Tooltip>
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <button
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-xs"
                       onClick={() => addChapterMutation.mutate()}
                       disabled={addChapterMutation.isPending}
                       aria-label="Add chapter"
-                      className="flex items-center justify-center size-7 rounded text-amber-500/70 hover:text-amber-400 hover:bg-amber-500/10 transition-colors duration-200"
+                      className="text-amber-600/80 hover:bg-amber-500/10 hover:text-amber-700 dark:text-amber-400/80 dark:hover:text-amber-300"
                     >
                       <Bookmark className="size-3" />
-                    </button>
+                    </Button>
                   </TooltipTrigger>
                   <TooltipContent side="left" className="text-[0.625rem]">Add chapter</TooltipContent>
                 </Tooltip>
                 {onClose && (
-                  <button
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-xs"
                     onClick={onClose}
                     aria-label="Close passages"
                     data-component-id="prose-outline-close"
-                    className="flex items-center justify-center size-7 -mr-1.5 ml-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent/40 transition-colors"
+                    className="-mr-1.5 ml-0.5"
                   >
                     <X className="size-4" />
-                  </button>
+                  </Button>
                 )}
-              </div>
-            </div>
+              </WorkspaceToolbar>
+            </WorkspaceRailHeader>
 
             {/* First-chapter teaching hint — shown once, while no chapter markers
                 exist in the story. Disappears the moment the first one is added. */}
             {!fragments.some(f => f.type === 'marker') && fragments.length > 1 && (
               <div className="shrink-0 px-4 pb-3">
-                <p className="text-[0.6875rem] font-display italic text-muted-foreground leading-relaxed">
+                <p className="text-ui-caption font-display italic leading-relaxed text-muted-foreground">
                   No chapters yet. Add one to group your summaries and find your place.
                 </p>
-                <button
+                <Button
+                  type="button"
+                  variant="link"
+                  size="sm"
                   onClick={() => addChapterMutation.mutate()}
                   disabled={addChapterMutation.isPending}
-                  className="mt-1.5 text-[0.6875rem] font-display italic text-muted-foreground hover:text-foreground transition-colors inline-flex items-center gap-1.5"
+                  className="mt-1 h-auto p-0 font-display text-ui-caption italic text-muted-foreground"
                 >
                   <Bookmark className="size-2.5" aria-hidden />
                   <span>Add first chapter</span>
-                </button>
+                </Button>
               </div>
             )}
 
@@ -254,7 +261,7 @@ export function ProseOutlinePanel({
                 const currentProseNumber = proseCounter
 
                 return (
-                  <button
+                  <PassageListItem
                     key={fragment.id}
                     ref={isActive ? activeRef : undefined}
                     data-component-id={`prose-outline-item-${idx}`}
@@ -264,56 +271,30 @@ export function ProseOutlinePanel({
                     onDragEnd={editMode ? handleDragEnd : undefined}
                     onDragOver={editMode ? (e) => e.preventDefault() : undefined}
                     onClick={editMode ? undefined : () => onJump(idx)}
-                    className={`w-full text-left rounded-md px-2.5 py-2 mb-0.5 transition-colors duration-100 group/item ${
-                      isActive
-                        ? 'bg-accent/70'
-                        : 'hover:bg-accent/40'
-                    } ${isDragging ? 'opacity-40 scale-[0.97]' : ''} ${editMode ? 'cursor-grab' : ''}`}
-                  >
-                    <div className="flex items-center gap-1.5">
-                      {editMode && (
-                        <GripVertical className="size-3 text-muted-foreground/40 shrink-0" />
-                      )}
-                      <div className="flex-1 min-w-0">
-                        <span className={`block text-[0.625rem] font-mono mb-0.5 ${
-                          isActive ? 'text-primary/70' : 'text-muted-foreground'
-                        }`}>
-                          {currentProseNumber}
-                        </span>
-                        {fragment.description && (
-                          <span className={`block text-[0.625rem] italic truncate mb-0.5 ${
-                            isActive
-                              ? 'text-muted-foreground'
-                              : 'text-muted-foreground group-hover/item:text-muted-foreground'
-                          }`}>
-                            {fragment.description.slice(0, 50)}{fragment.description.length > 50 ? '...' : ''}
-                          </span>
-                        )}
-                        <span className={`block text-[0.6875rem] leading-snug font-prose ${
-                          isActive
-                            ? 'text-foreground/80'
-                            : 'text-muted-foreground group-hover/item:text-muted-foreground'
-                        }`}>
-                          {preview(fragment.content)}
-                        </span>
-                      </div>
-                    </div>
-                  </button>
+                    fragment={fragment}
+                    number={currentProseNumber}
+                    active={isActive}
+                    leading={editMode ? <GripVertical className="mt-1 size-3 shrink-0 text-muted-foreground/50" /> : undefined}
+                    className={cn('mb-1', isDragging && 'scale-[0.97] opacity-40', editMode && 'cursor-grab')}
+                  />
                 )
               })}
             </div>
 
             {/* Jump-to-latest footer — hidden when the writer is already at the end */}
             {fragments.length > 1 && activeIndex < fragments.length - 1 && (
-              <div className="shrink-0 border-t border-border/30 px-3 py-2">
-                <button
+              <WorkspaceFooter className="justify-center px-3">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
                   onClick={() => onJump(fragments.length - 1)}
-                  className="w-full flex items-center justify-center gap-1.5 text-[0.6875rem] font-display italic text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:text-foreground"
+                  className="h-7 w-full font-display text-ui-caption italic"
                 >
                   <ArrowDown className="size-2.5" aria-hidden />
                   <span>Jump to latest passage</span>
-                </button>
-              </div>
+                </Button>
+              </WorkspaceFooter>
             )}
 
           </>
@@ -387,7 +368,7 @@ export function ProseOutlinePanel({
 
           </>
         )}
-      </div>
+      </WorkspaceRail>
     </>
   )
 }

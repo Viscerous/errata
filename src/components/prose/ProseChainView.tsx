@@ -3,9 +3,11 @@ import { useQuery, useMutation, useQueries, useQueryClient } from '@tanstack/rea
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { api, type Fragment, type ProseChainResponseEntry } from '@/lib/api'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { Button } from '@/components/ui/button'
+import { EmptyState } from '@/components/ui/async-view'
 import { StreamMarkdown } from '@/components/ui/stream-markdown'
 import { Wand2, Bookmark, List } from 'lucide-react'
-import { Hint, Caption } from '@/components/ui/prose-text'
+import { Caption } from '@/components/ui/prose-text'
 import { useQuickSwitch, useProseWidth, PROSE_WIDTH_VALUES, useMentionTypes, BASE_MENTION_TYPES } from '@/lib/theme'
 import { parseVisualRefs } from '@/lib/fragment-visuals'
 import { ProseBlock } from './ProseBlock'
@@ -992,7 +994,7 @@ export function ProseChainView({
   }
 
   return (
-    <div className="flex flex-1 min-h-0 relative" data-component-id="prose-chain-root">
+    <div className="relative flex min-h-0 flex-1 bg-workspace" data-component-id="prose-chain-root">
       <div className="relative flex flex-1 min-h-0 min-w-0 flex-col">
         <ScrollArea ref={scrollAreaRef} className="flex-1 min-h-0 min-w-0" data-component-id="prose-chain-scroll">
           {/* Cover image banner */}
@@ -1040,23 +1042,18 @@ export function ProseChainView({
                 })}
               </div>
             ) : !showPendingGeneration ? (
-              <div className="flex flex-col items-center justify-center py-20 text-center" data-component-id="prose-empty-state">
-                <p className="font-display text-2xl italic text-muted-foreground mb-2">
-                  The page awaits.
-                </p>
-                <Hint size="sm" className="mb-8 max-w-xs leading-relaxed">
-                  Write your first passage below, or let the wizard help you set up your story.
-                </Hint>
-                {onLaunchWizard && (
-                  <button
-                    onClick={onLaunchWizard}
-                    className="inline-flex items-center gap-2.5 px-6 py-3 rounded-xl border-2 border-primary/20 bg-primary/[0.04] text-sm font-medium text-primary/80 hover:text-primary hover:border-primary/40 hover:bg-primary/[0.08] transition-all duration-200"
-                  >
+              <EmptyState
+                variant="panel"
+                title="The page awaits."
+                hint="Write your first passage below, or let the wizard help you set up your story."
+                action={onLaunchWizard ? (
+                  <Button variant="outline" size="lg" onClick={onLaunchWizard}>
                     <Wand2 className="size-4" />
-                    <span>Story Setup Wizard</span>
-                  </button>
-                )}
-              </div>
+                    Story Setup Wizard
+                  </Button>
+                ) : undefined}
+                className="py-20"
+              />
             ) : null}
 
             {showPendingGeneration && pendingGeneration && (
@@ -1170,19 +1167,21 @@ export function ProseChainView({
           overlay (no room for a persistent rail). Sits left of the chat button. */}
       {outlineFragments.length > 1 && (
         <>
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="icon"
             onClick={() => setMobileTocOpen(true)}
             title="Passages"
             aria-label="Open passages outline"
             data-component-id="prose-mobile-toc-trigger"
-            className="md:hidden absolute top-3 right-14 z-20 flex items-center justify-center size-9 rounded-md bg-background/80 backdrop-blur-sm border border-border/40 shadow-sm text-muted-foreground hover:text-foreground transition-colors"
+            className="absolute right-14 top-3 z-20 size-9 border border-border/50 bg-elevated/90 shadow-sm backdrop-blur-md md:hidden"
           >
             <List className="size-4" />
-          </button>
+          </Button>
           {mobileTocOpen && (
             <div
-              className="md:hidden fixed inset-0 z-40 bg-background animate-in fade-in duration-150"
+              className="fixed inset-0 z-40 animate-in bg-panel fade-in duration-150 md:hidden"
               data-cuelume-surface="bloom"
               data-component-id="prose-mobile-toc-overlay"
             >

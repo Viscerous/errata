@@ -59,6 +59,16 @@ code {
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
+  --color-workspace: var(--workspace);
+  --color-panel: var(--panel);
+  --color-panel-muted: var(--panel-muted);
+  --color-elevated: var(--elevated);
+
+  /* A deliberately small UI type scale. Feature components should prefer
+     these semantic steps over inventing another sub-pixel size. */
+  --text-ui-label: 0.6875rem;
+  --text-ui-caption: 0.75rem;
+  --text-ui-body: 0.875rem;
 
 }
 
@@ -106,6 +116,10 @@ code {
   --sidebar-accent-foreground: oklch(0.185 0.015 55);
   --sidebar-border: oklch(0.895 0.008 70);
   --sidebar-ring: oklch(0.485 0.105 55);
+  --workspace: oklch(0.953 0.006 72);
+  --panel: oklch(0.982 0.004 72);
+  --panel-muted: oklch(0.966 0.006 72);
+  --elevated: oklch(0.995 0.002 72);
 }
 
 /* ── Dark mode ────────────────────────────────────────── */
@@ -142,6 +156,10 @@ code {
   --sidebar-accent-foreground: oklch(0.895 0.015 75);
   --sidebar-border: oklch(1 0 0 / 7%);
   --sidebar-ring: oklch(0.765 0.105 65);
+  --workspace: oklch(0.125 0.007 55);
+  --panel: oklch(0.165 0.009 55);
+  --panel-muted: oklch(0.145 0.008 55);
+  --elevated: oklch(0.195 0.011 55);
 }
 
 /* ── High contrast mode ────────────────────────────────────────── */
@@ -178,6 +196,10 @@ code {
   --sidebar-accent-foreground: #ffffff;
   --sidebar-border: #ffffff;
   --sidebar-ring: #ffff00;
+  --workspace: #000000;
+  --panel: #000000;
+  --panel-muted: #000000;
+  --elevated: #000000;
 }
 
 .high-contrast ::-webkit-scrollbar-thumb {
