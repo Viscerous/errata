@@ -8,7 +8,7 @@ import { PenLine, ArrowRight, Pause, Compass, RefreshCw, Loader2, PenSquare, Typ
 import { cn } from '@/lib/utils'
 import { invalidateStoryContent } from '@/lib/branch-cache'
 import { qk, useActiveBranchId } from '@/lib/query-keys'
-import type { SuggestionDirection, ClarifyQuestion, Clarification } from '@/lib/api/types'
+import type { SuggestionDirection, ClarifyQuestion, Clarification, LibrarianAnalysisProgress } from '@/lib/api/types'
 import { QuestionCard } from '@/components/generation/QuestionCard'
 import { generateRunId } from '@/lib/client-ids'
 import { mergeDirectionSuggestions } from './direction-suggestions'
@@ -38,6 +38,7 @@ interface InlineGenerationInputProps {
    * the timeline advances, they're hidden.
    */
   latestFragmentId?: string
+  liveAnalysisProgress?: LibrarianAnalysisProgress | null
   onGenerationStart: (prompt: string, inputMode: AuthorInputMode) => void
   onGenerationStream: (text: string) => void
   onGenerationThoughts?: (steps: ThoughtStep[]) => void
@@ -54,6 +55,7 @@ export function InlineGenerationInput({
   storyId,
   isGenerating,
   latestFragmentId,
+  liveAnalysisProgress,
   onGenerationStart,
   onGenerationStream,
   onGenerationThoughts,
@@ -119,26 +121,6 @@ export function InlineGenerationInput({
    */
   const pressStartedExpandedRef = useRef<boolean | null>(null)
 
-  // Poll librarian status to detect when analysis completes
-  const { data: librarianStatus } = useQuery({
-    queryKey: qk.librarianStatus(storyId, branchId),
-    queryFn: () => api.librarian.getStatus(storyId),
-    refetchInterval: 5_000,
-  })
-
-  const prevRunStatusRef = useRef<string | undefined>(undefined)
-  useEffect(() => {
-    const prev = prevRunStatusRef.current
-    const curr = librarianStatus?.runStatus
-    prevRunStatusRef.current = curr
-    // When analysis transitions from running → idle/error, refresh analyses and prose fragments
-    // (librarian writes annotations to fragment.meta, so prose fragments must be re-fetched)
-    if (prev === 'running' && (curr === 'idle' || curr === 'error')) {
-      queryClient.invalidateQueries({ queryKey: ['librarian-analyses', storyId] })
-      queryClient.invalidateQueries({ queryKey: qk.fragments(storyId, branchId, 'prose') })
-    }
-  }, [librarianStatus?.runStatus, queryClient, storyId, branchId])
-
   // Query latest analysis for auto-populated directions
   const { data: analysesList } = useQuery({
     queryKey: qk.librarianAnalyses(storyId, branchId),
@@ -163,10 +145,14 @@ export function InlineGenerationInput({
     staleTime: 60_000,
   })
 
-  const analysisDirections = useMemo(
-    () => latestAnalysis?.directions ?? [],
-    [latestAnalysis?.directions],
-  )
+  const liveDirectionsAreCurrent = !!liveAnalysisProgress
+    && liveAnalysisProgress.fragmentId === latestFragmentId
+  const analysisDirections = useMemo(() => {
+    if (liveAnalysisProgress && liveAnalysisProgress.fragmentId === latestFragmentId) {
+      return liveAnalysisProgress.directions
+    }
+    return latestAnalysis?.directions ?? []
+  }, [latestAnalysis?.directions, latestFragmentId, liveAnalysisProgress])
 
   // Merge: prewriter/manual directions first, then append analysis directions
   // unless the user explicitly refreshed directions for this analysis. Manual
@@ -179,10 +165,10 @@ export function InlineGenerationInput({
       manualAnchor,
       latestFragmentId,
       analysisDirections,
-      latestAnalysisId,
+      latestAnalysisId: liveDirectionsAreCurrent ? null : latestAnalysisId,
       invalidatedAnalysisId,
     }))
-  }, [manualSuggestions, manualAnchor, analysisDirections, latestFragmentId, latestAnalysisId, invalidatedAnalysisId])
+  }, [manualSuggestions, manualAnchor, analysisDirections, latestFragmentId, liveDirectionsAreCurrent, latestAnalysisId, invalidatedAnalysisId])
 
   const updateActiveSuggestion = useCallback((nextIndex: number | null) => {
     setActiveSuggestionIndex(nextIndex)

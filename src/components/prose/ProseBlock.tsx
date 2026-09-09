@@ -34,6 +34,7 @@ interface ProseBlockProps {
   quickSwitch: boolean
   enabledMentionTypes?: ReadonlySet<string>
   mentionFragmentTypesById?: ReadonlyMap<string, string>
+  mentionAnnotations?: Annotation[]
   mentionColors?: Map<string, string>
   onClickMention?: (fragmentId: string) => void
   mediaById?: Map<string, Fragment>
@@ -118,6 +119,7 @@ export const ProseBlock = memo(function ProseBlock({
   quickSwitch,
   enabledMentionTypes,
   mentionFragmentTypesById,
+  mentionAnnotations,
   mentionColors,
   onClickMention,
   mediaById,
@@ -412,7 +414,7 @@ export const ProseBlock = memo(function ProseBlock({
   const processedContent = useMemo(() => stripEmphasisInDialogue(fragment.content), [fragment.content])
 
   // Build text transform: dialogue italics + optional mention highlighting
-  const annotations = fragment.meta?.annotations as Annotation[] | undefined
+  const annotations = mentionAnnotations ?? fragment.meta?.annotations as Annotation[] | undefined
   const textTransform = useMemo(() => {
     const filteredAnnotations = filterMentionAnnotations(
       annotations,

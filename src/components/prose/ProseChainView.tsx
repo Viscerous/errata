@@ -14,11 +14,12 @@ import { InlineGenerationInput } from './InlineGenerationInput'
 import { GenerationThoughts } from './GenerationThoughts'
 import { ProseOutlinePanel } from './ProseOutlinePanel'
 import { MentionProvider } from './MentionContext'
-import { formatDialogue } from '@/lib/fragment-mentions'
+import { formatDialogue, type Annotation } from '@/lib/fragment-mentions'
 import { onActiveBranchChanged, invalidateStoryContent } from '@/lib/branch-cache'
 import { qk, q, useActiveBranchId } from '@/lib/query-keys'
 import { createGenerationStreamStore, EMPTY_STREAM_SNAPSHOT, type GenerationStreamStore } from './generation-stream-store'
 import type { AuthorInputMode } from '@/contracts/generation'
+import { useLiveAnalysisProgress } from '@/components/librarian/use-live-analysis-progress'
 
 interface ProseChainViewProps {
   storyId: string
@@ -213,27 +214,31 @@ export function ProseChainView({
   }, [story?.settings.customFragmentTypes])
   const mentionHighlightsEnabled = enabledMentionTypes.size > 0
 
-  // While the librarian is analyzing, poll its status so we can refresh prose as
-  // soon as it writes mention annotations (it persists them at the start of the
-  // run). Only relevant when mention highlights are on.
+  // Status starts the live semantic stream; its replay buffer covers tool calls
+  // made before the poll observes the running state.
   const { data: librarianStatus } = useQuery({
     queryKey: qk.librarianStatus(storyId, branchId),
     queryFn: () => api.librarian.getStatus(storyId),
-    enabled: mentionHighlightsEnabled,
-    refetchInterval: mentionHighlightsEnabled ? 2_000 : false,
+    refetchInterval: 2_000,
   })
   const isAnalyzing = librarianStatus?.runStatus === 'running'
+  const liveAnalysisProgress = useLiveAnalysisProgress(storyId, isAnalyzing)
+  const liveMentionAnnotations = useMemo<Annotation[] | undefined>(() => (
+    liveAnalysisProgress
+      ? liveAnalysisProgress.mentions.map(({ fragmentId, text }) => ({
+          type: 'mention',
+          fragmentId,
+          text,
+        }))
+      : undefined
+  ), [liveAnalysisProgress])
 
   // Co-locate both queries so they settle in the same component — prevents
   // desync after regeneration where the chain points to a fragment the stale
   // prop hadn't included yet.
   const { data: proseChain } = useQuery(q.proseChain(storyId, branchId))
 
-  const { data: fragments = [] } = useQuery({
-    ...q.fragments(storyId, branchId, 'prose'),
-    // Pick up mention annotations mid-run; idle = no extra polling.
-    refetchInterval: mentionHighlightsEnabled && isAnalyzing ? 2_000 : false,
-  })
+  const { data: fragments = [] } = useQuery(q.fragments(storyId, branchId, 'prose'))
 
   const { data: markerFragments = [] } = useQuery(q.fragments(storyId, branchId, 'marker'))
 
@@ -286,6 +291,7 @@ export function ProseChainView({
     mutationFn: (fragmentId: string) => api.librarian.analyze(storyId, fragmentId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['librarian-analysis-index', storyId] })
+      queryClient.invalidateQueries({ queryKey: ['librarian-status', storyId] })
     },
   })
 
@@ -966,6 +972,9 @@ export function ProseChainView({
             quickSwitch={quickSwitch}
             enabledMentionTypes={enabledMentionTypes}
             mentionFragmentTypesById={mentionFragmentTypesById}
+            mentionAnnotations={liveAnalysisProgress?.fragmentId === fragment.id
+              ? liveMentionAnnotations
+              : undefined}
             mentionColors={mentionColors}
             onClickMention={handleMentionClick}
             mediaById={mediaById}
@@ -1087,6 +1096,9 @@ export function ProseChainView({
                   quickSwitch={quickSwitch}
                   enabledMentionTypes={enabledMentionTypes}
                   mentionFragmentTypesById={mentionFragmentTypesById}
+                  mentionAnnotations={liveAnalysisProgress?.fragmentId === savedGenerationHandoffFragment.id
+                    ? liveMentionAnnotations
+                    : undefined}
                   mentionColors={mentionColors}
                   onClickMention={handleMentionClick}
                   mediaById={mediaById}
@@ -1108,6 +1120,7 @@ export function ProseChainView({
               storyId={storyId}
               isGenerating={isGenerating}
               latestFragmentId={lastProseFragment?.id}
+              liveAnalysisProgress={liveAnalysisProgress}
               onGenerationStart={(prompt, inputMode) => {
                 followRef.current = true
                 generationAnchorTopRef.current = null
