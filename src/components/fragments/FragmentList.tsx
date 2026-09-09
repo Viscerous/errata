@@ -1,26 +1,14 @@
-import { useState, useMemo, useRef, useCallback, memo, useEffect } from 'react'
+import { useState, useMemo, useRef, useCallback, useEffect } from 'react'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 import { api, type Fragment, type Folder } from '@/lib/api'
 import { qk, q, useActiveBranchId } from '@/lib/query-keys'
-import { componentId, fragmentComponentId } from '@/lib/dom-ids'
-import { resolveFragmentVisual, generateBubbles } from '@/lib/fragment-visuals'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import { componentId } from '@/lib/dom-ids'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Spinner, EmptyState } from '@/components/ui/async-view'
-import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
-import { Plus, Pin, GripVertical, FileDown, UserPlus, Archive, FolderPlus, ChevronRight, MoreHorizontal, Pencil, Trash2, FolderOpen, ListFilter } from 'lucide-react'
-import { Caption } from '@/components/ui/prose-text'
-import { FragmentBubbleShape } from './FragmentBubbleShape'
+import { Archive } from 'lucide-react'
+import { FragmentFolderHeader, UncategorizedFragmentHeader } from './FragmentFolderHeaders'
+import { FragmentListItem } from './FragmentListItem'
+import { FragmentListToolbar, type FragmentSortMode } from './FragmentListToolbar'
 
 interface FragmentListProps {
   storyId: string
@@ -34,378 +22,10 @@ interface FragmentListProps {
   selectedId?: string
 }
 
-// --- Memoized fragment row ---
-
-interface FragmentRowProps {
-  fragment: Fragment
-  index: number
-  selected: boolean
-  isDragging: boolean
-  canDrag: boolean
-  showType: boolean
-  mediaById: Map<string, Fragment>
-  onSelect: (fragment: Fragment) => void
-  onPin: (fragment: Fragment) => void
-  pinPending: boolean
-  onDragStart: (index: number, e: React.DragEvent) => void
-  onDragEnter: (index: number) => void
-  onDragEnd: () => void
-}
-
-const FragmentRow = memo(function FragmentRow({
-  fragment,
-  index,
-  selected,
-  isDragging,
-  canDrag,
-  showType,
-  mediaById,
-  onSelect,
-  onPin,
-  pinPending,
-  onDragStart,
-  onDragEnter,
-  onDragEnd,
-}: FragmentRowProps) {
-  const visual = useMemo(() => resolveFragmentVisual(fragment, mediaById), [fragment, mediaById])
-  const bubbleSet = useMemo(
-    () => (!visual.imageUrl ? generateBubbles(fragment.id, fragment.type) : null),
-    [fragment.id, fragment.type, visual.imageUrl],
-  )
-
-  const boundary = visual.boundary
-
-  return (
-    <div
-      data-component-id={fragmentComponentId(fragment, 'list-item')}
-      draggable={canDrag}
-      onDragStart={(e) => onDragStart(index, e)}
-      onDragEnter={() => onDragEnter(index)}
-      onDragEnd={onDragEnd}
-      onDragOver={(e) => e.preventDefault()}
-      className={`group flex items-start gap-2.5 rounded-lg px-2.5 py-2.5 text-sm transition-all duration-150 hover:bg-accent/50 ${
-        selected ? 'bg-accent' : ''
-      } ${isDragging ? 'opacity-40 scale-[0.97]' : ''}`}
-    >
-      {/* Drag handle */}
-      {canDrag && (
-        <div
-          role="presentation"
-          className="shrink-0 pt-0.5 cursor-grab opacity-0 group-hover:opacity-50 transition-opacity duration-150"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <GripVertical className="size-3.5 text-muted-foreground" data-component-id={fragmentComponentId(fragment, 'drag-handle')} />
-        </div>
-      )}
-
-      {visual.imageUrl ? (
-        boundary && boundary.width < 1 && boundary.height < 1 ? (
-          <div
-            className="size-9 shrink-0 rounded-lg overflow-hidden border border-border/40 bg-muted bg-no-repeat"
-            style={{
-              backgroundImage: `url("${visual.imageUrl}")`,
-              backgroundSize: `${100 / boundary.width}% ${100 / boundary.height}%`,
-              backgroundPosition: `${boundary.width < 1 ? (boundary.x / (1 - boundary.width)) * 100 : 50}% ${boundary.height < 1 ? (boundary.y / (1 - boundary.height)) * 100 : 50}%`,
-            }}
-          />
-        ) : (
-          <div className="size-9 shrink-0 rounded-lg overflow-hidden border border-border/40 bg-muted">
-            <img src={visual.imageUrl} alt="" className="size-full object-cover" />
-          </div>
-        )
-      ) : bubbleSet ? (
-        <div className="size-9 shrink-0 rounded-lg overflow-hidden">
-          <svg viewBox="0 0 36 36" className="size-full" aria-hidden>
-            <rect width="36" height="36" fill={bubbleSet.bg} />
-            {bubbleSet.bubbles.map((bubble) => (
-              <FragmentBubbleShape key={`${bubble.cx}-${bubble.cy}`} bubble={bubble} />
-            ))}
-          </svg>
-        </div>
-      ) : null}
-
-      <button
-        onClick={() => onSelect(fragment)}
-        className="flex-grow w-0 text-left overflow-hidden"
-        data-component-id={fragmentComponentId(fragment, 'select')}
-      >
-        <p className="font-medium text-sm truncate leading-tight">{fragment.name}</p>
-        <div className="flex items-center gap-1.5 mt-1">
-          <span className="text-[0.625rem] font-mono text-muted-foreground">
-            {fragment.id}
-          </span>
-          {fragment.sticky && (
-            <Badge variant="secondary" className="text-[0.5625rem] h-3.5 px-1">
-              pinned
-            </Badge>
-          )}
-          {fragment.sticky && fragment.placement === 'system' && (
-            <Badge variant="outline" className="text-[0.5625rem] h-3.5 px-1">
-              sys
-            </Badge>
-          )}
-          {showType && (
-            <Badge variant="outline" className="text-[0.5625rem] h-3.5 px-1">
-              {fragment.type}
-            </Badge>
-          )}
-        </div>
-        {fragment.description && (
-          <Caption className="truncate mt-0.5">
-            {fragment.description}
-          </Caption>
-        )}
-      </button>
-
-      {/* Pin button */}
-      <Button
-        size="icon"
-        variant="ghost"
-        data-component-id={fragmentComponentId(fragment, 'pin-toggle')}
-        className={`size-6 shrink-0 transition-opacity ${
-          fragment.sticky
-            ? 'opacity-100 text-primary'
-            : 'opacity-0 group-hover:opacity-50 hover:opacity-100 hover:text-foreground'
-        }`}
-        onClick={(e) => {
-          e.stopPropagation()
-          onPin(fragment)
-        }}
-        disabled={pinPending}
-        title={fragment.sticky ? 'Unpin' : 'Pin to context'}
-      >
-        <Pin className={`size-3.5 ${fragment.sticky ? 'fill-current' : ''}`} />
-      </Button>
-    </div>
-  )
-})
-
-// --- Folder header ---
-
-interface FolderHeaderProps {
-  folder: Folder
-  count: number
-  collapsed: boolean
-  isDropTarget: boolean
-  isDraggingFolder: boolean
-  isFolderDragOver: boolean
-  renamingId: string | null
-  renameValue: string
-  onToggle: () => void
-  onRename: (folderId: string) => void
-  onRenameChange: (value: string) => void
-  onRenameCommit: () => void
-  onRenameCancel: () => void
-  onDelete: (folderId: string) => void
-  onFolderDragStart: (folderId: string, e: React.DragEvent) => void
-  onFolderDragEnter: (folderId: string) => void
-  onFolderDragEnd: () => void
-  onDragOver: (e: React.DragEvent) => void
-  onDragEnter: (e: React.DragEvent) => void
-  onDragLeave: (e: React.DragEvent) => void
-  onDrop: (e: React.DragEvent) => void
-}
-
-const FolderHeader = memo(function FolderHeader({
-  folder,
-  count,
-  collapsed,
-  isDropTarget,
-  isDraggingFolder,
-  isFolderDragOver,
-  renamingId,
-  renameValue,
-  onToggle,
-  onRename,
-  onRenameChange,
-  onRenameCommit,
-  onRenameCancel,
-  onDelete,
-  onFolderDragStart,
-  onFolderDragEnter,
-  onFolderDragEnd,
-  onDragOver,
-  onDragEnter,
-  onDragLeave,
-  onDrop,
-}: FolderHeaderProps) {
-  const isRenaming = renamingId === folder.id
-  const inputRef = useRef<HTMLInputElement>(null)
-
-  useEffect(() => {
-    if (isRenaming && inputRef.current) {
-      inputRef.current.focus()
-      inputRef.current.select()
-    }
-  }, [isRenaming])
-
-  return (
-    <div
-      draggable={!isRenaming}
-      onDragStart={(e) => onFolderDragStart(folder.id, e)}
-      onDragEnd={onFolderDragEnd}
-      onDragOver={(e) => {
-        onDragOver(e)
-        // Also handle folder reorder drag-over
-        e.preventDefault()
-      }}
-      onDragEnter={(e) => {
-        onDragEnter(e)
-        onFolderDragEnter(folder.id)
-      }}
-      onDragLeave={onDragLeave}
-      onDrop={onDrop}
-      className={`group/folder flex items-center gap-1.5 px-2 py-1.5 rounded-md transition-colors select-none ${
-        isDropTarget
-          ? 'bg-primary/15 ring-1 ring-primary/30'
-          : isFolderDragOver
-            ? 'bg-accent/40 ring-1 ring-accent/50'
-            : 'hover:bg-accent/30'
-      } ${isDraggingFolder ? 'opacity-40 scale-[0.97]' : ''}`}
-    >
-      {/* Drag handle + Collapse chevron */}
-      <div className="shrink-0 flex items-center">
-        <div className="cursor-grab opacity-0 group-hover/folder:opacity-40 transition-opacity -mr-0.5">
-          <GripVertical className="size-2.5 text-muted-foreground" />
-        </div>
-        <button
-          onClick={onToggle}
-          className="p-0.5 rounded hover:bg-accent/50 transition-colors"
-        >
-          <ChevronRight
-            className={`size-3 text-muted-foreground transition-transform duration-150 ${
-              !collapsed ? 'rotate-90' : ''
-            }`}
-          />
-        </button>
-      </div>
-
-      {/* Folder icon with optional color accent */}
-      <FolderOpen
-        className="size-3.5 shrink-0"
-        style={folder.color ? { color: folder.color } : undefined}
-      />
-
-      {/* Name — inline editable */}
-      {isRenaming ? (
-        <input
-          ref={inputRef}
-          value={renameValue}
-          onChange={(e) => onRenameChange(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') onRenameCommit()
-            if (e.key === 'Escape') onRenameCancel()
-          }}
-          onBlur={onRenameCommit}
-          className="flex-1 min-w-0 text-xs font-medium bg-transparent border-b border-primary/40 outline-none px-0.5 py-0"
-          maxLength={50}
-        />
-      ) : (
-        <button
-          onClick={onToggle}
-          onDoubleClick={(e) => {
-            e.stopPropagation()
-            onRename(folder.id)
-          }}
-          className="flex-1 min-w-0 text-left"
-        >
-          <span className="text-xs font-medium truncate block">{folder.name}</span>
-        </button>
-      )}
-
-      {/* Count badge */}
-      <span className="text-[0.625rem] text-muted-foreground tabular-nums shrink-0">
-        {count}
-      </span>
-
-      {/* Context menu */}
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <button className="shrink-0 p-0.5 rounded opacity-0 group-hover/folder:opacity-60 hover:!opacity-100 transition-opacity">
-            <MoreHorizontal className="size-3" />
-          </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="min-w-[120px]">
-          <DropdownMenuItem onClick={() => onRename(folder.id)}>
-            <Pencil className="size-3 mr-2" />
-            Rename
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            onClick={() => onDelete(folder.id)}
-            className="text-destructive focus:text-destructive"
-          >
-            <Trash2 className="size-3 mr-2" />
-            Delete
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </div>
-  )
-})
-
-// --- Uncategorized header (drop target to remove folder assignment) ---
-
-interface UncategorizedHeaderProps {
-  count: number
-  collapsed: boolean
-  isDropTarget: boolean
-  onToggle: () => void
-  onDragOver: (e: React.DragEvent) => void
-  onDragEnter: (e: React.DragEvent) => void
-  onDragLeave: (e: React.DragEvent) => void
-  onDrop: (e: React.DragEvent) => void
-}
-
-function UncategorizedHeader({
-  count,
-  collapsed,
-  isDropTarget,
-  onToggle,
-  onDragOver,
-  onDragEnter,
-  onDragLeave,
-  onDrop,
-}: UncategorizedHeaderProps) {
-  return (
-    <div
-      onDragOver={onDragOver}
-      onDragEnter={onDragEnter}
-      onDragLeave={onDragLeave}
-      onDrop={onDrop}
-      className={`flex items-center gap-1.5 px-2 py-1.5 rounded-md transition-colors select-none ${
-        isDropTarget
-          ? 'bg-primary/15 ring-1 ring-primary/30'
-          : 'hover:bg-accent/30'
-      }`}
-    >
-      <button
-        onClick={onToggle}
-        className="shrink-0 p-0.5 rounded hover:bg-accent/50 transition-colors"
-      >
-        <ChevronRight
-          className={`size-3 text-muted-foreground transition-transform duration-150 ${
-            !collapsed ? 'rotate-90' : ''
-          }`}
-        />
-      </button>
-      <button onClick={onToggle} className="flex-1 min-w-0 text-left">
-        <span className="text-xs text-muted-foreground italic truncate block">Uncategorized</span>
-      </button>
-      <span className="text-[0.625rem] text-muted-foreground tabular-nums shrink-0">
-        {count}
-      </span>
-    </div>
-  )
-}
-
-// --- Folder group types ---
-
 interface FolderGroup {
   folder: Folder | null // null = uncategorized
   fragments: Fragment[]
 }
-
-type SortMode = 'name' | 'newest' | 'oldest' | 'order'
 
 export function FragmentList({
   storyId,
@@ -419,7 +39,7 @@ export function FragmentList({
   selectedId,
 }: FragmentListProps) {
   const [search, setSearch] = useState('')
-  const [sort, setSort] = useState<SortMode>('order')
+  const [sort, setSort] = useState<FragmentSortMode>('order')
   const queryClient = useQueryClient()
   const dragItem = useRef<number | null>(null)
   const [dragFragmentId, setDragFragmentId] = useState<string | null>(null)
@@ -964,7 +584,7 @@ export function FragmentList({
       {fragmentList.map((fragment) => {
         const globalIndex = fragmentIndexMap.get(fragment.id) ?? 0
         return (
-          <FragmentRow
+          <FragmentListItem
             key={fragment.id}
             fragment={fragment}
             index={globalIndex}
@@ -987,128 +607,22 @@ export function FragmentList({
 
   return (
     <div className="flex flex-col h-full" data-component-id={listIdBase ?? componentId(type ?? 'fragment', 'sidebar-list')}>
-      {/* Search + Sort controls */}
-      <div className="px-3 pt-3 pb-2 space-y-2 border-b border-border/50" data-component-id={componentId(listIdBase ?? type ?? 'fragment', 'list-controls')}>
-        <Input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search..."
-          className="h-7 text-xs bg-transparent"
-          data-component-id={componentId(listIdBase ?? type ?? 'fragment', 'list-search')}
-        />
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex min-w-0 items-center gap-1">
-            {supportsTypeFilter && typeOptions.length > 1 && (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="h-6 min-w-0 max-w-[8.5rem] gap-1 px-1.5 text-[0.625rem] text-muted-foreground hover:text-foreground"
-                    data-component-id={componentId(listIdBase ?? type ?? 'fragment', 'type-filter')}
-                  >
-                    <ListFilter className="size-3.5 shrink-0" />
-                    <span className="truncate">{typeFilter === 'all' ? 'all types' : typeFilter}</span>
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="w-44">
-                  <DropdownMenuRadioGroup value={typeFilter} onValueChange={setTypeFilter}>
-                    <DropdownMenuRadioItem value="all" className="text-xs">
-                      <span className="min-w-0 flex-1 truncate">all types</span>
-                      <span className="ml-auto text-[0.625rem] text-muted-foreground">
-                        {typeOptions.reduce((sum, option) => sum + option.count, 0)}
-                      </span>
-                    </DropdownMenuRadioItem>
-                    {typeOptions.map((option) => (
-                      <DropdownMenuRadioItem key={option.value} value={option.value} className="text-xs">
-                        <span className="min-w-0 flex-1 truncate">{option.value}</span>
-                        <span className="ml-auto text-[0.625rem] text-muted-foreground">{option.count}</span>
-                      </DropdownMenuRadioItem>
-                    ))}
-                  </DropdownMenuRadioGroup>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )}
-            <div className="flex gap-0.5">
-            {([
-              { mode: 'order' as SortMode, tip: 'Sort by manual order' },
-              { mode: 'name' as SortMode, tip: 'Sort alphabetically' },
-              { mode: 'newest' as SortMode, tip: 'Sort by newest first' },
-              { mode: 'oldest' as SortMode, tip: 'Sort by oldest first' },
-            ]).map(({ mode, tip }) => (
-              <Tooltip key={mode}>
-                <TooltipTrigger asChild>
-                  <button
-                    onClick={() => setSort(mode)}
-                    data-component-id={componentId(listIdBase ?? type ?? 'fragment', 'sort', mode)}
-                    className={`text-[0.625rem] px-1.5 py-0.5 rounded transition-colors ${
-                      sort === mode
-                        ? 'bg-accent text-accent-foreground'
-                        : 'text-muted-foreground hover:text-muted-foreground'
-                    }`}
-                  >
-                    {mode}
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">{tip}</TooltipContent>
-              </Tooltip>
-            ))}
-            </div>
-          </div>
-          <div className="flex gap-0.5">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  className="size-6 text-muted-foreground hover:text-foreground"
-                  onClick={handleCreateFolder}
-                  disabled={createFolderMutation.isPending}
-                >
-                  <FolderPlus className="size-3.5" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">New folder</TooltipContent>
-            </Tooltip>
-            {onImportCard && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button size="icon" variant="ghost" className="size-6 text-muted-foreground hover:text-foreground" onClick={onImportCard} data-component-id={componentId(listIdBase ?? type ?? 'fragment', 'import-card-button')}>
-                    <UserPlus className="size-3.5" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">Import character card</TooltipContent>
-              </Tooltip>
-            )}
-            {onImport && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button size="icon" variant="ghost" className="size-6 text-muted-foreground hover:text-foreground" onClick={onImport} data-component-id={componentId(listIdBase ?? type ?? 'fragment', 'import-button')}>
-                    <FileDown className="size-3.5" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">Import from clipboard or file</TooltipContent>
-              </Tooltip>
-            )}
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button size="icon" variant="ghost" className="size-6 text-muted-foreground hover:text-foreground" onClick={onCreateNew} data-component-id={componentId(listIdBase ?? type ?? 'fragment', 'create-button')}>
-                  <Plus className="size-3.5" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">Create new fragment</TooltipContent>
-            </Tooltip>
-          </div>
-        </div>
-      </div>
-
-      {/* Pinning info */}
-      <div className="px-3 py-2.5 border-b border-border/30">
-        <p className="text-[0.625rem] text-muted-foreground leading-relaxed">
-          <Pin className="size-2.5 inline -mt-0.5 mr-0.5" />
-          Pinned fragments are sent in full. Unpinned ones appear as catalog rows.
-        </p>
-      </div>
+      <FragmentListToolbar
+        baseId={listIdBase ?? type ?? 'fragment'}
+        search={search}
+        sort={sort}
+        typeFilter={typeFilter}
+        typeOptions={typeOptions}
+        showTypeFilter={supportsTypeFilter && typeOptions.length > 1}
+        creatingFolder={createFolderMutation.isPending}
+        onSearchChange={setSearch}
+        onSortChange={setSort}
+        onTypeFilterChange={setTypeFilter}
+        onCreateFolder={handleCreateFolder}
+        onCreate={onCreateNew}
+        onImport={onImport}
+        onImportCard={onImportCard}
+      />
 
       <ScrollArea className="flex-1 min-h-0" data-component-id={componentId(listIdBase ?? type ?? 'fragment', 'list-scroll')}>
         <div className="p-2 space-y-0.5" data-component-id={componentId(listIdBase ?? type ?? 'fragment', 'list-items')}>
@@ -1123,7 +637,7 @@ export function FragmentList({
                 return (
                   <div key={folderId} className="mb-1">
                     {group.folder ? (
-                      <FolderHeader
+                      <FragmentFolderHeader
                         folder={group.folder}
                         count={group.fragments.length}
                         collapsed={isCollapsed}
@@ -1144,7 +658,7 @@ export function FragmentList({
                         {...dropHandlers}
                       />
                     ) : (
-                      <UncategorizedHeader
+                      <UncategorizedFragmentHeader
                         count={group.fragments.length}
                         collapsed={isCollapsed}
                         isDropTarget={dropTargetFolderId === null && dragFragmentId !== null}
@@ -1173,24 +687,7 @@ export function FragmentList({
                   className="py-8"
                 />
               )}
-              {displayList.map((fragment, index) => (
-                <FragmentRow
-                  key={fragment.id}
-                  fragment={fragment}
-                  index={index}
-                  selected={selectedId === fragment.id}
-                  isDragging={dragFragmentId === fragment.id}
-                  canDrag={canDrag}
-                  showType={showType}
-                  mediaById={mediaById}
-                  onSelect={stableOnSelect}
-                  onPin={stableOnPin}
-                  pinPending={pinMutation.isPending}
-                  onDragStart={handleDragStart}
-                  onDragEnter={handleDragEnter}
-                  onDragEnd={handleDragEnd}
-                />
-              ))}
+              {renderFragmentList(displayList)}
             </>
           )}
 
