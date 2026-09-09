@@ -14,6 +14,7 @@ import { generateRunId } from '@/lib/client-ids'
 import { mergeDirectionSuggestions } from './direction-suggestions'
 import { composeGeneratedProse, type AuthorInputMode } from '@/contracts/generation'
 import { ContextPreviewDialog } from '@/components/generation/ContextPreviewDialog'
+import { GUIDED_CONTINUE_PROMPT, GUIDED_SCENE_SETTING_PROMPT } from '@/lib/guided-prompts'
 
 // A round high enough that the server withholds the ask tool and must write —
 // used by "Skip & write" to proceed without answering.
@@ -47,9 +48,6 @@ interface InlineGenerationInputProps {
 }
 
 const STORAGE_KEY = 'errata:generation-mode'
-
-const DEFAULT_CONTINUE_INSTRUCTION = 'Continue the story naturally. Write the next scene, advancing the plot and developing characters.'
-const DEFAULT_SCENE_SETTING_INSTRUCTION = "Continue the story without advancing the plot. Focus on atmosphere, internal thoughts, sensory details, or character moments. Don't introduce new events or move the story forward."
 
 export function InlineGenerationInput({
   storyId,
@@ -592,7 +590,7 @@ export function InlineGenerationInput({
               <button
                 type="button"
                 disabled={isGenerating}
-                onClick={() => handleGenerateWithInput(story?.settings.guidedContinuePrompt || DEFAULT_CONTINUE_INSTRUCTION)}
+                onClick={() => handleGenerateWithInput(story?.settings.guidedContinuePrompt || GUIDED_CONTINUE_PROMPT)}
                 className={cn(
                   'group flex-1 flex items-center gap-2 px-2.5 py-1.5 rounded-md border transition-all duration-200 text-left',
                   'border-border/30 hover:border-primary/30 hover:bg-primary/[0.04]',
@@ -610,7 +608,7 @@ export function InlineGenerationInput({
               <button
                 type="button"
                 disabled={isGenerating}
-                onClick={() => handleGenerateWithInput(story?.settings.guidedSceneSettingPrompt || DEFAULT_SCENE_SETTING_INSTRUCTION)}
+                onClick={() => handleGenerateWithInput(story?.settings.guidedSceneSettingPrompt || GUIDED_SCENE_SETTING_PROMPT)}
                 className={cn(
                   'group flex-1 flex items-center gap-2 px-2.5 py-1.5 rounded-md border transition-all duration-200 text-left',
                   'border-border/30 hover:border-primary/30 hover:bg-primary/[0.04]',

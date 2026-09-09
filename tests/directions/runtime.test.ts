@@ -4,6 +4,8 @@ import { createStory } from '@/server/fragments/storage'
 import { saveAgentBlockConfig } from '@/server/agents/agent-block-storage'
 import { ensureCoreAgentsRegistered } from '@/server/agents'
 import { proposeDirections } from '@/server/directions/suggest'
+import { instructionRegistry } from '@/server/instructions'
+import { GUIDED_SUGGEST_PROMPT } from '@/lib/guided-prompts'
 import type { StoryMeta } from '@/contracts/story'
 
 const { mockAgentConfig, mockStreamArgs } = vi.hoisted(() => ({
@@ -71,6 +73,10 @@ describe('direction proposal runtime', () => {
   })
 
   afterEach(async () => cleanup())
+
+  it('registers the same default shown by guided-writing settings', () => {
+    expect(instructionRegistry.resolve('directions.suggest-template')).toBe(GUIDED_SUGGEST_PROMPT)
+  })
 
   it('uses the shared context compiler and preserves the configured request template', async () => {
     await saveAgentBlockConfig(dataDir, STORY_ID, 'directions.suggest', {

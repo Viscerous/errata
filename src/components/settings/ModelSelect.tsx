@@ -2,6 +2,9 @@ import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 import { api } from '@/lib/api'
 import { modelOptionLabel } from '@/lib/model-capabilities'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { SettingsSelect } from './primitives'
 
 interface ModelSelectProps {
   providerId: string | null
@@ -29,12 +32,14 @@ export function ModelSelect({ providerId, value, onChange, disabled, defaultLabe
   // If no provider, show disabled placeholder
   if (!providerId) {
     return (
-      <select
+      <SettingsSelect
+        value=""
+        onChange={() => {}}
         disabled
-        className="w-full max-w-[140px] h-[26px] px-2 text-[0.6875rem] text-muted-foreground bg-muted/30 border border-border/30 rounded-md"
+        className="w-full max-w-[140px] text-muted-foreground"
       >
         <option>No provider</option>
-      </select>
+      </SettingsSelect>
     )
   }
 
@@ -42,23 +47,25 @@ export function ModelSelect({ providerId, value, onChange, disabled, defaultLabe
   if (manualEntry || (fetchFailed && !isLoading)) {
     return (
       <div className="flex items-center gap-1">
-        <input
+        <Input
           type="text"
           value={value ?? ''}
           onChange={(e) => onChange(e.target.value || null)}
           placeholder="model-id"
-          className="w-full max-w-[120px] h-[26px] px-2 text-[0.6875rem] text-foreground/80 bg-muted/50 border border-border/50 rounded-md focus:border-foreground/20 focus:outline-none font-mono placeholder:text-muted-foreground"
+          className="h-7 w-full max-w-[120px] bg-elevated px-2 font-mono text-ui-caption md:text-ui-caption"
           disabled={disabled}
         />
         {hasModels && (
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="xs"
             onClick={() => setManualEntry(false)}
-            className="text-[0.5625rem] text-muted-foreground hover:text-foreground/50 transition-colors shrink-0"
+            className="px-1.5 text-ui-label text-muted-foreground"
             title="Switch to dropdown"
           >
             list
-          </button>
+          </Button>
         )}
       </div>
     )
@@ -66,26 +73,28 @@ export function ModelSelect({ providerId, value, onChange, disabled, defaultLabe
 
   return (
     <div className="flex items-center gap-1">
-      <select
+      <SettingsSelect
         value={value ?? ''}
-        onChange={(e) => onChange(e.target.value || null)}
-        className="w-full max-w-[140px] h-[26px] px-2 text-[0.6875rem] text-foreground/80 bg-muted/50 border border-border/50 rounded-md focus:border-primary/30 focus:outline-none truncate"
+        onChange={(next) => onChange(next || null)}
+        className="w-full max-w-[140px] truncate"
         disabled={disabled || isLoading}
       >
         <option value="">{isLoading ? 'Loading\u2026' : defaultLabel}</option>
         {models.map((m) => (
           <option key={m.id} value={m.id}>{modelOptionLabel(m)}</option>
         ))}
-      </select>
+      </SettingsSelect>
       {hasModels && (
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="xs"
           onClick={() => setManualEntry(true)}
-          className="text-[0.5625rem] text-muted-foreground hover:text-foreground/50 transition-colors shrink-0"
+          className="px-1.5 text-ui-label text-muted-foreground"
           title="Type model ID manually"
         >
           edit
-        </button>
+        </Button>
       )}
     </div>
   )

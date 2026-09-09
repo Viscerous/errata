@@ -5,34 +5,36 @@ import type { SharingStatusResponse } from '@/lib/api/types'
 import { cn } from '@/lib/utils'
 import { copyText } from '@/lib/clipboard'
 import { Lock, Wifi, Globe, Loader2, Copy, Check, AlertTriangle, ShieldCheck } from 'lucide-react'
-import { Toggle } from './primitives'
-
-const inputClass = 'h-[28px] w-full rounded-md border border-border/40 bg-background px-2 text-[0.75rem] text-foreground focus:border-foreground/20 focus:outline-none'
+import { SectionHeading, SettingsCard, Toggle } from './primitives'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { MetaLabel } from '@/components/ui/prose-text'
 
 function CopyButton({ value }: { value: string }) {
   const [copied, setCopied] = useState(false)
   return (
-    <button
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon-xs"
       onClick={async () => {
         if (!await copyText(value)) return
         setCopied(true)
         setTimeout(() => setCopied(false), 1200)
       }}
-      className="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
-      title="Copy"
       aria-label="Copy link"
     >
       {copied ? <Check className="size-3.5 text-primary" /> : <Copy className="size-3.5" />}
-    </button>
+    </Button>
   )
 }
 
 function ConnectionCard({ icon, label, url, qr }: { icon: React.ReactNode; label: string; url: string; qr: string | null }) {
   return (
-    <div className="space-y-2 rounded-md border border-border/30 bg-card/30 p-3">
+    <div className="space-y-2 rounded-md border border-border/30 bg-elevated/60 p-3">
       <div className="flex items-center gap-2">
         <span className="text-primary/70">{icon}</span>
-        <span className="min-w-0 flex-1 truncate font-mono text-[0.6875rem] text-foreground/80">{url}</span>
+        <span className="min-w-0 flex-1 truncate font-mono text-ui-caption text-foreground/80">{url}</span>
         <CopyButton value={url} />
       </div>
       {qr && (
@@ -86,46 +88,50 @@ export function SharingPanel() {
 
   return (
     <div>
-      <label className="mb-2 block text-[0.625rem] uppercase tracking-wider text-muted-foreground">Remote</label>
-      <div className="space-y-3 rounded-lg border border-border/30 p-3">
+      <SectionHeading label="Remote" />
+      <SettingsCard className="space-y-3 divide-y-0 p-3">
         {/* Authentication */}
         <div className="space-y-2">
           <div className="flex items-start gap-2">
             <Lock className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
             <div className="min-w-0 flex-1">
-              <p className="text-[0.75rem] font-medium text-foreground/80">Require a password</p>
-              <p className="text-[0.625rem] leading-snug text-muted-foreground">
+              <p className="text-ui-body font-medium text-foreground/85">Require a password</p>
+              <MetaLabel asChild><p className="leading-snug">
                 Protects the app with Basic Auth. Required before exposing it to the network.
-              </p>
+              </p></MetaLabel>
             </div>
             {authOn && (
-              <button
+              <Button
+                type="button"
+                variant="outline"
+                size="xs"
                 onClick={() => authMut.mutate({ enabled: false })}
                 disabled={busy}
-                className="shrink-0 rounded-md border border-border/40 px-2 py-1 text-[0.625rem] text-muted-foreground transition-colors hover:border-destructive/40 hover:text-destructive disabled:opacity-40"
+                className="text-destructive"
               >
                 Disable
-              </button>
+              </Button>
             )}
           </div>
 
           {authOn ? (
-            <div className="flex items-center gap-1.5 pl-6 text-[0.6875rem] text-primary">
+            <div className="flex items-center gap-1.5 pl-6 text-ui-caption text-primary">
               <ShieldCheck className="size-3.5" />
-              <span>On — user <span className="font-mono">{status?.username}</span></span>
+              <span>On, user <span className="font-mono">{status?.username}</span></span>
             </div>
           ) : (
             <div className="space-y-1.5 pl-6">
-              <input className={inputClass} value={username} onChange={(e) => setUsername(e.target.value)} placeholder="Username" autoComplete="off" />
-              <input className={inputClass} type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password" autoComplete="new-password" />
-              <button
+              <Input className="h-8 bg-elevated text-ui-body" value={username} onChange={(e) => setUsername(e.target.value)} placeholder="Username" autoComplete="off" />
+              <Input className="h-8 bg-elevated text-ui-body" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password" autoComplete="new-password" />
+              <Button
+                type="button"
+                size="xs"
                 onClick={() => { if (!password.trim()) { setError('Enter a password.'); return } authMut.mutate({ enabled: true, username: username.trim() || 'errata', password }) }}
                 disabled={busy || !password.trim()}
-                className="inline-flex items-center gap-1.5 rounded-md bg-foreground px-2.5 py-1 text-[0.6875rem] font-medium text-background transition-opacity hover:opacity-90 disabled:opacity-40"
               >
                 {authMut.isPending ? <Loader2 className="size-3 animate-spin" /> : <Lock className="size-3" />}
                 Enable
-              </button>
+              </Button>
             </div>
           )}
         </div>
@@ -137,8 +143,8 @@ export function SharingPanel() {
           <div className="flex items-center gap-2">
             <Wifi className="size-3.5 shrink-0 text-muted-foreground" />
             <div className="min-w-0 flex-1">
-              <p className="text-[0.75rem] font-medium text-foreground/80">Local network</p>
-              <p className="text-[0.625rem] leading-snug text-muted-foreground">Reach Errata from other devices on your Wi-Fi.</p>
+              <p className="text-ui-body font-medium text-foreground/85">Local network</p>
+              <MetaLabel asChild><p className="leading-snug">Reach Errata from other devices on your Wi-Fi.</p></MetaLabel>
             </div>
             <Toggle checked={status?.lan.enabled ?? false} disabled={!canExpose || busy} onChange={(next) => lanMut.mutate(next)} label="Toggle local network" />
           </div>
@@ -154,13 +160,13 @@ export function SharingPanel() {
           <div className="flex items-center gap-2">
             <Globe className="size-3.5 shrink-0 text-muted-foreground" />
             <div className="min-w-0 flex-1">
-              <p className="text-[0.75rem] font-medium text-foreground/80">Internet (Cloudflare Tunnel)</p>
-              <p className="text-[0.625rem] leading-snug text-muted-foreground">A temporary public HTTPS link. cloudflared downloads automatically.</p>
+              <p className="text-ui-body font-medium text-foreground/85">Internet (Cloudflare Tunnel)</p>
+              <MetaLabel asChild><p className="leading-snug">A temporary public HTTPS link. cloudflared downloads automatically.</p></MetaLabel>
             </div>
             <Toggle checked={status?.tunnel.enabled ?? false} disabled={!canExpose || busy} onChange={(next) => tunnelMut.mutate(next)} label="Toggle tunnel" />
           </div>
           {status?.tunnel.enabled && tunnelStatusLabel && (
-            <div className={cn('flex items-center gap-1.5 pl-6 text-[0.6875rem]', status.tunnel.status === 'error' ? 'text-destructive' : 'text-muted-foreground')}>
+            <div className={cn('flex items-center gap-1.5 pl-6 text-ui-caption', status.tunnel.status === 'error' ? 'text-destructive' : 'text-muted-foreground')}>
               {status.tunnel.status === 'error' ? <AlertTriangle className="size-3.5" /> : <Loader2 className="size-3.5 animate-spin" />}
               {tunnelStatusLabel}
             </div>
@@ -171,16 +177,16 @@ export function SharingPanel() {
         </div>
 
         {!canExpose && (
-          <p className="text-[0.625rem] leading-snug text-muted-foreground">Set a password above to enable network sharing.</p>
+          <MetaLabel asChild><p className="leading-snug">Set a password above to enable network sharing.</p></MetaLabel>
         )}
         {canExpose && (status?.lan.enabled) && (
-          <p className="flex items-start gap-1.5 text-[0.625rem] leading-snug text-muted-foreground">
+          <MetaLabel asChild><p className="flex items-start gap-1.5 leading-snug">
             <AlertTriangle className="mt-px size-3 shrink-0 text-amber-500/70" />
-            Local-network access is plain HTTP — the password is sent unencrypted on your LAN. The tunnel is HTTPS.
-          </p>
+            Local-network access is plain HTTP. The password is sent unencrypted on your LAN; the tunnel is HTTPS.
+          </p></MetaLabel>
         )}
-        {error && <p className="text-[0.625rem] text-destructive">{error}</p>}
-      </div>
+        {error && <MetaLabel asChild><p className="text-destructive">{error}</p></MetaLabel>}
+      </SettingsCard>
     </div>
   )
 }

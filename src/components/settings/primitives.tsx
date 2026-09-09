@@ -1,20 +1,9 @@
-/**
- * Shared settings primitives.
- *
- * One canonical set of building blocks for every settings surface. These match
- * the established warm, bookish, quiet-typographic look rather than restyling
- * it: parchment / bronze OKLCH, text-[0.75rem] labels, text-[0.625rem] muted
- * descriptions, the pill toggle, the segmented control, the thin range slider.
- * Every interactive primitive accepts a `disabled` prop that visibly greys it
- * and blocks interaction.
- *
- * No em dashes in user-facing copy, per project convention; use commas, colons,
- * or periods.
- */
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { CircleHelp } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useHelp } from '@/hooks/use-help'
+import { Button } from '@/components/ui/button'
+import { Eyebrow, MetaLabel, Metric } from '@/components/ui/prose-text'
 
 /**
  * SettingsSection: content-sized section wrapper for the settings layout.
@@ -49,12 +38,6 @@ export function SettingsSection({
   )
 }
 
-/**
- * SectionHeading: the small uppercase section label, with an optional help icon
- * that opens the in-app help to `helpTopic` (supports 'section#anchor'). Matches
- * the existing section / group label treatment. Pass `action` for a trailing
- * control such as a Reset button.
- */
 export function SectionHeading({
   label,
   helpTopic,
@@ -70,16 +53,17 @@ export function SectionHeading({
   return (
     <div className={cn('mb-2 flex items-center justify-between gap-2', className)}>
       <div className="flex items-center gap-1.5">
-        <label className="text-[0.625rem] uppercase tracking-wider text-muted-foreground">{label}</label>
+        <Eyebrow>{label}</Eyebrow>
         {helpTopic && (
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="icon-xs"
             onClick={() => openHelp(helpTopic)}
-            className="text-muted-foreground transition-colors hover:text-primary/60"
-            title="Learn more"
+            aria-label={`Learn more about ${label}`}
           >
             <CircleHelp className="size-3" />
-          </button>
+          </Button>
         )}
       </div>
       {action}
@@ -87,15 +71,33 @@ export function SectionHeading({
   )
 }
 
-/**
- * SettingsCard: the grouped container that holds a stack of SettingRows. Rounded
- * bordered box with hairline dividers between rows.
- */
 export function SettingsCard({ children, className }: { children: ReactNode; className?: string }) {
   return (
-    <div className={cn('rounded-lg border border-border/30 divide-y divide-border/20', className)}>
+    <div className={cn('divide-y divide-border/20 overflow-hidden rounded-lg border border-border/40 bg-panel-muted/25', className)}>
       {children}
     </div>
+  )
+}
+
+export function SettingsGroup({
+  title,
+  description,
+  children,
+  className,
+}: {
+  title: string
+  description?: string
+  children: ReactNode
+  className?: string
+}) {
+  return (
+    <SettingsCard className={className}>
+      <div className="bg-panel-muted/60 px-3 py-2">
+        <Eyebrow asChild><p>{title}</p></Eyebrow>
+        {description && <MetaLabel asChild><p className="mt-0.5 leading-snug">{description}</p></MetaLabel>}
+      </div>
+      {children}
+    </SettingsCard>
   )
 }
 
@@ -132,19 +134,20 @@ export function SettingRow({
     >
       <div className="min-w-0">
         <div className="flex items-center gap-1">
-          <p className="text-[0.75rem] font-medium text-foreground/80">{label}</p>
+          <p className="text-ui-body font-medium text-foreground/85">{label}</p>
           {helpTopic && (
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="icon-xs"
               onClick={(e) => { e.stopPropagation(); openHelp(helpTopic) }}
-              className="text-muted-foreground transition-colors hover:text-primary/60"
-              title="Learn more"
+              aria-label={`Learn more about ${label}`}
             >
               <CircleHelp className="size-3" />
-            </button>
+            </Button>
           )}
         </div>
-        {description && <p className="mt-0.5 text-[0.625rem] leading-snug text-muted-foreground">{description}</p>}
+        {description && <MetaLabel asChild><p className="mt-0.5 leading-snug">{description}</p></MetaLabel>}
       </div>
       <div className="shrink-0">{children}</div>
     </div>
@@ -220,7 +223,7 @@ export function SegmentedControl<T extends string>({
           disabled={disabled}
           data-cuelume-toggle=""
           className={cn(
-            'px-2.5 text-[0.6875rem] font-medium transition-colors',
+            'px-2.5 text-ui-caption font-medium transition-colors',
             value === opt.value
               ? 'bg-foreground text-background'
               : 'bg-transparent text-muted-foreground hover:text-foreground/70',
@@ -260,8 +263,8 @@ export function Slider({
   return (
     <div className={cn('px-3 py-2.5', disabled && 'opacity-40')}>
       <div className="mb-1.5 flex items-baseline justify-between">
-        <p className="text-[0.75rem] font-medium text-foreground/80">{label}</p>
-        <span className="font-mono text-[0.625rem] tabular-nums text-muted-foreground">{format(value)}</span>
+        <p className="text-ui-body font-medium text-foreground/85">{label}</p>
+        <Metric>{format(value)}</Metric>
       </div>
       <input
         type="range"
@@ -284,7 +287,7 @@ export function Slider({
  * without re-deriving the class string.
  */
 export const selectClass =
-  'h-[26px] rounded-md border border-border/40 bg-background px-2 text-[0.6875rem] text-foreground focus:border-foreground/20 focus:outline-none disabled:opacity-40'
+  'h-7 rounded-md border border-border/50 bg-elevated px-2 text-ui-caption text-foreground shadow-xs outline-none transition-[color,box-shadow] focus:border-ring focus:ring-2 focus:ring-ring/30 disabled:opacity-40'
 
 /**
  * SettingsSelect: a styled <select> wrapper. Pass <option> elements as children.
@@ -385,7 +388,7 @@ export function NumberField({
       }}
       disabled={disabled}
       className={cn(
-        'h-[26px] w-14 rounded-md border border-border/40 bg-background px-2 text-center font-mono text-[0.6875rem] focus:border-foreground/20 focus:outline-none disabled:opacity-40',
+        'h-7 w-14 rounded-md border border-border/50 bg-elevated px-2 text-center font-mono text-ui-caption shadow-xs outline-none transition-[color,box-shadow] focus:border-ring focus:ring-2 focus:ring-ring/30 disabled:opacity-40',
         className,
       )}
     />

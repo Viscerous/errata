@@ -8,8 +8,6 @@ export type { SuggestionDirection } from './schema'
 
 const logger = createLogger('directions-suggest')
 
-export const DEFAULT_SUGGEST_PROMPT = `Return exactly {{count}} meaningfully different directions as a raw JSON array. Each item must contain "title" (3-6 evocative words), "description" (1-2 sentences), and "instruction" (a concrete 2-3 sentence prompt for the prose writer). Vary the narrative purpose across plot, relationship, tension, quiet development, or surprise where the story supports it. Return no text outside the JSON array.`
-
 export interface DirectionProposalInput {
   count?: number
 }

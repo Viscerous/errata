@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { cn } from '@/lib/utils'
+import { Input } from '@/components/ui/input'
 
 interface SamplingNumberInputProps {
   value?: number | null
@@ -62,7 +63,7 @@ export function SamplingNumberInput({
   }
 
   return (
-    <input
+    <Input
       type="number"
       min={min}
       max={max}
@@ -97,7 +98,7 @@ export function SamplingNumberInput({
       title={invalid ? `Enter a value from ${min} to ${max}${integer ? ' using a whole number' : ''}.` : title}
       aria-invalid={invalid || undefined}
       className={cn(
-        'h-[26px] px-1.5 text-[0.6875rem] font-mono text-center bg-background border border-border/40 rounded-md focus:border-foreground/20 focus:outline-none placeholder:text-muted-foreground/50',
+        'h-7 bg-elevated px-1.5 text-center font-mono text-ui-caption placeholder:text-muted-foreground/50 md:text-ui-caption',
         invalid && 'border-destructive/70 focus:border-destructive/70',
         className,
       )}

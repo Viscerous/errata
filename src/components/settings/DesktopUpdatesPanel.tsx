@@ -11,11 +11,8 @@ import { useEffect, useState } from 'react'
 import { RefreshCw, Download } from 'lucide-react'
 import { getDesktopBridge, onDesktopBridgeReady, type DesktopUpdateState, type ErrataDesktop } from '@/lib/desktop'
 import { SectionHeading, SettingsCard, SettingRow } from './primitives'
-
-const primaryBtn =
-  'flex items-center gap-1.5 rounded-md bg-foreground px-2.5 py-1 text-[0.6875rem] font-medium text-background transition-opacity hover:opacity-90 disabled:opacity-40'
-const ghostBtn =
-  'flex items-center gap-1.5 rounded-md px-2 py-1 text-[0.6875rem] text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground/70 disabled:opacity-40'
+import { Button } from '@/components/ui/button'
+import { MetaLabel, Metric } from '@/components/ui/prose-text'
 
 function statusText(state: DesktopUpdateState): string {
   switch (state.status) {
@@ -95,10 +92,10 @@ export function DesktopUpdatesControls() {
 
   const checking = busy || state.status === 'checking'
   const checkButton = (
-    <button type="button" className={ghostBtn} onClick={check} disabled={checking}>
+    <Button type="button" variant="ghost" size="xs" onClick={check} disabled={checking}>
       <RefreshCw className={`size-3 ${checking ? 'animate-spin' : ''}`} />
       Check for updates
-    </button>
+    </Button>
   )
 
   const actions = () => {
@@ -106,32 +103,32 @@ export function DesktopUpdatesControls() {
       case 'available':
         return (
           <div className="flex flex-wrap items-center justify-end gap-1.5">
-            <button type="button" className={primaryBtn} onClick={() => bridge.downloadUpdate()}>
+            <Button type="button" size="xs" onClick={() => bridge.downloadUpdate()}>
               <Download className="size-3" />
               Download and install
-            </button>
-            <button type="button" className={ghostBtn} onClick={() => bridge.skipUpdate(state.version ?? '')}>
+            </Button>
+            <Button type="button" variant="ghost" size="xs" onClick={() => bridge.skipUpdate(state.version ?? '')}>
               Skip
-            </button>
+            </Button>
             {checkButton}
           </div>
         )
       case 'skipped':
         return (
           <div className="flex flex-wrap items-center justify-end gap-1.5">
-            <button type="button" className={ghostBtn} onClick={() => bridge.downloadUpdate()}>
+            <Button type="button" variant="ghost" size="xs" onClick={() => bridge.downloadUpdate()}>
               <Download className="size-3" />
               Download
-            </button>
+            </Button>
             {checkButton}
           </div>
         )
       case 'downloaded':
         return (
-          <button type="button" className={primaryBtn} onClick={() => bridge.installUpdate()}>
+          <Button type="button" size="xs" onClick={() => bridge.installUpdate()}>
             <Download className="size-3" />
             Restart and install
-          </button>
+          </Button>
         )
       case 'downloading':
       case 'checking':
@@ -146,24 +143,24 @@ export function DesktopUpdatesControls() {
       <SectionHeading label="Updates" />
       <SettingsCard>
         <SettingRow label="Installed version">
-          <span className="font-mono text-[0.6875rem] tabular-nums text-muted-foreground">v{currentVersion}</span>
+          <Metric>v{currentVersion}</Metric>
         </SettingRow>
         <SettingRow label="Next version" description={releaseMetaText(state)}>
-          <span className="font-mono text-[0.6875rem] tabular-nums text-muted-foreground">{nextVersionText(state)}</span>
+          <Metric>{nextVersionText(state)}</Metric>
         </SettingRow>
         <SettingRow label="Desktop updates" description={statusText(state)}>
           {actions()}
         </SettingRow>
         <div className="px-3 py-2.5">
-          <p className="text-[0.75rem] font-medium text-foreground/80">Changelog</p>
-          <pre className="mt-1.5 max-h-44 whitespace-pre-wrap overflow-y-auto rounded-md bg-accent/20 px-2.5 py-2 font-sans text-[0.6875rem] leading-relaxed text-muted-foreground">
+          <p className="text-ui-body font-medium text-foreground/85">Changelog</p>
+          <pre className="mt-1.5 max-h-44 overflow-y-auto whitespace-pre-wrap rounded-md bg-panel-muted/60 px-2.5 py-2 font-sans text-ui-caption leading-relaxed text-muted-foreground">
             {changelogText(state)}
           </pre>
         </div>
       </SettingsCard>
-      <p className="mt-1.5 px-3 text-[0.625rem] leading-snug text-muted-foreground">
+      <MetaLabel asChild><p className="mt-1.5 px-3 leading-snug">
         Errata only checks for updates when you click the button. Your stories are backed up before every install.
-      </p>
+      </p></MetaLabel>
     </div>
   )
 }

@@ -17,6 +17,11 @@ import { ProviderSelect } from '@/components/settings/ProviderSelect'
 import { getDesktopBridge, onDesktopBridgeReady } from '@/lib/desktop'
 import { resolveProvider, getInheritLabel } from '@/lib/model-role-helpers'
 import { useInteractionSounds } from '@/lib/interaction-sounds'
+import { GUIDED_CONTINUE_PROMPT, GUIDED_SCENE_SETTING_PROMPT, GUIDED_SUGGEST_PROMPT } from '@/lib/guided-prompts'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
+import { Eyebrow, MetaLabel, Metric } from '@/components/ui/prose-text'
 import {
   BUILTIN_FRAGMENT_TYPES,
   compareFragmentTypeVisuals,
@@ -27,6 +32,7 @@ import {
   SettingsSection,
   SectionHeading,
   SettingsCard,
+  SettingsGroup,
   SettingRow,
   Toggle,
   SegmentedControl,
@@ -42,21 +48,6 @@ interface SettingsPanelProps {
   pluginSidebarVisibility?: Record<string, boolean>
 }
 
-
-function SettingsGroup({ title, description, children }: { title: string; description?: string; children: React.ReactNode }) {
-  return (
-    <div className="rounded-lg border border-border/30 overflow-hidden">
-      <div className="px-3 py-2 border-b border-border/20 bg-muted/20">
-        <p className="text-[0.625rem] uppercase tracking-[0.14em] text-muted-foreground">{title}</p>
-        {description && <p className="text-[0.6875rem] text-muted-foreground mt-0.5 leading-snug">{description}</p>}
-      </div>
-      <div className="divide-y divide-border/20">
-        {children}
-      </div>
-    </div>
-  )
-}
-
 function FontPicker({ role, label, description, activeFont, onSelect }: {
   role: FontRole
   label: string
@@ -68,20 +59,21 @@ function FontPicker({ role, label, description, activeFont, onSelect }: {
   const options = FONT_CATALOGUE[role]
   return (
     <div className="px-3 py-2.5">
-      <p className="text-[0.75rem] font-medium text-foreground/80 mb-0.5">{label}</p>
-      <p className="text-[0.625rem] text-muted-foreground mb-2 leading-snug">{description}</p>
+      <p className="mb-0.5 text-ui-body font-medium text-foreground/85">{label}</p>
+      <MetaLabel asChild><p className="mb-2 leading-snug">{description}</p></MetaLabel>
       <div className="flex flex-wrap gap-1.5">
         {options.map((opt) => {
           const isActive = opt.name === activeFont
           return (
-            <button
+            <Button
               key={opt.name}
+              type="button"
+              variant={isActive ? 'secondary' : 'ghost'}
+              size="xs"
+              aria-pressed={isActive}
               onClick={() => onSelect(opt.name)}
               style={{ fontFamily: `"${opt.name}", ${opt.fallback}` }}
-              className={`px-2.5 py-1 rounded-md text-[0.75rem] border transition-all duration-150 inline-flex items-center gap-1.5 ${isActive
-                  ? 'border-foreground/25 bg-foreground/5 text-foreground shadow-[0_0_0_1px_var(--foreground)/5]'
-                  : 'border-transparent text-muted-foreground hover:text-foreground/70 hover:bg-accent/30'
-                }`}
+              className="border border-transparent text-ui-body data-[variant=secondary]:border-border/50"
             >
               {opt.name}
               {opt.tag && (
@@ -89,7 +81,7 @@ function FontPicker({ role, label, description, activeFont, onSelect }: {
                   {opt.tag}
                 </span>
               )}
-            </button>
+            </Button>
           )
         })}
       </div>
@@ -129,20 +121,19 @@ function MentionTypePicker({
       {options.map((option) => {
         const active = enabled.has(option.type)
         return (
-          <button
+          <Button
             key={option.type}
             type="button"
+            variant={active ? 'secondary' : 'outline'}
+            size="xs"
             aria-pressed={active}
             onClick={() => toggleType(option.type)}
-            className={`inline-flex h-6 items-center gap-1 rounded-md border px-1.5 text-[0.625rem] font-medium transition-colors ${active
-                ? 'border-foreground/25 bg-foreground text-background shadow-[0_0_0_1px_rgba(0,0,0,0.03)]'
-                : 'border-border/40 bg-transparent text-muted-foreground hover:border-border/70 hover:text-foreground/75'
-              }`}
+            className="gap-1 px-1.5 text-ui-label"
             title={option.label}
           >
             <FragmentTypeDisplayIcon type={option.type} customTypes={customTypes} className="size-3" />
             <span>{option.singularLabel}</span>
-          </button>
+          </Button>
         )
       })}
     </div>
@@ -156,7 +147,6 @@ function LLMSection({ story, globalConfig, updateMutation, onManageProviders }: 
   updateMutation: { mutate: (data: Parameters<typeof api.settings.update>[1]) => void; isPending: boolean }
   onManageProviders: () => void
 }) {
-  const { openHelp } = useHelp()
   const settings = story.settings
   const overrides = settings.modelOverrides ?? {}
 
@@ -169,18 +159,8 @@ function LLMSection({ story, globalConfig, updateMutation, onManageProviders }: 
 
   return (
     <div>
-      <div className="flex items-center gap-1.5 mb-2">
-        <label className="text-[0.625rem] text-muted-foreground uppercase tracking-wider">LLM</label>
-        <button
-          type="button"
-          onClick={() => openHelp('settings#providers')}
-          className="text-muted-foreground hover:text-primary/60 transition-colors"
-          title="About model configuration"
-        >
-          <CircleHelp className="size-3" />
-        </button>
-      </div>
-      <div className="rounded-lg border border-border/30 divide-y divide-border/20">
+      <SectionHeading label="LLM" helpTopic="settings#providers" />
+      <SettingsCard>
         {roles.map((role) => {
           const directProviderId = overrides[role.key]?.providerId ?? null
           const directModelId = overrides[role.key]?.modelId ?? null
@@ -191,8 +171,8 @@ function LLMSection({ story, globalConfig, updateMutation, onManageProviders }: 
             <div key={role.key} className="px-3 py-2">
               <div className="flex items-center justify-between gap-2 mb-1.5">
                 <div className="min-w-0">
-                  <p className="text-[0.75rem] font-medium text-foreground/80">{role.label}</p>
-                  <p className="text-[0.625rem] text-muted-foreground leading-snug">{role.description}</p>
+                  <p className="text-ui-body font-medium text-foreground/85">{role.label}</p>
+                  <MetaLabel asChild><p className="leading-snug">{role.description}</p></MetaLabel>
                 </div>
               </div>
               <div className="flex items-center gap-2">
@@ -253,10 +233,11 @@ function LLMSection({ story, globalConfig, updateMutation, onManageProviders }: 
             </div>
           )
         })}
-        <button
+        <Button
           type="button"
+          variant="ghost"
           onClick={onManageProviders}
-          className="w-full flex items-center justify-between px-3 py-2 text-[0.6875rem] text-muted-foreground hover:text-foreground/60 hover:bg-accent/20 transition-colors rounded-b-lg"
+          className="h-9 w-full justify-between rounded-none px-3 text-ui-caption text-muted-foreground"
           data-component-id="settings-manage-providers"
         >
           <span className="flex items-center gap-1.5">
@@ -264,22 +245,11 @@ function LLMSection({ story, globalConfig, updateMutation, onManageProviders }: 
             Manage providers
           </span>
           <ChevronRight className="size-3" />
-        </button>
-      </div>
+        </Button>
+      </SettingsCard>
     </div>
   )
 }
-
-const DEFAULT_CONTINUE = 'Continue the story naturally. Write the next scene, advancing the plot and developing characters.'
-const DEFAULT_SCENE_SETTING = "Continue the story without advancing the plot. Focus on atmosphere, internal thoughts, sensory details, or character moments. Don't introduce new events or move the story forward."
-const DEFAULT_SUGGEST = `Based on everything in the story so far, suggest exactly {{count}} possible directions the story could go next. Return ONLY a JSON array with no other text. Each element must have:
-- "title": a short evocative title (3-6 words)
-- "description": 1-2 sentences describing this direction
-- "instruction": a detailed writing prompt (2-3 sentences) that could be given to a writer to produce this continuation
-
-Consider a mix of: advancing the main plot, exploring character relationships, introducing tension or conflict, quiet character moments, and unexpected developments. Make each suggestion meaningfully different from the others.
-
-Respond with ONLY the JSON array, no markdown fences or other text.`
 
 function GuidedPromptsControls({ story, onUpdate, isPending }: {
   story: StoryMeta
@@ -307,49 +277,49 @@ function GuidedPromptsControls({ story, onUpdate, isPending }: {
   return (
     <div className="space-y-4">
         <div>
-          <label className="text-[0.6875rem] font-medium text-foreground/80 mb-1 block">Continue prompt</label>
-          <p className="text-[0.625rem] text-muted-foreground mb-1.5 leading-snug">Used when clicking the "Continue" button</p>
-          <textarea
+          <label className="mb-1 block text-ui-body font-medium text-foreground/85">Continue prompt</label>
+          <MetaLabel asChild><p className="mb-1.5 leading-snug">Used when clicking the "Continue" button</p></MetaLabel>
+          <Textarea
             value={continuePrompt}
             onChange={(e) => setContinuePrompt(e.target.value)}
             onBlur={() => save('guidedContinuePrompt', continuePrompt)}
-            placeholder={DEFAULT_CONTINUE}
+            placeholder={GUIDED_CONTINUE_PROMPT}
             rows={3}
             disabled={isPending}
-            className="w-full text-[0.75rem] bg-muted/30 border border-border/30 rounded-md px-2.5 py-2 resize-none outline-none focus:border-primary/30 transition-colors placeholder:text-muted-foreground/50 disabled:opacity-40"
+            className="resize-none bg-elevated/60 text-ui-body"
           />
         </div>
         <div>
-          <label className="text-[0.6875rem] font-medium text-foreground/80 mb-1 block">Scene-setting prompt</label>
-          <p className="text-[0.625rem] text-muted-foreground mb-1.5 leading-snug">Used when clicking the "Scene-setting" button</p>
-          <textarea
+          <label className="mb-1 block text-ui-body font-medium text-foreground/85">Scene-setting prompt</label>
+          <MetaLabel asChild><p className="mb-1.5 leading-snug">Used when clicking the "Scene-setting" button</p></MetaLabel>
+          <Textarea
             value={sceneSettingPrompt}
             onChange={(e) => setSceneSettingPrompt(e.target.value)}
             onBlur={() => save('guidedSceneSettingPrompt', sceneSettingPrompt)}
-            placeholder={DEFAULT_SCENE_SETTING}
+            placeholder={GUIDED_SCENE_SETTING_PROMPT}
             rows={3}
             disabled={isPending}
-            className="w-full text-[0.75rem] bg-muted/30 border border-border/30 rounded-md px-2.5 py-2 resize-none outline-none focus:border-primary/30 transition-colors placeholder:text-muted-foreground/50 disabled:opacity-40"
+            className="resize-none bg-elevated/60 text-ui-body"
           />
         </div>
         <div>
-          <label className="text-[0.6875rem] font-medium text-foreground/80 mb-1 block">Suggest directions prompt</label>
-          <p className="text-[0.625rem] text-muted-foreground mb-1.5 leading-snug">
-            Prompt for generating direction suggestions. Use <code className="text-[0.625rem] bg-muted/50 px-1 rounded">{'{{count}}'}</code> for the number of suggestions.
-          </p>
-          <textarea
+          <label className="mb-1 block text-ui-body font-medium text-foreground/85">Suggest directions prompt</label>
+          <MetaLabel asChild><p className="mb-1.5 leading-snug">
+            Prompt for generating direction suggestions. Use <code className="rounded bg-panel-muted px-1">{'{{count}}'}</code> for the number of suggestions.
+          </p></MetaLabel>
+          <Textarea
             value={suggestPrompt}
             onChange={(e) => setSuggestPrompt(e.target.value)}
             onBlur={() => save('guidedSuggestPrompt', suggestPrompt)}
-            placeholder={DEFAULT_SUGGEST}
+            placeholder={GUIDED_SUGGEST_PROMPT}
             rows={6}
             disabled={isPending}
-            className="w-full text-[0.75rem] bg-muted/30 border border-border/30 rounded-md px-2.5 py-2 resize-none outline-none focus:border-primary/30 transition-colors placeholder:text-muted-foreground/50 disabled:opacity-40"
+            className="resize-none bg-elevated/60 text-ui-body"
           />
         </div>
-        <p className="text-[0.625rem] text-muted-foreground italic">
+        <MetaLabel asChild><p className="italic">
           Leave empty to use the default prompt. Changes are saved when you leave each field.
-        </p>
+        </p></MetaLabel>
     </div>
   )
 }
@@ -405,11 +375,11 @@ function ErrataNetSection() {
         </SettingsCard>
 
         <div className={`rounded-lg border border-border/30 p-3 ${enabled ? '' : 'pointer-events-none opacity-40'}`}>
-          <p className="text-[0.75rem] font-medium text-foreground/80">API endpoint</p>
-          <p className="mt-0.5 text-[0.625rem] leading-snug text-muted-foreground">
+          <p className="text-ui-body font-medium text-foreground/85">API endpoint</p>
+          <MetaLabel asChild><p className="mt-0.5 leading-snug">
             The hub Errata connects to for browsing and publishing packs.
-          </p>
-          <input
+          </p></MetaLabel>
+          <Input
             value={endpoint}
             onChange={(e) => setEndpoint(e.target.value)}
             onBlur={saveEndpoint}
@@ -418,7 +388,7 @@ function ErrataNetSection() {
             spellCheck={false}
             autoComplete="off"
             disabled={!enabled || setConfig.isPending}
-            className="mt-2 h-[28px] w-full rounded-md border border-border/40 bg-background px-2 font-mono text-[0.75rem] text-foreground focus:border-foreground/20 focus:outline-none disabled:opacity-60"
+            className="mt-2 h-8 bg-elevated font-mono text-ui-body"
           />
         </div>
       </div>
@@ -563,17 +533,18 @@ export function SettingsPanel({
             <Toggle checked={customCssEnabled} onChange={setCustomCssEnabled} label="Toggle custom CSS" />
           </SettingRow>
           {customCssEnabled && (
-            <button
+            <Button
               type="button"
+              variant="ghost"
               onClick={() => setCustomCssPanelOpen(true)}
-              className="w-full flex items-center justify-between px-3 py-2 text-[0.6875rem] text-muted-foreground hover:text-foreground/60 hover:bg-accent/20 transition-colors"
+              className="h-9 w-full justify-between rounded-none px-3 text-ui-caption text-muted-foreground"
             >
               <span className="flex items-center gap-1.5">
                 <Code className="size-3" />
                 Edit custom CSS
               </span>
               <ChevronRight className="size-3" />
-            </button>
+            </Button>
           )}
         </SettingsCard>
         <ProseColorsControls />
@@ -584,13 +555,16 @@ export function SettingsPanel({
         <SectionHeading
           label="Typography"
           action={hasCustomFonts && (
-            <button
+            <Button
+              type="button"
+              variant="ghost"
+              size="xs"
               onClick={resetFonts}
-              className="flex items-center gap-1 text-[0.625rem] text-muted-foreground hover:text-foreground/60 transition-colors"
+              className="text-ui-label text-muted-foreground"
             >
               <RotateCcw className="size-2.5" />
               Reset
-            </button>
+            </Button>
           )}
         />
         <SettingsCard>
@@ -746,17 +720,18 @@ export function SettingsPanel({
             </SettingRow>
             <div className="px-3 py-2.5">
               <div className="flex items-center gap-1">
-                <p className="text-[0.75rem] font-medium text-foreground/80">Context limit</p>
-                <button
+                <p className="text-ui-body font-medium text-foreground/85">Context limit</p>
+                <Button
                   type="button"
+                  variant="ghost"
+                  size="icon-xs"
                   onClick={(e) => { e.stopPropagation(); openHelp('generation#context-limit') }}
-                  className="text-muted-foreground hover:text-primary/60 transition-colors"
-                  title="Learn more"
+                  aria-label="Learn more about context limit"
                 >
                   <CircleHelp className="size-3" />
-                </button>
+                </Button>
               </div>
-              <p className="text-[0.625rem] text-muted-foreground mt-0.5 leading-snug">How much recent prose to include</p>
+              <MetaLabel asChild><p className="mt-0.5 leading-snug">How much recent prose to include</p></MetaLabel>
               <div className="flex items-center justify-between gap-2 mt-2.5">
                 <SegmentedControl
                   value={(story.settings.contextCompact?.type ?? 'proseLimit') as 'proseLimit' | 'maxTokens' | 'maxCharacters'}
@@ -826,12 +801,12 @@ export function SettingsPanel({
         <div className="space-y-6">
           <div className="space-y-2.5">
             <div>
-              <p className="text-[0.625rem] uppercase tracking-[0.14em] text-muted-foreground">
+              <Eyebrow asChild><p>
                 Selection transforms{enabledTransformCount > 0 ? ` · ${enabledTransformCount} active` : ''}
-              </p>
-              <p className="text-[0.6875rem] text-muted-foreground mt-0.5 leading-snug">
+              </p></Eyebrow>
+              <MetaLabel asChild><p className="mt-0.5 leading-snug">
                 Quick rewrites in the floating toolbar when you select text. Drag to reorder, toggle to show or hide.
-              </p>
+              </p></MetaLabel>
             </div>
             <SettingsCard>
               <SettingRow label="Surrounding context" description="How much of the passage around your selection a transform can read.">
@@ -847,10 +822,10 @@ export function SettingsPanel({
 
           <div className="space-y-2.5">
             <div>
-              <p className="text-[0.625rem] uppercase tracking-[0.14em] text-muted-foreground">Guided mode prompts</p>
-              <p className="text-[0.6875rem] text-muted-foreground mt-0.5 leading-snug">
+              <Eyebrow asChild><p>Guided mode prompts</p></Eyebrow>
+              <MetaLabel asChild><p className="mt-0.5 leading-snug">
                 The prompts behind the guided writing buttons. Leave a field empty to use its default.
-              </p>
+              </p></MetaLabel>
             </div>
             <GuidedPromptsControls story={story} onUpdate={(data) => updateMutation.mutate(data)} isPending={updateMutation.isPending} />
           </div>
@@ -892,50 +867,47 @@ export function SettingsPanel({
                 >
                   {/* Main row: toggle + info */}
                   <div className="flex items-start gap-3 px-3 py-2.5">
-                    <button
-                      onClick={() => togglePlugin(plugin.name)}
+                    <Toggle
+                      checked={isEnabled}
+                      onChange={() => togglePlugin(plugin.name)}
                       disabled={updateMutation.isPending}
-                      className={`mt-0.5 relative shrink-0 h-[18px] w-[32px] rounded-full transition-colors ${isEnabled
-                          ? 'bg-foreground'
-                          : 'bg-muted-foreground/20'
-                        }`}
-                      aria-label={`${isEnabled ? 'Disable' : 'Enable'} ${plugin.name}`}
-                    >
-                      <span
-                        className={`absolute top-[2px] h-[14px] w-[14px] rounded-full bg-background transition-[left] duration-150 ${isEnabled ? 'left-[16px]' : 'left-[2px]'
-                          }`}
-                      />
-                    </button>
+                      label={`${isEnabled ? 'Disable' : 'Enable'} ${plugin.name}`}
+                    />
                     <div className="min-w-0 flex-1">
                       <p className="text-[0.8125rem] font-medium leading-tight text-foreground/85">{plugin.name}</p>
-                      <p className="text-[0.6875rem] text-muted-foreground mt-0.5 leading-snug">{plugin.description}</p>
+                      <MetaLabel asChild><p className="mt-0.5 leading-snug">{plugin.description}</p></MetaLabel>
                     </div>
-                    <span className={`text-[0.5625rem] uppercase tracking-widest mt-1 shrink-0 ${isEnabled ? 'text-foreground/50' : 'text-muted-foreground'
-                      }`}>
+                    <Metric className={`mt-1 shrink-0 uppercase tracking-widest ${isEnabled ? 'text-foreground/50' : ''}`}>
                       v{plugin.version}
-                    </span>
+                    </Metric>
                   </div>
 
                   {/* Panel actions — only when enabled and has a panel */}
                   {isEnabled && plugin.panel && (
                     <div className="flex items-center gap-1 px-3 pb-2.5 pt-0">
                       {onOpenPluginPanel && (
-                        <button
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="xs"
                           onClick={() => onOpenPluginPanel(plugin.name)}
-                          className="flex items-center gap-1.5 rounded-md px-2 py-1 text-[0.6875rem] text-muted-foreground hover:text-foreground/70 hover:bg-accent/40 transition-colors"
+                          className="text-ui-caption text-muted-foreground"
                         >
                           <ExternalLink className="size-3" />
                           Open panel
-                        </button>
+                        </Button>
                       )}
                       {onTogglePluginSidebar && (
-                        <button
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="xs"
                           onClick={() => onTogglePluginSidebar(plugin.name, !isSidebarVisible)}
-                          className="flex items-center gap-1.5 rounded-md px-2 py-1 text-[0.6875rem] text-muted-foreground hover:text-foreground/70 hover:bg-accent/40 transition-colors"
+                          className="text-ui-caption text-muted-foreground"
                         >
                           {isSidebarVisible ? <Eye className="size-3" /> : <EyeOff className="size-3" />}
                           {isSidebarVisible ? 'Visible in sidebar' : 'Hidden from sidebar'}
-                        </button>
+                        </Button>
                       )}
                     </div>
                   )}
@@ -946,7 +918,7 @@ export function SettingsPanel({
         ) : (
           <div className="flex flex-col items-center py-6 text-center">
             <Puzzle className="size-5 text-muted-foreground mb-2" />
-            <p className="text-[0.6875rem] text-muted-foreground">No plugins available</p>
+            <MetaLabel>No plugins available</MetaLabel>
           </div>
         )}
       </SettingsSection>

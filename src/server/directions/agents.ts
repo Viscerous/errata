@@ -4,7 +4,8 @@ import { agentBlockRegistry } from '../agents/agent-block-registry'
 import { modelRoleRegistry } from '../agents/model-role-registry'
 import { instructionRegistry } from '../instructions'
 import type { AgentDefinition } from '../agents/types'
-import { proposeDirections, DEFAULT_SUGGEST_PROMPT } from './suggest'
+import { proposeDirections } from './suggest'
+import { GUIDED_SUGGEST_PROMPT } from '@/lib/guided-prompts'
 import { DIRECTIONS_SYSTEM_PROMPT, createDirectionsSuggestBlocks, buildDirectionsPreviewContext } from './blocks'
 
 const SuggestInputSchema = z.object({
@@ -33,7 +34,7 @@ export function registerDirectionsAgents(): void {
 
   // Register instruction defaults
   instructionRegistry.registerDefault('directions.system', DIRECTIONS_SYSTEM_PROMPT.trim(), { usedBy: 'directions.suggest', kind: 'system' })
-  instructionRegistry.registerDefault('directions.suggest-template', DEFAULT_SUGGEST_PROMPT, { usedBy: 'directions.suggest', kind: 'template' })
+  instructionRegistry.registerDefault('directions.suggest-template', GUIDED_SUGGEST_PROMPT, { usedBy: 'directions.suggest', kind: 'template' })
 
   agentRegistry.register(suggestDefinition)
 

@@ -1,4 +1,5 @@
 import type { GlobalConfigSafe } from '@/lib/api/types'
+import { SettingsSelect } from './primitives'
 
 interface ProviderSelectProps {
   value: string | null
@@ -20,10 +21,10 @@ export function ProviderSelect({ value, globalConfig, onChange, disabled, inheri
       : 'DeepSeek (env)'
 
   return (
-    <select
+    <SettingsSelect
+      className="w-full truncate"
       value={value ?? ''}
-      onChange={(e) => onChange(e.target.value || null)}
-      className="w-full h-[26px] px-2 text-[0.6875rem] text-foreground/80 bg-muted/50 border border-border/50 rounded-md focus:border-primary/30 focus:outline-none truncate"
+      onChange={(next) => onChange(next || null)}
       disabled={disabled}
     >
       <option value="">
@@ -32,6 +33,6 @@ export function ProviderSelect({ value, globalConfig, onChange, disabled, inheri
       {(globalConfig?.providers ?? []).map((p) => (
         <option key={p.id} value={p.id}>{p.name}</option>
       ))}
-    </select>
+    </SettingsSelect>
   )
 }

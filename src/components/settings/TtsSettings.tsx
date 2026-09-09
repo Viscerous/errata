@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { Volume2, Download, Check, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { Button } from '@/components/ui/button'
+import { MetaLabel } from '@/components/ui/prose-text'
 import {
   useTtsSettings,
   useBrowserVoices,
@@ -17,6 +19,8 @@ import {
   SegmentedControl,
   Slider,
   SettingsSelect,
+  SectionHeading,
+  SettingsCard,
 } from './primitives'
 
 const SAMPLE = 'And here he stands, the one they call the Knight of the Sorrowful Countenance, the once and future king'
@@ -53,8 +57,8 @@ export function TtsSettings() {
 
   return (
     <div>
-      <label className="mb-2 block text-[0.625rem] uppercase tracking-wider text-muted-foreground">Read aloud</label>
-      <div className="divide-y divide-border/20 rounded-lg border border-border/30">
+      <SectionHeading label="Read aloud" />
+      <SettingsCard>
         <SettingRow label="Enable read-aloud" description="Adds a Read aloud action to each passage and a player at the bottom of the screen.">
           <Toggle checked={s.enabled} onChange={(next) => { if (!next) stopTts(); set({ enabled: next }) }} label="Toggle read-aloud" />
         </SettingRow>
@@ -81,13 +85,13 @@ export function TtsSettings() {
             </SettingRow>
             <SettingRow label="Model" description="Downloads once on first read (~200 MB), then runs offline from cache." disabled={disabled}>
               {preload === 'loading' ? (
-                <span className="inline-flex items-center gap-1.5 font-mono text-[0.625rem] text-muted-foreground"><Loader2 className="size-3.5 animate-spin motion-reduce:animate-none" />Loading…</span>
+                <MetaLabel className="inline-flex items-center gap-1.5 font-mono"><Loader2 className="size-3.5 animate-spin motion-reduce:animate-none" />Loading…</MetaLabel>
               ) : preload === 'ready' ? (
-                <span className="inline-flex items-center gap-1 text-[0.6875rem] text-primary"><Check className="size-3.5" />Ready</span>
+                <MetaLabel className="inline-flex items-center gap-1 text-primary"><Check className="size-3.5" />Ready</MetaLabel>
               ) : (
-                <button onClick={handlePreload} disabled={disabled} className="inline-flex items-center gap-1.5 rounded-md border border-border/40 px-2.5 py-1 text-[0.6875rem] text-foreground/80 transition-colors hover:border-primary/30 hover:bg-primary/[0.04] disabled:opacity-40">
+                <Button type="button" variant="outline" size="xs" onClick={handlePreload} disabled={disabled}>
                   <Download className="size-3.5" />Preload
-                </button>
+                </Button>
               )}
             </SettingRow>
             <Slider label="Quality" value={s.steps} min={1} max={20} step={1} onChange={(v) => set({ steps: v })} format={(v) => `${v} steps`} disabled={disabled} />
@@ -99,15 +103,17 @@ export function TtsSettings() {
         <Slider label="Volume" value={s.volume} min={0} max={1} step={0.05} onChange={(v) => set({ volume: v })} format={(v) => `${Math.round(v * 100)}%`} disabled={disabled} />
 
         <div className={cn('px-3 py-2.5', disabled && 'pointer-events-none opacity-40')}>
-          <button
+          <Button
+            type="button"
+            variant="outline"
+            size="xs"
             onClick={() => playFragment('__tts_test__', SAMPLE, 'Voice test', s)}
             disabled={disabled}
-            className="inline-flex items-center gap-1.5 rounded-md border border-border/40 px-2.5 py-1 text-[0.6875rem] text-foreground/80 transition-colors hover:border-primary/30 hover:bg-primary/[0.04] disabled:opacity-40"
           >
             <Volume2 className="size-3.5" />Test voice
-          </button>
+          </Button>
         </div>
-      </div>
+      </SettingsCard>
     </div>
   )
 }

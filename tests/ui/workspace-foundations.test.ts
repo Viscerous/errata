@@ -2,7 +2,7 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { PassageListItem } from '@/components/prose/PassageListItem'
-import { SettingsSection } from '@/components/settings/primitives'
+import { SettingsGroup, SettingsSection } from '@/components/settings/primitives'
 import { WorkspaceHeader, WorkspaceTitle } from '@/components/ui/workspace'
 import type { Fragment } from '@/lib/api'
 
@@ -48,6 +48,18 @@ describe('workspace foundations', () => {
     expect(html).toContain('data-toc="Appearance"')
     expect(html).not.toContain('min-h-[80vh]')
     expect(html).not.toContain('snap-start')
+  })
+
+  it('gives nested settings one shared group treatment', () => {
+    const html = renderToStaticMarkup(createElement(SettingsGroup, {
+      title: 'Context',
+      description: 'What the model can read.',
+      children: createElement('div', null, 'Controls'),
+    }))
+
+    expect(html).toContain('Context')
+    expect(html).toContain('What the model can read.')
+    expect(html).toContain('bg-panel-muted/60')
   })
 
   it('uses one semantic header treatment', () => {
