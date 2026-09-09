@@ -92,7 +92,7 @@ export function buildAnalyzeSystemPrompt(opts?: {
   const canMaintainRecords = opts?.disableSuggestions !== true && (
     hasTool('proposeRecordCorrections') || hasTool('proposeNewRecords')
   )
-  const canSuggestDirections = opts?.disableDirections !== true && hasTool('proposeDirections')
+  const canSuggestDirections = opts?.disableDirections !== true && canReport
   const guidance: string[] = []
 
   if (canReport) {
@@ -102,10 +102,10 @@ export function buildAnalyzeSystemPrompt(opts?: {
   }
 
   if (canReport && canMaintainRecords) {
-    guidance.push('Report findings before making any optional record-maintenance proposals.')
+    guidance.push('Before the first **reportAnalysis**, make any optional record-maintenance proposals supported by records already shown. If the report supplies additional record bodies, inspect them and make any resulting proposals; call **reportAnalysis** again only when those records change its findings or directions, otherwise stop.')
   }
   if (canSuggestDirections) {
-    guidance.push('Suggest next directions only after the analysis is complete.')
+    guidance.push('Include next directions in the final report only after the analysis is complete.')
   }
 
   return `

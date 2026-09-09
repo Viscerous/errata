@@ -13,8 +13,6 @@ const tools = [
   'readFragments',
   'proposeRecordCorrections',
   'proposeNewRecords',
-  'proposeDirections',
-  'finishInspection',
 ]
 
 function step(...toolResults: Array<{ toolName: string; output: unknown }>): AnalyzeStep {
@@ -22,40 +20,36 @@ function step(...toolResults: Array<{ toolName: string; output: unknown }>): Ana
 }
 
 describe('librarian analyze tool stages', () => {
-  it('keeps the common path in one request while omitting inspection and finish tools', () => {
+  it('keeps the common path in one request while omitting inspection tools', () => {
     expect(selectAnalyzeToolStage(tools, [])).toEqual({
       stage: 'primary',
       activeTools: [
         'reportAnalysis',
         'proposeRecordCorrections',
         'proposeNewRecords',
-        'proposeDirections',
       ],
     })
   })
 
-  it('completes deterministically after required work succeeds', () => {
-    expect(isAnalyzeWorkflowComplete(tools, [step(
-      { toolName: 'reportAnalysis', output: { ok: true } },
-      { toolName: 'proposeDirections', output: { ok: true } },
-    )])).toBe(true)
+  it('completes deterministically after the final report succeeds', () => {
+    expect(isAnalyzeWorkflowComplete(tools, [
+      step({ toolName: 'reportAnalysis', output: { ok: true } }),
+    ])).toBe(true)
   })
 
   it('does not require an optional proposal that was never called', () => {
-    expect(isAnalyzeWorkflowComplete(tools, [step(
-      { toolName: 'reportAnalysis', output: { ok: true } },
-      { toolName: 'proposeDirections', output: { ok: true } },
-    )])).toBe(true)
+    expect(isAnalyzeWorkflowComplete(tools, [
+      step({ toolName: 'reportAnalysis', output: { ok: true } }),
+    ])).toBe(true)
   })
 
-  it('holds required work open but does not turn an optional proposal into a requirement', () => {
+  it('holds rejected work open but does not turn an optional proposal into a requirement', () => {
     expect(isAnalyzeWorkflowComplete(tools, [step(
-      { toolName: 'reportAnalysis', output: { ok: true } },
+      { toolName: 'reportAnalysis', output: { ok: false } },
     )])).toBe(false)
     expect(isAnalyzeWorkflowComplete(tools, [step(
-      { toolName: 'reportAnalysis', output: { ok: true } },
       { toolName: 'proposeRecordCorrections', output: { ok: false } },
-      { toolName: 'proposeDirections', output: { ok: true } },
+      { toolName: 'reportAnalysis', output: { ok: true } },
     )])).toBe(true)
   })
 
@@ -68,7 +62,6 @@ describe('librarian analyze tool stages', () => {
         'reportAnalysis',
         'proposeRecordCorrections',
         'proposeNewRecords',
-        'proposeDirections',
       ],
     })
   })
@@ -79,7 +72,6 @@ describe('librarian analyze tool stages', () => {
         toolName: 'reportAnalysis',
         output: { ok: true, inspectionRequired: true, resolvedFragments: [{ id: 'ch-1', content: '[1] Existing claim.' }] },
       },
-      { toolName: 'proposeDirections', output: { ok: true } },
     )]
     expect(isAnalyzeWorkflowComplete(tools, steps)).toBe(false)
     expect(selectAnalyzeToolStage(tools, steps)).toEqual({
@@ -88,7 +80,7 @@ describe('librarian analyze tool stages', () => {
     })
   })
 
-  it('keeps inspection open across reads and accepts an explicit close', () => {
+  it('keeps inspection open across reads until a final report replaces the preliminary one', () => {
     const inspected = [
       step({
         toolName: 'reportAnalysis',
@@ -98,12 +90,12 @@ describe('librarian analyze tool stages', () => {
     ]
     expect(selectAnalyzeToolStage(tools, inspected)).toMatchObject({ stage: 'inspection' })
 
-    const closed = [...inspected, step({ toolName: 'finishInspection', output: { ok: true } })]
+    const closed = [...inspected, step({ toolName: 'reportAnalysis', output: { ok: true } })]
     expect(isAnalyzeWorkflowComplete(tools, closed)).toBe(true)
   })
 
   it('uses the un-staged surface when the report tool is disabled', () => {
-    const available = ['readFragments', 'finishInspection']
+    const available = ['readFragments']
     expect(selectAnalyzeToolStage(available, [])).toEqual({
       stage: 'primary',
       activeTools: available,
@@ -115,7 +107,7 @@ describe('librarian analyze tool stages', () => {
     const stages = describeAnalyzeToolStages(tools)
     expect(stages.map((stage) => stage.id)).toEqual(['primary', 'inspection'])
     expect(stages[0].toolNames).not.toContain('readFragments')
-    expect(stages[0].toolNames).not.toContain('finishInspection')
+    expect(stages[1].toolNames).toContain('readFragments')
     expect(stages[1]).toMatchObject({ conditional: true, toolNames: tools })
   })
 

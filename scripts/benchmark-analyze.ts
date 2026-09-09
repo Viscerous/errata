@@ -34,6 +34,7 @@ interface Sample {
   error?: string
   toolCalls: string[]
   toolErrors: number
+  toolErrorDetails: string[]
   lossAttempts: number
   summary: string
   directions: string[]
@@ -105,21 +106,28 @@ async function copyFixture(options: Options): Promise<{ root: string; dataDir: s
   return { root, dataDir }
 }
 
-function countTraceLosses(trace: unknown): { toolErrors: number; lossAttempts: number } {
-  if (!Array.isArray(trace)) return { toolErrors: 0, lossAttempts: 0 }
+function countTraceLosses(trace: unknown): { toolErrors: number; toolErrorDetails: string[]; lossAttempts: number } {
+  if (!Array.isArray(trace)) return { toolErrors: 0, toolErrorDetails: [], lossAttempts: 0 }
   let toolErrors = 0
+  const toolErrorDetails: string[] = []
   let lossAttempts = 0
   for (const event of trace) {
     if (!event || typeof event !== 'object') continue
     const item = event as { type?: string; result?: unknown }
-    if (item.type === 'tool-error') toolErrors += 1
+    if (item.type === 'tool-error') {
+      toolErrors += 1
+      const event = item as { toolName?: unknown; error?: unknown }
+      const toolName = typeof event.toolName === 'string' ? event.toolName : 'unknown tool'
+      const error = typeof event.error === 'string' ? event.error : 'unknown error'
+      toolErrorDetails.push(`${toolName}: ${error}`)
+    }
     if (item.type === 'tool-result') {
       const outcome = toolResultOutcome(item.result)
       lossAttempts += outcome.dropped
       if (!outcome.ok && outcome.dropped === 0) lossAttempts += 1
     }
   }
-  return { toolErrors, lossAttempts }
+  return { toolErrors, toolErrorDetails, lossAttempts }
 }
 
 function words(value: string): Set<string> {
@@ -191,6 +199,7 @@ for (let index = 0; index < options.runs; index += 1) {
         ...(error ? { error } : {}),
         toolCalls: [],
         toolErrors: 0,
+        toolErrorDetails: [],
         lossAttempts: 0,
         summary: '',
         directions: [],

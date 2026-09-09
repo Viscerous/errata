@@ -293,9 +293,12 @@ function knowledgeOperationSchemaFor(registry: ContinuityRegistry) {
   })
 }
 
-export function buildReportAnalysisInputSchema(input: ContinuityKeyRegistry = {}) {
+export function buildReportAnalysisInputSchema(
+  input: ContinuityKeyRegistry = {},
+  options: { includeDirections?: boolean } = {},
+) {
   const registry = completeRegistry(input)
-  return z.object({
+  const report = z.object({
     // Model-authored report text is stored as supplied; this schema only asks
     // for the structure required to interpret it.
     summary: z.string().trim().min(1).describe('Concise retrospective summary of the new prose as past history.'),
@@ -329,6 +332,12 @@ export function buildReportAnalysisInputSchema(input: ContinuityKeyRegistry = {}
     knowledgeOperations: z.array(knowledgeOperationSchemaFor(registry)).default([])
       .describe('Durable character-specific learning with attributed and temporal limits.'),
   })
+  return options.includeDirections === false
+    ? report
+    : report.extend({
+        directions: z.array(suggestionDirectionSchema).min(3).max(5)
+          .describe('Story-specific options for the passage that follows this one.'),
+      })
 }
 
 /** Registry-free shape for the context preview and the tool-name listing. */
@@ -767,8 +776,6 @@ export const librarianNewRecordsInputSchema = z.object({
     .describe('New reusable named records; not event logs, current conditions, scene details, or duplicates.'),
 })
 
-export const librarianFinishInspectionInputSchema = z.object({})
-
 type AnalysisProposalSkipped = Skipped<{
   operationId: string
   action: FragmentChangeOperation['action']
@@ -895,11 +902,11 @@ export function createAnalysisTools(
   const numberedFragmentIds = opts?.numberedFragmentIds instanceof Set
     ? opts.numberedFragmentIds
     : new Set(opts?.numberedFragmentIds ?? [])
-  const successfulToolNames = new Set<string>()
+  let hasReported = false
   // Normalized once here; every lookup below reads the same shape and numbering.
   const continuityRegistry = completeRegistry(opts?.continuityKeys ?? {})
   const emitProgress = (stage: LibrarianAnalysisProgressStage) => {
-    if (!opts?.onProgress || !opts.proseFragmentId || !successfulToolNames.has('reportAnalysis')) return
+    if (!opts?.onProgress || !opts.proseFragmentId || !hasReported) return
     opts.onProgress(structuredClone({
       fragmentId: opts.proseFragmentId,
       stage,
@@ -919,7 +926,9 @@ export function createAnalysisTools(
   if (opts?.includeReportTool !== false) {
     tools.reportAnalysis = tool({
       description: 'Report all prose findings in one self-contained batch. Evidence fields cite numbered sentences.',
-      inputSchema: buildReportAnalysisInputSchema(opts?.continuityKeys ?? {}),
+      inputSchema: buildReportAnalysisInputSchema(opts?.continuityKeys ?? {}, {
+        includeDirections: opts?.disableDirections !== true,
+      }),
       execute: async (input: ReportAnalysisInput) => {
         const {
           summary,
@@ -932,6 +941,9 @@ export function createAnalysisTools(
           threadOperations = [],
           knowledgeOperations = [],
         } = input
+        const directions = 'directions' in input && Array.isArray(input.directions)
+          ? input.directions as SuggestionDirection[]
+          : []
         const sourceProse = opts?.proseFragmentId
           ? await getFragment(opts.dataDir, opts.storyId, opts.proseFragmentId)
           : null
@@ -981,6 +993,7 @@ export function createAnalysisTools(
 
         collector.events = events
         collector.summaryUpdate = summary
+        collector.directions = directions
 
         // A highlight can only bind text that actually occurs in the passage.
         const skippedMentions: Array<Skipped<{ fragmentId: string; text: string }>> = []
@@ -1092,8 +1105,10 @@ export function createAnalysisTools(
         }
         collector.contradictions = groundedContradictions
 
-        successfulToolNames.add('reportAnalysis')
-        emitProgress(inspectionRequired ? 'inspection' : 'observation')
+        hasReported = true
+        emitProgress(inspectionRequired
+          ? 'inspection'
+          : opts?.disableDirections === true ? 'observation' : 'directions')
         return {
           ok: true,
           mentionCount: collector.mentions.length,
@@ -1104,6 +1119,7 @@ export function createAnalysisTools(
           threadOperationCount: collector.continuityProjection.threadOperations.length,
           focusedThreadCount: collector.continuityProjection.threadFocus.length,
           knowledgeOperationCount: collector.continuityProjection.knowledgeOperations.length,
+          directionCount: collector.directions.length,
           ...(resolvedFragments.length > 0 ? {
             resolvedFragments,
             resolvedFragmentNote: 'Full records for what you just reported, not already in your context. Their sentences are numbered for correction targeting. Use them for directions and record maintenance; no further reads are needed for these.',
@@ -1212,7 +1228,6 @@ export function createAnalysisTools(
         operations: validation.operations,
         validation: validation.results,
       })
-      successfulToolNames.add(params.toolName)
       emitProgress('record-maintenance')
       return {
         ok: true,
@@ -1310,42 +1325,6 @@ export function createAnalysisTools(
       },
     })
   }
-
-  if (!opts?.disableDirections) {
-    tools.proposeDirections = tool({
-      description: 'Required when available: suggest 3-5 next directions informed by the completed analysis.',
-      inputSchema: z.object({
-        directions: z.array(suggestionDirectionSchema).min(3).max(5),
-      }),
-      execute: async ({ directions }) => {
-        collector.directions = directions
-        successfulToolNames.add('proposeDirections')
-        emitProgress('directions')
-        return { ok: true }
-      },
-    })
-  }
-
-  tools.finishInspection = tool({
-    description: 'End record inspection when the records did not change the last report. If they changed a finding, call reportAnalysis again instead.',
-    inputSchema: librarianFinishInspectionInputSchema,
-    execute: async () => {
-      const missingRequired: string[] = []
-      if (tools.reportAnalysis && !successfulToolNames.has('reportAnalysis')) missingRequired.push('reportAnalysis')
-      if (tools.proposeDirections && !successfulToolNames.has('proposeDirections')) {
-        missingRequired.push('proposeDirections')
-      }
-
-      if (missingRequired.length > 0) {
-        return {
-          ok: false,
-          missingRequired,
-          note: 'Finish inspection only after required report and direction tools succeed.',
-        }
-      }
-      return { ok: true, completed: [...successfulToolNames] }
-    },
-  })
 
   return tools
 }

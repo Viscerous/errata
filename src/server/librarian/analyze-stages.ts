@@ -1,8 +1,6 @@
 /** Tool exposure and deterministic completion for the adaptive Analyze loop. */
 
 export const ANALYZE_REPORT_TOOL = 'reportAnalysis'
-const ANALYZE_INSPECTION_DONE_TOOL = 'finishInspection'
-const ANALYZE_DIRECTION_TOOL = 'proposeDirections'
 const ANALYZE_INSPECTION_TOOLS = new Set([
   'readFragments',
   'findFragments',
@@ -47,16 +45,14 @@ function lastResult(results: readonly AnalyzeToolResult[], toolName: string): An
 }
 
 function primaryTools(availableTools: readonly string[]): string[] {
-  return availableTools.filter((name) => (
-    !ANALYZE_INSPECTION_TOOLS.has(name)
-    && name !== ANALYZE_INSPECTION_DONE_TOOL
-  ))
+  return availableTools.filter((name) => !ANALYZE_INSPECTION_TOOLS.has(name))
 }
 
 /**
- * The normal path ends after one model response: report, optional proposals,
- * and directions can be emitted together. Only an inspection that leaves the
- * report unchanged needs an explicit close signal.
+ * A successful report is the deterministic stage boundary. If it supplies
+ * record bodies, the loop stays open so the model can inspect them and replace
+ * findings that changed; a natural model stop can also close unchanged
+ * inspection without a synthetic finish tool.
  */
 export function isAnalyzeWorkflowComplete(
   availableTools: readonly string[],
@@ -65,17 +61,9 @@ export function isAnalyzeWorkflowComplete(
   const results = flattenResults(steps)
   if (results.length === 0) return false
 
-  const finish = lastResult(results, ANALYZE_INSPECTION_DONE_TOOL)
-  if (finish && outputOk(finish.output)) return true
-
   if (availableTools.includes(ANALYZE_REPORT_TOOL)) {
     const report = lastResult(results, ANALYZE_REPORT_TOOL)
     if (!report || !outputOk(report.output) || hasResolvedFragments(report.output)) return false
-  }
-
-  if (availableTools.includes(ANALYZE_DIRECTION_TOOL)) {
-    const directions = lastResult(results, ANALYZE_DIRECTION_TOOL)
-    if (!directions || !outputOk(directions.output)) return false
   }
 
   return true
@@ -95,16 +83,8 @@ export function selectAnalyzeToolStage(
   }
 
   const latestReport = lastResult(results, ANALYZE_REPORT_TOOL)
-
   if (latestReport && hasResolvedFragments(latestReport.output)) {
-    const reportIndex = results.lastIndexOf(latestReport)
-    const closedInspection = results.slice(reportIndex + 1).some((result) => (
-      result.toolName === ANALYZE_INSPECTION_DONE_TOOL
-      || result.toolName === ANALYZE_REPORT_TOOL
-    ))
-    if (!closedInspection) {
-      return { stage: 'inspection', activeTools: [...availableTools] }
-    }
+    return { stage: 'inspection', activeTools: [...availableTools] }
   }
 
   return { stage: 'primary', activeTools: primaryTools(availableTools) }
@@ -125,14 +105,14 @@ export function describeAnalyzeToolStages(availableTools: readonly string[]): An
     {
       id: 'primary',
       label: 'Primary',
-      description: 'Normal one-request path: observation, optional proposals, and directions.',
+      description: 'Normal one-request path: optional record proposals followed by the complete report.',
       conditional: false,
       toolNames: primaryTools(availableTools),
     },
     {
       id: 'inspection',
       label: 'Record inspection',
-      description: 'Used only when the report loads additional record bodies that may change the findings.',
+      description: 'Used only when the report loads record bodies that may prompt proposals or a revised report.',
       conditional: true,
       toolNames: [...availableTools],
     },

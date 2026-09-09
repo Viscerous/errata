@@ -153,32 +153,21 @@ describe('compileAgentContext', () => {
         inputSchema: z.object({}),
         execute: async () => ({ ok: true }),
       }),
-      proposeDirections: tool({
-        description: 'Propose directions',
-        inputSchema: z.object({}),
-        execute: async () => ({ ok: true }),
-      }),
-      finishInspection: tool({
-        description: 'Finish analysis',
-        inputSchema: z.object({}),
-        execute: async () => ({ ok: true }),
-      }),
     }
     await saveAgentBlockConfig(dataDir, STORY_ID, 'librarian.analyze', {
       customBlocks: [],
       overrides: {},
       blockOrder: [],
-      disabledTools: ['proposeDirections', 'proposeRecordCorrections', 'proposeNewRecords'],
+      disabledTools: ['proposeRecordCorrections', 'proposeNewRecords'],
     })
 
     const result = await compileAgentContext(dataDir, STORY_ID, 'librarian.analyze', makeContext(), tools)
     const instructions = result.blocks.find((block) => block.id === 'instructions')!
 
-    expect(Object.keys(result.tools)).toEqual(['reportAnalysis', 'finishInspection'])
+    expect(Object.keys(result.tools)).toEqual(['reportAnalysis'])
     expect(instructions.content).toContain('Before calling **reportAnalysis**')
     expect(instructions.content).not.toContain('optional record-maintenance proposals')
-    expect(instructions.content).not.toContain('Suggest next directions')
-    expect(instructions.content).not.toContain('finishInspection')
+    expect(instructions.content).toContain('Include next directions')
   })
 
   it('applies block overrides from config', async () => {

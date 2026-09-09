@@ -341,9 +341,18 @@ async function runOnlineAnalyzePass(
       { providerId, configuredModelId: modelId, servedModelId: result.servedModelId },
     )
     const toolCallNames = result.toolCalls.map((call) => call.toolName)
-    const workflowComplete = isAnalyzeWorkflowComplete(Object.keys(compiled.tools), [{
+    const deterministicallyComplete = isAnalyzeWorkflowComplete(Object.keys(compiled.tools), [{
       toolResults: result.toolCalls.map((call) => ({ toolName: call.toolName, output: call.result })),
     }])
+    const successfulReport = [...result.toolCalls].reverse().find((call) => (
+      call.toolName === 'reportAnalysis' && booleanToolResultField(call.result, 'ok') === true
+    ))
+    // A natural stop after inspecting newly supplied records is itself the
+    // model's "nothing else changed" signal. Only forced endings (step/length
+    // limits) still require the deterministic report boundary.
+    const workflowComplete = Boolean(successfulReport)
+      && (disableDirections || collector.directions.length > 0)
+      && (deterministicallyComplete || result.finishReason === 'stop')
     const proposalToolNames = new Set(['proposeRecordCorrections', 'proposeNewRecords'])
     const proposalToolResults = result.toolCalls
       .filter((call) => proposalToolNames.has(call.toolName))
@@ -363,8 +372,6 @@ async function runOnlineAnalyzePass(
       proposalToolFailureCount: proposalToolResults.filter((result) => booleanToolResultField(result, 'ok') === false).length,
       proposalQueuedOperationCount: proposalToolResults.reduce<number>((sum, result) => sum + numericToolResultField(result, 'queuedOperationCount'), 0),
       proposalInvalidOperationCount: proposalToolResults.reduce<number>((sum, result) => sum + numericToolResultField(result, 'invalid'), 0),
-      directionToolCallCount: toolCallNames.filter((name) => name === 'proposeDirections').length,
-      inspectionFinishToolCallCount: toolCallNames.filter((name) => name === 'finishInspection').length,
       workflowComplete,
       attentionCandidateIds: context.attentionCandidateIds,
       initialCandidateFragments: initialCandidates,

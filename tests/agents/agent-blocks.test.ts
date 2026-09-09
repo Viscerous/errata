@@ -610,8 +610,9 @@ describe('Librarian Analyze Prompt', () => {
     expect(prompt).toContain('Before calling **reportAnalysis**')
     expect(prompt).toContain('candidateFragmentIds')
     expect(prompt).toContain('revise only findings those records change')
-    expect(prompt).toContain('Report findings before making any optional record-maintenance proposals')
-    expect(prompt).toContain('Suggest next directions only after the analysis is complete')
+    expect(prompt).toContain('record-maintenance proposals supported by records already shown')
+    expect(prompt).toContain('call **reportAnalysis** again only when')
+    expect(prompt).toContain('Include next directions in the final report')
   })
 
   it('derives workflow guidance from the tools that are actually available', () => {
@@ -620,22 +621,20 @@ describe('Librarian Analyze Prompt', () => {
     expect(noDirections).not.toContain('Suggest next directions')
 
     const noSuggestions = buildAnalyzeSystemPrompt({ disableSuggestions: true })
-    expect(noSuggestions).toContain('Suggest next directions')
+    expect(noSuggestions).toContain('Include next directions')
     expect(noSuggestions).not.toContain('optional record-maintenance proposals')
 
     const noOptionalTools = buildAnalyzeSystemPrompt({
-      disabledTools: ['proposeDirections', 'proposeRecordCorrections', 'proposeNewRecords'],
+      disabledTools: ['proposeRecordCorrections', 'proposeNewRecords'],
     })
     expect(noOptionalTools).toContain('Before calling **reportAnalysis**')
     expect(noOptionalTools).not.toContain('optional record-maintenance proposals')
     expect(noOptionalTools).not.toContain('Suggest next directions')
 
-    const noReport = buildAnalyzeSystemPrompt({
-      enabledTools: ['proposeDirections'],
-    })
+    const noReport = buildAnalyzeSystemPrompt({ enabledTools: [] })
     expect(noReport).toContain('without inventing a replacement reporting tool')
     expect(noReport).not.toContain('reportAnalysis')
-    expect(noReport).toContain('Suggest next directions')
+    expect(noReport).not.toContain('next directions')
   })
 
   it('includes custom fragment groups for mention detection', () => {

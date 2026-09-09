@@ -5,7 +5,6 @@ import {
   createAnalysisTools,
   createEmptyCollector,
   createLibrarianOnlineTools,
-  librarianFinishInspectionInputSchema,
   librarianNewRecordsInputSchema,
   librarianRecordCorrectionsInputSchema,
   listLibrarianAnalyzeToolNames,
@@ -59,6 +58,11 @@ describe('analysis tool contracts', () => {
     expect(reportAnalysisInputSchema.safeParse({ summary: '   ' }).success).toBe(false)
     const parsed = reportAnalysisInputSchema.parse({
       summary: 'Alice waited.', participantIds: ['ch-0001'], witnessIds: ['ch-0002'],
+      directions: [
+        { title: 'Wait', description: 'The pause lengthens.', instruction: 'Continue the pause.' },
+        { title: 'Enter', description: 'A visitor arrives.', instruction: 'Introduce the visitor.' },
+        { title: 'Leave', description: 'Alice departs.', instruction: 'Follow Alice outside.' },
+      ],
     })
     expect(parsed).not.toHaveProperty('participantIds')
     expect(parsed).not.toHaveProperty('witnessIds')
@@ -71,7 +75,6 @@ describe('analysis tool contracts', () => {
     expect(librarianNewRecordsInputSchema.safeParse({
       evidenceSegments: [1], newFragments: [],
     }).success).toBe(false)
-    expect(librarianFinishInspectionInputSchema.parse({ skipped: ['proposeNewRecords'] })).toEqual({})
   })
 
   it('exposes one shared online tool set without duplicate prose and summary reads', () => {
@@ -80,7 +83,7 @@ describe('analysis tool contracts', () => {
     })
     expect(Object.keys(tools)).toEqual(expect.arrayContaining([
       'reportAnalysis', 'readFragments', 'listFragmentTypes', 'proposeRecordCorrections',
-      'proposeNewRecords', 'proposeDirections', 'finishInspection',
+      'proposeNewRecords',
     ]))
     expect(tools).not.toHaveProperty('readProseChain')
     expect(tools).not.toHaveProperty('readStorySummary')
@@ -92,26 +95,23 @@ describe('analysis tool contracts', () => {
       dataDir: '/tmp', storyId: 'story-test', disableSuggestions: true, disableDirections: true,
     })
     expect(tools).toHaveProperty('reportAnalysis')
-    expect(tools).toHaveProperty('finishInspection')
     expect(tools).not.toHaveProperty('proposeRecordCorrections')
     expect(tools).not.toHaveProperty('proposeNewRecords')
     expect(tools).not.toHaveProperty('proposeDirections')
   })
 
-  it('finishes based only on required observable calls', async () => {
-    const tools = createAnalysisTools(createEmptyCollector())
-    expect(await tools.finishInspection.execute!({}, executionContext)).toMatchObject({
-      ok: false, missingRequired: ['reportAnalysis', 'proposeDirections'],
-    })
-    await tools.reportAnalysis.execute!({ summary: 'Alice waited.' }, executionContext)
-    await tools.proposeDirections.execute!({
+  it('collects directions in the self-contained report', async () => {
+    const collector = createEmptyCollector()
+    const tools = createAnalysisTools(collector)
+    await tools.reportAnalysis.execute!({
+      summary: 'Alice waited.',
       directions: [
         { title: 'Wait', description: 'The pause lengthens.', instruction: 'Continue the pause.' },
         { title: 'Enter', description: 'A visitor arrives.', instruction: 'Introduce the visitor.' },
         { title: 'Leave', description: 'Alice departs.', instruction: 'Follow Alice outside.' },
       ],
     }, executionContext)
-    expect(await tools.finishInspection.execute!({}, executionContext)).toMatchObject({ ok: true })
+    expect(collector.directions).toHaveLength(3)
   })
 })
 
@@ -150,6 +150,11 @@ describe('reportAnalysis', () => {
         { fragmentId: record.id, text: 'Alice Cooper' },
       ],
       candidateFragmentIds: [record.id],
+      directions: [
+        { title: 'Wait', description: 'The hall settles.', instruction: 'Let the hall settle.' },
+        { title: 'Search', description: 'Alice looks around.', instruction: 'Search the hall.' },
+        { title: 'Leave', description: 'Alice moves on.', instruction: 'Leave the hall.' },
+      ],
     }, executionContext)
 
     expect(onProgress).toHaveBeenLastCalledWith(expect.objectContaining({
@@ -158,17 +163,6 @@ describe('reportAnalysis', () => {
       summaryUpdate: 'Alice entered the hall.',
       mentions: [{ fragmentId: record.id, text: 'Alice' }],
       timelineEvents: [{ event: 'Alice entered the north hall.', position: 'after' }],
-    }))
-
-    await tools.proposeDirections.execute!({
-      directions: [
-        { title: 'Wait', description: 'The hall settles.', instruction: 'Let the hall settle.' },
-        { title: 'Search', description: 'Alice looks around.', instruction: 'Search the hall.' },
-        { title: 'Leave', description: 'Alice moves on.', instruction: 'Leave the hall.' },
-      ],
-    }, executionContext)
-    expect(onProgress).toHaveBeenLastCalledWith(expect.objectContaining({
-      stage: 'directions',
       directions: expect.arrayContaining([expect.objectContaining({ title: 'Wait' })]),
     }))
   })
@@ -393,6 +387,11 @@ describe('continuity registry addressing', () => {
     const schema = buildReportAnalysisInputSchema(registry)
     expect(schema.safeParse({
       summary: 'A new state emerged.',
+      directions: [
+        { title: 'Wait', description: 'The moment holds.', instruction: 'Remain in the moment.' },
+        { title: 'Act', description: 'The state drives action.', instruction: 'Act on the new state.' },
+        { title: 'Leave', description: 'The scene closes.', instruction: 'End the scene.' },
+      ],
       stateOperations: [{
         key: 'new_state', action: 'set', subject: { label: 'Alice' }, facet: 'condition',
         value: 'free', evidenceSegments: [1],
