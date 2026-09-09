@@ -1,5 +1,6 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { PassageListItem } from '@/components/prose/PassageListItem'
 import { SettingsGroup, SettingsSection } from '@/components/settings/primitives'
@@ -69,5 +70,17 @@ describe('workspace foundations', () => {
 
     expect(html).toContain('data-slot="workspace-header"')
     expect(html).toContain('data-slot="workspace-title"')
+  })
+
+  it('shares global appearance and provider entry controls across settings surfaces', () => {
+    const library = readFileSync('src/routes/index.tsx', 'utf8')
+    const story = readFileSync('src/components/sidebar/SettingsPanel.tsx', 'utf8')
+    const providers = readFileSync('src/components/settings/ProviderManager.tsx', 'utf8')
+
+    expect(library).toContain('<GlobalAppearanceRows />')
+    expect(story).toContain('<GlobalAppearanceRows />')
+    expect(story).toContain('<ManageProvidersButton')
+    expect(providers).toContain('<ManageProvidersButton')
+    expect(library).not.toContain('THEME_OPTIONS')
   })
 })

@@ -25,7 +25,7 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
-import { Plus, Trash2, Sparkles, BookOpen, Users, Scroll, Globe, Upload, ChevronRight, FileJson, AlertCircle, Clipboard, Camera, X, ImagePlus, Settings, Sun, Moon, Contrast } from 'lucide-react'
+import { Plus, Trash2, Sparkles, BookOpen, Users, Scroll, Globe, Upload, ChevronRight, FileJson, AlertCircle, Clipboard, Camera, X, ImagePlus, Settings } from 'lucide-react'
 import { OnboardingWizard } from '@/components/onboarding/OnboardingWizard'
 import { ErrataLogo } from '@/components/ErrataLogo'
 import { ImportDialog } from '@/components/ImportDialog'
@@ -35,22 +35,15 @@ import {
   parseCardJson,
 } from '@/lib/importers/tavern-card'
 import { GeneratedCover } from '@/components/GeneratedCover'
-import { useTheme } from '@/lib/theme'
-import { useInteractionSounds } from '@/lib/interaction-sounds'
 import { ProviderList, ProviderPanel } from '@/components/settings/ProviderManager'
 import { AboutSection } from '@/components/settings/AboutPanel'
 import { DesktopUpdatesControls } from '@/components/settings/DesktopUpdatesPanel'
-import { SectionHeading, SettingRow, SettingsCard, Toggle } from '@/components/settings/primitives'
+import { SectionHeading, SettingsCard } from '@/components/settings/primitives'
+import { GlobalAppearanceRows } from '@/components/settings/GlobalSettingsControls'
 import { useConfirm } from '@/components/ui/confirm-dialog'
 import { getStoryDisplayName } from '@/lib/story-display'
 import type { FileDropDetails } from '@/lib/file-drop'
 import { createStoryArchiveFromFolderDrop } from '@/lib/story-folder-import'
-
-const THEME_OPTIONS = [
-  { value: 'light' as const, label: 'Light', Icon: Sun },
-  { value: 'dark' as const, label: 'Dark', Icon: Moon },
-  { value: 'high-contrast' as const, label: 'High contrast', Icon: Contrast },
-]
 
 export const Route = createFileRoute('/')({ component: StoryListPage })
 
@@ -58,8 +51,6 @@ function StoryListPage() {
   const queryClient = useQueryClient()
   const confirm = useConfirm()
   const navigate = useNavigate()
-  const { theme, setTheme } = useTheme()
-  const [interactionSounds, setInteractionSounds] = useInteractionSounds()
   const [open, setOpen] = useState(false)
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
@@ -713,33 +704,8 @@ function StoryListPage() {
           <div className="mt-1 min-h-0 flex-1 space-y-6 overflow-y-auto pr-1">
             <section>
               <SectionHeading label="Appearance" />
-              <div className="mt-2 grid grid-cols-3 gap-2">
-                {THEME_OPTIONS.map(({ value, label, Icon }) => (
-                  <button
-                    key={value}
-                    type="button"
-                    onClick={() => setTheme(value)}
-                    aria-pressed={theme === value}
-                    data-cuelume-toggle=""
-                    className={`flex flex-col items-center gap-1.5 rounded-lg border px-2 py-3 text-xs transition-colors ${
-                      theme === value
-                        ? 'border-primary bg-primary/10 text-foreground'
-                        : 'border-border/60 text-muted-foreground hover:border-border hover:text-foreground'
-                    }`}
-                  >
-                    <Icon className="size-4" />
-                    {label}
-                  </button>
-                ))}
-              </div>
-              <SettingsCard className="mt-3">
-                <SettingRow label="Interaction sounds" description="Play subtle feedback for controls">
-                  <Toggle
-                    checked={interactionSounds}
-                    onChange={setInteractionSounds}
-                    label="Toggle interaction sounds"
-                  />
-                </SettingRow>
+              <SettingsCard className="mt-2">
+                <GlobalAppearanceRows />
               </SettingsCard>
             </section>
 

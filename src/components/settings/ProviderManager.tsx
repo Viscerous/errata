@@ -17,6 +17,7 @@ import {
   PanelHeaderText,
   PanelTitle,
 } from '@/components/ui/panel'
+import { ManageProvidersButton } from './GlobalSettingsControls'
 
 type PresetKey = PresetId
 
@@ -71,9 +72,7 @@ export function ProviderList({ onManage }: { onManage: () => void }) {
           </div>
         ))
       )}
-      <Button size="sm" variant="outline" className="h-7 text-xs gap-1.5 w-full" onClick={onManage} data-component-id="provider-list-manage">
-        Manage Providers
-      </Button>
+      <ManageProvidersButton onClick={onManage} className="rounded-md border border-border/50" />
     </div>
   )
 }

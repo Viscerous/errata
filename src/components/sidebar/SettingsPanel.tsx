@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, type StoryMeta, type GlobalConfigSafe } from '@/lib/api'
-import { useTheme, useQuickSwitch, useMentionTypes, BASE_MENTION_TYPES, useTimelineBar, useProseWidth, useUiFontSize, UI_FONT_SIZE_LABELS, useProseFontSize, PROSE_FONT_SIZE_LABELS, useFontPreferences, getActiveFont, FONT_CATALOGUE, loadFullFontCatalogue, useCustomCss, useWritingTransforms, useTransformContext, TRANSFORM_CONTEXT_LABELS, type TransformContext, type FontRole, type ProseWidth, type UiFontSize, type ProseFontSize } from '@/lib/theme'
-import { Settings2, ChevronRight, ExternalLink, Eye, EyeOff, Puzzle, RotateCcw, CircleHelp, Code } from 'lucide-react'
+import { useQuickSwitch, useMentionTypes, BASE_MENTION_TYPES, useTimelineBar, useProseWidth, useUiFontSize, UI_FONT_SIZE_LABELS, useProseFontSize, PROSE_FONT_SIZE_LABELS, useFontPreferences, getActiveFont, FONT_CATALOGUE, loadFullFontCatalogue, useCustomCss, useWritingTransforms, useTransformContext, TRANSFORM_CONTEXT_LABELS, type TransformContext, type FontRole, type ProseWidth, type UiFontSize, type ProseFontSize } from '@/lib/theme'
+import { ChevronRight, ExternalLink, Eye, EyeOff, Puzzle, RotateCcw, CircleHelp, Code } from 'lucide-react'
 import { useHelp } from '@/hooks/use-help'
 import { CustomCssPanel } from '@/components/settings/CustomCssPanel'
 import { TtsSettings } from '@/components/settings/TtsSettings'
@@ -16,12 +16,12 @@ import { SamplingNumberInput } from '@/components/settings/SamplingNumberInput'
 import { ProviderSelect } from '@/components/settings/ProviderSelect'
 import { getDesktopBridge, onDesktopBridgeReady } from '@/lib/desktop'
 import { resolveProvider, getInheritLabel } from '@/lib/model-role-helpers'
-import { useInteractionSounds } from '@/lib/interaction-sounds'
 import { GUIDED_CONTINUE_PROMPT, GUIDED_SCENE_SETTING_PROMPT, GUIDED_SUGGEST_PROMPT } from '@/lib/guided-prompts'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Eyebrow, MetaLabel, Metric } from '@/components/ui/prose-text'
+import { GlobalAppearanceRows, ManageProvidersButton } from '@/components/settings/GlobalSettingsControls'
 import {
   BUILTIN_FRAGMENT_TYPES,
   compareFragmentTypeVisuals,
@@ -233,19 +233,7 @@ function LLMSection({ story, globalConfig, updateMutation, onManageProviders }: 
             </div>
           )
         })}
-        <Button
-          type="button"
-          variant="ghost"
-          onClick={onManageProviders}
-          className="h-9 w-full justify-between rounded-none px-3 text-ui-caption text-muted-foreground"
-          data-component-id="settings-manage-providers"
-        >
-          <span className="flex items-center gap-1.5">
-            <Settings2 className="size-3" />
-            Manage providers
-          </span>
-          <ChevronRight className="size-3" />
-        </Button>
+        <ManageProvidersButton onClick={onManageProviders} />
       </SettingsCard>
     </div>
   )
@@ -437,8 +425,6 @@ export function SettingsPanel({
   const enabledTransformCount = writingTransforms.filter(t => t.enabled).length
   const [transformContext, setTransformContext] = useTransformContext()
   const { openHelp } = useHelp()
-  const { theme, setTheme } = useTheme()
-  const [interactionSounds, setInteractionSounds] = useInteractionSounds()
   const [quickSwitch, setQuickSwitch] = useQuickSwitch()
   const [mentionTypes, setMentionTypes] = useMentionTypes()
   const [timelineBar, setTimelineBar] = useTimelineBar()
@@ -464,24 +450,7 @@ export function SettingsPanel({
       <SettingsSection id="set-appearance" label="Appearance" group="Interface">
         <SectionHeading label="Appearance" />
         <SettingsCard>
-          <SettingRow label="Theme">
-            <SegmentedControl
-              value={theme}
-              options={[
-                { value: 'light', label: 'Light' },
-                { value: 'dark', label: 'Dark' },
-                { value: 'high-contrast', label: 'High' },
-              ]}
-              onChange={setTheme}
-            />
-          </SettingRow>
-          <SettingRow label="Interaction sounds" description="Play subtle feedback for controls">
-            <Toggle
-              checked={interactionSounds}
-              onChange={setInteractionSounds}
-              label="Toggle interaction sounds"
-            />
-          </SettingRow>
+          <GlobalAppearanceRows />
           <SettingRow label="UI size" description="Scale the entire interface">
             <SegmentedControl<UiFontSize>
               value={uiFontSize}
