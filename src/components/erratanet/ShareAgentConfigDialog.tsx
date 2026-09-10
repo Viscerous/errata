@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import type { PackManifestDraft } from '@/lib/erratanet/pack-schema'
-import { GLOBAL_PACK_ID_REGEX, packPageUrl } from '@/lib/erratanet/pack-schema'
+import { GLOBAL_PACK_ID_REGEX } from '@/lib/erratanet/pack-schema'
 import { slugify, bumpVersion, type BumpKind } from '@/lib/erratanet/publish-utils'
 import type { AgentConfigSnapshotResponse } from '@/lib/api/types'
 import {
@@ -14,7 +14,6 @@ import {
   selectedScripts,
   type AgentConfigSelectionState,
 } from './AgentConfigSelector'
-import { cn } from '@/lib/utils'
 import {
   Dialog,
   DialogContent,
@@ -24,16 +23,18 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Textarea } from '@/components/ui/textarea'
-import { Badge } from '@/components/ui/badge'
+import { Eyebrow, Hint } from '@/components/ui/prose-text'
+import {
+  ERRATANET_LICENSES,
+  ErratanetAccountNotice,
+  ErratanetIdentityFields,
+  ErratanetPublishSuccess,
+  ErratanetReleaseFields,
+  useErratanetPackLookup,
+} from './ErratanetPublishFields'
 import {
   UploadCloud,
   Loader2,
-  Check,
-  AlertTriangle,
-  X,
-  ExternalLink,
   Code2,
 } from 'lucide-react'
 
@@ -48,25 +49,6 @@ interface ShareAgentConfigDialogProps {
   defaultIncludes?: string[]
 }
 
-const LICENSES = [
-  { value: 'CC0-1.0', label: 'CC0 1.0 (public domain)' },
-  { value: 'CC-BY-4.0', label: 'CC BY 4.0 (attribution)' },
-  { value: 'CC-BY-SA-4.0', label: 'CC BY-SA 4.0 (share-alike)' },
-  { value: 'proprietary', label: 'Proprietary (all rights reserved)' },
-] as const
-
-const sectionLabel = 'text-[0.5625rem] text-muted-foreground uppercase tracking-[0.15em] font-medium mb-2'
-
-/** Trail the live input so the latest-version lookup isn't fired per keystroke. */
-function useDebouncedValue<T>(value: T, delayMs: number): T {
-  const [debounced, setDebounced] = useState(value)
-  useEffect(() => {
-    const timer = setTimeout(() => setDebounced(value), delayMs)
-    return () => clearTimeout(timer)
-  }, [value, delayMs])
-  return debounced
-}
-
 /**
  * Publish the current story's agent configuration as a shareable `agent-config`
  * pack. The user picks which surfaces to include; a scripts notice appears when
@@ -79,9 +61,8 @@ export function ShareAgentConfigDialog({ open, onOpenChange, storyId, storyName,
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [readme, setReadme] = useState('')
-  const [license, setLicense] = useState<string>(LICENSES[1].value)
+  const [license, setLicense] = useState<string>(ERRATANET_LICENSES[1].value)
   const [tags, setTags] = useState<string[]>([])
-  const [tagDraft, setTagDraft] = useState('')
   const [visibility, setVisibility] = useState<'public' | 'unlisted'>('public')
   const [bump, setBump] = useState<BumpKind>('patch')
   const [selection, setSelection] = useState<AgentConfigSelectionState>({
@@ -117,17 +98,7 @@ export function ShareAgentConfigDialog({ open, onOpenChange, storyId, storyName,
   const packId = handle && effectiveSlug ? `@${handle}/${effectiveSlug}` : null
   // Debounced: the slug derives from the live title input, and each new packId
   // is a fresh queryKey — without trailing it, every keystroke hits the hub.
-  const debouncedPackId = useDebouncedValue(packId, 400)
-
-  const { data: existingPack } = useQuery({
-    queryKey: ['erratanet-pack', debouncedPackId],
-    queryFn: async () => {
-      if (!debouncedPackId) return null
-      try { return await api.erratanet.getPack(debouncedPackId) } catch { return null }
-    },
-    enabled: open && !!debouncedPackId,
-    staleTime: 30_000,
-  })
+  const { data: existingPack, lookupPackId: debouncedPackId } = useErratanetPackLookup(packId, open)
   const latestVersion = existingPack?.version ?? null
   const nextVersion = useMemo(() => bumpVersion(latestVersion, bump), [latestVersion, bump])
 
@@ -145,7 +116,7 @@ export function ShareAgentConfigDialog({ open, onOpenChange, storyId, storyName,
     setDescription('')
     setReadme('')
     setTags([])
-    setLicense(LICENSES[1].value)
+    setLicense(ERRATANET_LICENSES[1].value)
     seededRef.current = false
     selectionSeededRef.current = false
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -182,12 +153,6 @@ export function ShareAgentConfigDialog({ open, onOpenChange, storyId, storyName,
   // Does the current selection still carry scripts? Only selected script blocks
   // count, so unpicking them drops the "runs code" flag.
   const willHaveScripts = snapshot ? selectedScripts(selection, snapshot.preview).length > 0 : false
-
-  const addTag = useCallback(() => {
-    const tag = tagDraft.trim().toLowerCase()
-    if (tag && !tags.includes(tag)) setTags((prev) => [...prev, tag])
-    setTagDraft('')
-  }, [tagDraft, tags])
 
   const publishMut = useMutation({
     mutationFn: async () => {
@@ -251,48 +216,23 @@ export function ShareAgentConfigDialog({ open, onOpenChange, storyId, storyName,
         </DialogHeader>
 
         {publishedId ? (
-          <div className="flex flex-col items-center gap-3 py-10 text-center">
-            <div className="grid size-11 place-items-center rounded-full bg-primary/10">
-              <Check className="size-5 text-primary" />
-            </div>
-            <div>
-              <p className="text-sm font-medium">Shared</p>
-              <p className="mt-1 font-mono text-[0.8125rem] text-muted-foreground">{publishedId}</p>
-              <p className="mt-1 text-[0.6875rem] text-muted-foreground">version {publishedVersion}</p>
-            </div>
-            {(() => {
-              const url = packPageUrl(config?.hubUrl, publishedId)
-              return url ? (
-                <a href={url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-md border border-border/40 px-3 py-1.5 text-[0.75rem] text-foreground/80 transition-colors hover:border-border hover:text-foreground">
-                  View on ErrataNet
-                  <ExternalLink className="size-3.5" />
-                </a>
-              ) : null
-            })()}
-          </div>
+          <ErratanetPublishSuccess verb="Shared" id={publishedId} version={publishedVersion} hubUrl={config?.hubUrl} />
         ) : (
           <div className="flex-1 overflow-y-auto space-y-5 py-1 pr-1">
-            {!handle && (
-              <div className="flex items-start gap-2 rounded-md border border-amber-500/20 bg-amber-500/5 px-3 py-2">
-                <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-amber-500/80" />
-                <p className="text-[0.6875rem] leading-snug text-amber-600/80 dark:text-amber-400/80">
-                  No hub account connected. Sign in from the ErrataNet panel before sharing.
-                </p>
-              </div>
-            )}
+            {!handle && <ErratanetAccountNotice action="sharing" />}
 
             {/* What to include — down to individual agents and blocks. */}
             <div>
-              <h4 className={sectionLabel}>Include</h4>
+              <Eyebrow asChild><h4 className="mb-2">Include</h4></Eyebrow>
               {loadingSnapshot ? (
-                <p className="flex items-center gap-2 text-xs text-muted-foreground">
+                <Hint className="flex items-center gap-2">
                   <Loader2 className="size-3.5 animate-spin" /> Reading this story&apos;s config…
-                </p>
+                </Hint>
               ) : nothingToShare || !snapshot ? (
-                <p className="text-xs text-muted-foreground">
+                <Hint>
                   This story has no custom agent configuration yet. Tune some blocks, instructions, or
                   model assignments first.
-                </p>
+                </Hint>
               ) : (
                 <AgentConfigSelector preview={snapshot.preview} value={selection} onChange={setSelection} />
               )}
@@ -301,108 +241,53 @@ export function ShareAgentConfigDialog({ open, onOpenChange, storyId, storyName,
             {/* Scripts notice */}
             {willHaveScripts && (
               <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3">
-                <p className="flex items-center gap-2 text-[0.8125rem] font-medium text-foreground">
+                <p className="flex items-center gap-2 text-ui-body font-medium text-foreground">
                   <Code2 className="size-4 text-amber-500" />
                   This config runs code
                 </p>
-                <p className="mt-1 text-[0.6875rem] leading-snug text-muted-foreground">
+                <Hint className="mt-1 leading-snug">
                   It includes executable script blocks. The pack will be flagged &ldquo;runs code&rdquo;, and
                   importers must review the script source and confirm before it applies.
-                </p>
+                </Hint>
               </div>
             )}
 
-            {/* Slug + title */}
-            <div>
-              <h4 className={sectionLabel}>Slug</h4>
-              <div className="flex items-center gap-2">
-                <span className="shrink-0 font-mono text-[0.8125rem] text-muted-foreground">@{handle ?? 'handle'}/</span>
-                <Input
-                  value={slug}
-                  onChange={(e) => setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
-                  placeholder={slugify(title) || 'cozy-writer'}
-                  className="h-9 font-mono"
-                  data-component-id="share-config-slug"
-                />
-              </div>
-            </div>
+            <ErratanetIdentityFields
+              fieldPrefix="share-config"
+              handle={handle}
+              slug={slug}
+              slugPlaceholder={slugify(title) || 'cozy-writer'}
+              onSlugChange={setSlug}
+              title={title}
+              titlePlaceholder="Cozy Writer"
+              onTitleChange={setTitle}
+              description={description}
+              descriptionPlaceholder="What this configuration is good for…"
+              onDescriptionChange={setDescription}
+              readme={readme}
+              readmePlaceholder="Setup notes, what it pairs well with, credits… Markdown supported."
+              onReadmeChange={setReadme}
+              license={license}
+              onLicenseChange={setLicense}
+              tags={tags}
+              onTagsChange={setTags}
+            />
 
-            <div>
-              <h4 className={sectionLabel}>Title</h4>
-              <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Cozy Writer" maxLength={120} className="h-9" />
-            </div>
+            <ErratanetReleaseFields
+              visibility={visibility}
+              onVisibilityChange={setVisibility}
+              bump={bump}
+              onBumpChange={setBump}
+              nextVersion={nextVersion}
+              latestVersion={latestVersion}
+              newLabel="New config, starting at 1.0.0"
+            />
 
-            <div>
-              <div className="flex items-baseline justify-between">
-                <h4 className={sectionLabel}>Description</h4>
-                <span className={cn('text-[0.625rem] tabular-nums', descOver ? 'text-destructive' : 'text-muted-foreground')}>{description.length}/250</span>
-              </div>
-              <Textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What this configuration is good for…" rows={3} className="text-xs resize-y min-h-16 max-h-40" aria-invalid={descOver} />
-            </div>
-
-            <div>
-              <h4 className={sectionLabel}>Information</h4>
-              <Textarea value={readme} onChange={(e) => setReadme(e.target.value.slice(0, 8000))} placeholder="Setup notes, what it pairs well with, credits… Markdown supported." rows={4} className="text-xs resize-y min-h-20 max-h-56" />
-            </div>
-
-            <div>
-              <h4 className={sectionLabel}>License</h4>
-              <select value={license} onChange={(e) => setLicense(e.target.value)} className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]">
-                {LICENSES.map((l) => (<option key={l.value} value={l.value}>{l.label}</option>))}
-              </select>
-            </div>
-
-            <div>
-              <h4 className={sectionLabel}>Tags</h4>
-              {tags.length > 0 && (
-                <div className="mb-2 flex flex-wrap gap-1.5">
-                  {tags.map((tag) => (
-                    <Badge key={tag} variant="secondary" className="gap-1 text-xs">
-                      {tag}
-                      <button type="button" onClick={() => setTags((p) => p.filter((t) => t !== tag))} className="text-muted-foreground hover:text-foreground" aria-label={`Remove ${tag}`}>
-                        <X className="size-3" />
-                      </button>
-                    </Badge>
-                  ))}
-                </div>
-              )}
-              <Input
-                value={tagDraft}
-                onChange={(e) => setTagDraft(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); addTag() } }}
-                onBlur={addTag}
-                placeholder="Add a tag and press Enter"
-                className="h-9"
-              />
-            </div>
-
-            <div>
-              <h4 className={sectionLabel}>Visibility</h4>
-              <div className="flex w-fit gap-[3px] rounded-lg bg-muted/25 p-[3px]">
-                {(['public', 'unlisted'] as const).map((v) => (
-                  <button key={v} type="button" onClick={() => setVisibility(v)} className={cn('rounded-md px-3 py-[6px] text-[0.6875rem] font-medium capitalize transition-all duration-150', visibility === v ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')}>{v}</button>
-                ))}
-              </div>
-            </div>
-
-            <div>
-              <h4 className={sectionLabel}>Version</h4>
-              <div className="flex items-center gap-3">
-                <div className="flex rounded-lg bg-muted/25 p-[3px] gap-[3px]">
-                  {(['patch', 'minor', 'major'] as const).map((kind) => (
-                    <button key={kind} type="button" onClick={() => setBump(kind)} className={cn('px-3 py-[6px] rounded-md text-[0.6875rem] font-medium capitalize transition-all duration-150', bump === kind ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')}>{kind}</button>
-                  ))}
-                </div>
-                <span className="font-mono text-sm tabular-nums">{nextVersion}</span>
-              </div>
-              <p className="mt-1.5 text-[0.625rem] text-muted-foreground">{latestVersion ? `Latest published: ${latestVersion}` : 'New config, starting at 1.0.0'}</p>
-            </div>
-
-            <p className="text-[0.625rem] leading-snug text-muted-foreground">
+            <Hint className="leading-snug">
               API keys are never shared. Provider shape carries only the provider name, base URL, and model.
-            </p>
+            </Hint>
 
-            {error && <p className="text-[0.6875rem] text-destructive">{error}</p>}
+            {error && <Hint className="text-destructive">{error}</Hint>}
           </div>
         )}
 

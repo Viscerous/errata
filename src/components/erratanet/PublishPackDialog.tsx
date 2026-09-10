@@ -1,9 +1,9 @@
-import { useState, useMemo, useEffect, useCallback, useRef } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api, type Fragment } from '@/lib/api'
 import { q, useActiveBranchId } from '@/lib/query-keys'
 import type { PackManifestDraft } from '@/lib/erratanet/pack-schema'
-import { GLOBAL_PACK_ID_REGEX, packPageUrl } from '@/lib/erratanet/pack-schema'
+import { GLOBAL_PACK_ID_REGEX } from '@/lib/erratanet/pack-schema'
 import { slugify, bumpVersion, type BumpKind } from '@/lib/erratanet/publish-utils'
 import { serializeBundle } from '@/lib/fragment-clipboard'
 import { parseVisualRefs } from '@/lib/fragment-visuals'
@@ -17,16 +17,19 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Textarea } from '@/components/ui/textarea'
-import { Badge } from '@/components/ui/badge'
+import { SegmentedControl } from '@/components/settings/primitives'
+import { Eyebrow, Hint } from '@/components/ui/prose-text'
+import {
+  ERRATANET_LICENSES,
+  ErratanetAccountNotice,
+  ErratanetIdentityFields,
+  ErratanetPublishSuccess,
+  ErratanetReleaseFields,
+  useErratanetPackLookup,
+} from './ErratanetPublishFields'
 import {
   UploadCloud,
   Loader2,
-  Check,
-  AlertTriangle,
-  X,
-  ExternalLink,
   Image as ImageIcon,
 } from 'lucide-react'
 
@@ -46,14 +49,6 @@ interface PublishPackDialogProps {
   storyName?: string
 }
 
-const LICENSES = [
-  { value: 'CC0-1.0', label: 'CC0 1.0 (public domain)' },
-  { value: 'CC-BY-4.0', label: 'CC BY 4.0 (attribution)' },
-  { value: 'CC-BY-SA-4.0', label: 'CC BY-SA 4.0 (share-alike)' },
-  { value: 'CC-BY-NC-4.0', label: 'CC BY-NC 4.0 (non-commercial)' },
-  { value: 'proprietary', label: 'Proprietary (all rights reserved)' },
-] as const
-
 type ContentRating = 'general' | 'mature' | 'r18'
 
 const CONTENT_RATINGS: { value: ContentRating; label: string; hint: string }[] = [
@@ -61,11 +56,6 @@ const CONTENT_RATINGS: { value: ContentRating; label: string; hint: string }[] =
   { value: 'mature', label: 'Mature', hint: 'Mature themes; not explicit.' },
   { value: 'r18', label: 'R18', hint: 'Explicit adult content. Marked NSFW.' },
 ]
-
-const README_MAX = 8000
-
-const sectionLabel =
-  'text-[0.5625rem] text-muted-foreground uppercase tracking-[0.15em] font-medium mb-2'
 
 export function PublishPackDialog({
   open,
@@ -84,9 +74,8 @@ export function PublishPackDialog({
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [readme, setReadme] = useState('')
-  const [license, setLicense] = useState<string>(LICENSES[1].value)
+  const [license, setLicense] = useState<string>(ERRATANET_LICENSES[1].value)
   const [tags, setTags] = useState<string[]>([])
-  const [tagDraft, setTagDraft] = useState('')
   const [contentRating, setContentRating] = useState<ContentRating>('general')
   const [visibility, setVisibility] = useState<'public' | 'unlisted'>('public')
   const [bump, setBump] = useState<BumpKind>('patch')
@@ -114,19 +103,7 @@ export function PublishPackDialog({
   const packId = handle && effectiveSlug ? `@${handle}/${effectiveSlug}` : null
 
   // Look up the latest published version of this pack (404 -> brand new pack).
-  const { data: existingPack, isFetching: checkingPack } = useQuery({
-    queryKey: ['erratanet-pack', packId],
-    queryFn: async () => {
-      if (!packId) return null
-      try {
-        return await api.erratanet.getPack(packId)
-      } catch {
-        // Not found / unreachable: treat as a new pack.
-        return null
-      }
-    },
-    enabled: open && !!packId,
-  })
+  const { data: existingPack, isFetching: checkingPack } = useErratanetPackLookup(packId, open)
   const latestVersion = existingPack?.version ?? null
   const nextVersion = useMemo(() => bumpVersion(latestVersion, bump), [latestVersion, bump])
 
@@ -211,16 +188,6 @@ export function PublishPackDialog({
     if (typeof manifest.title === 'string' && manifest.title) setTitle(manifest.title)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, existingPack])
-
-  const addTag = useCallback(() => {
-    const tag = tagDraft.trim().toLowerCase()
-    if (tag && !tags.includes(tag)) setTags((prev) => [...prev, tag])
-    setTagDraft('')
-  }, [tagDraft, tags])
-
-  const removeTag = useCallback((tag: string) => {
-    setTags((prev) => prev.filter((t) => t !== tag))
-  }, [])
 
   const publishMut = useMutation({
     mutationFn: async () => {
@@ -314,168 +281,37 @@ export function PublishPackDialog({
         </DialogHeader>
 
         {publishedId ? (
-          <div className="flex flex-col items-center gap-3 py-10 text-center">
-            <div className="grid size-11 place-items-center rounded-full bg-primary/10">
-              <Check className="size-5 text-primary" />
-            </div>
-            <div>
-              <p className="text-sm font-medium">Published</p>
-              <p className="mt-1 font-mono text-[0.8125rem] text-muted-foreground">{publishedId}</p>
-              <p className="mt-1 text-[0.6875rem] text-muted-foreground">version {nextVersion}</p>
-            </div>
-            {(() => {
-              const packUrl = packPageUrl(config?.hubUrl, publishedId)
-              return packUrl ? (
-                <a
-                  href={packUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-1.5 rounded-md border border-border/40 px-3 py-1.5 text-[0.75rem] text-foreground/80 transition-colors hover:border-border hover:text-foreground"
-                >
-                  View on ErrataNet
-                  <ExternalLink className="size-3.5" />
-                </a>
-              ) : null
-            })()}
-          </div>
+          <ErratanetPublishSuccess verb="Published" id={publishedId} version={nextVersion} hubUrl={config?.hubUrl} />
         ) : (
           <div className="flex-1 overflow-y-auto space-y-5 py-1 pr-1">
-            {/* Account notice */}
-            {!handle && (
-              <div className="flex items-start gap-2 rounded-md border border-amber-500/20 bg-amber-500/5 px-3 py-2">
-                <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-amber-500/80" />
-                <p className="text-[0.6875rem] leading-snug text-amber-600/80 dark:text-amber-400/80">
-                  No hub account connected. Sign in from the ErrataNet panel before publishing.
-                </p>
-              </div>
-            )}
+            {!handle && <ErratanetAccountNotice action="publishing" />}
 
-            {/* Slug */}
-            <div>
-              <h4 className={sectionLabel}>Slug</h4>
-              <div className="flex items-center gap-2">
-                <span className="shrink-0 font-mono text-[0.8125rem] text-muted-foreground">
-                  @{handle ?? 'handle'}/
-                </span>
-                <Input
-                  value={slug}
-                  onChange={(e) => setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
-                  placeholder={derivedSlug || 'cozy-fantasy-starter'}
-                  className="h-9 font-mono"
-                  autoFocus
-                  data-component-id="publish-pack-slug"
-                />
-              </div>
-            </div>
-
-            {/* Title */}
-            <div>
-              <h4 className={sectionLabel}>Title</h4>
-              <Input
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="Cozy Fantasy Starter"
-                maxLength={120}
-                className="h-9"
-                data-component-id="publish-pack-title"
-              />
-            </div>
-
-            {/* Description */}
-            <div>
-              <div className="flex items-baseline justify-between">
-                <h4 className={sectionLabel}>Description</h4>
-                <span className={cn('text-[0.625rem] tabular-nums', descOver ? 'text-destructive' : 'text-muted-foreground')}>
-                  {description.length}/250
-                </span>
-              </div>
-              <Textarea
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="A short summary of what this pack contains..."
-                rows={3}
-                className="text-xs resize-y min-h-16 max-h-40"
-                aria-invalid={descOver}
-                data-component-id="publish-pack-description"
-              />
-            </div>
-
-            {/* Information (readme) */}
-            <div>
-              <div className="flex items-baseline justify-between">
-                <h4 className={sectionLabel}>Information</h4>
-                <span className="text-[0.625rem] tabular-nums text-muted-foreground">
-                  {readme.length}/{README_MAX}
-                </span>
-              </div>
-              <Textarea
-                value={readme}
-                onChange={(e) => setReadme(e.target.value.slice(0, README_MAX))}
-                placeholder="Long-form notes, setup, credits... Markdown is supported."
-                rows={4}
-                className="text-xs resize-y min-h-20 max-h-56"
-                data-component-id="publish-pack-readme"
-              />
-              <p className="mt-1.5 text-[0.625rem] text-muted-foreground">
-                Shown on the pack page. Optional.
-              </p>
-            </div>
-
-            {/* License */}
-            <div>
-              <h4 className={sectionLabel}>License</h4>
-              <select
-                value={license}
-                onChange={(e) => setLicense(e.target.value)}
-                className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
-                data-component-id="publish-pack-license"
-              >
-                {LICENSES.map((l) => (
-                  <option key={l.value} value={l.value}>{l.label}</option>
-                ))}
-              </select>
-            </div>
-
-            {/* Tags */}
-            <div>
-              <h4 className={sectionLabel}>Tags</h4>
-              {tags.length > 0 && (
-                <div className="mb-2 flex flex-wrap gap-1.5">
-                  {tags.map((tag) => (
-                    <Badge key={tag} variant="secondary" className="gap-1 text-xs">
-                      {tag}
-                      <button
-                        type="button"
-                        onClick={() => removeTag(tag)}
-                        className="text-muted-foreground hover:text-foreground"
-                        aria-label={`Remove ${tag}`}
-                      >
-                        <X className="size-3" />
-                      </button>
-                    </Badge>
-                  ))}
-                </div>
-              )}
-              <Input
-                value={tagDraft}
-                onChange={(e) => setTagDraft(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ',') {
-                    e.preventDefault()
-                    addTag()
-                  }
-                }}
-                onBlur={addTag}
-                placeholder="Add a tag and press Enter"
-                className="h-9"
-                data-component-id="publish-pack-tags"
-              />
-            </div>
+            <ErratanetIdentityFields
+              fieldPrefix="publish-pack"
+              handle={handle}
+              slug={slug}
+              slugPlaceholder={derivedSlug || 'cozy-fantasy-starter'}
+              onSlugChange={setSlug}
+              title={title}
+              titlePlaceholder="Cozy Fantasy Starter"
+              onTitleChange={setTitle}
+              description={description}
+              descriptionPlaceholder="A short summary of what this pack contains…"
+              onDescriptionChange={setDescription}
+              readme={readme}
+              readmePlaceholder="Long-form notes, setup, credits… Markdown is supported."
+              onReadmeChange={setReadme}
+              license={license}
+              onLicenseChange={setLicense}
+              tags={tags}
+              onTagsChange={setTags}
+              autoFocusSlug
+            />
 
             {/* Chapters (story mode, derived from markers) */}
             {isStory && chapters.length > 0 && (
               <div>
-                <h4 className={sectionLabel}>Chapters ({chapters.length})</h4>
+                <Eyebrow asChild><h4 className="mb-2">Chapters ({chapters.length})</h4></Eyebrow>
                 <ol className="max-h-28 overflow-y-auto rounded-md border border-border/40 bg-muted/15 px-3 py-2 text-xs text-muted-foreground">
                   {chapters.map((ch, i) => (
                     <li key={i} className="flex gap-2 py-0.5">
@@ -484,16 +320,16 @@ export function PublishPackDialog({
                     </li>
                   ))}
                 </ol>
-                <p className="mt-1.5 text-[0.625rem] text-muted-foreground">
+                <Hint className="mt-1.5">
                   Derived from chapter markers. Shown on the pack page.
-                </p>
+                </Hint>
               </div>
             )}
 
             {/* Thumbnail */}
             {thumbnailCandidates.length > 0 && (
               <div>
-                <h4 className={sectionLabel}>Thumbnail</h4>
+                <Eyebrow asChild><h4 className="mb-2">Thumbnail</h4></Eyebrow>
                 <div className="flex flex-wrap gap-2">
                   <button
                     type="button"
@@ -526,88 +362,32 @@ export function PublishPackDialog({
 
             {/* Content rating */}
             <div>
-              <h4 className={sectionLabel}>Content rating</h4>
-              <div className="flex w-fit gap-[3px] rounded-lg bg-muted/25 p-[3px]">
-                {CONTENT_RATINGS.map((r) => (
-                  <button
-                    key={r.value}
-                    type="button"
-                    onClick={() => setContentRating(r.value)}
-                    className={cn(
-                      'rounded-md px-3 py-[6px] text-[0.6875rem] font-medium transition-all duration-150',
-                      contentRating === r.value ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
-                    )}
-                    data-component-id={`publish-pack-rating-${r.value}`}
-                  >
-                    {r.label}
-                  </button>
-                ))}
-              </div>
-              <p className="mt-1.5 text-[0.625rem] text-muted-foreground">
+              <Eyebrow asChild><h4 className="mb-2">Content rating</h4></Eyebrow>
+              <SegmentedControl value={contentRating} options={CONTENT_RATINGS} onChange={setContentRating} />
+              <Hint className="mt-1.5">
                 {CONTENT_RATINGS.find((r) => r.value === contentRating)?.hint}
-              </p>
+              </Hint>
             </div>
 
-            {/* Visibility */}
-            <div>
-              <h4 className={sectionLabel}>Visibility</h4>
-              <div className="flex w-fit gap-[3px] rounded-lg bg-muted/25 p-[3px]">
-                {(['public', 'unlisted'] as const).map((v) => (
-                  <button
-                    key={v}
-                    type="button"
-                    onClick={() => setVisibility(v)}
-                    className={cn(
-                      'rounded-md px-3 py-[6px] text-[0.6875rem] font-medium capitalize transition-all duration-150',
-                      visibility === v ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
-                    )}
-                  >
-                    {v}
-                  </button>
-                ))}
-              </div>
-              <p className="mt-1.5 text-[0.625rem] text-muted-foreground">
-                {visibility === 'public'
-                  ? 'Listed in search and explore.'
-                  : 'Hidden from search. Only people with the link can find it.'}
-              </p>
-            </div>
-
-            {/* Version */}
-            <div>
-              <h4 className={sectionLabel}>Version</h4>
-              <div className="flex items-center gap-3">
-                <div className="flex rounded-lg bg-muted/25 p-[3px] gap-[3px]">
-                  {(['patch', 'minor', 'major'] as const).map((kind) => (
-                    <button
-                      key={kind}
-                      type="button"
-                      onClick={() => setBump(kind)}
-                      className={cn(
-                        'px-3 py-[6px] rounded-md text-[0.6875rem] font-medium capitalize transition-all duration-150',
-                        bump === kind ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
-                      )}
-                    >
-                      {kind}
-                    </button>
-                  ))}
-                </div>
-                <span className="font-mono text-sm tabular-nums">{nextVersion}</span>
-                {checkingPack && <Loader2 className="size-3.5 animate-spin text-muted-foreground" />}
-              </div>
-              <p className="mt-1.5 text-[0.625rem] text-muted-foreground">
-                {latestVersion ? `Latest published: ${latestVersion}` : 'New pack, starting at 1.0.0'}
-              </p>
-            </div>
+            <ErratanetReleaseFields
+              visibility={visibility}
+              onVisibilityChange={setVisibility}
+              bump={bump}
+              onBumpChange={setBump}
+              nextVersion={nextVersion}
+              latestVersion={latestVersion}
+              checkingVersion={checkingPack}
+              newLabel="New pack, starting at 1.0.0"
+            />
 
             {/* MVP note */}
-            <p className="text-[0.625rem] leading-snug text-muted-foreground">
+            <Hint className="leading-snug">
               {isStory
                 ? 'The whole story is published: branches, prose chain, fragments, and images. Context blocks and agent configuration are not included.'
                 : 'Packs carry fragments and their images only. Context blocks and agent configuration are not included.'}
-            </p>
+            </Hint>
 
-            {error && <p className="text-[0.6875rem] text-destructive">{error}</p>}
+            {error && <Hint className="text-destructive">{error}</Hint>}
           </div>
         )}
 

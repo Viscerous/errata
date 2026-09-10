@@ -295,12 +295,14 @@ export const selectClass =
  * per-use width constraints such as max-w-[11rem].
  */
 export function SettingsSelect({
+  id,
   value,
   onChange,
   disabled,
   className,
   children,
 }: {
+  id?: string
   value: string
   onChange: (value: string) => void
   disabled?: boolean
@@ -309,6 +311,7 @@ export function SettingsSelect({
 }) {
   return (
     <select
+      id={id}
       value={value}
       onChange={(e) => onChange(e.target.value)}
       disabled={disabled}
