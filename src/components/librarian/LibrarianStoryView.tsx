@@ -131,11 +131,13 @@ export function LibrarianStoryView({ storyId, status, onOpenChat }: LibrarianSto
           <section>
             <SectionLabel icon={<Clock />}>Timeline</SectionLabel>
             <div className="relative mt-1.5">
-              <div className="absolute bottom-2 left-[5px] top-2 w-px bg-border/40" />
+              <div className="absolute bottom-2 left-1.5 top-2 w-px -translate-x-1/2 bg-border/40" />
               {status.timeline.slice(-10).map((entry, index) => (
-                <div key={`${entry.fragmentId}-${entry.event}-${index}`} className="relative flex items-start gap-2.5 py-1">
-                  <span className="relative z-10 mt-[5px] size-[7px] shrink-0 rounded-full bg-muted-foreground/20 ring-2 ring-background" />
-                  <span className="min-w-0"><span className="block text-ui-label leading-snug text-foreground/65">{entry.event}</span><span className="font-mono text-ui-label text-muted-foreground">{entry.fragmentId}</span></span>
+                <div key={`${entry.fragmentId}-${entry.event}-${index}`} className="relative grid grid-cols-[12px_minmax(0,1fr)] gap-x-2.5 py-1">
+                  <span className="relative z-10 flex h-4 items-center justify-center" aria-hidden>
+                    <span className="size-[7px] rounded-full bg-muted-foreground/20 ring-2 ring-background" />
+                  </span>
+                  <span className="min-w-0"><span className="block text-ui-label leading-4 text-foreground/65">{entry.event}</span><span className="font-mono text-ui-label text-muted-foreground">{entry.fragmentId}</span></span>
                 </div>
               ))}
             </div>
