@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button'
 import { StreamMarkdown } from '@/components/ui/stream-markdown'
 import { ErrataMark } from '@/components/ErrataLogo'
 import { ChatSendButton } from '@/components/chat/ChatSendButton'
-import { ComposerFrame, ComposerTextarea, ComposerToolbar } from '@/components/chat/ComposerSurface'
+import { ChatComposerRow, ChatComposerTextarea, ComposerFrame } from '@/components/chat/ComposerSurface'
 import { Eyebrow, MetaLabel } from '@/components/ui/prose-text'
 import { Spinner } from '@/components/ui/async-view'
 import { WorkspaceHeader, WorkspaceRail, WorkspaceTitle, WorkspaceToolbar } from '@/components/ui/workspace'
@@ -273,20 +273,19 @@ export function StoryWizard({ controller, onClose }: StoryWizardProps) {
           <div className="shrink-0" data-component-id="story-setup-composer-column">
             <div className="mx-auto w-full max-w-2xl px-4 py-3 sm:px-6">
               <ComposerFrame>
-                <ComposerTextarea
-                  ref={textareaRef}
-                  value={input}
-                  onChange={event => setInput(event.target.value)}
-                  onKeyDown={handleKeyDown}
-                  disabled={isStreaming || !contextReady}
-                  rows={1}
-                  autoFocus
-                  aria-label="Your story idea"
-                  placeholder="Tell Errata whatever you have..."
-                  className="min-h-11 max-h-44"
-                />
-                <ComposerToolbar>
-                  <span className="text-ui-label text-muted-foreground">Enter to send · Shift+Enter for newline</span>
+                <ChatComposerRow>
+                  <ChatComposerTextarea
+                    ref={textareaRef}
+                    value={input}
+                    onChange={event => setInput(event.target.value)}
+                    onKeyDown={handleKeyDown}
+                    disabled={isStreaming || !contextReady}
+                    rows={1}
+                    autoFocus
+                    aria-label="Your story idea"
+                    placeholder="Tell Errata whatever you have..."
+                    className="max-h-44"
+                  />
                   <ChatSendButton
                     isStreaming={isStreaming}
                     canSend={contextReady && Boolean(input.trim())}
@@ -296,7 +295,7 @@ export function StoryWizard({ controller, onClose }: StoryWizardProps) {
                     idPrefix="story-setup"
                     size="md"
                   />
-                </ComposerToolbar>
+                </ChatComposerRow>
               </ComposerFrame>
             </div>
           </div>

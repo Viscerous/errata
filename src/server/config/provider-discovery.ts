@@ -77,7 +77,9 @@ export async function localProviderCandidates(deps: DiscoveryDependencies = {}):
   const omlxPort = validPort(omlxServer.port)
   if (omlxPort) candidates.set('omlx', `http://127.0.0.1:${omlxPort}/v1`)
 
-  return [...candidates].map(([preset, baseURL]) => ({ preset, baseURL }))
+  const resolved = [...candidates].map(([preset, baseURL]) => ({ preset, baseURL }))
+  resolved.push({ preset: 'llamacpp', baseURL: 'http://127.0.0.1:9931/v1' })
+  return resolved
 }
 
 async function probeCandidate(
@@ -113,5 +115,13 @@ async function probeCandidate(
 export async function discoverLocalProviders(deps: DiscoveryDependencies = {}): Promise<DiscoveredProvider[]> {
   const candidates = await localProviderCandidates(deps)
   const fetchImpl = deps.fetch ?? globalThis.fetch
-  return Promise.all(candidates.map(candidate => probeCandidate(candidate, fetchImpl, deps.timeoutMs ?? 1_500)))
+  const results = await Promise.all(candidates.map(candidate => probeCandidate(candidate, fetchImpl, deps.timeoutMs ?? 1_500)))
+  const byPreset = new Map<PresetId, DiscoveredProvider>()
+  for (const result of results) {
+    const previous = byPreset.get(result.preset)
+    if (!previous || (previous.status === 'unavailable' && result.status === 'available')) {
+      byPreset.set(result.preset, result)
+    }
+  }
+  return [...byPreset.values()]
 }

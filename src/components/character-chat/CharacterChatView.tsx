@@ -6,7 +6,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Caption, EmptyHint } from '@/components/ui/prose-text'
 import { AssistantMessageView } from '@/components/chat/ChatMessageParts'
 import { ChatSendButton } from '@/components/chat/ChatSendButton'
-import { ComposerFrame, ComposerTextarea, ComposerToolbar } from '@/components/chat/ComposerSurface'
+import { ChatComposerRow, ChatComposerTextarea, ComposerFrame } from '@/components/chat/ComposerSurface'
 import { useChatTurn, type ChatTurnMessage } from '@/components/chat/use-chat-turn'
 import { CharacterAvatar } from '@/components/shared/CharacterAvatar'
 import { ChatConfig } from './ChatConfig'
@@ -290,24 +290,23 @@ export function CharacterChatView({ storyId, initialCharacterId, onClose }: Char
       <div>
         <div className="max-w-2xl mx-auto px-4 py-3">
           <ComposerFrame>
-            <ComposerTextarea
-              ref={textareaRef}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              aria-label="Message to character"
-              placeholder={
-                selectedCharacter
-                  ? `Say something to ${selectedCharacter.name}...`
-                  : 'Select a character first...'
-              }
-              disabled={isStreaming || !characterId}
-              className="min-h-11 max-h-[400px]"
-              rows={1}
-              data-component-id="character-chat-input"
-            />
-            <ComposerToolbar>
-              <span className="text-ui-label text-muted-foreground">Enter to send · Shift+Enter for newline</span>
+            <ChatComposerRow>
+              <ChatComposerTextarea
+                ref={textareaRef}
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                aria-label="Message to character"
+                placeholder={
+                  selectedCharacter
+                    ? `Say something to ${selectedCharacter.name}...`
+                    : 'Select a character first...'
+                }
+                disabled={isStreaming || !characterId}
+                className="max-h-[400px]"
+                rows={1}
+                data-component-id="character-chat-input"
+              />
               <ChatSendButton
                 isStreaming={isStreaming}
                 canSend={!!input.trim() && !!characterId}
@@ -317,7 +316,7 @@ export function CharacterChatView({ storyId, initialCharacterId, onClose }: Char
                 idPrefix="character-chat"
                 size="md"
               />
-            </ComposerToolbar>
+            </ChatComposerRow>
           </ComposerFrame>
         </div>
       </div>

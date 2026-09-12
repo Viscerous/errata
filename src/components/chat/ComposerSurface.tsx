@@ -28,3 +28,12 @@ export function ComposerTextarea({ className, ...props }: ComponentProps<'textar
 export function ComposerToolbar({ className, ...props }: ComponentProps<'div'>) {
   return <div className={cn('flex items-center justify-between gap-2 px-3 pb-2.5 pt-0.5', className)} {...props} />
 }
+
+/** Chat inputs share the prose composer's frame, but keep Send beside the text. */
+export function ChatComposerRow({ className, ...props }: ComponentProps<'div'>) {
+  return <div className={cn('flex items-end gap-1 p-1.5', className)} {...props} />
+}
+
+export function ChatComposerTextarea({ className, ...props }: ComponentProps<'textarea'>) {
+  return <ComposerTextarea className={cn('min-h-9 min-w-0 flex-1 px-2.5 py-1.5', className)} {...props} />
+}

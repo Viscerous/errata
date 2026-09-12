@@ -666,7 +666,7 @@ export function ProseWritingPanel({
           <FloatingElement
             editor={editor}
             shouldShow={hasSelection || isTransformingSelection}
-            placement="top"
+            placement="bottom"
             offsetValue={8}
           >
             <div className="w-[min(34rem,calc(100vw-2rem))] overflow-hidden rounded-lg border border-border/60 bg-elevated/95 shadow-xl backdrop-blur-md">

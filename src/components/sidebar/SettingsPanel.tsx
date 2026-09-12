@@ -74,7 +74,7 @@ function FontPicker({ role, label, description, activeFont, onSelect }: {
               aria-pressed={isActive}
               onClick={() => onSelect(opt.name)}
               style={{ fontFamily: `"${opt.name}", ${opt.fallback}` }}
-              className="border border-transparent text-ui-body data-[variant=secondary]:border-border/50"
+              className="border border-transparent text-ui-body font-normal data-[variant=secondary]:border-border/50"
             >
               {opt.name}
               {opt.tag && (
@@ -125,14 +125,14 @@ function MentionTypePicker({
           <Button
             key={option.type}
             type="button"
-            variant={active ? 'secondary' : 'outline'}
+            variant="outline"
             size="xs"
             aria-pressed={active}
             onClick={() => toggleType(option.type)}
             className={cn(
-              'gap-1 px-2 text-ui-caption',
+              'gap-1 px-2 text-ui-caption shadow-none',
               active
-                ? 'bg-foreground text-background hover:bg-foreground/90'
+                ? 'border-foreground bg-foreground text-background hover:bg-foreground/90 hover:text-background dark:border-foreground dark:bg-foreground dark:hover:bg-foreground/90 dark:hover:text-background'
                 : 'border-border/60 bg-transparent text-muted-foreground hover:bg-accent/40',
             )}
             title={option.label}
@@ -245,10 +245,9 @@ function LLMSection({ story, globalConfig, updateMutation, onManageProviders }: 
   )
 }
 
-function GuidedPromptsControls({ story, onUpdate, isPending }: {
+function GuidedPromptsControls({ story, onUpdate }: {
   story: StoryMeta
   onUpdate: (data: { guidedContinuePrompt?: string; guidedSceneSettingPrompt?: string; guidedSuggestPrompt?: string }) => void
-  isPending: boolean
 }) {
   const [continuePrompt, setContinuePrompt] = useState(story.settings.guidedContinuePrompt ?? '')
   const [sceneSettingPrompt, setSceneSettingPrompt] = useState(story.settings.guidedSceneSettingPrompt ?? '')
@@ -256,16 +255,17 @@ function GuidedPromptsControls({ story, onUpdate, isPending }: {
 
   useEffect(() => {
     setContinuePrompt(story.settings.guidedContinuePrompt ?? '')
+  }, [story.settings.guidedContinuePrompt])
+  useEffect(() => {
     setSceneSettingPrompt(story.settings.guidedSceneSettingPrompt ?? '')
+  }, [story.settings.guidedSceneSettingPrompt])
+  useEffect(() => {
     setSuggestPrompt(story.settings.guidedSuggestPrompt ?? '')
-  }, [
-    story.settings.guidedContinuePrompt,
-    story.settings.guidedSceneSettingPrompt,
-    story.settings.guidedSuggestPrompt,
-  ])
+  }, [story.settings.guidedSuggestPrompt])
 
   const save = (field: 'guidedContinuePrompt' | 'guidedSceneSettingPrompt' | 'guidedSuggestPrompt', value: string) => {
-    onUpdate({ [field]: value.trim() === '' ? '' : value })
+    const next = value.trim() === '' ? '' : value
+    if (next !== (story.settings[field] ?? '')) onUpdate({ [field]: next })
   }
 
   return (
@@ -279,7 +279,6 @@ function GuidedPromptsControls({ story, onUpdate, isPending }: {
             onBlur={() => save('guidedContinuePrompt', continuePrompt)}
             placeholder={GUIDED_CONTINUE_PROMPT}
             rows={3}
-            disabled={isPending}
             className="resize-none bg-elevated/60 text-ui-body"
           />
         </div>
@@ -292,7 +291,6 @@ function GuidedPromptsControls({ story, onUpdate, isPending }: {
             onBlur={() => save('guidedSceneSettingPrompt', sceneSettingPrompt)}
             placeholder={GUIDED_SCENE_SETTING_PROMPT}
             rows={3}
-            disabled={isPending}
             className="resize-none bg-elevated/60 text-ui-body"
           />
         </div>
@@ -307,7 +305,6 @@ function GuidedPromptsControls({ story, onUpdate, isPending }: {
             onBlur={() => save('guidedSuggestPrompt', suggestPrompt)}
             placeholder={GUIDED_SUGGEST_PROMPT}
             rows={6}
-            disabled={isPending}
             className="resize-none bg-elevated/60 text-ui-body"
           />
         </div>
@@ -411,10 +408,17 @@ export function SettingsPanel({
   })
 
   const updateMutation = useMutation({
+    mutationKey: ['story-settings', storyId],
+    scope: { id: `story-settings:${storyId}` },
     mutationFn: (data: Parameters<typeof api.settings.update>[1]) =>
       api.settings.update(storyId, data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['story', storyId] })
+    onSuccess: (updated) => {
+      queryClient.setQueryData(['story', storyId], updated)
+    },
+    onSettled: () => {
+      if (queryClient.isMutating({ mutationKey: ['story-settings', storyId] }) === 1) {
+        queryClient.invalidateQueries({ queryKey: ['story', storyId] })
+      }
     },
   })
 
@@ -605,7 +609,6 @@ export function SettingsPanel({
                   { value: 'play' as const, label: 'Play' },
                 ]}
                 onChange={(v) => updateMutation.mutate({ authorInputMode: v })}
-                disabled={updateMutation.isPending}
               />
             </SettingRow>
             <SettingRow label="Generation mode" description="How prose generation is handled">
@@ -616,7 +619,6 @@ export function SettingsPanel({
                   { value: 'prewriter' as const, label: 'Prewriter' },
                 ]}
                 onChange={(v) => updateMutation.mutate({ generationMode: v })}
-                disabled={updateMutation.isPending}
               />
             </SettingRow>
             {(story.settings.generationMode ?? 'standard') === 'prewriter' && (
@@ -630,14 +632,12 @@ export function SettingsPanel({
                       { value: 'extensive' as const, label: 'Extensive' },
                     ]}
                     onChange={(v) => updateMutation.mutate({ prewriterReasoning: v })}
-                    disabled={updateMutation.isPending}
                   />
                 </SettingRow>
                 <SettingRow label="Clarify before writing" description="Let the prewriter ask you questions when your direction is ambiguous, before it writes.">
                   <Toggle
                     checked={story.settings.clarifyBeforeGenerate ?? false}
                     onChange={(next) => updateMutation.mutate({ clarifyBeforeGenerate: next })}
-                    disabled={updateMutation.isPending}
                     label="Toggle clarify before writing"
                   />
                 </SettingRow>
@@ -651,7 +651,6 @@ export function SettingsPanel({
                   { value: 'markdown', label: 'Markdown' },
                 ]}
                 onChange={(v) => updateMutation.mutate({ outputFormat: v })}
-                disabled={updateMutation.isPending}
               />
             </SettingRow>
             <SettingRow label="Max steps" description="Tool-use rounds per generation" helpTopic="generation#max-steps">
@@ -660,14 +659,12 @@ export function SettingsPanel({
                 min={1}
                 max={50}
                 onChange={(v) => updateMutation.mutate({ maxSteps: v })}
-                disabled={updateMutation.isPending}
               />
             </SettingRow>
             <SettingRow label="Disable thinking" description="Suppress extended thinking / reasoning mode on models that support it">
               <Toggle
                 checked={story.settings.disableThinking ?? false}
                 onChange={(next) => updateMutation.mutate({ disableThinking: next })}
-                disabled={updateMutation.isPending}
                 label="Toggle disable thinking"
               />
             </SettingRow>
@@ -675,7 +672,6 @@ export function SettingsPanel({
               <Toggle
                 checked={story.settings.expandThoughtsByDefault ?? true}
                 onChange={(next) => updateMutation.mutate({ expandThoughtsByDefault: next })}
-                disabled={updateMutation.isPending}
                 label="Toggle expand thinking by default"
               />
             </SettingRow>
@@ -690,7 +686,6 @@ export function SettingsPanel({
                   { value: 'advanced', label: 'Custom' },
                 ]}
                 onChange={(v) => updateMutation.mutate({ contextOrderMode: v })}
-                disabled={updateMutation.isPending}
               />
             </SettingRow>
             <div className="px-3 py-2.5">
@@ -719,14 +714,12 @@ export function SettingsPanel({
                     const defaults = { proseLimit: 10, maxTokens: 40000, maxCharacters: 160000 } as const
                     updateMutation.mutate({ contextCompact: { type: v, value: defaults[v] } })
                   }}
-                  disabled={updateMutation.isPending}
                 />
                 <NumberField
                   value={story.settings.contextCompact?.value ?? 10}
                   min={(story.settings.contextCompact?.type ?? 'proseLimit') === 'proseLimit' ? 1 : (story.settings.contextCompact?.type ?? 'proseLimit') === 'maxTokens' ? 100 : 500}
                   max={(story.settings.contextCompact?.type ?? 'proseLimit') === 'proseLimit' ? 100 : (story.settings.contextCompact?.type ?? 'proseLimit') === 'maxTokens' ? 100000 : 500000}
                   onChange={(v) => updateMutation.mutate({ contextCompact: { type: story.settings.contextCompact?.type ?? 'proseLimit', value: v } })}
-                  disabled={updateMutation.isPending}
                   className={(story.settings.contextCompact?.type ?? 'proseLimit') !== 'proseLimit' ? 'w-20' : undefined}
                 />
               </div>
@@ -738,7 +731,6 @@ export function SettingsPanel({
               <Toggle
                 checked={story.settings.disableLibrarianAutoAnalysis ?? false}
                 onChange={(next) => updateMutation.mutate({ disableLibrarianAutoAnalysis: next })}
-                disabled={updateMutation.isPending}
                 label="Toggle disable auto analysis"
               />
             </SettingRow>
@@ -746,7 +738,6 @@ export function SettingsPanel({
               <Toggle
                 checked={story.settings.autoApplyLibrarianSuggestions ?? false}
                 onChange={(next) => updateMutation.mutate({ autoApplyLibrarianSuggestions: next })}
-                disabled={updateMutation.isPending}
                 label="Toggle auto-apply suggestions"
               />
             </SettingRow>
@@ -754,7 +745,6 @@ export function SettingsPanel({
               <Toggle
                 checked={story.settings.disableLibrarianDirections ?? false}
                 onChange={(next) => updateMutation.mutate({ disableLibrarianDirections: next })}
-                disabled={updateMutation.isPending}
                 label="Toggle automatic directions"
               />
             </SettingRow>
@@ -762,7 +752,6 @@ export function SettingsPanel({
               <Toggle
                 checked={story.settings.disableLibrarianSuggestions ?? false}
                 onChange={(next) => updateMutation.mutate({ disableLibrarianSuggestions: next })}
-                disabled={updateMutation.isPending}
                 label="Toggle disable suggestions"
               />
             </SettingRow>
@@ -802,7 +791,7 @@ export function SettingsPanel({
                 The prompts behind the guided writing buttons. Leave a field empty to use its default.
               </p></MetaLabel>
             </div>
-            <GuidedPromptsControls story={story} onUpdate={(data) => updateMutation.mutate(data)} isPending={updateMutation.isPending} />
+            <GuidedPromptsControls story={story} onUpdate={(data) => updateMutation.mutate(data)} />
           </div>
         </div>
       </SettingsSection>

@@ -47,14 +47,13 @@ export function AboutSection() {
       </SettingsCard>
 
       <p className="mt-2 text-center text-ui-label leading-relaxed text-muted-foreground">
-        Built by{' '}
         <a
-          href="https://github.com/nokusukun"
+          href="https://github.com/Viscerous/errata"
           target="_blank"
           rel="noopener noreferrer"
           className="underline transition-colors hover:text-foreground/70"
         >
-          nokusukun
+          Viscerous fork
         </a>
         {' · '}GPL-2.0
       </p>

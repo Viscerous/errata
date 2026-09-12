@@ -17,6 +17,7 @@ describe('local provider discovery', () => {
       { preset: 'ollama', baseURL: 'http://localhost:22444/v1' },
       { preset: 'lmstudio', baseURL: 'http://127.0.0.1:6123/v1' },
       { preset: 'llamacpp', baseURL: 'http://127.0.0.1:8080/v1' },
+      { preset: 'llamacpp', baseURL: 'http://127.0.0.1:9931/v1' },
       { preset: 'koboldcpp', baseURL: 'http://127.0.0.1:5001/v1' },
       { preset: 'omlx', baseURL: 'http://127.0.0.1:8123/v1' },
     ]))
@@ -63,5 +64,24 @@ describe('local provider discovery', () => {
       status: 'unavailable', error: 'Failed to fetch models: connection refused',
     })
     expect(result.filter(provider => provider.status === 'available')).toHaveLength(4)
+    expect(result.filter(provider => provider.preset === 'llamacpp')).toHaveLength(1)
+    expect(result.find(provider => provider.preset === 'llamacpp')?.baseURL).toBe('http://127.0.0.1:8080/v1')
+  })
+
+  it('discovers llama.cpp on the announced future default port when 8080 is unavailable', async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      if (String(input).includes(':8080/')) throw new Error('connection refused')
+      return new Response(JSON.stringify({ data: [{ id: 'local-model' }] }), { status: 200 })
+    }) as unknown as typeof fetch
+
+    const result = await discoverLocalProviders({
+      fetch: fetchMock,
+      readText: async () => { throw new Error('missing') },
+      timeoutMs: 100,
+    })
+
+    expect(result.find(provider => provider.preset === 'llamacpp')).toMatchObject({
+      status: 'available', baseURL: 'http://127.0.0.1:9931/v1',
+    })
   })
 })

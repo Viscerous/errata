@@ -5,7 +5,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { EmptyHint } from '@/components/ui/prose-text'
 import { AssistantMessageView } from '@/components/chat/ChatMessageParts'
 import { ChatSendButton } from '@/components/chat/ChatSendButton'
-import { ComposerFrame, ComposerTextarea, ComposerToolbar } from '@/components/chat/ComposerSurface'
+import { ChatComposerRow, ChatComposerTextarea, ComposerFrame } from '@/components/chat/ComposerSurface'
 import { useChatTurn, type ChatTurnMessage } from '@/components/chat/use-chat-turn'
 
 interface LibrarianChatProps {
@@ -190,20 +190,19 @@ export function LibrarianChat({ storyId, conversationId, initialInput }: Librari
       {/* Input area */}
       <div className="p-3">
         <ComposerFrame>
-          <ComposerTextarea
-            ref={textareaRef}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            aria-label="Ask the librarian"
-            placeholder="Ask the librarian..."
-            disabled={isStreaming}
-            className="min-h-11 max-h-[400px]"
-            rows={1}
-            data-component-id="librarian-chat-input"
-          />
-          <ComposerToolbar>
-            <span className="text-ui-label text-muted-foreground">Enter to send · Shift+Enter for newline</span>
+          <ChatComposerRow>
+            <ChatComposerTextarea
+              ref={textareaRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              aria-label="Ask the librarian"
+              placeholder="Ask the librarian..."
+              disabled={isStreaming}
+              className="max-h-[400px]"
+              rows={1}
+              data-component-id="librarian-chat-input"
+            />
             <ChatSendButton
               isStreaming={isStreaming}
               canSend={!!input.trim()}
@@ -211,8 +210,9 @@ export function LibrarianChat({ storyId, conversationId, initialInput }: Librari
               onStop={stop}
               stopLabel="Stop the librarian"
               idPrefix="librarian-chat"
+              size="md"
             />
-          </ComposerToolbar>
+          </ChatComposerRow>
         </ComposerFrame>
       </div>
     </div>
