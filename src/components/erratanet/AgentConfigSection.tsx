@@ -31,7 +31,7 @@ function includesLabel(includes: string[]): string {
 /** Small uppercase block label, matching the panel's other sections. */
 function Label({ children }: { children: React.ReactNode }) {
   return (
-    <p className="mb-2.5 text-[0.625rem] font-medium uppercase tracking-[0.13em] text-muted-foreground">
+    <p className="mb-2.5 text-ui-label font-medium uppercase tracking-[0.13em] text-muted-foreground">
       {children}
     </p>
   )
@@ -75,29 +75,29 @@ export function AgentConfigSection({
   return (
     <section>
       <Label>Agent configuration</Label>
-      <p className="mb-3 text-[0.75rem] leading-snug text-muted-foreground">
+      <p className="mb-3 text-ui-caption leading-snug text-muted-foreground">
         Share how you&apos;ve tuned this story&apos;s agents, or apply a saved preset to it.
       </p>
 
       {/* Configs already shared from this story — re-syncable, like fragment packs. */}
       {sharedConfigs.length > 0 && (
         <div className="mb-3 space-y-2">
-          <p className="text-[0.625rem] uppercase tracking-wider text-muted-foreground">Shared configs</p>
+          <p className="text-ui-label uppercase tracking-wider text-muted-foreground">Shared configs</p>
           {sharedConfigs.map((sc) => (
             <div
               key={sc.pack}
               className="flex items-center gap-2 rounded-lg border border-border/40 bg-card/40 px-3 py-2.5"
             >
               <div className="min-w-0 flex-1">
-                <PackLink pack={sc.pack} hubUrl={hubUrl} className="text-[0.75rem]" />
-                <p className="font-mono text-[0.625rem] text-muted-foreground">
+                <PackLink pack={sc.pack} hubUrl={hubUrl} className="text-ui-caption" />
+                <p className="font-mono text-ui-label text-muted-foreground">
                   v{sc.version} · {includesLabel(sc.includes)}
                 </p>
               </div>
               <Button
                 size="sm"
                 variant="outline"
-                className="h-7 shrink-0 gap-1.5 px-2.5 text-[0.6875rem]"
+                className="h-7 shrink-0 gap-1.5 px-2.5 text-ui-label"
                 onClick={() => setShare({ slug: sc.pack.split('/')[1], includes: sc.includes })}
               >
                 <ArrowUpFromLine className="size-3" />
@@ -117,7 +117,7 @@ export function AgentConfigSection({
         {savingName === null ? (
           <Button
             variant="ghost"
-            className="h-8 w-full justify-start gap-2 px-2 text-[0.75rem] text-muted-foreground hover:text-foreground"
+            className="h-8 w-full justify-start gap-2 px-2 text-ui-caption text-muted-foreground hover:text-foreground"
             onClick={() => setSavingName(storyName ? `${storyName} setup` : '')}
           >
             <Plus className="size-3.5" />
@@ -148,7 +148,7 @@ export function AgentConfigSection({
           </div>
         )}
         {saveMut.error && (
-          <p className="text-[0.6875rem] text-destructive">
+          <p className="text-ui-label text-destructive">
             {saveMut.error instanceof Error ? saveMut.error.message : 'Could not save preset.'}
           </p>
         )}
@@ -156,13 +156,13 @@ export function AgentConfigSection({
 
       {/* Presets */}
       <div className="mt-4">
-        <p className="mb-2 text-[0.625rem] uppercase tracking-wider text-muted-foreground">Presets</p>
+        <p className="mb-2 text-ui-label uppercase tracking-wider text-muted-foreground">Presets</p>
         {isLoading ? (
           <p className="flex items-center gap-2 text-xs text-muted-foreground">
             <Loader2 className="size-3.5 animate-spin" /> Loading…
           </p>
         ) : presets.length === 0 ? (
-          <p className="text-[0.6875rem] leading-snug text-muted-foreground">
+          <p className="text-ui-label leading-snug text-muted-foreground">
             No presets yet. Save one above, or import a config from the hub.
           </p>
         ) : (
@@ -233,8 +233,8 @@ function PresetRow({ preset, storyId }: { preset: AgentPresetSummary; storyId: s
     <div className="rounded-lg border border-border/40 bg-card/40 px-3 py-2.5">
       <div className="flex items-start gap-2">
         <div className="min-w-0 flex-1">
-          <p className="truncate text-[0.8125rem] text-foreground">{preset.name}</p>
-          <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[0.625rem] text-muted-foreground">
+          <p className="truncate text-ui-body text-foreground">{preset.name}</p>
+          <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-ui-label text-muted-foreground">
             <span className="tabular-nums">
               {preset.summary.agents.length} {preset.summary.agents.length === 1 ? 'agent' : 'agents'} · {preset.summary.blockCount} {preset.summary.blockCount === 1 ? 'block' : 'blocks'}
             </span>
@@ -250,7 +250,7 @@ function PresetRow({ preset, storyId }: { preset: AgentPresetSummary; storyId: s
           <Button
             size="sm"
             variant="outline"
-            className="h-7 gap-1 px-2 text-[0.6875rem]"
+            className="h-7 gap-1 px-2 text-ui-label"
             disabled={applyMut.isPending || applied}
             onClick={onApply}
           >
@@ -272,15 +272,15 @@ function PresetRow({ preset, storyId }: { preset: AgentPresetSummary; storyId: s
 
       {confirmingScripts && !applied && (
         <div className="mt-2 rounded-md border border-amber-500/30 bg-amber-500/5 px-2.5 py-2">
-          <p className="text-[0.6875rem] leading-snug text-muted-foreground">
+          <p className="text-ui-label leading-snug text-muted-foreground">
             This preset runs code. Apply it to this story?
           </p>
           <div className="mt-1.5 flex gap-2">
-            <Button size="sm" className={cn('h-7 gap-1 px-2.5 text-[0.6875rem]')} onClick={() => applyMut.mutate(true)} disabled={applyMut.isPending}>
+            <Button size="sm" className={cn('h-7 gap-1 px-2.5 text-ui-label')} onClick={() => applyMut.mutate(true)} disabled={applyMut.isPending}>
               {applyMut.isPending ? <Loader2 className="size-3 animate-spin" /> : <Check className="size-3" />}
               Apply anyway
             </Button>
-            <Button size="sm" variant="ghost" className="h-7 px-2.5 text-[0.6875rem]" onClick={() => setConfirmingScripts(false)}>
+            <Button size="sm" variant="ghost" className="h-7 px-2.5 text-ui-label" onClick={() => setConfirmingScripts(false)}>
               Cancel
             </Button>
           </div>
@@ -288,7 +288,7 @@ function PresetRow({ preset, storyId }: { preset: AgentPresetSummary; storyId: s
       )}
 
       {applyMut.error && !confirmingScripts && (
-        <p className="mt-1.5 text-[0.6875rem] text-destructive">
+        <p className="mt-1.5 text-ui-label text-destructive">
           {applyMut.error instanceof Error ? applyMut.error.message : 'Apply failed.'}
         </p>
       )}

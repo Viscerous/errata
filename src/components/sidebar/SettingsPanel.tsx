@@ -77,7 +77,7 @@ function FontPicker({ role, label, description, activeFont, onSelect }: {
             >
               {opt.name}
               {opt.tag && (
-                <span className="text-[0.5rem] font-sans font-medium uppercase tracking-wider text-primary/60 bg-primary/8 px-1.5 py-px rounded-full leading-tight">
+                <span className="text-ui-label font-sans font-medium uppercase tracking-wider text-primary/60 bg-primary/8 px-1.5 py-px rounded-full leading-tight">
                   {opt.tag}
                 </span>
               )}
@@ -117,7 +117,7 @@ function MentionTypePicker({
   }
 
   return (
-    <div className="flex max-w-[22rem] flex-wrap justify-end gap-1.5">
+    <div className="flex flex-wrap gap-1.5">
       {options.map((option) => {
         const active = enabled.has(option.type)
         return (
@@ -467,7 +467,7 @@ export function SettingsPanel({
           <SettingRow label="Quick switch" description="Show chevrons to swap between variations">
             <Toggle checked={quickSwitch} onChange={setQuickSwitch} label="Toggle quick switch" />
           </SettingRow>
-          <SettingRow label="Mentions" description="Highlight analyzed fragment references in prose">
+          <SettingRow label="Mentions" description="Highlight analyzed fragment references in prose" className="flex-col items-stretch gap-2">
             <MentionTypePicker story={story} enabledTypes={mentionTypes} onChange={setMentionTypes} />
           </SettingRow>
           <SettingRow label="Timeline bar" description="Show timeline switcher above prose">
@@ -843,7 +843,7 @@ export function SettingsPanel({
                       label={`${isEnabled ? 'Disable' : 'Enable'} ${plugin.name}`}
                     />
                     <div className="min-w-0 flex-1">
-                      <p className="text-[0.8125rem] font-medium leading-tight text-foreground/85">{plugin.name}</p>
+                      <p className="text-ui-body font-medium leading-tight text-foreground/85">{plugin.name}</p>
                       <MetaLabel asChild><p className="mt-0.5 leading-snug">{plugin.description}</p></MetaLabel>
                     </div>
                     <Metric className={`mt-1 shrink-0 uppercase tracking-widest ${isEnabled ? 'text-foreground/50' : ''}`}>

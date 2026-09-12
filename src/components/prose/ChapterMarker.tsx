@@ -135,20 +135,22 @@ export const ChapterMarker = memo(function ChapterMarker({
       <div className="flex items-center justify-center gap-1 mt-2 opacity-0 group-hover/chapter:opacity-100 transition-opacity duration-200">
         <Tooltip>
           <TooltipTrigger asChild>
-            <button
+            <button type="button"
               onClick={() => onSelect(fragment)}
+              aria-label="Edit chapter"
               className="flex items-center justify-center size-6 rounded-md text-muted-foreground hover:text-amber-400/70 hover:bg-amber-500/10 transition-colors duration-200"
             >
               <Pencil className="size-3" />
             </button>
           </TooltipTrigger>
-          <TooltipContent side="bottom" className="text-[0.625rem]">Edit chapter</TooltipContent>
+          <TooltipContent side="bottom" className="text-ui-label">Edit chapter</TooltipContent>
         </Tooltip>
 
         <Tooltip>
           <TooltipTrigger asChild>
-            <button
+            <button type="button"
               onClick={() => summarizeMutation.mutate()}
+              aria-label="Generate chapter summary"
               disabled={summarizeMutation.isPending}
               className="flex items-center justify-center size-6 rounded-md text-muted-foreground hover:text-amber-400/70 hover:bg-amber-500/10 transition-colors duration-200 disabled:opacity-40"
             >
@@ -159,33 +161,35 @@ export const ChapterMarker = memo(function ChapterMarker({
               )}
             </button>
           </TooltipTrigger>
-          <TooltipContent side="bottom" className="text-[0.625rem]">Generate summary</TooltipContent>
+          <TooltipContent side="bottom" className="text-ui-label">Generate summary</TooltipContent>
         </Tooltip>
 
         {hasSummary && (
           <Tooltip>
             <TooltipTrigger asChild>
-              <button
+              <button type="button"
                 onClick={() => setSummaryExpanded(!summaryExpanded)}
+                aria-label={summaryExpanded ? 'Collapse chapter summary' : 'Expand chapter summary'}
                 className="flex items-center justify-center size-6 rounded-md text-muted-foreground hover:text-amber-400/70 hover:bg-amber-500/10 transition-colors duration-200"
               >
                 {summaryExpanded ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
               </button>
             </TooltipTrigger>
-            <TooltipContent side="bottom" className="text-[0.625rem]">{summaryExpanded ? 'Collapse summary' : 'Expand summary'}</TooltipContent>
+            <TooltipContent side="bottom" className="text-ui-label">{summaryExpanded ? 'Collapse summary' : 'Expand summary'}</TooltipContent>
           </Tooltip>
         )}
 
         <Tooltip>
           <TooltipTrigger asChild>
-            <button
+            <button type="button"
               onClick={() => onDelete(sectionIndex)}
+              aria-label="Delete chapter"
               className="flex items-center justify-center size-6 rounded-md text-muted-foreground hover:text-red-400/70 hover:bg-red-500/10 transition-colors duration-200"
             >
               <Trash2 className="size-3" />
             </button>
           </TooltipTrigger>
-          <TooltipContent side="bottom" className="text-[0.625rem]">Delete chapter</TooltipContent>
+          <TooltipContent side="bottom" className="text-ui-label">Delete chapter</TooltipContent>
         </Tooltip>
       </div>
 
@@ -197,14 +201,14 @@ export const ChapterMarker = memo(function ChapterMarker({
               <Textarea
                 value={summaryDraft}
                 onChange={(e) => setSummaryDraft(e.target.value)}
-                className="min-h-[120px] resize-y bg-background/50 text-[0.75rem] leading-relaxed"
+                className="min-h-[120px] resize-y bg-background/50 text-ui-caption leading-relaxed"
                 placeholder="Chapter summary..."
               />
               <div className="flex justify-center gap-1.5">
                 <Button
                   size="sm"
                   variant="ghost"
-                  className="h-7 text-[0.6875rem]"
+                  className="h-7 text-ui-label"
                   onClick={() => {
                     setSummaryDraft(fragment.content)
                     setIsEditingSummary(false)
@@ -214,7 +218,7 @@ export const ChapterMarker = memo(function ChapterMarker({
                 </Button>
                 <Button
                   size="sm"
-                  className="h-7 text-[0.6875rem]"
+                  className="h-7 text-ui-label"
                   disabled={updateSummaryMutation.isPending}
                   onClick={() => updateSummaryMutation.mutate(summaryDraft.trim())}
                 >
@@ -224,14 +228,14 @@ export const ChapterMarker = memo(function ChapterMarker({
             </div>
           ) : (
             <>
-              <p className="text-[0.6875rem] leading-relaxed text-muted-foreground italic text-center px-4 whitespace-pre-wrap">
+              <p className="text-ui-label leading-relaxed text-muted-foreground italic text-center px-4 whitespace-pre-wrap">
                 {fragment.content}
               </p>
               <div className="mt-2 flex justify-center">
                 <Button
                   size="sm"
                   variant="ghost"
-                  className="h-6 text-[0.625rem] text-amber-500/80 hover:text-amber-400 hover:bg-amber-500/10"
+                  className="h-6 text-ui-label text-amber-500/80 hover:text-amber-400 hover:bg-amber-500/10"
                   onClick={() => setIsEditingSummary(true)}
                 >
                   Edit summary

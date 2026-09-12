@@ -181,7 +181,7 @@ export function FragmentExportPanel({ storyId, storyName, onClose }: FragmentExp
           <Package className="size-4 text-muted-foreground" />
           <PanelTitle>Export Fragments</PanelTitle>
           {selected.size > 0 && (
-            <Badge variant="secondary" className="text-[0.625rem] h-4 tabular-nums">
+            <Badge variant="secondary" className="text-ui-label h-4 tabular-nums">
               {selected.size} selected
             </Badge>
           )}
@@ -195,13 +195,13 @@ export function FragmentExportPanel({ storyId, storyName, onClose }: FragmentExp
 
       {/* Select actions */}
       <div className="shrink-0 flex items-center gap-3 px-6 py-3 border-b border-border/30">
-        <button
+        <button type="button"
           onClick={allSelected ? deselectAll : selectAll}
-          className="text-[0.6875rem] text-muted-foreground hover:text-foreground transition-colors"
+          className="text-ui-label text-muted-foreground hover:text-foreground transition-colors"
         >
           {allSelected ? 'Deselect all' : 'Select all'}
         </button>
-        <span className="text-[0.625rem] text-muted-foreground">
+        <span className="text-ui-label text-muted-foreground">
           {allExportable.length} fragments available
         </span>
       </div>
@@ -231,7 +231,7 @@ export function FragmentExportPanel({ storyId, storyName, onClose }: FragmentExp
                   <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground group-hover:text-foreground transition-colors">
                     {visual.label}
                   </span>
-                  <span className="text-[0.625rem] text-muted-foreground ml-auto">
+                  <span className="text-ui-label text-muted-foreground ml-auto">
                     {fragments.filter((f) => selected.has(f.id)).length}/{fragments.length}
                   </span>
                 </div>
@@ -286,9 +286,9 @@ export function FragmentExportPanel({ storyId, storyName, onClose }: FragmentExp
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-medium truncate leading-tight">{fragment.name}</p>
                           <div className="flex items-center gap-1.5 mt-0.5">
-                            <span className="text-[0.625rem] font-mono text-muted-foreground">{fragment.id}</span>
+                            <span className="text-ui-label font-mono text-muted-foreground">{fragment.id}</span>
                             {fragment.sticky && (
-                              <Badge variant="secondary" className="text-[0.5625rem] h-3.5 px-1">pinned</Badge>
+                              <Badge variant="secondary" className="text-ui-label h-4 px-1">pinned</Badge>
                             )}
                           </div>
                         </div>
@@ -324,12 +324,12 @@ export function FragmentExportPanel({ storyId, storyName, onClose }: FragmentExp
           </span>
         </div>
         {includeConfigs && configSummary && (
-          <p className="text-[0.625rem] text-muted-foreground mt-1.5 ml-6">
+          <p className="text-ui-label text-muted-foreground mt-1.5 ml-6">
             {configSummary.agentCount} agent config{configSummary.agentCount !== 1 ? 's' : ''}
           </p>
         )}
         {includeConfigs && !configSummary && exportedConfigs && (
-          <p className="text-[0.625rem] text-muted-foreground mt-1.5 ml-6 italic">
+          <p className="text-ui-label text-muted-foreground mt-1.5 ml-6 italic">
             No custom configuration to export
           </p>
         )}

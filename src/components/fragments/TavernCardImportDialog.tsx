@@ -231,7 +231,7 @@ export function TavernCardImportDialog({
             >
               <div className="flex flex-col items-center justify-center gap-2 py-4 text-muted-foreground">
                 <Plus className="size-5" aria-hidden="true" />
-                <p className="text-[0.6875rem]">Add more cards</p>
+                <p className="text-ui-label">Add more cards</p>
               </div>
             </FileDropzone>
           </div>
@@ -312,7 +312,7 @@ function CharacterCard({
         </div>
 
         {/* Remove button */}
-        <button
+        <button type="button"
           onClick={(e) => { e.stopPropagation(); onRemove() }}
           className="absolute top-2.5 right-2.5 size-5 rounded-md bg-background/60 backdrop-blur-sm border border-border/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground hover:bg-background/80"
           title="Remove from list"
@@ -326,7 +326,7 @@ function CharacterCard({
             {card.character.name}
           </p>
           {card.character.meta.tavernCreator && (
-            <p className="text-[0.625rem] text-muted-foreground mt-0.5 truncate">
+            <p className="text-ui-label text-muted-foreground mt-0.5 truncate">
               by {card.character.meta.tavernCreator}
             </p>
           )}
@@ -336,22 +336,22 @@ function CharacterCard({
       {/* Body */}
       <div className="px-3.5 py-2.5 space-y-1.5">
         {card.character.description && (
-          <p className={`text-muted-foreground leading-relaxed ${large ? 'text-[0.8125rem] line-clamp-3' : 'text-[0.6875rem] line-clamp-2'}`}>
+          <p className={`text-muted-foreground leading-relaxed ${large ? 'text-ui-body line-clamp-3' : 'text-ui-label line-clamp-2'}`}>
             {card.character.description}
           </p>
         )}
 
         <div className="flex items-center gap-1.5 flex-wrap">
-          <Badge variant="secondary" className="text-[0.5625rem] h-4 px-1.5">
+          <Badge variant="secondary" className="text-ui-label h-4 px-1.5">
             {card.character.meta.tavernSpec || 'character'}
           </Badge>
           {card.character.tags.slice(0, large ? 6 : 3).map((tag) => (
-            <Badge key={tag} variant="outline" className="text-[0.5625rem] h-4 px-1.5 border-border/40 text-muted-foreground">
+            <Badge key={tag} variant="outline" className="text-ui-label h-4 px-1.5 border-border/40 text-muted-foreground">
               {tag}
             </Badge>
           ))}
           {card.character.tags.length > (large ? 6 : 3) && (
-            <span className="text-[0.5625rem] text-muted-foreground">
+            <span className="text-ui-label text-muted-foreground">
               +{card.character.tags.length - (large ? 6 : 3)}
             </span>
           )}

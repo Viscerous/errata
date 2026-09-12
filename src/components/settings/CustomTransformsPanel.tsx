@@ -1,7 +1,10 @@
 import { useState, useRef, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import { RotateCcw, Plus, Trash2, ChevronDown, ChevronRight, GripVertical } from 'lucide-react'
 import { useWritingTransforms, type WritingTransform } from '@/lib/theme'
+import { Toggle } from './primitives'
 
 function generateId(): string {
   return `t-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
@@ -96,22 +99,13 @@ export function CustomTransformsControls() {
                   {isExpanded
                     ? <ChevronDown className="size-3 text-muted-foreground shrink-0" />
                     : <ChevronRight className="size-3 text-muted-foreground shrink-0" />}
-                  <span className={`text-[0.75rem] truncate ${t.enabled ? 'text-foreground/80' : 'text-muted-foreground line-through'}`}>
+                  <span className={`text-ui-caption truncate ${t.enabled ? 'text-foreground/80' : 'text-muted-foreground line-through'}`}>
                     {t.label}
                   </span>
                 </button>
 
                 {/* Toggle */}
-                <button
-                  type="button"
-                  onClick={() => toggleEnabled(t.id)}
-                  className={`relative shrink-0 h-[16px] w-[28px] rounded-full transition-colors cursor-pointer ${t.enabled ? 'bg-foreground' : 'bg-muted-foreground/20'}`}
-                  aria-label={`Toggle ${t.label}`}
-                >
-                  <span
-                    className={`absolute top-[2px] h-[12px] w-[12px] rounded-full bg-background transition-[left] duration-150 ${t.enabled ? 'left-[14px]' : 'left-[2px]'}`}
-                  />
-                </button>
+                <Toggle checked={t.enabled} onChange={() => toggleEnabled(t.id)} label={`Toggle ${t.label}`} />
 
                 {/* Delete */}
                 <button
@@ -119,6 +113,7 @@ export function CustomTransformsControls() {
                   onClick={() => removeTransform(t.id)}
                   className="text-muted-foreground hover:text-destructive/70 transition-colors shrink-0 cursor-pointer"
                   title="Delete"
+                  aria-label={`Delete ${t.label}`}
                 >
                   <Trash2 className="size-3" />
                 </button>
@@ -127,23 +122,25 @@ export function CustomTransformsControls() {
               {isExpanded && (
                 <div className="px-3 pb-3 space-y-2 border-t border-border/20 pt-2">
                   <div>
-                    <label className="text-[0.625rem] text-muted-foreground uppercase tracking-wider mb-1 block">Label</label>
-                    <input
+                    <label htmlFor={`transform-label-${t.id}`} className="text-ui-label text-muted-foreground uppercase tracking-wider mb-1 block">Label</label>
+                    <Input
+                      id={`transform-label-${t.id}`}
                       type="text"
                       value={t.label}
                       onChange={(e) => updateLabel(t.id, e.target.value)}
                       draggable={false}
-                      className="w-full h-8 px-2.5 text-[0.75rem] bg-muted/30 border border-border/40 rounded-md focus:border-foreground/20 focus:outline-none cursor-text"
+                      className="h-8 bg-muted/30 text-ui-caption"
                       placeholder="Transform name"
                     />
                   </div>
                   <div>
-                    <label className="text-[0.625rem] text-muted-foreground uppercase tracking-wider mb-1 block">Instruction</label>
-                    <textarea
+                    <label htmlFor={`transform-instruction-${t.id}`} className="text-ui-label text-muted-foreground uppercase tracking-wider mb-1 block">Instruction</label>
+                    <Textarea
+                      id={`transform-instruction-${t.id}`}
                       value={t.instruction}
                       onChange={(e) => updateInstruction(t.id, e.target.value)}
                       draggable={false}
-                      className="w-full min-h-[80px] px-2.5 py-2 text-[0.75rem] bg-muted/30 border border-border/40 rounded-md focus:border-foreground/20 focus:outline-none resize-y cursor-text"
+                      className="min-h-[80px] resize-y bg-muted/30 text-ui-caption"
                       placeholder="Describe what this transform should do to the selected text..."
                     />
                   </div>

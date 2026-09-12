@@ -104,7 +104,7 @@ function Elapsed({ startedAt }: { startedAt: string }) {
     const id = setInterval(() => setText(formatElapsed(startedAt)), 1000)
     return () => clearInterval(id)
   }, [startedAt])
-  return <span className="text-[0.625rem] text-foreground/50 tabular-nums">{text}</span>
+  return <span className="text-ui-label text-foreground/50 tabular-nums">{text}</span>
 }
 
 // ── Individual wisp ─────────────────────────────────────

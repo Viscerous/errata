@@ -23,11 +23,11 @@ export function AboutSection() {
             <p className="font-display text-2xl italic leading-none tracking-tight text-foreground">
               Errata
             </p>
-            <p className="mt-1.5 text-[0.625rem] leading-snug text-muted-foreground">
+            <p className="mt-1.5 text-ui-label leading-snug text-muted-foreground">
               LLM-assisted writing, built around a fragment system.
             </p>
           </div>
-          <span className="shrink-0 font-mono text-[0.6875rem] tabular-nums text-muted-foreground">
+          <span className="shrink-0 font-mono text-ui-label tabular-nums text-muted-foreground">
             v{__APP_VERSION__}
           </span>
         </div>
@@ -38,7 +38,7 @@ export function AboutSection() {
             href={link.href}
             target="_blank"
             rel="noopener noreferrer"
-            className="flex items-center justify-between gap-3 px-3 py-2 text-[0.75rem] text-foreground/80 transition-colors hover:bg-accent/40 hover:text-foreground"
+            className="flex items-center justify-between gap-3 px-3 py-2 text-ui-caption text-foreground/80 transition-colors hover:bg-accent/40 hover:text-foreground"
           >
             {link.label}
             <ExternalLink className="size-3 shrink-0 text-muted-foreground" />
@@ -46,7 +46,7 @@ export function AboutSection() {
         ))}
       </SettingsCard>
 
-      <p className="mt-2 text-center text-[0.625rem] leading-relaxed text-muted-foreground">
+      <p className="mt-2 text-center text-ui-label leading-relaxed text-muted-foreground">
         Built by{' '}
         <a
           href="https://github.com/nokusukun"

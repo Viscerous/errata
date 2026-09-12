@@ -73,7 +73,7 @@ function GenerationThoughtStepList({
               key={`reasoning-${i}`}
               text={step.text}
               active={isThinking && i === steps.length - 1}
-              className="text-[0.625rem] text-muted-foreground italic font-mono whitespace-pre-wrap leading-relaxed max-h-[200px] overflow-y-auto"
+              className="text-ui-label text-muted-foreground italic font-mono whitespace-pre-wrap leading-relaxed max-h-[200px] overflow-y-auto"
             />
           )
         }
@@ -89,7 +89,7 @@ function GenerationThoughtStepList({
               <StreamingText
                 text={step.text}
                 active={isActive}
-                className="text-[0.625rem] text-muted-foreground font-mono whitespace-pre-wrap leading-relaxed max-h-[200px] overflow-y-auto"
+                className="text-ui-label text-muted-foreground font-mono whitespace-pre-wrap leading-relaxed max-h-[200px] overflow-y-auto"
               />
             </ChainOfThoughtStep>
           )

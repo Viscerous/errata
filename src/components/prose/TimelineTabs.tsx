@@ -101,7 +101,7 @@ export function TimelineTabs({ storyId, branches, activeBranchId, rootBranchId, 
 
         return (
           <div key={branch.id} className="flex items-center group/tab">
-            <button
+            <button type="button"
               className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs transition-all ${
                 isActive
                   ? 'bg-background text-foreground shadow-sm border border-border/50 font-medium'
@@ -119,7 +119,7 @@ export function TimelineTabs({ storyId, branches, activeBranchId, rootBranchId, 
             {isActive && (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <button className="p-0.5 rounded text-muted-foreground hover:text-muted-foreground transition-colors opacity-0 group-hover/tab:opacity-100">
+                  <button type="button" className="p-0.5 rounded text-muted-foreground hover:text-muted-foreground transition-colors opacity-0 group-hover/tab:opacity-100">
                     <MoreVertical className="size-3" />
                   </button>
                 </DropdownMenuTrigger>

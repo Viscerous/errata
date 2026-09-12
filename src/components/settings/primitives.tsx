@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ComponentProps, type ReactNode } from 'react'
 import { CircleHelp } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useHelp } from '@/hooks/use-help'
@@ -295,23 +295,20 @@ export const selectClass =
  * per-use width constraints such as max-w-[11rem].
  */
 export function SettingsSelect({
-  id,
   value,
   onChange,
   disabled,
   className,
   children,
-}: {
-  id?: string
+  ...selectProps
+}: Omit<ComponentProps<'select'>, 'value' | 'onChange' | 'children'> & {
   value: string
   onChange: (value: string) => void
-  disabled?: boolean
-  className?: string
   children: ReactNode
 }) {
   return (
     <select
-      id={id}
+      {...selectProps}
       value={value}
       onChange={(e) => onChange(e.target.value)}
       disabled={disabled}

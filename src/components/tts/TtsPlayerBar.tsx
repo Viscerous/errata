@@ -9,8 +9,8 @@ function PopSlider({ label, value, min, max, step, onChange, format }: {
   return (
     <div>
       <div className="mb-1 flex items-baseline justify-between">
-        <span className="font-sans text-[0.6875rem] font-medium text-foreground/80">{label}</span>
-        <span className="font-mono text-[0.625rem] tabular-nums text-muted-foreground">{format(value)}</span>
+        <span className="font-sans text-ui-label font-medium text-foreground/80">{label}</span>
+        <span className="font-mono text-ui-label tabular-nums text-muted-foreground">{format(value)}</span>
       </div>
       <input
         type="range"
@@ -137,13 +137,13 @@ export function TtsPlayerBar() {
 
         {/* Now reading: title + counter, single line */}
         <div className="flex min-w-0 flex-1 items-baseline gap-2">
-          <p className="min-w-0 flex-1 truncate font-prose text-[0.8125rem] italic leading-tight text-foreground/85">
+          <p className="min-w-0 flex-1 truncate font-prose text-ui-body italic leading-tight text-foreground/85">
             {error
               ? <span className="inline-flex items-center gap-1.5 not-italic text-destructive"><AlertCircle className="size-3.5" />{error}</span>
               : (title || 'Reading passage')}
           </p>
           {!error && (
-            <span className="shrink-0 font-mono text-[0.625rem] tabular-nums text-muted-foreground" aria-hidden>
+            <span className="shrink-0 font-mono text-ui-label tabular-nums text-muted-foreground" aria-hidden>
               {loading ? 'generating…' : `${chunkIndex + 1} / ${chunkCount}`}
             </span>
           )}
@@ -192,7 +192,7 @@ export function TtsPlayerBar() {
 
         {/* Engine hint + stop */}
         {engine && !error && (
-          <span className="hidden shrink-0 font-mono text-[0.5625rem] uppercase tracking-[0.14em] text-muted-foreground/70 sm:inline">
+          <span className="hidden shrink-0 font-mono text-ui-label uppercase tracking-[0.14em] text-muted-foreground/70 sm:inline">
             {engine === 'supertonic' ? 'Supertonic' : 'Browser'}
           </span>
         )}

@@ -456,7 +456,7 @@ export function InlineGenerationInput({
             onBlur={() => setIsFocused(false)}
             placeholder={effectiveInputMode === 'play' ? 'What do you do or say next?' : 'What should happen next?'}
             rows={1}
-            className="w-full resize-none bg-transparent border-none outline-none px-4 pt-1.5 pb-2 font-prose text-[0.9375rem] leading-relaxed text-foreground placeholder:text-muted-foreground placeholder:italic disabled:opacity-40"
+            className="w-full resize-none bg-transparent border-none outline-none px-4 pt-1.5 pb-2 font-prose text-base leading-relaxed text-foreground placeholder:text-muted-foreground placeholder:italic disabled:opacity-40"
             style={{ minHeight: '44px', maxHeight: '200px', overflowY: 'auto', scrollbarWidth: 'none' }}
             disabled={isGenerating}
             onKeyDown={(e) => {
@@ -492,7 +492,7 @@ export function InlineGenerationInput({
             onBlur={() => setIsFocused(false)}
             placeholder="Write your prose directly..."
             rows={3}
-            className="w-full resize-none bg-transparent border-none outline-none px-4 pt-1.5 pb-2 font-prose text-[0.9375rem] leading-relaxed text-foreground placeholder:text-muted-foreground placeholder:italic disabled:opacity-40"
+            className="w-full resize-none bg-transparent border-none outline-none px-4 pt-1.5 pb-2 font-prose text-base leading-relaxed text-foreground placeholder:text-muted-foreground placeholder:italic disabled:opacity-40"
             style={{ minHeight: '100px', maxHeight: '400px', overflowY: 'auto', scrollbarWidth: 'none' }}
             disabled={isComposing}
             onKeyDown={(e) => {
@@ -528,7 +528,7 @@ export function InlineGenerationInput({
           {/* Right: Write/Stop/Add button + shortcut hint */}
           <div className="flex items-center gap-2.5">
             {(mode === 'primary' || mode === 'compose') && !isGenerating && !isComposing && (
-              <span className="text-[0.625rem] text-muted-foreground font-sans select-none hidden sm:inline">
+              <span className="text-ui-label text-muted-foreground font-sans select-none hidden sm:inline">
                 Ctrl+Enter
               </span>
             )}

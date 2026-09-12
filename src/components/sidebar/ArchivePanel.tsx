@@ -96,8 +96,8 @@ export function ArchivePanel({ storyId, onSelect }: ArchivePanelProps) {
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium truncate">{fragment.name}</p>
                 <div className="flex items-center gap-1.5 mt-0.5">
-                  <Badge variant="secondary" className="text-[0.625rem] h-4">{fragment.type}</Badge>
-                  <span className="text-[0.625rem] font-mono text-muted-foreground">{fragment.id}</span>
+                  <Badge variant="secondary" className="text-ui-label h-4">{fragment.type}</Badge>
+                  <span className="text-ui-label font-mono text-muted-foreground">{fragment.id}</span>
                 </div>
               </div>
               <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">

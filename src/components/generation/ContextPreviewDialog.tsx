@@ -96,9 +96,9 @@ export function ContextPreviewDialog({ storyId, input, inputMode, disabled }: Co
                   <details key={block.id} className="group rounded-md border border-border/40 bg-muted/10">
                     <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-sm">
                       <span className="font-medium">{block.name}</span>
-                      <span className="ml-auto text-[0.6875rem] uppercase tracking-wide text-muted-foreground">{block.role}</span>
-                      <span className="text-[0.6875rem] text-muted-foreground">{block.source}</span>
-                      <span className="text-[0.6875rem] tabular-nums text-muted-foreground">~{block.estimatedTokens.toLocaleString()} tokens</span>
+                      <span className="ml-auto text-ui-label uppercase tracking-wide text-muted-foreground">{block.role}</span>
+                      <span className="text-ui-label text-muted-foreground">{block.source}</span>
+                      <span className="text-ui-label tabular-nums text-muted-foreground">~{block.estimatedTokens.toLocaleString()} tokens</span>
                     </summary>
                     <pre className="max-h-72 overflow-auto whitespace-pre-wrap border-t border-border/30 px-3 py-3 font-mono text-xs leading-relaxed text-foreground/80">
                       {block.content}
@@ -112,7 +112,7 @@ export function ContextPreviewDialog({ storyId, input, inputMode, disabled }: Co
                 <div className="space-y-3 border-t border-border/30 p-3">
                   {preview.data.messages.map((message, index) => (
                     <div key={`${message.role}-${index}`}>
-                      <p className="mb-1 text-[0.6875rem] uppercase tracking-wide text-muted-foreground">{message.role}</p>
+                      <p className="mb-1 text-ui-label uppercase tracking-wide text-muted-foreground">{message.role}</p>
                       <pre className="max-h-96 overflow-auto whitespace-pre-wrap rounded bg-muted/20 p-3 font-mono text-xs leading-relaxed">
                         {message.content}
                       </pre>
@@ -132,7 +132,7 @@ export function ContextPreviewDialog({ storyId, input, inputMode, disabled }: Co
                         {tool.description && <p>{tool.description}</p>}
                       </summary>
                       {tool.schema && (
-                        <pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap border-t border-border/20 pt-2 font-mono text-[0.6875rem] leading-relaxed">
+                        <pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap border-t border-border/20 pt-2 font-mono text-ui-label leading-relaxed">
                           {tool.schema}
                         </pre>
                       )}

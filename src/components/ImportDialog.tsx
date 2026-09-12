@@ -240,7 +240,7 @@ export function ImportDialog({ open, onOpenChange }: ImportDialogProps) {
 
       {/* URL input */}
       <div className="space-y-1.5">
-        <label className="text-[0.6875rem] font-medium text-muted-foreground uppercase tracking-wider">
+        <label className="text-ui-label font-medium text-muted-foreground uppercase tracking-wider">
           Or import from URL
         </label>
         <div className="flex gap-2">
@@ -271,7 +271,7 @@ export function ImportDialog({ open, onOpenChange }: ImportDialogProps) {
         {status.type === 'error' ? status.message : undefined}
       </FileDropDialog.Errors>
 
-      <p className="text-[0.6875rem] text-muted-foreground leading-relaxed">
+      <p className="text-ui-label text-muted-foreground leading-relaxed">
         <strong className="text-muted-foreground">.zip</strong> — Errata story export
         {' · '}
         <strong className="text-muted-foreground">.json</strong> — SillyTavern / TavernAI character card (V2/V3)

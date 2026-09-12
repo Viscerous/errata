@@ -382,7 +382,7 @@ function WizardBackButton({
 
   if (tone === 'link') {
     return (
-      <button
+      <button type="button"
         onClick={handle}
         className={cn(
           'text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1',
@@ -462,9 +462,9 @@ export interface WizardSkipButtonProps extends React.ButtonHTMLAttributes<HTMLBu
 
 function WizardSkipButton({ className, children = 'Skip setup', ...props }: WizardSkipButtonProps) {
   return (
-    <button
+    <button type="button"
       className={cn(
-        'text-[0.6875rem] text-muted-foreground hover:text-foreground transition-colors',
+        'text-ui-label text-muted-foreground hover:text-foreground transition-colors',
         className,
       )}
       {...props}
@@ -518,7 +518,7 @@ function WizardProgress({ current, total, className }: WizardProgressProps) {
   return (
     <span
       className={cn(
-        'font-display italic text-[0.8125rem] text-muted-foreground/70 tabular-nums tracking-wide',
+        'font-display italic text-ui-body text-muted-foreground/70 tabular-nums tracking-wide',
         className,
       )}
       aria-label={`Step ${resolvedCurrent} of ${resolvedTotal}`}

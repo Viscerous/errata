@@ -256,7 +256,7 @@ export function CharacterCardImportDialog({
     <span className="flex items-center gap-2">
       <span className="font-medium text-foreground/70">{cardData.card.name}</span>
       {cardData.card.spec && (
-        <Badge variant="outline" className="text-[0.5625rem] h-4 px-1.5 border-border/40 text-muted-foreground">
+        <Badge variant="outline" className="text-ui-label h-4 px-1.5 border-border/40 text-muted-foreground">
           {cardData.card.spec}
         </Badge>
       )}
@@ -291,7 +291,7 @@ export function CharacterCardImportDialog({
 
           <div className="flex items-center gap-2">
             <div className="h-px flex-1 bg-border/30" />
-            <span className="text-[0.625rem] text-muted-foreground uppercase tracking-wider">or paste URL</span>
+            <span className="text-ui-label text-muted-foreground uppercase tracking-wider">or paste URL</span>
             <div className="h-px flex-1 bg-border/30" />
           </div>
 
@@ -336,7 +336,7 @@ export function CharacterCardImportDialog({
               <div className="min-w-0">
                 <p className="text-sm font-medium truncate">{cardData.card.name}</p>
                 {cardData.card.description && (
-                  <p className="text-[0.6875rem] text-muted-foreground line-clamp-1">
+                  <p className="text-ui-label text-muted-foreground line-clamp-1">
                     {cardData.card.description}
                   </p>
                 )}
@@ -344,15 +344,15 @@ export function CharacterCardImportDialog({
             </div>
           )}
 
-          <div className="flex items-center gap-3 text-[0.6875rem]">
-            <button
+          <div className="flex items-center gap-3 text-ui-label">
+            <button type="button"
               onClick={selectAll}
               className="text-primary/60 hover:text-primary transition-colors"
             >
               Select all
             </button>
             <span className="text-border/60">/</span>
-            <button
+            <button type="button"
               onClick={deselectAll}
               className="text-muted-foreground hover:text-muted-foreground transition-colors"
             >
@@ -374,12 +374,12 @@ export function CharacterCardImportDialog({
                 return (
                   <div key={group.key}>
                     <div className="flex items-center gap-2 mb-1.5">
-                      <span className="text-[0.625rem] uppercase tracking-wider text-muted-foreground font-medium">
+                      <span className="text-ui-label uppercase tracking-wider text-muted-foreground font-medium">
                         {group.label}
                       </span>
                       <div className="h-px flex-1 bg-border/20" />
                       {group.key === 'lorebook' && (
-                        <span className="text-[0.625rem] text-muted-foreground tabular-nums">
+                        <span className="text-ui-label text-muted-foreground tabular-nums">
                           {groupItems.length}
                         </span>
                       )}
@@ -482,7 +482,7 @@ function ItemRow({
           )}
         </div>
 
-        <p className="text-[0.6875rem] text-muted-foreground line-clamp-1 leading-relaxed">
+        <p className="text-ui-label text-muted-foreground line-clamp-1 leading-relaxed">
           {item.content.slice(0, 120)}
         </p>
 
@@ -491,13 +491,13 @@ function ItemRow({
             {item.tags.slice(0, 4).map((tag) => (
               <span
                 key={tag}
-                className="text-[0.5625rem] px-1.5 py-0.5 rounded-md bg-muted-foreground/[0.06] text-muted-foreground"
+                className="text-ui-label px-1.5 py-0.5 rounded-md bg-muted-foreground/[0.06] text-muted-foreground"
               >
                 {tag}
               </span>
             ))}
             {item.tags.length > 4 && (
-              <span className="text-[0.5625rem] text-muted-foreground">
+              <span className="text-ui-label text-muted-foreground">
                 +{item.tags.length - 4}
               </span>
             )}
@@ -507,9 +507,9 @@ function ItemRow({
 
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <button
+          <button type="button"
             onClick={(e) => e.stopPropagation()}
-            className={`shrink-0 flex items-center gap-1 text-[0.625rem] h-5 px-1.5 rounded-md border transition-colors ${config.className} hover:opacity-80`}
+            className={`shrink-0 flex items-center gap-1 text-ui-label h-5 px-1.5 rounded-md border transition-colors ${config.className} hover:opacity-80`}
           >
             <FragmentTypeDisplayIcon type={activeType} className="size-3" />
             <span>{config.label}</span>

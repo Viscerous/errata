@@ -114,7 +114,7 @@ export function MentionPreviewCard({
             {fragment.name}
           </div>
           {fragment.description && (
-            <p className="text-[0.6875rem] text-muted-foreground leading-snug mt-0.5 line-clamp-2">
+            <p className="text-ui-label text-muted-foreground leading-snug mt-0.5 line-clamp-2">
               {fragment.description}
             </p>
           )}
@@ -165,7 +165,7 @@ export function MentionPreviewCard({
             <Badge
               key={tag}
               variant="secondary"
-              className="text-[0.625rem] px-1.5 py-0 h-4"
+              className="text-ui-label px-1.5 py-0 h-4"
             >
               {tag}
             </Badge>

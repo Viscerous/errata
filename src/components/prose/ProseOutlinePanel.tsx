@@ -160,7 +160,7 @@ export function ProseOutlinePanel({
                       <ArrowUpDown className="size-3" />
                     </Button>
                   </TooltipTrigger>
-                  <TooltipContent side="left" className="text-[0.625rem]">
+                  <TooltipContent side="left" className="text-ui-label">
                     {editMode ? 'Exit reorder mode' : 'Reorder sections'}
                   </TooltipContent>
                 </Tooltip>
@@ -178,7 +178,7 @@ export function ProseOutlinePanel({
                       <Bookmark className="size-3" />
                     </Button>
                   </TooltipTrigger>
-                  <TooltipContent side="left" className="text-[0.625rem]">Add chapter</TooltipContent>
+                  <TooltipContent side="left" className="text-ui-label">Add chapter</TooltipContent>
                 </Tooltip>
                 {onClose && (
                   <Button
@@ -226,7 +226,7 @@ export function ProseOutlinePanel({
 
                 if (isMarker) {
                   return (
-                    <button
+                    <button type="button"
                       key={fragment.id}
                       ref={isActive ? activeRef : undefined}
                       data-component-id={`prose-outline-chapter-${idx}`}
@@ -247,7 +247,7 @@ export function ProseOutlinePanel({
                           <GripVertical className="size-2.5 text-muted-foreground/40 shrink-0" />
                         )}
                         <Bookmark className="size-2.5 text-amber-500/50 shrink-0" />
-                        <span className={`text-[0.625rem] font-medium tracking-wide truncate ${
+                        <span className={`text-ui-label font-medium tracking-wide truncate ${
                           isActive ? 'text-amber-400/80' : 'text-amber-500/40 group-hover/item:text-amber-400/60'
                         }`}>
                           {fragment.name}
@@ -311,7 +311,7 @@ export function ProseOutlinePanel({
                   return (
                     <Tooltip key={fragment.id}>
                       <TooltipTrigger asChild>
-                        <button
+                        <button type="button"
                           ref={isActive ? collapsedActiveRef : undefined}
                           onClick={() => onJump(idx)}
                           data-component-id={`prose-outline-dot-${idx}`}
@@ -324,7 +324,7 @@ export function ProseOutlinePanel({
                           }`} />
                         </button>
                       </TooltipTrigger>
-                      <TooltipContent side="left" className="text-[0.625rem]">{fragment.name}</TooltipContent>
+                      <TooltipContent side="left" className="text-ui-label">{fragment.name}</TooltipContent>
                     </Tooltip>
                   )
                 }
@@ -332,7 +332,7 @@ export function ProseOutlinePanel({
                 return (
                   <Tooltip key={fragment.id}>
                     <TooltipTrigger asChild>
-                      <button
+                      <button type="button"
                         ref={isActive ? collapsedActiveRef : undefined}
                         onClick={() => onJump(idx)}
                         data-component-id={`prose-outline-dot-${idx}`}
@@ -345,7 +345,7 @@ export function ProseOutlinePanel({
                         }`} />
                       </button>
                     </TooltipTrigger>
-                    <TooltipContent side="left" className="text-[0.625rem]">{idx + 1}</TooltipContent>
+                    <TooltipContent side="left" className="text-ui-label">{idx + 1}</TooltipContent>
                   </Tooltip>
                 )
               })}
@@ -355,14 +355,14 @@ export function ProseOutlinePanel({
             {fragments.length > 1 && activeIndex < fragments.length - 1 && (
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <button
+                  <button type="button"
                     onClick={() => onJump(fragments.length - 1)}
                     className="shrink-0 flex items-center justify-center w-7 h-6 border-t border-border/30 text-muted-foreground/60 hover:text-foreground transition-colors focus-visible:outline-none focus-visible:text-foreground"
                   >
                     <ArrowDown className="size-3" aria-hidden />
                   </button>
                 </TooltipTrigger>
-                <TooltipContent side="left" className="text-[0.625rem]">Jump to the latest</TooltipContent>
+                <TooltipContent side="left" className="text-ui-label">Jump to the latest</TooltipContent>
               </Tooltip>
             )}
 

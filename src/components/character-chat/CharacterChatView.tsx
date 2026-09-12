@@ -210,7 +210,7 @@ export function CharacterChatView({ storyId, initialCharacterId, onClose }: Char
                   {selectedCharacter.description}
                 </Caption>
               </div>
-              <p className="text-[0.6875rem] text-muted-foreground max-w-[240px] leading-relaxed">
+              <p className="text-ui-label text-muted-foreground max-w-[240px] leading-relaxed">
                 Start a conversation. The character will respond in their voice, knowing only the story events up to your selected point.
               </p>
             </div>
@@ -248,7 +248,7 @@ export function CharacterChatView({ storyId, initialCharacterId, onClose }: Char
                   <CharacterAvatar character={selectedCharacter} mediaById={mediaById} size="sm" />
                 )}
                 <div
-                  className={`max-w-[80%] rounded-xl px-4 py-2.5 text-[0.8125rem] leading-relaxed ${
+                  className={`max-w-[80%] rounded-xl px-4 py-2.5 text-ui-body leading-relaxed ${
                     msg.role === 'user'
                       ? 'bg-primary/8 text-foreground'
                       : 'bg-card/60 border border-border/20 text-foreground/85'
@@ -257,7 +257,7 @@ export function CharacterChatView({ storyId, initialCharacterId, onClose }: Char
                   {msg.role === 'assistant' ? (
                     <div>
                       {isFirstAssistantInGroup && (
-                        <div className="font-display text-[0.6875rem] text-primary/50 mb-1 tracking-wide">
+                        <div className="font-display text-ui-label text-primary/50 mb-1 tracking-wide">
                           {selectedCharacter?.name}
                         </div>
                       )}
@@ -301,7 +301,7 @@ export function CharacterChatView({ storyId, initialCharacterId, onClose }: Char
                   : 'Select a character first...'
               }
               disabled={isStreaming || !characterId}
-              className="min-h-[44px] max-h-[400px] resize-none text-[0.8125rem] bg-transparent
+              className="min-h-[44px] max-h-[400px] resize-none text-ui-body bg-transparent
                 placeholder:italic placeholder:text-muted-foreground flex-1 border-border/30
                 focus-visible:ring-primary/20"
               rows={1}
@@ -318,7 +318,7 @@ export function CharacterChatView({ storyId, initialCharacterId, onClose }: Char
             />
           </div>
 
-          <p className="text-[0.625rem] text-muted-foreground text-center mt-2">
+          <p className="text-ui-label text-muted-foreground text-center mt-2">
             Enter to send · Shift+Enter for newline
           </p>
         </div>

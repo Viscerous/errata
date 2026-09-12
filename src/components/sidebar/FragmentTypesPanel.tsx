@@ -5,6 +5,7 @@ import { api, type CustomFragmentType, type StoryMeta } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
+import { SettingsSelect } from '@/components/settings/primitives'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { EmptyState } from '@/components/ui/async-view'
 import {
@@ -137,7 +138,7 @@ export function FragmentTypesPanel({ storyId, story }: FragmentTypesPanelProps) 
       <div className="border-b border-border/50 px-3 py-3">
         <div className="grid grid-cols-[1fr_auto] items-end gap-2">
           <label className="min-w-0 space-y-1">
-            <span className="text-[0.625rem] font-medium uppercase tracking-wider text-muted-foreground">New type</span>
+            <span className="text-ui-label font-medium uppercase tracking-wider text-muted-foreground">New type</span>
             <Input
               value={newType}
               onChange={(e) => setNewType(e.target.value)}
@@ -165,7 +166,7 @@ export function FragmentTypesPanel({ storyId, story }: FragmentTypesPanelProps) 
             Add type
           </Button>
         </div>
-        <p className={`mt-1 text-[0.625rem] ${addDisabled ? 'text-muted-foreground' : 'text-emerald-600 dark:text-emerald-400/80'}`}>
+        <p className={`mt-1 text-ui-label ${addDisabled ? 'text-muted-foreground' : 'text-emerald-600 dark:text-emerald-400/80'}`}>
           {addHint}
         </p>
       </div>
@@ -205,11 +206,11 @@ export function FragmentTypesPanel({ storyId, story }: FragmentTypesPanelProps) 
                     <div className="min-w-0 flex-1">
                       <div className="flex min-w-0 items-center gap-2">
                         <p className="truncate text-sm font-medium">{def.name.trim() || titleFromFragmentType(normalizedType) || 'Custom Fragment'}</p>
-                        <span className="shrink-0 rounded border border-border/50 px-1.5 py-0.5 font-mono text-[0.625rem] text-muted-foreground">
+                        <span className="shrink-0 rounded border border-border/50 px-1.5 py-0.5 font-mono text-ui-label text-muted-foreground">
                           {normalizedType || 'type'}
                         </span>
                       </div>
-                      <p className="truncate text-[0.6875rem] text-muted-foreground">
+                      <p className="truncate text-ui-label text-muted-foreground">
                         {def.showInSidebar ? 'Shown in sidebar' : 'Hidden from sidebar'}
                         {def.description.trim() ? ` - ${def.description.trim()}` : ''}
                       </p>
@@ -231,7 +232,7 @@ export function FragmentTypesPanel({ storyId, story }: FragmentTypesPanelProps) 
                   <div className="space-y-2 p-3">
                     <div className="grid grid-cols-2 gap-2">
                       <label className="space-y-1">
-                        <span className="text-[0.625rem] font-medium uppercase tracking-wider text-muted-foreground">Type</span>
+                        <span className="text-ui-label font-medium uppercase tracking-wider text-muted-foreground">Type</span>
                         <Input
                           value={def.type}
                           onChange={(e) => updateDraft(index, { type: slugifyType(e.target.value) })}
@@ -239,7 +240,7 @@ export function FragmentTypesPanel({ storyId, story }: FragmentTypesPanelProps) 
                         />
                       </label>
                       <label className="space-y-1">
-                        <span className="text-[0.625rem] font-medium uppercase tracking-wider text-muted-foreground">Name</span>
+                        <span className="text-ui-label font-medium uppercase tracking-wider text-muted-foreground">Name</span>
                         <Input
                           value={def.name}
                           onChange={(e) => updateDraft(index, { name: e.target.value })}
@@ -249,7 +250,7 @@ export function FragmentTypesPanel({ storyId, story }: FragmentTypesPanelProps) 
                     </div>
 
                     <label className="block space-y-1">
-                      <span className="text-[0.625rem] font-medium uppercase tracking-wider text-muted-foreground">Description</span>
+                      <span className="text-ui-label font-medium uppercase tracking-wider text-muted-foreground">Description</span>
                       <Input
                         value={def.description}
                         onChange={(e) => updateDraft(index, { description: e.target.value })}
@@ -260,19 +261,18 @@ export function FragmentTypesPanel({ storyId, story }: FragmentTypesPanelProps) 
 
                     <div className="grid grid-cols-[1fr_auto] items-end gap-2">
                       <label className="min-w-0 space-y-1">
-                        <span className="text-[0.625rem] font-medium uppercase tracking-wider text-muted-foreground">Icon</span>
+                        <span className="text-ui-label font-medium uppercase tracking-wider text-muted-foreground">Icon</span>
                         <div className="flex min-w-0 items-center gap-2">
                           <FragmentTypeIcon icon={def.icon} className="size-4 shrink-0 text-muted-foreground" />
-                          <select
+                          <SettingsSelect
                             value={def.icon}
-                            onChange={(e) => updateDraft(index, { icon: e.target.value })}
-                            className="h-8 min-w-0 flex-1 rounded-md border border-input bg-transparent px-2 text-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
-                            aria-label="Icon"
+                            onChange={(value) => updateDraft(index, { icon: value })}
+                            className="h-8 min-w-0 flex-1 text-xs"
                           >
                             {FRAGMENT_TYPE_ICON_OPTIONS.map((option) => (
                               <option key={option.value} value={option.value}>{option.label}</option>
                             ))}
-                          </select>
+                          </SettingsSelect>
                         </div>
                       </label>
                       <label className="flex h-8 shrink-0 items-center gap-2 rounded-md border border-border/40 px-2 text-xs text-muted-foreground">
@@ -284,7 +284,7 @@ export function FragmentTypesPanel({ storyId, story }: FragmentTypesPanelProps) 
                       </label>
                     </div>
 
-                    <p className="text-[0.625rem] text-muted-foreground">
+                    <p className="text-ui-label text-muted-foreground">
                       {getFragmentTypeIconLabel(def.icon)}
                     </p>
                   </div>
@@ -296,7 +296,7 @@ export function FragmentTypesPanel({ storyId, story }: FragmentTypesPanelProps) 
       </ScrollArea>
 
       <div className="border-t border-border/50 p-3">
-        <div className="mb-2 flex min-h-4 items-center justify-between text-[0.625rem]">
+        <div className="mb-2 flex min-h-4 items-center justify-between text-ui-label">
           <span className={hasInvalidDraft ? 'text-destructive' : 'text-muted-foreground'}>
             {hasInvalidDraft ? 'Fix duplicate or reserved types' : `${drafts.length} custom type${drafts.length === 1 ? '' : 's'}`}
           </span>

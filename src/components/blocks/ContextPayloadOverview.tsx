@@ -47,18 +47,18 @@ export function ContextPayloadOverview({ messages, blocks, tools, toolStages, co
           <div className="flex items-center gap-2">
             <h3 className="text-xs font-medium text-foreground/90">Request payload</h3>
             {selectedStage && (
-              <Badge variant="outline" className="h-4 border-border/30 px-1.5 text-[0.5625rem] font-normal text-muted-foreground">
+              <Badge variant="outline" className="h-4 border-border/30 px-1.5 text-ui-label font-normal text-muted-foreground">
                 {selectedStage.label}
               </Badge>
             )}
           </div>
-          <p className="mt-0.5 text-[0.625rem] text-muted-foreground">
+          <p className="mt-0.5 text-ui-label text-muted-foreground">
             Exact compiled messages and serialized tool schemas
           </p>
         </div>
         <div className="ml-auto text-right">
           <p className="text-sm font-medium tabular-nums text-foreground/90">~{breakdown.estimatedTokens.toLocaleString()} tokens</p>
-          <p className="text-[0.5625rem] tabular-nums text-muted-foreground">{breakdown.estimatedCharacters.toLocaleString()} characters</p>
+          <p className="text-ui-label tabular-nums text-muted-foreground">{breakdown.estimatedCharacters.toLocaleString()} characters</p>
         </div>
       </div>
 
@@ -69,7 +69,7 @@ export function ContextPayloadOverview({ messages, blocks, tools, toolStages, co
               key={stage.id}
               type="button"
               className={cn(
-                'rounded-md border px-2 py-1 text-[0.625rem] transition-colors',
+                'rounded-md border px-2 py-1 text-ui-label transition-colors',
                 selectedStage?.id === stage.id
                   ? 'border-primary/30 bg-primary/[0.07] text-foreground'
                   : 'border-border/30 text-muted-foreground hover:bg-accent/30 hover:text-foreground/80',
@@ -83,12 +83,12 @@ export function ContextPayloadOverview({ messages, blocks, tools, toolStages, co
         </div>
       )}
       {selectedStage && (
-        <p className="mt-1.5 text-[0.5625rem] leading-relaxed text-muted-foreground">{selectedStage.description}</p>
+        <p className="mt-1.5 text-ui-label leading-relaxed text-muted-foreground">{selectedStage.description}</p>
       )}
 
       {contextWindowTokens && contextUsage !== null && (
         <div className="mt-3">
-          <div className="flex items-baseline justify-between gap-3 text-[0.5625rem] text-muted-foreground">
+          <div className="flex items-baseline justify-between gap-3 text-ui-label text-muted-foreground">
             <span>
               Estimated prompt · {contextUsage}% of {formatContextWindow(contextWindowTokens)} advertised context
             </span>
@@ -121,7 +121,7 @@ export function ContextPayloadOverview({ messages, blocks, tools, toolStages, co
           </div>
           <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1">
             {breakdown.requestParts.map((part) => (
-              <div key={part.id} className="flex items-center gap-1.5 text-[0.5625rem] text-muted-foreground">
+              <div key={part.id} className="flex items-center gap-1.5 text-ui-label text-muted-foreground">
                 <span className={cn('size-1.5 rounded-full', part.kind === 'tool' ? partColors.tool : partColors[part.role ?? ''] ?? 'bg-muted-foreground/50')} />
                 <span>{part.label}</span>
                 <span className="tabular-nums">~{part.estimatedTokens.toLocaleString()}</span>
@@ -134,15 +134,15 @@ export function ContextPayloadOverview({ messages, blocks, tools, toolStages, co
       {breakdown.largestSources.length > 0 && (
         <div className="mt-3 border-t border-border/20 pt-2.5">
           <div className="mb-2 flex items-baseline justify-between gap-3">
-            <p className="text-[0.625rem] font-medium text-foreground/80">Largest declared sources</p>
-            <p className="text-[0.5625rem] text-muted-foreground">Blocks are measured before final message hooks</p>
+            <p className="text-ui-label font-medium text-foreground/80">Largest declared sources</p>
+            <p className="text-ui-label text-muted-foreground">Blocks are measured before final message hooks</p>
           </div>
           <div className="grid gap-x-4 gap-y-1.5 sm:grid-cols-2">
             {breakdown.largestSources.map((part) => (
               <div key={part.id} className="min-w-0">
-                <div className="flex items-center gap-2 text-[0.5625rem]">
+                <div className="flex items-center gap-2 text-ui-label">
                   <span className="truncate text-muted-foreground" title={part.label}>{part.label}</span>
-                  <Badge variant="outline" className="ml-auto h-3.5 border-transparent bg-muted/30 px-1 text-[0.5rem] font-normal text-muted-foreground">
+                  <Badge variant="outline" className="ml-auto h-4 border-transparent bg-muted/30 px-1 text-ui-label font-normal text-muted-foreground">
                     {part.kind === 'tool' ? 'tool' : part.role}
                   </Badge>
                   <span className="w-14 shrink-0 text-right tabular-nums text-muted-foreground">~{part.estimatedTokens.toLocaleString()}</span>

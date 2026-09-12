@@ -43,7 +43,7 @@ export function VariationSwitcher({ storyId, sectionIndex, entry }: VariationSwi
         <Button
           variant="ghost"
           size="sm"
-          className="h-5 px-1.5 text-[0.625rem] gap-1 text-muted-foreground hover:text-muted-foreground"
+          className="h-5 px-1.5 text-ui-label gap-1 text-muted-foreground hover:text-muted-foreground"
           data-component-id="variation-switcher-trigger"
         >
           <History className="size-3" />
@@ -70,7 +70,7 @@ export function VariationSwitcher({ storyId, sectionIndex, entry }: VariationSwi
                     #{idx + 1}
                   </span>
                   {isActive && (
-                    <Badge variant="secondary" className="h-4 text-[0.5625rem] px-1">
+                    <Badge variant="secondary" className="h-4 text-ui-label px-1">
                       Active
                     </Badge>
                   )}
@@ -78,7 +78,7 @@ export function VariationSwitcher({ storyId, sectionIndex, entry }: VariationSwi
                 <Caption className="mt-0.5 truncate">
                   {fragment.description || fragment.name}
                 </Caption>
-                <p className="text-[0.625rem] text-muted-foreground">
+                <p className="text-ui-label text-muted-foreground">
                   {new Date(fragment.createdAt).toLocaleDateString()}
                 </p>
               </div>

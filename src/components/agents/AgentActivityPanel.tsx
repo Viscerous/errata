@@ -120,21 +120,21 @@ function StatusStrip({ status, runStatus, active }: StatusStripProps) {
           <span className={`relative inline-flex size-2 rounded-full ${dotColor}`} />
         </span>
 
-        <span className="text-[0.625rem] text-muted-foreground tracking-wide">
+        <span className="text-ui-label text-muted-foreground tracking-wide">
           {label}
         </span>
 
         {fragmentId && (
           <>
             <span className="text-muted-foreground">&middot;</span>
-            <span className="text-[0.625rem] font-mono text-muted-foreground truncate">
+            <span className="text-ui-label font-mono text-muted-foreground truncate">
               {fragmentId}
             </span>
           </>
         )}
 
         {isError && status?.lastError && (
-          <span className="text-[0.625rem] text-red-500/70 truncate ml-auto" title={status.lastError}>
+          <span className="text-ui-label text-red-500/70 truncate ml-auto" title={status.lastError}>
             {status.lastError.length > 30 ? status.lastError.slice(0, 30) + '\u2026' : status.lastError}
           </span>
         )}
@@ -175,8 +175,9 @@ function ActivityContent({ storyId }: { storyId: string }) {
                 return (
                   <div key={run.rootRunId} className="rounded-md border border-border/25 overflow-hidden">
                     <button
+                      type="button"
                       onClick={() => setExpandedRunId(expanded ? null : run.rootRunId)}
-                      className="w-full flex items-center gap-1.5 px-2.5 py-2 text-[0.6875rem] hover:bg-accent/30 transition-colors"
+                      className="w-full flex items-center gap-1.5 px-2.5 py-2 text-ui-label hover:bg-accent/30 transition-colors"
                     >
                       {expanded
                         ? <ChevronDown className="size-3 text-muted-foreground shrink-0" />
@@ -185,7 +186,7 @@ function ActivityContent({ storyId }: { storyId: string }) {
                       <span className="font-mono text-foreground/65 truncate">{run.agentName}</span>
                       <span className="text-muted-foreground shrink-0">{runTime}</span>
                       <span className="text-muted-foreground shrink-0">{formatDuration(run.durationMs)}</span>
-                      <span className={`ml-auto text-[0.5625rem] font-mono shrink-0 ${statusColor}`}>
+                      <span className={`ml-auto text-ui-label font-mono shrink-0 ${statusColor}`}>
                         {run.status}
                       </span>
                     </button>
@@ -214,7 +215,7 @@ function SectionLabel({ children, icon }: { children: React.ReactNode; icon?: Re
   return (
     <div className="flex items-center gap-1.5 pt-2.5 pb-0.5">
       {icon && <span className="text-muted-foreground">{icon}</span>}
-      <h4 className="text-[0.5625rem] text-muted-foreground uppercase tracking-[0.15em] font-medium">
+      <h4 className="text-ui-label text-muted-foreground uppercase tracking-[0.15em] font-medium">
         {children}
       </h4>
     </div>
@@ -245,7 +246,7 @@ function TraceTree({ run }: { run: AgentRunTraceRecord }) {
     return (
       <div key={node.runId}>
         <div
-          className="flex items-start gap-1.5 text-[0.625rem] py-0.5"
+          className="flex items-start gap-1.5 text-ui-label py-0.5"
           style={{ paddingLeft: `${depth * 12 + 4}px` }}
         >
           <span className="text-muted-foreground mt-px">{depth === 0 ? '\u25CF' : '\u2514'}</span>
@@ -257,7 +258,7 @@ function TraceTree({ run }: { run: AgentRunTraceRecord }) {
         </div>
         {node.error && (
           <p
-            className="text-[0.5625rem] text-red-500/60 leading-tight"
+            className="text-ui-label text-red-500/60 leading-tight"
             style={{ paddingLeft: `${depth * 12 + 20}px` }}
           >
             {node.error}
@@ -275,7 +276,7 @@ function TraceTree({ run }: { run: AgentRunTraceRecord }) {
       {run.output && <TraceDataSection label="Output" data={run.output} />}
       {roots.map((root) => renderNode(root, 0))}
       {run.error && (
-        <p className="text-[0.5625rem] text-red-500/60 px-2 mt-1">{run.error}</p>
+        <p className="text-ui-label text-red-500/60 px-2 mt-1">{run.error}</p>
       )}
     </div>
   )
@@ -300,15 +301,16 @@ function TraceDataSection({ label, data }: { label: string; data: Record<string,
   return (
     <div className="px-2 py-0.5">
       <button
+        type="button"
         onClick={() => setExpanded(!expanded)}
-        className="flex items-center gap-1.5 text-[0.5625rem] text-muted-foreground hover:text-foreground/60 transition-colors"
+        className="flex items-center gap-1.5 text-ui-label text-muted-foreground hover:text-foreground/60 transition-colors"
       >
         {expanded ? <ChevronDown className="size-2.5" /> : <ChevronRight className="size-2.5" />}
         <span className="font-medium">{label}</span>
         {!expanded && <span className="font-mono truncate max-w-[200px]">{preview}</span>}
       </button>
       {expanded && (
-        <pre className="mt-1 text-[0.5625rem] text-muted-foreground leading-relaxed whitespace-pre-wrap break-all px-4 py-1 rounded-md border border-border/15 bg-muted/10">
+        <pre className="mt-1 text-ui-label text-muted-foreground leading-relaxed whitespace-pre-wrap break-all px-4 py-1 rounded-md border border-border/15 bg-muted/10">
           {JSON.stringify(data, null, 2)}
         </pre>
       )}
@@ -328,13 +330,14 @@ function TraceNodeOutput({ output, depth }: { output: Record<string, unknown>; d
   return (
     <div style={{ paddingLeft: `${indent}px` }} className="py-0.5">
       <button
+        type="button"
         onClick={() => setExpanded(!expanded)}
-        className="flex items-center gap-1.5 text-[0.5625rem] text-muted-foreground hover:text-muted-foreground transition-colors"
+        className="flex items-center gap-1.5 text-ui-label text-muted-foreground hover:text-muted-foreground transition-colors"
       >
         {expanded ? <ChevronDown className="size-2.5" /> : <ChevronRight className="size-2.5" />}
         <span>Output</span>
         {modelId && (
-          <Badge variant="outline" className="text-[0.5rem] h-3 px-1">{modelId}</Badge>
+          <Badge variant="outline" className="text-ui-label h-4 px-1">{modelId}</Badge>
         )}
         {durationMs != null && (
           <span className="text-muted-foreground">{formatDuration(durationMs)}</span>
@@ -344,18 +347,18 @@ function TraceNodeOutput({ output, depth }: { output: Record<string, unknown>; d
         <div className="mt-1 space-y-1.5">
           {reasoning && (
             <TraceOutputSection icon={<Brain className="size-3 text-purple-400/60" />} label="Reasoning">
-              <p className="text-[0.5625rem] text-muted-foreground leading-relaxed whitespace-pre-wrap break-words">
+              <p className="text-ui-label text-muted-foreground leading-relaxed whitespace-pre-wrap break-words">
                 {reasoning}
               </p>
             </TraceOutputSection>
           )}
           {summary && (
             <div className="rounded-md border border-border/15 px-2 py-1.5">
-              <p className="text-[0.625rem] text-foreground/60 leading-relaxed">{summary}</p>
+              <p className="text-ui-label text-foreground/60 leading-relaxed">{summary}</p>
             </div>
           )}
           {!summary && !reasoning && (
-            <pre className="text-[0.5625rem] text-muted-foreground leading-relaxed whitespace-pre-wrap break-all px-2">
+            <pre className="text-ui-label text-muted-foreground leading-relaxed whitespace-pre-wrap break-all px-2">
               {JSON.stringify(output, null, 2)}
             </pre>
           )}
@@ -370,8 +373,9 @@ function TraceOutputSection({ icon, label, children }: { icon: React.ReactNode; 
   return (
     <div className="rounded-md border border-border/15 overflow-hidden">
       <button
+        type="button"
         onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center gap-1.5 px-2 py-1 text-[0.625rem] hover:bg-accent/20 transition-colors"
+        className="w-full flex items-center gap-1.5 px-2 py-1 text-ui-label hover:bg-accent/20 transition-colors"
       >
         {icon}
         <span className="text-muted-foreground">{label}</span>
@@ -482,7 +486,7 @@ function ActivityTrace({ storyId, agentName }: { storyId: string; agentName: str
             <span className="absolute inset-0 rounded-full bg-blue-400 animate-ping" style={{ animationDuration: '2s' }} />
             <span className="relative inline-flex size-1.5 rounded-full bg-blue-400" />
           </span>
-          <span className="text-[0.5625rem] text-muted-foreground uppercase tracking-wider">Live Trace</span>
+          <span className="text-ui-label text-muted-foreground uppercase tracking-wider">Live Trace</span>
         </div>
         <div className="space-y-0.5 max-h-32 overflow-y-auto">
           {items.map((item, i) => (
@@ -499,14 +503,14 @@ function LiveTraceItem({ item }: { item: CollapsedTraceItem }) {
     return (
       <div className="flex items-start gap-1 px-1">
         <Brain className="size-2.5 text-purple-400/50 shrink-0 mt-0.5" />
-        <p className="text-[0.5625rem] text-muted-foreground leading-snug truncate">{item.text.slice(0, 120)}{item.text.length > 120 ? '\u2026' : ''}</p>
+        <p className="text-ui-label text-muted-foreground leading-snug truncate">{item.text.slice(0, 120)}{item.text.length > 120 ? '\u2026' : ''}</p>
       </div>
     )
   }
   if (item.kind === 'text') {
     return (
       <div className="px-1">
-        <p className="text-[0.5625rem] text-foreground/40 leading-snug truncate">{item.text.slice(0, 120)}{item.text.length > 120 ? '\u2026' : ''}</p>
+        <p className="text-ui-label text-foreground/40 leading-snug truncate">{item.text.slice(0, 120)}{item.text.length > 120 ? '\u2026' : ''}</p>
       </div>
     )
   }
@@ -514,7 +518,7 @@ function LiveTraceItem({ item }: { item: CollapsedTraceItem }) {
     return (
       <div className="flex items-center gap-1 px-1">
         <Wrench className="size-2.5 text-blue-400/50 shrink-0" />
-        <Badge variant="outline" className="text-[0.5rem] h-3 px-1">{item.toolName}</Badge>
+        <Badge variant="outline" className="text-ui-label h-4 px-1">{item.toolName}</Badge>
       </div>
     )
   }
@@ -522,7 +526,7 @@ function LiveTraceItem({ item }: { item: CollapsedTraceItem }) {
     return (
       <div className="flex items-center gap-1 px-1">
         <Check className="size-2 text-emerald-500/40" />
-        <span className="text-[0.5rem] text-muted-foreground">{item.toolName}</span>
+        <span className="text-ui-label text-muted-foreground">{item.toolName}</span>
       </div>
     )
   }
@@ -530,7 +534,7 @@ function LiveTraceItem({ item }: { item: CollapsedTraceItem }) {
     return (
       <div className="flex items-start gap-1 px-1 text-red-500/70" title={item.error}>
         <CircleAlert className="mt-0.5 size-2.5 shrink-0" />
-        <span className="min-w-0 truncate text-[0.5rem]">{item.toolName}: {item.error}</span>
+        <span className="min-w-0 truncate text-ui-label">{item.toolName}: {item.error}</span>
       </div>
     )
   }

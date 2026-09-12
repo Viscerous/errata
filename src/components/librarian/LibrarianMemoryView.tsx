@@ -150,7 +150,7 @@ function MemoryEditor({ storyId, fragment, onClose }: { storyId: string; fragmen
       </header>
       <div className="min-h-0 flex-1 overflow-auto">
         <div className="mx-auto max-w-[68ch] px-8 py-10 md:py-14">
-          <Textarea value={draft} onChange={event => setDraft(event.target.value)} onBlur={saveIfDirty} placeholder="Write author-owned story memory…" autoFocus spellCheck className="min-h-[60vh] w-full resize-none border-none bg-transparent px-0 py-0 font-prose text-[1.0625rem] leading-[1.75] shadow-none placeholder:italic placeholder:text-muted-foreground/35 focus-visible:outline-none focus-visible:ring-0" />
+          <Textarea value={draft} onChange={event => setDraft(event.target.value)} onBlur={saveIfDirty} placeholder="Write author-owned story memory…" autoFocus spellCheck className="min-h-[60vh] w-full resize-none border-none bg-transparent px-0 py-0 font-prose text-lg leading-[1.75] shadow-none placeholder:italic placeholder:text-muted-foreground/35 focus-visible:outline-none focus-visible:ring-0" />
         </div>
       </div>
       <footer className="flex shrink-0 items-center justify-between border-t border-border/30 px-6 py-2 text-ui-label text-muted-foreground/70">

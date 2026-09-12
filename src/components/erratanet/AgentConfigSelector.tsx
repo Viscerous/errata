@@ -94,7 +94,7 @@ function TriCheck({ state, className }: { state: Tri; className?: string }) {
 
 function ScriptTag() {
   return (
-    <span className="inline-flex items-center gap-0.5 rounded bg-amber-500/10 px-1 font-mono text-[0.5625rem] text-amber-600 dark:text-amber-400">
+    <span className="inline-flex items-center gap-0.5 rounded bg-amber-500/10 px-1 font-mono text-ui-label text-amber-600 dark:text-amber-400">
       <Code2 className="size-2.5" /> script
     </span>
   )
@@ -198,10 +198,10 @@ export function AgentConfigSelector({
                   <div className="flex items-center gap-2 px-2.5 py-2">
                     <button type="button" onClick={() => toggleAgent(agent.name)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
                       <TriCheck state={agentTri(agent.name)} />
-                      <span className="truncate text-[0.8125rem]">{humanize(agent.displayName)}</span>
+                      <span className="truncate text-ui-body">{humanize(agent.displayName)}</span>
                       {hasScript && <ScriptTag />}
                     </button>
-                    <span className="shrink-0 text-[0.625rem] text-muted-foreground tabular-nums">
+                    <span className="shrink-0 text-ui-label text-muted-foreground tabular-nums">
                       {agent.blocks.length > 0
                         ? `${sel.length}/${agent.blocks.length} blocks`
                         : `${agent.overrideCount} overrides`}
@@ -227,10 +227,10 @@ export function AgentConfigSelector({
                             className="flex w-full items-center gap-2 rounded px-1.5 py-1 text-left hover:bg-accent/30"
                           >
                             <TriCheck state={sel.includes(b.id) ? 'on' : 'off'} />
-                            <span className="truncate text-[0.75rem]">{b.name}</span>
-                            <span className="text-[0.5625rem] uppercase tracking-wider text-muted-foreground">{b.role}</span>
+                            <span className="truncate text-ui-caption">{b.name}</span>
+                            <span className="text-ui-label uppercase tracking-wider text-muted-foreground">{b.role}</span>
                             {b.type === 'script' && <ScriptTag />}
-                            {!b.enabled && <span className="text-[0.5625rem] text-muted-foreground">off</span>}
+                            {!b.enabled && <span className="text-ui-label text-muted-foreground">off</span>}
                           </button>
                         </li>
                       ))}
@@ -294,8 +294,8 @@ function SurfaceHeader({
   return (
     <button type="button" onClick={onToggle} className="flex w-full items-center gap-2 px-2.5 py-2 text-left">
       <TriCheck state={tri} />
-      <span className="flex-1 text-[0.8125rem]">{label}</span>
-      <span className="text-[0.625rem] text-muted-foreground tabular-nums">{count}</span>
+      <span className="flex-1 text-ui-body">{label}</span>
+      <span className="text-ui-label text-muted-foreground tabular-nums">{count}</span>
     </button>
   )
 }
@@ -325,8 +325,8 @@ function FlatSurface({
               className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left hover:bg-accent/20"
             >
               <TriCheck state={item.on ? 'on' : 'off'} />
-              <span className="truncate text-[0.75rem]">{item.label}</span>
-              {item.hint && <span className="ml-auto shrink-0 truncate font-mono text-[0.625rem] text-muted-foreground">{item.hint}</span>}
+              <span className="truncate text-ui-caption">{item.label}</span>
+              {item.hint && <span className="ml-auto shrink-0 truncate font-mono text-ui-label text-muted-foreground">{item.hint}</span>}
             </button>
           </li>
         ))}

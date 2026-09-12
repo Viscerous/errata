@@ -34,7 +34,7 @@ export function ErratanetResultRow({ result, onSelect, busy }: { result: Erratan
           {config ? result.agentConfig && <MetaLabel className="mr-0.5 tabular-nums">{result.agentConfig.blockCount} {result.agentConfig.blockCount === 1 ? 'block' : 'blocks'}{result.agentConfig.agents.length > 0 ? ` · tunes ${result.agentConfig.agents.length}` : ''}</MetaLabel> : (
             <>
               <MetaLabel className="mr-0.5 tabular-nums">{result.fragmentCount ?? 0} {result.fragmentCount === 1 ? 'fragment' : 'fragments'}</MetaLabel>
-              {(result.fragmentTypes ?? []).slice(0, 4).map((type) => <Badge key={type} variant="outline" className="h-3.5 px-1 text-ui-label">{type}</Badge>)}
+              {(result.fragmentTypes ?? []).slice(0, 4).map((type) => <Badge key={type} variant="outline" className="h-4 px-1 text-ui-label">{type}</Badge>)}
             </>
           )}
           {(result.tags ?? []).slice(0, 3).map((tag) => <MetaLabel key={tag} className="rounded bg-muted/60 px-1">#{tag}</MetaLabel>)}

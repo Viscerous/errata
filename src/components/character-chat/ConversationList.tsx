@@ -186,16 +186,16 @@ export function ConversationList({
                       <div className="flex-1 min-w-0">
                         <div className="flex items-baseline gap-2">
                           <span className="text-xs font-medium truncate">{conv.title}</span>
-                          <span className="text-[0.625rem] text-muted-foreground shrink-0 ml-auto">
+                          <span className="text-ui-label text-muted-foreground shrink-0 ml-auto">
                             {formatRelativeTime(conv.updatedAt)}
                           </span>
                         </div>
                         <div className="flex items-center gap-1.5 mt-0.5">
-                          <span className="text-[0.625rem] text-muted-foreground">
+                          <span className="text-ui-label text-muted-foreground">
                             {personaLabel(conv.persona, characters)}
                           </span>
-                          <span className="text-[0.625rem] text-muted-foreground">·</span>
-                          <span className="text-[0.625rem] text-muted-foreground">
+                          <span className="text-ui-label text-muted-foreground">·</span>
+                          <span className="text-ui-label text-muted-foreground">
                             {conv.messageCount} message{conv.messageCount !== 1 ? 's' : ''}
                           </span>
                         </div>

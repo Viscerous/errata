@@ -47,7 +47,7 @@ export const PassageListItem = forwardRef<HTMLButtonElement, PassageListItemProp
               </span>
             )}
             <span className={cn(
-              'block font-prose text-[0.8125rem] leading-snug',
+              'block font-prose text-ui-body leading-snug',
               active ? 'text-foreground/85' : 'text-muted-foreground group-hover/passage:text-foreground/80',
             )}>
               {passagePreview(fragment.content)}

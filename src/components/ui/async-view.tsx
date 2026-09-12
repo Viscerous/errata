@@ -92,11 +92,11 @@ export function EmptyState({
         ? <span className="text-muted-foreground/40 mb-1">{icon}</span>
         : <ErrataMark size={14} className="text-muted-foreground/30 mb-1" />
       }
-      <p className="font-display italic text-[0.875rem] text-muted-foreground leading-snug">
+      <p className="font-display italic text-ui-body text-muted-foreground leading-snug">
         {title}
       </p>
       {hint && (
-        <p className="text-[0.6875rem] text-muted-foreground/70 leading-relaxed max-w-[220px]">
+        <p className="text-ui-label text-muted-foreground/70 leading-relaxed max-w-[220px]">
           {hint}
         </p>
       )}

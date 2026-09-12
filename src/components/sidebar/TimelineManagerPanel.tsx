@@ -186,7 +186,7 @@ export function TimelineManagerPanel({ storyId }: TimelineManagerPanelProps) {
                         {branch.name}
                       </p>
                       {parent && (
-                        <p className="text-[0.625rem] text-muted-foreground truncate">
+                        <p className="text-ui-label text-muted-foreground truncate">
                           from {parent.name}
                           {branch.forkAfterIndex !== undefined && ` at section ${branch.forkAfterIndex + 1}`}
                         </p>
@@ -196,11 +196,11 @@ export function TimelineManagerPanel({ storyId }: TimelineManagerPanelProps) {
                 </div>
 
                 {isActive && (
-                  <span className="text-[0.625rem] text-primary/60 font-medium shrink-0">active</span>
+                  <span className="text-ui-label text-primary/60 font-medium shrink-0">active</span>
                 )}
 
                 <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" onClick={(e) => e.stopPropagation()}>
-                  <button
+                  <button type="button"
                     className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-all"
                     onClick={() => startRename(branch)}
                     title="Rename"
@@ -208,7 +208,7 @@ export function TimelineManagerPanel({ storyId }: TimelineManagerPanelProps) {
                     <Pencil className="size-3" />
                   </button>
                   {!isRoot && (
-                    <button
+                    <button type="button"
                       className="p-1 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-all"
                       onClick={async () => {
                         if (await confirm({ title: `Delete timeline "${branch.name}"?`, description: 'This cannot be undone.', confirmText: 'Delete', destructive: true })) {

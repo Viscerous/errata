@@ -31,7 +31,7 @@ function AssistantTurn({ content, streaming = false }: { content: string; stream
       <div className="mt-0.5 flex size-7 shrink-0 items-center justify-center text-primary/75" aria-hidden>
         <ErrataMark size={18} />
       </div>
-      <div className="min-w-0 max-w-[70ch] flex-1 font-prose text-[0.975rem] leading-7 text-foreground/90 sm:text-base">
+      <div className="min-w-0 max-w-[70ch] flex-1 font-prose text-base leading-7 text-foreground/90 sm:text-base">
         <span className="sr-only">Errata: </span>
         {content ? (
           <StreamMarkdown content={content} streaming={streaming} variant="prose" />
@@ -51,7 +51,7 @@ function WriterTurn({ content }: { content: string }) {
   return (
     <article className="ml-10 sm:ml-11" data-component-id="story-setup-writer-turn">
       <p className="mb-1.5 text-xs font-medium text-muted-foreground">You</p>
-      <p className="max-w-[68ch] whitespace-pre-wrap rounded-lg bg-muted/45 px-4 py-3 font-prose text-[0.95rem] leading-6 text-foreground sm:text-base">
+      <p className="max-w-[68ch] whitespace-pre-wrap rounded-lg bg-muted/45 px-4 py-3 font-prose text-base leading-6 text-foreground sm:text-base">
         {content}
       </p>
     </article>
@@ -113,7 +113,7 @@ function StorySetupRail({
                   <p className={`text-xs leading-5 ${item.status === 'missing' ? 'text-muted-foreground' : 'text-foreground/85'}`}>
                     {definition.label}
                   </p>
-                  {item.note && <p className="line-clamp-2 text-[0.6875rem] leading-4 text-muted-foreground">{item.note}</p>}
+                  {item.note && <p className="line-clamp-2 text-ui-label leading-4 text-muted-foreground">{item.note}</p>}
                 </div>
               </li>
             )
@@ -124,7 +124,7 @@ function StorySetupRail({
       <section aria-labelledby="draft-fragments-heading">
         <div className="flex items-center justify-between gap-3">
           <h2 id="draft-fragments-heading" className="text-sm font-semibold text-foreground">Story fragments</h2>
-          {updating && <span className="text-[0.6875rem] text-muted-foreground">Updating</span>}
+          {updating && <span className="text-ui-label text-muted-foreground">Updating</span>}
         </div>
         <p className="mt-1 text-xs leading-5 text-muted-foreground">Saved as the conversation develops. Open one to read it.</p>
 
@@ -141,11 +141,11 @@ function StorySetupRail({
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <p className="truncate text-xs font-medium text-foreground/90">{fragment.name}</p>
-                      <p className="mt-0.5 text-[0.6875rem] text-muted-foreground">{fragment.type}</p>
+                      <p className="mt-0.5 text-ui-label text-muted-foreground">{fragment.type}</p>
                     </div>
                     <span className="mt-0.5 text-xs text-muted-foreground transition-transform group-open:rotate-90" aria-hidden>›</span>
                   </div>
-                  <p className="mt-1.5 text-[0.6875rem] leading-4 text-muted-foreground">{fragment.description}</p>
+                  <p className="mt-1.5 text-ui-label leading-4 text-muted-foreground">{fragment.description}</p>
                 </summary>
                 <p className="mt-3 whitespace-pre-wrap font-prose text-xs leading-5 text-foreground/75">{fragment.content}</p>
               </details>
@@ -311,7 +311,7 @@ export function StoryWizard({ controller, onComplete }: StoryWizardProps) {
                   </Button>
                 )}
               </div>
-              <div className="mt-2 flex items-center justify-between gap-4 px-1 text-[0.6875rem] text-muted-foreground">
+              <div className="mt-2 flex items-center justify-between gap-4 px-1 text-ui-label text-muted-foreground">
                 <p>Fragments are saved as the conversation develops.</p>
                 <p className="hidden sm:block">Enter to send, Shift+Enter for a new line</p>
               </div>

@@ -121,15 +121,15 @@ export function BlockContentView({ messages, blocks, tools, toolStages, contextW
           <div key={group.role} className="mb-3 last:mb-0">
             <div className="flex items-center gap-1.5 px-2 mb-1">
               <div className="size-1 rounded-full bg-muted-foreground/50" />
-              <span className="text-[0.5625rem] text-muted-foreground uppercase tracking-[0.15em] font-medium">
+              <span className="text-ui-label text-muted-foreground uppercase tracking-[0.15em] font-medium">
                 {group.role}
               </span>
             </div>
             {group.blocks.map((block) => (
-            <button
+            <button type="button"
               key={block.id}
               className={cn(
-                'w-full text-left px-2 py-1 rounded-md text-[0.6875rem] truncate transition-colors duration-100',
+                'w-full text-left px-2 py-1 rounded-md text-ui-label truncate transition-colors duration-100',
                 activeBlockId === block.id
                   ? 'bg-accent/50 text-foreground font-medium'
                   : 'text-muted-foreground hover:text-foreground/80 hover:bg-accent/25',
@@ -167,27 +167,27 @@ export function BlockContentView({ messages, blocks, tools, toolStages, contextW
             >
               {/* Block header */}
               <div className="flex items-center gap-2 px-3 py-1.5 bg-muted/10 border-b border-border/10">
-                <span className="text-[0.625rem] font-medium text-muted-foreground truncate">
+                <span className="text-ui-label font-medium text-muted-foreground truncate">
                   {seg.name}
                 </span>
                 {seg.name !== seg.id && (
-                  <span className="text-[0.5625rem] text-muted-foreground/50 font-mono truncate">
+                  <span className="text-ui-label text-muted-foreground/50 font-mono truncate">
                     {seg.id}
                   </span>
                 )}
-                <span className="text-[0.5625rem] text-muted-foreground tabular-nums ml-auto shrink-0">
+                <span className="text-ui-label text-muted-foreground tabular-nums ml-auto shrink-0">
                   {seg.content.length.toLocaleString()} chars
                 </span>
                 <Badge
                   variant="outline"
-                  className="text-[0.5625rem] h-3.5 px-1 font-normal border-transparent text-muted-foreground bg-muted/30 shrink-0"
+                  className="text-ui-label h-4 px-1 font-normal border-transparent text-muted-foreground bg-muted/30 shrink-0"
                 >
                   {seg.role}
                 </Badge>
               </div>
 
               {/* Block content */}
-              <pre className="whitespace-pre-wrap text-[0.6875rem] font-mono text-muted-foreground p-3 max-h-[300px] overflow-y-auto leading-relaxed">
+              <pre className="whitespace-pre-wrap text-ui-label font-mono text-muted-foreground p-3 max-h-[300px] overflow-y-auto leading-relaxed">
                 {seg.content}
               </pre>
             </div>
@@ -202,11 +202,11 @@ export function BlockContentView({ messages, blocks, tools, toolStages, contextW
               )}
             >
               <div className="flex items-center gap-2 px-3 py-1.5 bg-muted/10 border-b border-border/10">
-                <span className="text-[0.625rem] font-medium text-muted-foreground">Tools</span>
-                <span className="text-[0.5625rem] text-muted-foreground/70">
+                <span className="text-ui-label font-medium text-muted-foreground">Tools</span>
+                <span className="text-ui-label text-muted-foreground/70">
                   sent to the model via the API tool schema
                 </span>
-                <span className="text-[0.5625rem] text-muted-foreground tabular-nums ml-auto shrink-0">
+                <span className="text-ui-label text-muted-foreground tabular-nums ml-auto shrink-0">
                   {enabledToolCount}/{tools!.length} enabled
                 </span>
               </div>
@@ -215,26 +215,26 @@ export function BlockContentView({ messages, blocks, tools, toolStages, contextW
                 {tools!.map((t) => (
                   <details key={t.name} className={cn('rounded border border-border/20 px-2 py-1.5', !t.enabled && 'opacity-45')}>
                     <summary className="flex cursor-pointer list-none items-center gap-2">
-                      <code className={cn('text-[0.6875rem] font-mono text-foreground/90', !t.enabled && 'line-through')}>
+                      <code className={cn('text-ui-label font-mono text-foreground/90', !t.enabled && 'line-through')}>
                         {t.name}
                       </code>
                       {!t.enabled && (
                         <Badge
                           variant="outline"
-                          className="text-[0.5rem] h-3.5 px-1 font-normal border-transparent text-muted-foreground bg-muted/30 shrink-0 uppercase tracking-wide"
+                          className="text-ui-label h-4 px-1 font-normal border-transparent text-muted-foreground bg-muted/30 shrink-0 uppercase tracking-wide"
                         >
                           disabled
                         </Badge>
                       )}
-                      <span className="ml-auto text-[0.5625rem] tabular-nums text-muted-foreground">
+                      <span className="ml-auto text-ui-label tabular-nums text-muted-foreground">
                         ~{t.estimatedTokens.toLocaleString()} tokens
                       </span>
                     </summary>
                     {t.description && (
-                      <p className="mt-1 text-[0.625rem] text-muted-foreground leading-relaxed">{t.description}</p>
+                      <p className="mt-1 text-ui-label text-muted-foreground leading-relaxed">{t.description}</p>
                     )}
                     {t.schema && (
-                      <pre className="mt-2 max-h-[300px] overflow-auto whitespace-pre-wrap border-t border-border/20 pt-2 font-mono text-[0.625rem] leading-relaxed text-muted-foreground">
+                      <pre className="mt-2 max-h-[300px] overflow-auto whitespace-pre-wrap border-t border-border/20 pt-2 font-mono text-ui-label leading-relaxed text-muted-foreground">
                         {t.schema}
                       </pre>
                     )}

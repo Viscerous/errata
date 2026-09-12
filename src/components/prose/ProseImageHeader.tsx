@@ -121,7 +121,7 @@ export function ProseImageHeader({ storyId, fragment, header }: ProseImageHeader
                 e.stopPropagation()
                 chooseAspect(o.id)
               }}
-              className={`rounded-md px-1.5 py-0.5 font-mono text-[0.625rem] leading-none transition-colors disabled:opacity-50 ${
+              className={`rounded-md px-1.5 py-0.5 font-mono text-ui-label leading-none transition-colors disabled:opacity-50 ${
                 selected
                   ? 'bg-primary/15 text-primary'
                   : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground'
@@ -143,7 +143,7 @@ export function ProseImageHeader({ storyId, fragment, header }: ProseImageHeader
             e.stopPropagation()
             toggleFade()
           }}
-          className={`rounded-md px-1.5 py-0.5 font-mono text-[0.625rem] leading-none transition-colors disabled:opacity-50 ${
+          className={`rounded-md px-1.5 py-0.5 font-mono text-ui-label leading-none transition-colors disabled:opacity-50 ${
             fade
               ? 'bg-primary/15 text-primary'
               : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground'

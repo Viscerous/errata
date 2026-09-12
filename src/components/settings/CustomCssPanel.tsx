@@ -40,7 +40,7 @@ export function CustomCssPanel({ onClose }: CustomCssPanelProps) {
         <PanelHeaderText className="flex-row items-center gap-2">
           <Code2 className="size-4 text-muted-foreground" />
           <PanelTitle>Custom CSS</PanelTitle>
-          <span className="text-[0.625rem] text-muted-foreground uppercase tracking-wider">Appearance</span>
+          <span className="text-ui-label text-muted-foreground uppercase tracking-wider">Appearance</span>
         </PanelHeaderText>
         <PanelActions>
           <Button size="icon" variant="ghost" className="size-7 text-muted-foreground" onClick={onClose} data-component-id="custom-css-panel-close">
@@ -51,7 +51,7 @@ export function CustomCssPanel({ onClose }: CustomCssPanelProps) {
 
       <PanelBody className="px-6 py-6" data-component-id="custom-css-panel-scroll">
         <div className="max-w-3xl w-full mx-auto space-y-4">
-          <Hint className="text-[0.625rem] leading-snug">
+          <Hint className="text-ui-label leading-snug">
             Add your own CSS to customize the interface. Styles are applied globally when Custom CSS is enabled.
           </Hint>
 

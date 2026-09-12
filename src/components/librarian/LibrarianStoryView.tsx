@@ -14,6 +14,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { EmptyState } from '@/components/ui/async-view'
 import { RefinementPanel } from '@/components/refinement/RefinementPanel'
 import { FragmentTypeDisplayIcon } from '@/components/fragments/fragment-type-icons'
+import { SettingsSelect } from '@/components/settings/primitives'
 import { LibrarianAnalysisCard } from './LibrarianAnalysisCard'
 import { buildMentionGroups, type MentionGroup } from './librarian-mention-groups'
 import { useLiveAnalysisProgress } from './use-live-analysis-progress'
@@ -147,10 +148,10 @@ export function LibrarianStoryView({ storyId, status, onOpenChat }: LibrarianSto
             {refineTarget ? (
               <RefinementPanel storyId={storyId} fragmentId={refineTarget.fragmentId} fragmentName={refineTarget.fragmentName} onComplete={() => setRefineTarget(null)} onClose={() => setRefineTarget(null)} />
             ) : refinableFragments.length > 0 ? (
-              <select aria-label="Fragment to refine" className="w-full cursor-pointer rounded-md border border-border/40 bg-elevated/60 px-2 py-1.5 text-ui-label text-muted-foreground outline-none transition-colors hover:border-border/60 focus:border-ring" defaultValue="" onChange={event => { const fragment = refinableFragments.find(item => item.id === event.target.value); if (fragment) setRefineTarget({ fragmentId: fragment.id, fragmentName: fragment.name }) }}>
+              <SettingsSelect aria-label="Fragment to refine" className="h-8 w-full cursor-pointer text-ui-label text-muted-foreground" value="" onChange={value => { const fragment = refinableFragments.find(item => item.id === value); if (fragment) setRefineTarget({ fragmentId: fragment.id, fragmentName: fragment.name }) }}>
                 <option value="" disabled>Select a fragment to refine...</option>
                 {refinableFragments.map(fragment => <option key={fragment.id} value={fragment.id}>{fragment.name} ({fragment.type})</option>)}
-              </select>
+              </SettingsSelect>
             ) : <p className="text-ui-label italic text-muted-foreground">No fragments to refine yet.</p>}
           </div>
         </section>

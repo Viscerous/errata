@@ -10,6 +10,7 @@ import { parseGlobalPackId } from '@/lib/erratanet/pack-schema'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
+import { Checkbox } from '@/components/ui/checkbox'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '@/lib/utils'
 import { Loader2, Download, Code2, Check, ChevronRight } from 'lucide-react'
@@ -133,14 +134,14 @@ export function AgentConfigImportView({ id, version, storyId }: AgentConfigImpor
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <h3 className="font-display text-xl leading-tight">{manifest.title}</h3>
-              <Badge variant="secondary" className="h-4 text-[0.625rem]">agent config</Badge>
+              <Badge variant="secondary" className="h-4 text-ui-label">agent config</Badge>
               {summary.hasScripts && (
-                <span className="inline-flex items-center gap-1 rounded border border-amber-500/40 px-1.5 py-0.5 font-mono text-[0.625rem] lowercase tracking-wide text-amber-600 dark:text-amber-400">
+                <span className="inline-flex items-center gap-1 rounded border border-amber-500/40 px-1.5 py-0.5 font-mono text-ui-label lowercase tracking-wide text-amber-600 dark:text-amber-400">
                   <Code2 className="size-3" /> runs code
                 </span>
               )}
             </div>
-            <p className="mt-1 font-mono text-[0.6875rem] text-muted-foreground">
+            <p className="mt-1 font-mono text-ui-label text-muted-foreground">
               {handleLabel}{idParts ? `/${idParts.slug}` : ''} <span className="text-muted-foreground/70">v{manifest.version}</span>
             </p>
             {manifest.description && (
@@ -154,7 +155,7 @@ export function AgentConfigImportView({ id, version, storyId }: AgentConfigImpor
             <>
               {/* Choose what to apply — down to individual agents and blocks. */}
               <div>
-                <span className="text-[0.625rem] uppercase tracking-wider text-muted-foreground">
+                <span className="text-ui-label uppercase tracking-wider text-muted-foreground">
                   Choose what to apply
                 </span>
                 <div className="mt-2">
@@ -171,7 +172,7 @@ export function AgentConfigImportView({ id, version, storyId }: AgentConfigImpor
 
               {/* Targets */}
               <div className="space-y-2">
-                <span className="text-[0.625rem] uppercase tracking-wider text-muted-foreground">Apply</span>
+                <span className="text-ui-label uppercase tracking-wider text-muted-foreground">Apply</span>
                 {storyId ? (
                   <TargetToggle
                     on={applyToStory}
@@ -235,11 +236,11 @@ function ScriptConsent({
   const [open, setOpen] = useState(false)
   return (
     <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3">
-      <p className="flex items-center gap-2 text-[0.8125rem] font-medium text-foreground">
+      <p className="flex items-center gap-2 text-ui-body font-medium text-foreground">
         <Code2 className="size-4 text-amber-500" />
         This configuration runs code
       </p>
-      <p className="mt-1 text-[0.6875rem] leading-snug text-muted-foreground">
+      <p className="mt-1 text-ui-label leading-snug text-muted-foreground">
         You&apos;ve selected {scripts.length} executable script {scripts.length === 1 ? 'block' : 'blocks'}.
         Read the source below before you apply it. Only adopt configs from authors you trust.
       </p>
@@ -247,7 +248,7 @@ function ScriptConsent({
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="mt-2 inline-flex items-center gap-1 text-[0.6875rem] text-foreground/80 hover:text-foreground"
+        className="mt-2 inline-flex items-center gap-1 text-ui-label text-foreground/80 hover:text-foreground"
       >
         <ChevronRight className={cn('size-3 transition-transform', open && 'rotate-90')} />
         {open ? 'Hide' : 'Review'} script source
@@ -258,10 +259,10 @@ function ScriptConsent({
           {scripts.map((s, i) => (
             <div key={i} className="overflow-hidden rounded border border-border/40">
               <div className="flex items-baseline gap-2 border-b border-border/40 bg-muted/30 px-2.5 py-1">
-                <span className="font-mono text-[0.625rem] text-muted-foreground">{humanizeAgent(s.agent)}</span>
-                <span className="text-[0.6875rem]">{s.blockName}</span>
+                <span className="font-mono text-ui-label text-muted-foreground">{humanizeAgent(s.agent)}</span>
+                <span className="text-ui-label">{s.blockName}</span>
               </div>
-              <pre className="max-h-48 overflow-auto p-2.5 font-mono text-[0.6875rem] leading-relaxed text-foreground/90 whitespace-pre-wrap break-words">
+              <pre className="max-h-48 overflow-auto p-2.5 font-mono text-ui-label leading-relaxed text-foreground/90 whitespace-pre-wrap break-words">
                 {s.content}
               </pre>
             </div>
@@ -269,12 +270,12 @@ function ScriptConsent({
         </div>
       )}
 
-      <label className="mt-3 flex items-start gap-2 text-[0.75rem]">
-        <input
-          type="checkbox"
+      <label htmlFor="agent-config-consent" className="mt-3 flex items-start gap-2 text-ui-caption">
+        <Checkbox
+          id="agent-config-consent"
           checked={consent}
-          onChange={(e) => onConsent(e.target.checked)}
-          className="mt-0.5 size-3.5 accent-primary"
+          onCheckedChange={(checked) => onConsent(checked === true)}
+          className="mt-0.5"
           data-component-id="agent-config-consent"
         />
         <span>I understand this configuration runs code, and I&apos;ve reviewed it.</span>
@@ -307,8 +308,8 @@ function TargetToggle({
         {on ? <Check className="size-3" /> : null}
       </span>
       <span className="min-w-0">
-        <span className="block text-[0.8125rem] leading-tight">{title}</span>
-        <span className="block text-[0.6875rem] text-muted-foreground">{subtitle}</span>
+        <span className="block text-ui-body leading-tight">{title}</span>
+        <span className="block text-ui-label text-muted-foreground">{subtitle}</span>
       </span>
     </button>
   )
@@ -322,7 +323,7 @@ function ApplyResultPanel({ result }: { result: { applied?: AgentConfigApplyResu
         <Check className="size-4 text-primary" />
         Done.
       </div>
-      <ul className="space-y-1.5 text-[0.8125rem] text-muted-foreground">
+      <ul className="space-y-1.5 text-ui-body text-muted-foreground">
         {a && a.agentsApplied.length > 0 && (
           <li>Applied blocks for <span className="text-foreground">{a.agentsApplied.map(humanizeAgent).join(', ')}</span>.</li>
         )}
@@ -333,13 +334,13 @@ function ApplyResultPanel({ result }: { result: { applied?: AgentConfigApplyResu
       </ul>
 
       {a && a.modelRolesNeedingProvider.length > 0 && (
-        <p className="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-[0.6875rem] text-muted-foreground">
+        <p className="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-ui-label text-muted-foreground">
           Some roles ({a.modelRolesNeedingProvider.map(humanizeAgent).join(', ')}) reference a provider you
           don&apos;t have yet. Add it in Settings → Providers and the model picks up automatically.
         </p>
       )}
       {a && a.suggestedProviders.length > 0 && (
-        <p className="rounded-md border border-border/30 px-3 py-2 text-[0.6875rem] text-muted-foreground">
+        <p className="rounded-md border border-border/30 px-3 py-2 text-ui-label text-muted-foreground">
           This config was tuned for{' '}
           {a.suggestedProviders.map((p) => `${p.name} (${p.defaultModel})`).join(', ')}. Add your API key
           in Settings → Providers to match it.

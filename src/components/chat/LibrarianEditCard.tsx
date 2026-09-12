@@ -118,7 +118,7 @@ export function LibrarianEditCard({ storyId, result }: { storyId: string; result
   }
 
   return (
-    <div className="my-1.5 rounded border border-border/40 bg-muted/20 text-[0.625rem]">
+    <div className="my-1.5 rounded border border-border/40 bg-muted/20 text-ui-label">
       <div className="flex items-center gap-1.5 px-2 py-1.5 border-b border-border/20">
         <span className="text-muted-foreground">
           {changes.length === 1 ? '1 fragment change' : `${changes.length} fragment changes`}
@@ -133,7 +133,7 @@ export function LibrarianEditCard({ storyId, result }: { storyId: string; result
               <AlertCircle className="size-3" /> Undo failed
             </span>
           ) : (
-            <button
+            <button type="button"
               onClick={handleUndo}
               disabled={state === 'undoing'}
               className="flex items-center gap-1 text-muted-foreground hover:text-foreground disabled:opacity-50 transition-colors"

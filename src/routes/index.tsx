@@ -738,7 +738,16 @@ function StoryListPage() {
         </DialogContent>
       </Dialog>
 
-      {showProviders && <ProviderPanel onClose={() => setShowProviders(false)} />}
+      <Dialog open={showProviders} onOpenChange={setShowProviders}>
+        <DialogContent
+          showCloseButton={false}
+          aria-describedby={undefined}
+          className="inset-0 top-0 left-0 flex h-dvh max-h-dvh w-screen max-w-none translate-x-0 translate-y-0 flex-col gap-0 overflow-hidden rounded-none border-0 bg-background p-0 shadow-none sm:max-w-none"
+        >
+          <DialogTitle className="sr-only">Providers</DialogTitle>
+          <ProviderPanel onClose={() => setShowProviders(false)} />
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

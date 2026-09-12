@@ -105,8 +105,8 @@ function ColorRow({
     <div className="px-4 py-3">
       <div className="flex items-center justify-between mb-1.5">
         <div>
-          <p className="text-[0.75rem] font-medium text-foreground/80">{channel.label}</p>
-          <p className="text-[0.625rem] text-muted-foreground leading-snug">{channel.description}</p>
+          <p className="text-ui-caption font-medium text-foreground/80">{channel.label}</p>
+          <p className="text-ui-label text-muted-foreground leading-snug">{channel.description}</p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
           {value && (
@@ -127,7 +127,7 @@ function ColorRow({
             title={value || `Default (${channel.defaultHint})`}
           >
             {!value && (
-              <span className="absolute inset-0 flex items-center justify-center text-[0.5rem] text-muted-foreground">
+              <span className="absolute inset-0 flex items-center justify-center text-ui-label text-muted-foreground">
                 —
               </span>
             )}
@@ -188,12 +188,12 @@ export function ProseColorsControls() {
   return (
     <div className="rounded-lg border border-border/30 divide-y divide-border/20">
       <div className="flex items-center justify-between px-3 py-2">
-        <p className="text-[0.75rem] font-medium text-foreground/80">Prose colors</p>
+        <p className="text-ui-caption font-medium text-foreground/80">Prose colors</p>
         {hasCustomColors && (
           <button
             type="button"
             onClick={resetColors}
-            className="flex items-center gap-1 text-[0.625rem] text-muted-foreground hover:text-foreground/60 transition-colors"
+            className="flex items-center gap-1 text-ui-label text-muted-foreground hover:text-foreground/60 transition-colors"
           >
             <RotateCcw className="size-2.5" />
             Reset all
@@ -213,11 +213,11 @@ export function ProseColorsControls() {
 
       {/* Live preview */}
       <div className="px-4 py-4">
-        <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wider mb-2">
+        <p className="text-ui-label text-muted-foreground uppercase tracking-wider mb-2">
           Preview
         </p>
         <div
-          className="prose-content rounded-lg border border-border/20 bg-background p-4 text-[0.8125rem] leading-relaxed"
+          className="prose-content rounded-lg border border-border/20 bg-background p-4 text-ui-body leading-relaxed"
         >
           {PREVIEW_TEXT.split('\n\n').map((para, i) => {
             // Simple rendering: detect dialogue and emphasis for preview

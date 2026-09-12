@@ -211,7 +211,7 @@ export function LibrarianChat({ storyId, conversationId, initialInput }: Librari
           />
         </div>
 
-        <p className="text-[0.625rem] text-muted-foreground text-center">
+        <p className="text-ui-label text-muted-foreground text-center">
           Enter to send, Shift+Enter for newline
         </p>
       </div>

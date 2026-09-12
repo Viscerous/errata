@@ -72,7 +72,7 @@ export function QuestionCard({ questions, onSubmit, onCancel, disabled }: Questi
     >
       <div className="flex items-center gap-2 text-muted-foreground">
         <HelpCircle className="size-3.5 text-primary/70" />
-        <span className="font-sans text-[0.6875rem] uppercase tracking-[0.12em]">
+        <span className="font-sans text-ui-label uppercase tracking-[0.12em]">
           A few questions before writing
         </span>
       </div>
@@ -84,10 +84,10 @@ export function QuestionCard({ questions, onSubmit, onCancel, disabled }: Questi
           return (
             <div key={i} className="space-y-2.5" data-component-id="clarify-question">
               <div className="flex items-baseline gap-2.5">
-                <span className="shrink-0 rounded bg-primary/10 px-1.5 py-0.5 font-sans text-[0.625rem] font-medium uppercase tracking-wide text-primary/80">
+                <span className="shrink-0 rounded bg-primary/10 px-1.5 py-0.5 font-sans text-ui-label font-medium uppercase tracking-wide text-primary/80">
                   {q.header}
                 </span>
-                <p className="font-prose text-[0.9375rem] leading-snug text-foreground/90">
+                <p className="font-prose text-base leading-snug text-foreground/90">
                   {q.question}
                 </p>
               </div>
@@ -105,7 +105,7 @@ export function QuestionCard({ questions, onSubmit, onCancel, disabled }: Questi
                         title={opt.description}
                         onClick={() => toggleOption(i, q, opt.label)}
                         className={cn(
-                          'rounded-md border px-2.5 py-1.5 text-left font-sans text-[0.8125rem] transition-all duration-200 disabled:opacity-40',
+                          'rounded-md border px-2.5 py-1.5 text-left font-sans text-ui-body transition-all duration-200 disabled:opacity-40',
                           active
                             ? 'border-primary/40 bg-primary/[0.07] text-foreground'
                             : 'border-border/40 text-foreground/75 hover:border-primary/30 hover:bg-primary/[0.03]',
@@ -121,7 +121,7 @@ export function QuestionCard({ questions, onSubmit, onCancel, disabled }: Questi
                     aria-pressed={a.otherActive}
                     onClick={() => toggleOther(i, q)}
                     className={cn(
-                      'rounded-md border px-2.5 py-1.5 font-sans text-[0.8125rem] italic transition-all duration-200 disabled:opacity-40',
+                      'rounded-md border px-2.5 py-1.5 font-sans text-ui-body italic transition-all duration-200 disabled:opacity-40',
                       a.otherActive
                         ? 'border-primary/40 bg-primary/[0.07] text-foreground'
                         : 'border-dashed border-border/50 text-muted-foreground hover:border-primary/30',
@@ -140,7 +140,7 @@ export function QuestionCard({ questions, onSubmit, onCancel, disabled }: Questi
                   onChange={(e) => update(i, { other: e.target.value })}
                   placeholder={hasOptions ? 'Your answer…' : 'Type your answer…'}
                   rows={hasOptions ? 1 : 2}
-                  className="w-full resize-none rounded-md border border-border/40 bg-card/30 px-3 py-2 font-prose text-[0.875rem] leading-relaxed text-foreground outline-none transition-colors placeholder:italic placeholder:text-muted-foreground focus:border-primary/30 disabled:opacity-40"
+                  className="w-full resize-none rounded-md border border-border/40 bg-card/30 px-3 py-2 font-prose text-ui-body leading-relaxed text-foreground outline-none transition-colors placeholder:italic placeholder:text-muted-foreground focus:border-primary/30 disabled:opacity-40"
                 />
               )}
             </div>
@@ -149,7 +149,7 @@ export function QuestionCard({ questions, onSubmit, onCancel, disabled }: Questi
       </div>
 
       <div className="flex items-center justify-between pt-1">
-        <span className="font-sans text-[0.625rem] text-muted-foreground">
+        <span className="font-sans text-ui-label text-muted-foreground">
           Answers guide this passage only — nothing is saved.
         </span>
         <div className="flex gap-1.5">

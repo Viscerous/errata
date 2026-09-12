@@ -39,21 +39,21 @@ export function ToolCallCard({ tc, defaultExpanded = false }: { tc: ToolCallInfo
   const hasResult = tc.result !== undefined
 
   return (
-    <div className="my-1.5 rounded border border-border/40 bg-muted/20 text-[0.625rem]">
-      <button
+    <div className="my-1.5 rounded border border-border/40 bg-muted/20 text-ui-label">
+      <button type="button"
         onClick={() => setExpanded(!expanded)}
         className="flex items-center gap-1.5 w-full px-2 py-1.5 text-left hover:bg-muted/30 transition-colors"
       >
         {expanded ? <ChevronDown className="size-3 shrink-0" /> : <ChevronRight className="size-3 shrink-0" />}
         <Wrench className="size-3 shrink-0 text-muted-foreground" />
-        <Badge variant="outline" className="text-[0.5625rem] px-1 py-0 h-4 font-mono">
+        <Badge variant="outline" className="text-ui-label px-1 py-0 h-4 font-mono">
           {tc.toolName}
         </Badge>
         {argSummary && (
           <span className="text-muted-foreground truncate">{argSummary}</span>
         )}
         {hasResult && (
-          <Badge variant="secondary" className="text-[0.5625rem] px-1 py-0 h-4 ml-auto shrink-0">
+          <Badge variant="secondary" className="text-ui-label px-1 py-0 h-4 ml-auto shrink-0">
             done
           </Badge>
         )}
@@ -62,14 +62,14 @@ export function ToolCallCard({ tc, defaultExpanded = false }: { tc: ToolCallInfo
         <div className="px-2 pb-2 space-y-1.5 border-t border-border/20">
           <div>
             <div className="text-muted-foreground mt-1.5 mb-0.5">Arguments</div>
-            <pre className="bg-muted/30 rounded px-1.5 py-1 font-mono text-[0.625rem] overflow-x-auto whitespace-pre-wrap break-all">
+            <pre className="bg-muted/30 rounded px-1.5 py-1 font-mono text-ui-label overflow-x-auto whitespace-pre-wrap break-all">
               {JSON.stringify(args, null, 2)}
             </pre>
           </div>
           {hasResult && (
             <div>
               <div className="text-muted-foreground mb-0.5">Result</div>
-              <pre className="bg-muted/30 rounded px-1.5 py-1 font-mono text-[0.625rem] overflow-x-auto whitespace-pre-wrap break-all">
+              <pre className="bg-muted/30 rounded px-1.5 py-1 font-mono text-ui-label overflow-x-auto whitespace-pre-wrap break-all">
                 {JSON.stringify(tc.result, null, 2)}
               </pre>
             </div>
@@ -85,9 +85,9 @@ export function ReasoningSection({ reasoning, streaming }: { reasoning: string; 
 
   return (
     <div className="mb-2">
-      <button
+      <button type="button"
         onClick={() => setExpanded(!expanded)}
-        className="flex items-center gap-1.5 text-[0.625rem] text-muted-foreground hover:text-muted-foreground transition-colors"
+        className="flex items-center gap-1.5 text-ui-label text-muted-foreground hover:text-muted-foreground transition-colors"
       >
         {expanded ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
         <Brain className="size-3" />
@@ -97,7 +97,7 @@ export function ReasoningSection({ reasoning, streaming }: { reasoning: string; 
         {streaming && <Loader2 className="size-3 animate-spin" />}
       </button>
       {expanded && (
-        <div className="mt-1 pl-5 text-[0.625rem] text-muted-foreground italic whitespace-pre-wrap leading-relaxed">
+        <div className="mt-1 pl-5 text-ui-label text-muted-foreground italic whitespace-pre-wrap leading-relaxed">
           {reasoning}
         </div>
       )}

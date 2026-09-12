@@ -292,7 +292,7 @@ function UploadVisualButton({ uploading, tile, onUpload }: { uploading: boolean;
       : `inline-flex h-7 items-center gap-1.5 rounded-md border px-3 text-xs transition-colors ${uploading ? 'pointer-events-none opacity-50' : 'cursor-pointer border-border/40 hover:bg-accent/50'}`
     }>
       <Upload className="size-3.5 text-muted-foreground" />
-      <span className={tile ? 'text-[0.5rem] text-muted-foreground' : ''}>{uploading ? 'Uploading…' : tile ? 'Upload' : 'Upload & link'}</span>
+      <span className={tile ? 'text-ui-label text-muted-foreground' : ''}>{uploading ? 'Uploading…' : tile ? 'Upload' : 'Upload & link'}</span>
       <input
         type="file"
         accept="image/*"

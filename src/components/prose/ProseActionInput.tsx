@@ -89,7 +89,7 @@ export function ProseActionInput({
         <p className="text-sm text-destructive mt-2">{error}</p>
       )}
       <div className="flex items-center justify-between mt-2.5">
-        <span className="text-[0.625rem] text-muted-foreground">
+        <span className="text-ui-label text-muted-foreground">
           Esc to cancel &middot; Ctrl+Enter to submit
         </span>
         <div className="flex gap-1.5">

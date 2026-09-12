@@ -250,7 +250,7 @@ export const FileDropzone = React.forwardRef<HTMLDivElement, FileDropzoneProps>(
                 {label}
               </p>
               {hint && (
-                <p className="text-[0.6875rem] text-muted-foreground mt-1.5 text-center">
+                <p className="text-ui-label text-muted-foreground mt-1.5 text-center">
                   {hint}
                 </p>
               )}
@@ -340,7 +340,7 @@ function FileDropDialogActions({
       </div>
       <DialogFooter className={cn('shrink-0 px-5 py-3.5 flex-row items-center', className)}>
         {meta && (
-          <span className="text-[0.6875rem] text-muted-foreground mr-auto tabular-nums">
+          <span className="text-ui-label text-muted-foreground mr-auto tabular-nums">
             {meta}
           </span>
         )}

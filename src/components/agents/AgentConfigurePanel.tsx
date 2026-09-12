@@ -352,8 +352,8 @@ function AgentBlockEditor({ storyId, agentName, agents, onBack }: AgentBlockEdit
           <ChevronLeft className="size-4" />
         </button>
         <div className="flex-1 min-w-0">
-          <p className="text-[0.75rem] font-medium truncate">{agent?.displayName ?? agentName}</p>
-          <p className="text-[0.625rem] text-muted-foreground truncate">{agent?.description}</p>
+          <p className="text-ui-caption font-medium truncate">{agent?.displayName ?? agentName}</p>
+          <p className="text-ui-label text-muted-foreground truncate">{agent?.description}</p>
         </div>
         <div className="flex items-center gap-1 shrink-0">
           <Button
@@ -396,7 +396,7 @@ function AgentBlockEditor({ storyId, agentName, agents, onBack }: AgentBlockEdit
       </div>
 
       {transferError && (
-        <p className="px-3 py-2 border-b border-destructive/20 bg-destructive/5 text-[0.6875rem] text-destructive">
+        <p className="px-3 py-2 border-b border-destructive/20 bg-destructive/5 text-ui-label text-destructive">
           {transferError}
         </p>
       )}
@@ -451,7 +451,7 @@ function AgentBlockEditor({ storyId, agentName, agents, onBack }: AgentBlockEdit
             <DialogTitle className="font-display text-lg flex items-center gap-2.5">
               {agent?.displayName ?? agentName} — Context Preview
               {previewData && (
-                <Badge variant="outline" className="text-[0.625rem] font-normal text-muted-foreground">
+                <Badge variant="outline" className="text-ui-label font-normal text-muted-foreground">
                   {previewData.blockCount} {previewData.blockCount === 1 ? 'block' : 'blocks'}
                 </Badge>
               )}

@@ -184,19 +184,19 @@ function OutputPane({
 }) {
   const hasError = !!evalResult?.error
   const preClass = variant === 'compact'
-    ? 'whitespace-pre-wrap text-[0.6875rem] rounded-md p-2.5 max-h-[120px] overflow-y-auto border leading-relaxed font-mono'
-    : 'whitespace-pre-wrap text-[0.8125rem] rounded-md p-4 border leading-relaxed font-mono'
+    ? 'whitespace-pre-wrap text-ui-label rounded-md p-2.5 max-h-[120px] overflow-y-auto border leading-relaxed font-mono'
+    : 'whitespace-pre-wrap text-ui-body rounded-md p-4 border leading-relaxed font-mono'
 
   return (
     <div>
       <div className="flex items-center gap-2 mb-1.5">
-        <span className="text-[0.5625rem] text-muted-foreground uppercase tracking-[0.15em] font-medium">
+        <span className="text-ui-label text-muted-foreground uppercase tracking-[0.15em] font-medium">
           Output
         </span>
         {evalLoading && (
           <span className="inline-flex items-center gap-1 text-muted-foreground/50">
             <span className="inline-block size-1 rounded-full bg-primary/50 animate-wisp-breathe" aria-hidden="true" />
-            <span className="text-[0.5625rem] uppercase tracking-[0.15em]">running</span>
+            <span className="text-ui-label uppercase tracking-[0.15em]">running</span>
           </span>
         )}
       </div>
@@ -326,7 +326,7 @@ function ExpandedScriptView({
           <p className="font-display italic text-xl leading-tight text-foreground truncate">
             {blockName || 'Untitled block'}
           </p>
-          <div className="flex items-center gap-2 text-[0.625rem] uppercase tracking-[0.15em] text-muted-foreground">
+          <div className="flex items-center gap-2 text-ui-label uppercase tracking-[0.15em] text-muted-foreground">
             {context && (
               <>
                 <span className="font-medium">{formatContextLabel(context)}</span>
@@ -412,7 +412,7 @@ function ExpandedScriptView({
             {/* Mini-header inside the context pane */}
             <div className="shrink-0 flex items-center justify-between px-4 py-2 border-b border-border/30">
               <div className="flex items-center gap-2">
-                <span className="text-[0.5625rem] text-muted-foreground uppercase tracking-[0.15em] font-medium">
+                <span className="text-ui-label text-muted-foreground uppercase tracking-[0.15em] font-medium">
                   Full context
                 </span>
                 {previewLoading && (
@@ -423,7 +423,7 @@ function ExpandedScriptView({
                 type="button"
                 onClick={handleRefreshContext}
                 aria-label="Refresh context"
-                className="flex items-center gap-1.5 text-[0.6875rem] text-muted-foreground hover:text-foreground transition-colors font-display italic focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 rounded px-1.5 py-0.5"
+                className="flex items-center gap-1.5 text-ui-label text-muted-foreground hover:text-foreground transition-colors font-display italic focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 rounded px-1.5 py-0.5"
                 disabled={previewLoading}
               >
                 <RefreshCw
@@ -451,9 +451,9 @@ function ExpandedScriptView({
       </div>
 
       {/* Footer hint */}
-      <footer className="shrink-0 flex items-center justify-between px-6 py-2 border-t border-border/30 text-[0.6875rem] text-muted-foreground/70">
+      <footer className="shrink-0 flex items-center justify-between px-6 py-2 border-t border-border/30 text-ui-label text-muted-foreground/70">
         <span className="font-display italic">
-          Press <kbd className="font-mono text-[0.625rem] px-1 py-0.5 rounded bg-muted/50 not-italic">Esc</kbd> to close
+          Press <kbd className="font-mono text-ui-label px-1 py-0.5 rounded bg-muted/50 not-italic">Esc</kbd> to close
         </span>
         <span className="font-display italic">
           The preview runs {evalLoading ? 'now' : 'as you type'}.
@@ -517,8 +517,8 @@ export function FragmentReference({ storyId }: { storyId: string }) {
 
   return (
     <div>
-      <button
-        className="flex items-center gap-1.5 text-[0.625rem] text-muted-foreground hover:text-foreground/70 transition-colors"
+      <button type="button"
+        className="flex items-center gap-1.5 text-ui-label text-muted-foreground hover:text-foreground/70 transition-colors"
         onClick={() => setOpen(!open)}
       >
         {open ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
@@ -533,27 +533,27 @@ export function FragmentReference({ storyId }: { storyId: string }) {
               <Loader2 className="size-3 text-muted-foreground animate-spin" />
             </div>
           ) : grouped.size === 0 ? (
-            <p className="text-[0.625rem] text-muted-foreground/50 italic text-center py-2">No fragments</p>
+            <p className="text-ui-label text-muted-foreground/50 italic text-center py-2">No fragments</p>
           ) : (
             Array.from(grouped.entries()).map(([type, items]) => (
               <div key={type}>
-                <p className="text-[0.5625rem] text-muted-foreground uppercase tracking-[0.12em] font-medium mb-1">{type}</p>
+                <p className="text-ui-label text-muted-foreground uppercase tracking-[0.12em] font-medium mb-1">{type}</p>
                 <div className="space-y-0.5">
                   {items.map((item) => (
                     <div key={item.id} className="flex items-center gap-2 group/ref px-1 py-0.5 rounded hover:bg-muted/30">
-                      <button
+                      <button type="button"
                         className="flex items-center gap-1 shrink-0"
                         onClick={() => handleCopy(item.id)}
                         title="Copy ID"
                       >
-                        <code className="text-[0.625rem] font-mono text-primary/70">{item.id}</code>
+                        <code className="text-ui-label font-mono text-primary/70">{item.id}</code>
                         {copiedId === item.id ? (
                           <Check className="size-2.5 text-emerald-500" />
                         ) : (
                           <Copy className="size-2.5 text-muted-foreground/40 opacity-0 group-hover/ref:opacity-100 transition-opacity" />
                         )}
                       </button>
-                      <span className="text-[0.625rem] text-muted-foreground truncate">{item.name}</span>
+                      <span className="text-ui-label text-muted-foreground truncate">{item.name}</span>
                     </div>
                   ))}
                 </div>

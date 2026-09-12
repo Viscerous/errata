@@ -2,6 +2,7 @@ import { useCallback, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, type DiscoveredProvider, type ProviderConfigSafe, type ProviderModelInfo } from '@/lib/api'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Plus, Trash2, Star, Pencil, RefreshCw, Loader2, X, ArrowLeft, Minus, Zap, Copy, KeyRound, Server } from 'lucide-react'
 import { EmptyHint, Hint } from '@/components/ui/prose-text'
@@ -18,6 +19,7 @@ import {
   PanelTitle,
 } from '@/components/ui/panel'
 import { ManageProvidersButton } from './GlobalSettingsControls'
+import { SettingsSelect } from './primitives'
 
 type PresetKey = PresetId
 
@@ -66,9 +68,9 @@ export function ProviderList({ onManage }: { onManage: () => void }) {
           <div key={p.id} className="flex items-center gap-1.5 py-0.5">
             <span className="text-sm truncate">{p.name}</span>
             {defaultId === p.id && (
-              <span className="text-[0.625rem] bg-primary/10 text-primary px-1.5 py-0.5 rounded-full shrink-0">default</span>
+              <span className="text-ui-label bg-primary/10 text-primary px-1.5 py-0.5 rounded-full shrink-0">default</span>
             )}
-            <span className="text-[0.6875rem] text-muted-foreground truncate ml-auto">{p.defaultModel}</span>
+            <span className="text-ui-label text-muted-foreground truncate ml-auto">{p.defaultModel}</span>
           </div>
         ))
       )}
@@ -339,7 +341,6 @@ export function ProviderPanel({ onClose }: { onClose: () => void }) {
   const canSubmit = form && form.name && form.baseURL && form.defaultModel
     && (editingId || !PROVIDER_PRESETS[form.preset].requiresApiKey || form.apiKey)
 
-  const inputClass = "w-full h-9 px-3 text-sm text-foreground bg-muted/30 border border-border/50 rounded-md focus:border-primary/30 focus:outline-none"
   const labelClass = "text-xs font-medium text-muted-foreground mb-1.5 block"
 
   return (
@@ -347,7 +348,7 @@ export function ProviderPanel({ onClose }: { onClose: () => void }) {
       <PanelHeader>
         <div className="flex items-center gap-2">
           {form && (
-            <Button size="icon" variant="ghost" className="size-7 text-muted-foreground" onClick={closeForm} data-component-id="provider-panel-back">
+            <Button size="icon" variant="ghost" className="size-7 text-muted-foreground" onClick={closeForm} aria-label="Back to providers" data-component-id="provider-panel-back">
               <ArrowLeft className="size-4" />
             </Button>
           )}
@@ -377,7 +378,7 @@ export function ProviderPanel({ onClose }: { onClose: () => void }) {
                     </Button>
                   </div>
                   {oauthStatus && (
-                    <p className={`mt-2 text-[0.6875rem] ${oauthStatus.type === 'success' ? 'text-emerald-500' : 'text-destructive'}`}>
+                    <p className={`mt-2 text-ui-label ${oauthStatus.type === 'success' ? 'text-emerald-500' : 'text-destructive'}`}>
                       {oauthStatus.message}
                     </p>
                   )}
@@ -390,37 +391,39 @@ export function ProviderPanel({ onClose }: { onClose: () => void }) {
             {/* Preset selector (only for new providers) */}
             {!editingId && (
               <div>
-                <label className={labelClass}>Preset</label>
-                <select
+                <label htmlFor="provider-form-preset" className={labelClass}>Preset</label>
+                <SettingsSelect
+                  id="provider-form-preset"
                   value={form.preset}
-                  onChange={(e) => handlePresetChange(e.target.value as PresetKey)}
-                  className={inputClass}
-                  data-component-id="provider-form-preset"
+                  onChange={(value) => handlePresetChange(value as PresetKey)}
+                  className="h-9 w-full text-sm"
                 >
                   {providerPresetEntries().map(([id, preset]) => (
                     <option key={id} value={id}>{preset.name}</option>
                   ))}
-                </select>
+                </SettingsSelect>
               </div>
             )}
 
             {/* Two-column layout for name + base URL */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className={labelClass}>Name</label>
-                <input
+                <label htmlFor="provider-form-name" className={labelClass}>Name</label>
+                <Input
+                  id="provider-form-name"
                   value={form.name}
                   onChange={(e) => setForm({ ...form, name: e.target.value })}
-                  className={inputClass}
+                  className="h-9 bg-muted/30"
                   placeholder="Provider name"
                 />
               </div>
               <div>
-                <label className={labelClass}>Base URL</label>
-                <input
+                <label htmlFor="provider-form-base-url" className={labelClass}>Base URL</label>
+                <Input
+                  id="provider-form-base-url"
                   value={form.baseURL}
                   onChange={(e) => setForm({ ...form, baseURL: e.target.value })}
-                  className={inputClass}
+                  className="h-9 bg-muted/30"
                   placeholder="https://api.example.com/v1"
                 />
               </div>
@@ -428,14 +431,15 @@ export function ProviderPanel({ onClose }: { onClose: () => void }) {
 
             {/* API Key */}
             <div>
-              <label className={labelClass}>
+              <label htmlFor="provider-form-api-key" className={labelClass}>
                 API Key{PROVIDER_PRESETS[form.preset].requiresApiKey ? '' : ' (optional)'}
               </label>
-              <input
+              <Input
+                id="provider-form-api-key"
                 type="password"
                 value={form.apiKey}
                 onChange={(e) => setForm({ ...form, apiKey: e.target.value })}
-                className={inputClass}
+                className="h-9 bg-muted/30"
                 placeholder={editingId
                   ? 'Leave blank to keep current key'
                   : PROVIDER_PRESETS[form.preset].requiresApiKey
@@ -447,39 +451,41 @@ export function ProviderPanel({ onClose }: { onClose: () => void }) {
             {/* Custom Headers */}
             <div>
               <div className="flex items-center justify-between mb-1.5">
-                <label className={labelClass + ' !mb-0'}>Custom Headers</label>
+                <span className={labelClass + ' !mb-0'}>Custom Headers</span>
                 <button
                   type="button"
-                  className="text-[0.6875rem] text-muted-foreground hover:text-muted-foreground flex items-center gap-0.5 transition-colors"
+                  className="text-ui-label text-muted-foreground hover:text-muted-foreground flex items-center gap-0.5 transition-colors"
                   onClick={() => setForm({ ...form, customHeaders: [...form.customHeaders, { key: '', value: '', _id: randomToken() }] })}
                 >
                   <Plus className="size-3" /> Add
                 </button>
               </div>
               {form.customHeaders.length === 0 ? (
-                <p className="text-[0.6875rem] text-muted-foreground italic">No custom headers</p>
+                <p className="text-ui-label text-muted-foreground italic">No custom headers</p>
               ) : (
                 <div className="space-y-1.5">
                   {form.customHeaders.map((header, i) => (
                     <div key={header._id} className="flex gap-1.5 items-center">
-                      <input
+                      <Input
+                        aria-label={`Header ${i + 1} name`}
                         value={header.key}
                         onChange={(e) => {
                           const next = [...form.customHeaders]
                           next[i] = { ...next[i], key: e.target.value }
                           setForm({ ...form, customHeaders: next })
                         }}
-                        className={inputClass + ' flex-1'}
+                        className="h-9 min-w-0 flex-1 bg-muted/30"
                         placeholder="Header name"
                       />
-                      <input
+                      <Input
+                        aria-label={`Header ${i + 1} value`}
                         value={header.value}
                         onChange={(e) => {
                           const next = [...form.customHeaders]
                           next[i] = { ...next[i], value: e.target.value }
                           setForm({ ...form, customHeaders: next })
                         }}
-                        className={inputClass + ' flex-[2]'}
+                        className="h-9 min-w-0 flex-[2] bg-muted/30"
                         placeholder="Value"
                       />
                       <Button
@@ -491,6 +497,7 @@ export function ProviderPanel({ onClose }: { onClose: () => void }) {
                           const next = form.customHeaders.filter((_, j) => j !== i)
                           setForm({ ...form, customHeaders: next })
                         }}
+                        aria-label={`Remove header ${i + 1}`}
                       >
                         <Minus className="size-3.5" />
                       </Button>
@@ -502,13 +509,14 @@ export function ProviderPanel({ onClose }: { onClose: () => void }) {
 
             {/* Default Model with fetch */}
             <div>
-              <label className={labelClass}>Default Model</label>
+              <label htmlFor="provider-form-model" className={labelClass}>Default Model</label>
               <div className="flex gap-2">
                 {fetchedModels.length > 0 && !useCustomModel ? (
-                  <select
+                  <SettingsSelect
+                    id="provider-form-model"
                     value={form.defaultModel}
-                    onChange={(e) => setForm({ ...form, defaultModel: e.target.value })}
-                    className={inputClass + ' flex-1'}
+                    onChange={(value) => setForm({ ...form, defaultModel: value })}
+                    className="h-9 min-w-0 flex-1 text-sm"
                   >
                     {!fetchedModels.some(m => m.id === form.defaultModel) && form.defaultModel && (
                       <option value={form.defaultModel}>{form.defaultModel} (current)</option>
@@ -518,12 +526,13 @@ export function ProviderPanel({ onClose }: { onClose: () => void }) {
                         {modelOptionLabel(m)}
                       </option>
                     ))}
-                  </select>
+                  </SettingsSelect>
                 ) : (
-                  <input
+                  <Input
+                    id="provider-form-model"
                     value={form.defaultModel}
                     onChange={(e) => setForm({ ...form, defaultModel: e.target.value })}
-                    className={inputClass + ' flex-1'}
+                    className="h-9 min-w-0 flex-1 bg-muted/30"
                     placeholder="e.g. deepseek-v4-flash"
                   />
                 )}
@@ -543,13 +552,13 @@ export function ProviderPanel({ onClose }: { onClose: () => void }) {
                 const suggested = (PROVIDER_PRESETS[form.preset] as { models?: readonly string[] }).models ?? []
                 return suggested.length > 0 ? (
                   <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
-                    <span className="text-[0.625rem] uppercase tracking-wider text-muted-foreground mr-0.5">Suggested</span>
+                    <span className="text-ui-label uppercase tracking-wider text-muted-foreground mr-0.5">Suggested</span>
                     {suggested.map((m) => (
                       <button
                         key={m}
                         type="button"
                         onClick={() => setForm({ ...form, defaultModel: m })}
-                        className={`px-2 py-0.5 rounded-full text-[0.6875rem] border transition-colors ${form.defaultModel === m ? 'border-primary/40 bg-primary/10 text-foreground' : 'border-border/50 text-muted-foreground hover:text-foreground/80 hover:bg-accent/40'}`}
+                        className={`px-2 py-0.5 rounded-full text-ui-label border transition-colors ${form.defaultModel === m ? 'border-primary/40 bg-primary/10 text-foreground' : 'border-border/50 text-muted-foreground hover:text-foreground/80 hover:bg-accent/40'}`}
                       >
                         {m}
                       </button>
@@ -560,7 +569,7 @@ export function ProviderPanel({ onClose }: { onClose: () => void }) {
               {fetchedModels.length > 0 && (
                 <button
                   type="button"
-                  className="text-[0.6875rem] text-muted-foreground hover:text-muted-foreground mt-1 underline"
+                  className="text-ui-label text-muted-foreground hover:text-muted-foreground mt-1 underline"
                   onClick={() => setUseCustomModel(!useCustomModel)}
                 >
                   {useCustomModel ? 'Use fetched models' : 'Enter model ID manually'}
@@ -570,35 +579,36 @@ export function ProviderPanel({ onClose }: { onClose: () => void }) {
                 <p className="text-xs text-destructive mt-1">{fetchError}</p>
               )}
               {fetchedModels.length > 0 && !fetchError && (
-                <p className="text-[0.6875rem] text-muted-foreground mt-1">{fetchedModels.length} models available</p>
+                <p className="text-ui-label text-muted-foreground mt-1">{fetchedModels.length} models available</p>
               )}
             </div>
 
             {/* Temperature */}
             <div>
-              <label className={labelClass}>Temperature</label>
+              <label htmlFor="provider-form-temperature" className={labelClass}>Temperature</label>
               <div className="flex items-center gap-2">
-                <input
+                <Input
+                  id="provider-form-temperature"
                   type="number"
                   min={0}
                   max={2}
                   step={0.1}
                   value={form.temperature}
                   onChange={(e) => setForm({ ...form, temperature: e.target.value })}
-                  className={inputClass + ' w-32'}
+                  className="h-9 w-32 bg-muted/30"
                   placeholder="Default"
                 />
                 {form.temperature !== '' && (
                   <button
                     type="button"
-                    className="text-[0.6875rem] text-muted-foreground hover:text-foreground transition-colors"
+                    className="text-ui-label text-muted-foreground hover:text-foreground transition-colors"
                     onClick={() => setForm({ ...form, temperature: '' })}
                   >
                     Reset
                   </button>
                 )}
               </div>
-              <p className="text-[0.6875rem] text-muted-foreground mt-1">
+              <p className="text-ui-label text-muted-foreground mt-1">
                 Controls randomness (0 = deterministic, 2 = most creative). Leave empty for model default.
               </p>
             </div>
@@ -701,13 +711,13 @@ export function ProviderPanel({ onClose }: { onClose: () => void }) {
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-medium">{p.name}</span>
                     {defaultId === p.id && (
-                      <span className="text-[0.625rem] bg-primary/10 text-primary px-1.5 py-0.5 rounded-full">default</span>
+                      <span className="text-ui-label bg-primary/10 text-primary px-1.5 py-0.5 rounded-full">default</span>
                     )}
                     {p.preset !== 'custom' && (
-                      <span className="text-[0.625rem] text-muted-foreground">{p.preset}</span>
+                      <span className="text-ui-label text-muted-foreground">{p.preset}</span>
                     )}
                   </div>
-                  <div className="text-[0.6875rem] text-muted-foreground mt-0.5 flex gap-3">
+                  <div className="text-ui-label text-muted-foreground mt-0.5 flex gap-3">
                     <span>Model: {p.defaultModel}</span>
                     <span>URL: {p.baseURL}</span>
                     <span>Key: {p.apiKey}</span>
@@ -748,7 +758,7 @@ export function ProviderPanel({ onClose }: { onClose: () => void }) {
 
       {/* Creator */}
       <PanelFooter className="justify-center">
-        <span className="text-[0.625rem] text-muted-foreground">
+        <span className="text-ui-label text-muted-foreground">
           built by{' '}
           <a
             href="https://github.com/tealios/"

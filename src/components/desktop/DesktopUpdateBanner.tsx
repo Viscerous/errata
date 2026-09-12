@@ -10,9 +10,9 @@ import { Download, X } from 'lucide-react'
 import { getDesktopBridge, onDesktopBridgeReady, type DesktopUpdateState, type ErrataDesktop } from '@/lib/desktop'
 
 const primaryBtn =
-  'flex items-center gap-1.5 rounded-md bg-foreground px-2.5 py-1 text-[0.6875rem] font-medium text-background transition-opacity hover:opacity-90'
+  'flex items-center gap-1.5 rounded-md bg-foreground px-2.5 py-1 text-ui-label font-medium text-background transition-opacity hover:opacity-90'
 const ghostBtn =
-  'rounded-md px-2 py-1 text-[0.6875rem] text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground/70'
+  'rounded-md px-2 py-1 text-ui-label text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground/70'
 
 export function DesktopUpdateBanner() {
   const [bridge, setBridge] = useState<ErrataDesktop | null>(() => getDesktopBridge())
@@ -57,7 +57,7 @@ export function DesktopUpdateBanner() {
   return (
     <div className="fixed right-3 top-3 z-50 w-[20rem] max-w-[calc(100vw-1.5rem)] rounded-lg border border-border/40 bg-background/95 px-3 py-2.5 shadow-lg backdrop-blur">
       <div className="flex items-start justify-between gap-2">
-        <p className="font-display text-[0.9375rem] italic leading-tight text-foreground">{title}</p>
+        <p className="font-display text-base italic leading-tight text-foreground">{title}</p>
         <button
           type="button"
           aria-label="Dismiss"
@@ -67,7 +67,7 @@ export function DesktopUpdateBanner() {
           <X className="size-3.5" />
         </button>
       </div>
-      <p className="mt-1 text-[0.6875rem] leading-snug text-muted-foreground">{subtitle}</p>
+      <p className="mt-1 text-ui-label leading-snug text-muted-foreground">{subtitle}</p>
 
       {state.status !== 'downloading' && (
         <div className="mt-2 flex items-center gap-1.5">

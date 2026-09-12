@@ -8,7 +8,7 @@ export function FragmentAvatar({ fragment, mediaById, size = 'md' }: {
 }) {
   const visual = resolveFragmentVisual(fragment, mediaById)
   const sizeClass = size === 'sm' ? 'size-6' : size === 'lg' ? 'w-14 h-14' : 'size-9'
-  const textClass = size === 'sm' ? 'text-[0.625rem]' : size === 'lg' ? 'text-xl' : 'text-sm'
+  const textClass = size === 'sm' ? 'text-ui-label' : size === 'lg' ? 'text-xl' : 'text-sm'
 
   if (visual.imageUrl) {
     const boundary = visual.boundary

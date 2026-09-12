@@ -19,11 +19,11 @@ export function AgentsPanel({ storyId }: AgentsPanelProps) {
     >
       <div className="shrink-0 px-4 pt-3">
         <TabsList variant="line" className="w-full h-8 gap-0 relative z-20">
-          <TabsTrigger value="configure" className="text-[0.6875rem] gap-1.5 flex-1 px-1">
+          <TabsTrigger value="configure" className="text-ui-label gap-1.5 flex-1 px-1">
             <SlidersHorizontal className="size-3" />
             Configure
           </TabsTrigger>
-          <TabsTrigger value="activity" className="text-[0.6875rem] gap-1.5 flex-1 px-1">
+          <TabsTrigger value="activity" className="text-ui-label gap-1.5 flex-1 px-1">
             <Radio className="size-3" />
             Activity
           </TabsTrigger>

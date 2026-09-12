@@ -707,7 +707,7 @@ export function ProseWritingPanel({
                     <Button
                       size="sm"
                       variant="ghost"
-                      className="h-6 px-2 text-[0.625rem] gap-1 text-muted-foreground hover:text-foreground"
+                      className="h-6 px-2 text-ui-label gap-1 text-muted-foreground hover:text-foreground"
                       onClick={() => {
                         editor?.commands.undo()
                         setShowTransformUndo(false)
@@ -727,7 +727,7 @@ export function ProseWritingPanel({
                       key={t.id}
                       size="sm"
                       variant="ghost"
-                      className="h-6 px-2 text-[0.625rem] text-muted-foreground hover:text-foreground/80"
+                      className="h-6 px-2 text-ui-label text-muted-foreground hover:text-foreground/80"
                       onClick={() => applySelectionTransform('custom', t.instruction, t.label)}
                       disabled={isTransformingSelection || !hasSelection}
                     >
@@ -755,13 +755,13 @@ export function ProseWritingPanel({
 
           {/* Previous passage context strip */}
           {prevFragment && (
-            <button
+            <button type="button"
               className="group/ctx w-full text-left px-6 sm:px-10 md:px-16 pt-4 pb-2"
               onClick={navigatePrev}
             >
               <div className="flex items-center gap-2 mb-1">
                 <ChevronUp className="size-3 text-muted-foreground group-hover/ctx:text-muted-foreground transition-colors" />
-                <span className="text-[0.625rem] text-muted-foreground group-hover/ctx:text-muted-foreground transition-colors">
+                <span className="text-ui-label text-muted-foreground group-hover/ctx:text-muted-foreground transition-colors">
                   Previous passage
                 </span>
               </div>
@@ -777,7 +777,7 @@ export function ProseWritingPanel({
 
           {/* Next passage context strip */}
           {nextFragment && (
-            <button
+            <button type="button"
               className="group/ctx w-full text-left px-6 sm:px-10 md:px-16 pt-2 pb-4"
               onClick={navigateNext}
             >
@@ -787,7 +787,7 @@ export function ProseWritingPanel({
               </p>
               <div className="flex items-center gap-2 mt-1">
                 <ChevronDown className="size-3 text-muted-foreground group-hover/ctx:text-muted-foreground transition-colors" />
-                <span className="text-[0.625rem] text-muted-foreground group-hover/ctx:text-muted-foreground transition-colors">
+                <span className="text-ui-label text-muted-foreground group-hover/ctx:text-muted-foreground transition-colors">
                   Next passage
                 </span>
               </div>
@@ -863,7 +863,7 @@ export function ProseWritingPanel({
                     <div className="flex items-center gap-1.5">
                       <div className="h-px flex-1 bg-amber-500/10" />
                       <Bookmark className="size-2.5 text-amber-500/40 shrink-0" />
-                      <span className="text-[0.625rem] font-medium tracking-wide text-amber-500/40 shrink-0">
+                      <span className="text-ui-label font-medium tracking-wide text-amber-500/40 shrink-0">
                         {fragment.name}
                       </span>
                       <div className="h-px flex-1 bg-amber-500/10" />

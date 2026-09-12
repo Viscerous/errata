@@ -144,7 +144,7 @@ export function StoryInfoPanel({ storyId, story, onLaunchWizard, onExport, onDow
       <div className="p-4 space-y-3" data-component-id="story-info-edit">
         {/* Cover Image */}
         <div>
-          <label className="text-[0.625rem] text-muted-foreground uppercase tracking-wider mb-1.5 block">Cover Image</label>
+          <label className="text-ui-label text-muted-foreground uppercase tracking-wider mb-1.5 block">Cover Image</label>
           <input
             ref={coverInputRef}
             type="file"
@@ -190,11 +190,11 @@ export function StoryInfoPanel({ storyId, story, onLaunchWizard, onExport, onDow
           )}
         </div>
         <div>
-          <label className="text-[0.625rem] text-muted-foreground uppercase tracking-wider mb-1.5 block">Name</label>
+          <label className="text-ui-label text-muted-foreground uppercase tracking-wider mb-1.5 block">Name</label>
           <Input value={name} onChange={(e) => setName(e.target.value)} className="bg-transparent" data-component-id="story-info-name" />
         </div>
         <div>
-          <label className="text-[0.625rem] text-muted-foreground uppercase tracking-wider mb-1.5 block">Description</label>
+          <label className="text-ui-label text-muted-foreground uppercase tracking-wider mb-1.5 block">Description</label>
           <Textarea
             value={description}
             onChange={(e) => setDescription(e.target.value)}
@@ -234,9 +234,9 @@ export function StoryInfoPanel({ storyId, story, onLaunchWizard, onExport, onDow
       <div className="px-5 pt-5 pb-4">
         <h2 className="text-xl font-display leading-tight tracking-tight">{story.name}</h2>
         {story.description ? (
-          <p className="text-[0.8125rem] text-muted-foreground mt-1.5 leading-relaxed">{story.description}</p>
+          <p className="text-ui-body text-muted-foreground mt-1.5 leading-relaxed">{story.description}</p>
         ) : (
-          <p className="text-[0.8125rem] text-muted-foreground mt-1.5 italic">No description</p>
+          <p className="text-ui-body text-muted-foreground mt-1.5 italic">No description</p>
         )}
       </div>
 
@@ -288,12 +288,12 @@ export function StoryInfoPanel({ storyId, story, onLaunchWizard, onExport, onDow
       {/* Dates */}
       <div className="px-5 py-4 flex justify-between">
         <div>
-          <label className="text-[0.5625rem] text-muted-foreground uppercase tracking-[0.15em]">Created</label>
-          <p className="text-[0.6875rem] text-muted-foreground mt-0.5 font-mono">{formatDate(story.createdAt)}</p>
+          <label className="text-ui-label text-muted-foreground uppercase tracking-[0.15em]">Created</label>
+          <p className="text-ui-label text-muted-foreground mt-0.5 font-mono">{formatDate(story.createdAt)}</p>
         </div>
         <div className="text-right">
-          <label className="text-[0.5625rem] text-muted-foreground uppercase tracking-[0.15em]">Updated</label>
-          <p className="text-[0.6875rem] text-muted-foreground mt-0.5 font-mono">{timeAgo(story.updatedAt)}</p>
+          <label className="text-ui-label text-muted-foreground uppercase tracking-[0.15em]">Updated</label>
+          <p className="text-ui-label text-muted-foreground mt-0.5 font-mono">{timeAgo(story.updatedAt)}</p>
         </div>
       </div>
 
@@ -348,7 +348,7 @@ function StatCell({ value, label }: { value: string; label: string }) {
   return (
     <div className="text-center py-2 rounded-md bg-accent/30">
       <p className="text-lg font-display leading-none tracking-tight text-foreground/85">{value}</p>
-      <p className="text-[0.5625rem] text-muted-foreground uppercase tracking-[0.12em] mt-1">{label}</p>
+      <p className="text-ui-label text-muted-foreground uppercase tracking-[0.12em] mt-1">{label}</p>
     </div>
   )
 }
@@ -356,23 +356,23 @@ function StatCell({ value, label }: { value: string; label: string }) {
 function MiniStat({ label, value }: { label: string; value: number }) {
   return (
     <div className="flex items-baseline gap-1.5">
-      <span className="text-[0.75rem] font-mono text-foreground/60">{value}</span>
-      <span className="text-[0.5625rem] text-muted-foreground uppercase tracking-wider">{label}</span>
+      <span className="text-ui-caption font-mono text-foreground/60">{value}</span>
+      <span className="text-ui-label text-muted-foreground uppercase tracking-wider">{label}</span>
     </div>
   )
 }
 
 function ActionTile({ icon: Icon, label, description, onClick, dataComponentId }: { icon: LucideIcon; label: string; description: string; onClick: () => void; dataComponentId?: string }) {
   return (
-    <button
+    <button type="button"
       onClick={onClick}
       className="flex items-start gap-2.5 rounded-md border border-border/40 px-3 py-2.5 text-left transition-colors hover:bg-accent/40 hover:border-border/60"
       data-component-id={dataComponentId}
     >
       <Icon className="size-3.5 mt-0.5 text-muted-foreground shrink-0" />
       <div className="min-w-0">
-        <p className="text-[0.75rem] font-medium leading-none text-foreground/80">{label}</p>
-        <p className="text-[0.625rem] text-muted-foreground mt-1 leading-tight">{description}</p>
+        <p className="text-ui-caption font-medium leading-none text-foreground/80">{label}</p>
+        <p className="text-ui-label text-muted-foreground mt-1 leading-tight">{description}</p>
       </div>
     </button>
   )
@@ -405,8 +405,8 @@ function shortModelName(modelId: string): string {
 function UsageRow({ label, entry, indent }: { label: string; entry: UsageEntry; indent?: boolean }) {
   return (
     <div className={`flex items-baseline justify-between ${indent ? 'pl-3' : ''}`}>
-      <span className={`text-[0.625rem] text-muted-foreground ${indent ? '' : 'uppercase tracking-wider'} truncate mr-2`}>{label}</span>
-      <span className="text-[0.6875rem] font-mono text-foreground/60 whitespace-nowrap shrink-0">
+      <span className={`text-ui-label text-muted-foreground ${indent ? '' : 'uppercase tracking-wider'} truncate mr-2`}>{label}</span>
+      <span className="text-ui-label font-mono text-foreground/60 whitespace-nowrap shrink-0">
         {formatNumber(entry.inputTokens)} in &middot; {formatNumber(entry.outputTokens)} out
       </span>
     </div>
@@ -424,7 +424,7 @@ function UsageBreakdown({ label, snapshot }: { label: string; snapshot: UsageSna
 
   return (
     <div>
-      <button
+      <button type="button"
         onClick={() => setExpanded(!expanded)}
         className="flex items-center gap-1 w-full group"
       >
@@ -432,8 +432,8 @@ function UsageBreakdown({ label, snapshot }: { label: string; snapshot: UsageSna
           ? <ChevronDown className="size-3 text-muted-foreground/50" />
           : <ChevronRight className="size-3 text-muted-foreground/50" />
         }
-        <span className="text-[0.625rem] text-muted-foreground uppercase tracking-wider">{label}</span>
-        <span className="text-[0.6875rem] font-mono text-foreground/60 ml-auto whitespace-nowrap">
+        <span className="text-ui-label text-muted-foreground uppercase tracking-wider">{label}</span>
+        <span className="text-ui-label font-mono text-foreground/60 ml-auto whitespace-nowrap">
           {formatNumber(snapshot.total.inputTokens)} in &middot; {formatNumber(snapshot.total.outputTokens)} out
         </span>
       </button>
@@ -441,7 +441,7 @@ function UsageBreakdown({ label, snapshot }: { label: string; snapshot: UsageSna
         <div className="mt-1 space-y-0.5 ml-1">
           {sources.length > 0 && (
             <>
-              <div className="text-[0.5625rem] text-muted-foreground/50 uppercase tracking-wider mt-1.5 mb-0.5">By agent</div>
+              <div className="text-ui-label text-muted-foreground/50 uppercase tracking-wider mt-1.5 mb-0.5">By agent</div>
               {sources.map(([source, entry]) => (
                 <div key={source}>
                   <UsageRow label={formatSourceName(source)} entry={entry} indent />
@@ -449,8 +449,8 @@ function UsageBreakdown({ label, snapshot }: { label: string; snapshot: UsageSna
                     .sort((a, b) => (b[1].inputTokens + b[1].outputTokens) - (a[1].inputTokens + a[1].outputTokens))
                     .map(([model, mEntry]) => (
                       <div key={model} className="pl-6 flex items-baseline justify-between opacity-60">
-                        <span className="text-[0.5625rem] text-muted-foreground truncate mr-2">{shortModelName(model)}</span>
-                        <span className="text-[0.625rem] font-mono text-foreground/50 whitespace-nowrap shrink-0">
+                        <span className="text-ui-label text-muted-foreground truncate mr-2">{shortModelName(model)}</span>
+                        <span className="text-ui-label font-mono text-foreground/50 whitespace-nowrap shrink-0">
                           {formatNumber(mEntry.inputTokens)} in &middot; {formatNumber(mEntry.outputTokens)} out
                         </span>
                       </div>
@@ -462,7 +462,7 @@ function UsageBreakdown({ label, snapshot }: { label: string; snapshot: UsageSna
           )}
           {models.length > 1 && (
             <>
-              <div className="text-[0.5625rem] text-muted-foreground/50 uppercase tracking-wider mt-1.5 mb-0.5">By model</div>
+              <div className="text-ui-label text-muted-foreground/50 uppercase tracking-wider mt-1.5 mb-0.5">By model</div>
               {models.map(([model, entry]) => (
                 <UsageRow key={model} label={shortModelName(model)} entry={entry} indent />
               ))}
@@ -477,7 +477,7 @@ function UsageBreakdown({ label, snapshot }: { label: string; snapshot: UsageSna
 function TokenUsageSection({ session, project }: { session: UsageSnapshot; project: UsageSnapshot }) {
   return (
     <div className="mt-3 pt-3 border-t border-border/30">
-      <label className="text-[0.5625rem] text-muted-foreground uppercase tracking-[0.15em] font-medium">Token Usage</label>
+      <label className="text-ui-label text-muted-foreground uppercase tracking-[0.15em] font-medium">Token Usage</label>
       <div className="mt-1.5 space-y-1">
         <UsageBreakdown label="Session" snapshot={session} />
         <UsageBreakdown label="Project" snapshot={project} />
@@ -501,30 +501,30 @@ function SummarySection({ summary }: { summary: string | undefined }) {
   if (!summary) {
     return (
       <div className="px-5 py-4">
-        <label className="text-[0.5625rem] text-muted-foreground uppercase tracking-[0.15em] font-medium">Authored memory</label>
-        <p className="text-[0.8125rem] text-muted-foreground mt-1.5 italic">No authored memory</p>
+        <label className="text-ui-label text-muted-foreground uppercase tracking-[0.15em] font-medium">Authored memory</label>
+        <p className="text-ui-body text-muted-foreground mt-1.5 italic">No authored memory</p>
       </div>
     )
   }
 
   return (
     <div className="px-5 py-4">
-      <label className="text-[0.5625rem] text-muted-foreground uppercase tracking-[0.15em] font-medium">Authored memory</label>
+      <label className="text-ui-label text-muted-foreground uppercase tracking-[0.15em] font-medium">Authored memory</label>
       <div className="relative">
         <div
           ref={contentRef}
           className="overflow-hidden transition-[max-height] duration-300 ease-out"
           style={{ maxHeight: expanded ? 'none' : '20vh' }}
         >
-          <p className="text-[0.8125rem] leading-relaxed mt-1.5 text-foreground/80 font-prose whitespace-pre-wrap">{summary}</p>
+          <p className="text-ui-body leading-relaxed mt-1.5 text-foreground/80 font-prose whitespace-pre-wrap">{summary}</p>
         </div>
         {overflows && !expanded && (
           <div className="absolute bottom-0 left-0 right-0 h-16 bg-gradient-to-t from-background to-transparent pointer-events-none" />
         )}
         {overflows && (
-          <button
+          <button type="button"
             onClick={() => setExpanded(!expanded)}
-            className="text-[0.6875rem] text-muted-foreground hover:text-muted-foreground mt-1 transition-colors"
+            className="text-ui-label text-muted-foreground hover:text-muted-foreground mt-1 transition-colors"
             data-component-id="story-info-summary-toggle"
           >
             {expanded ? 'Show less' : 'Read more'}

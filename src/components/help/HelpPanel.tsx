@@ -103,7 +103,7 @@ export function HelpPanel() {
         <div className="shrink-0 flex items-center justify-between gap-3 px-6 py-4 border-b border-border/30">
           <div className="flex items-center gap-2.5 min-w-0">
             {activeSection && (
-              <button
+              <button type="button"
                 onClick={() => openHelp()}
                 data-cuelume-toggle="page"
                 className="shrink-0 p-1 -ml-1 rounded-md text-muted-foreground hover:text-foreground/70 transition-colors"
@@ -118,7 +118,7 @@ export function HelpPanel() {
               {activeSection ? activeSection.title : 'Help'}
             </h2>
           </div>
-          <button
+          <button type="button"
             onClick={closeHelp}
             className="shrink-0 p-1.5 rounded-md text-muted-foreground hover:text-foreground/70 hover:bg-accent/30 transition-colors"
             data-component-id="help-close"
@@ -142,8 +142,8 @@ export function HelpPanel() {
 
         {/* Footer */}
         <div className="shrink-0 border-t border-border/20 px-6 py-3">
-          <p className="text-[0.625rem] text-muted-foreground text-center leading-relaxed">
-            Press <kbd className="px-1 py-0.5 rounded border border-border/30 bg-muted/30 text-[0.5625rem] font-mono">Esc</kbd> to close
+          <p className="text-ui-label text-muted-foreground text-center leading-relaxed">
+            Press <kbd className="px-1 py-0.5 rounded border border-border/30 bg-muted/30 text-ui-label font-mono">Esc</kbd> to close
           </p>
         </div>
       </div>
@@ -158,11 +158,11 @@ export function HelpPanel() {
 function TopicIndex({ onSelect }: { onSelect: (sectionId: string) => void }) {
   return (
     <div className="space-y-2">
-      <p className="text-[0.6875rem] text-muted-foreground leading-relaxed mb-4">
+      <p className="text-ui-label text-muted-foreground leading-relaxed mb-4">
         Select a topic to learn more about Errata's features.
       </p>
       {HELP_SECTIONS.map((section, idx) => (
-        <button
+        <button type="button"
           key={section.id}
           onClick={() => onSelect(section.id)}
           data-cuelume-toggle="page"
@@ -172,10 +172,10 @@ function TopicIndex({ onSelect }: { onSelect: (sectionId: string) => void }) {
         >
           <div className="flex items-center justify-between gap-3">
             <div className="min-w-0">
-              <p className="text-[0.8125rem] font-medium text-foreground/80 group-hover:text-foreground transition-colors">
+              <p className="text-ui-body font-medium text-foreground/80 group-hover:text-foreground transition-colors">
                 {section.title}
               </p>
-              <p className="text-[0.6875rem] text-muted-foreground mt-0.5 leading-snug">
+              <p className="text-ui-label text-muted-foreground mt-0.5 leading-snug">
                 {section.description}
               </p>
             </div>
@@ -184,7 +184,7 @@ function TopicIndex({ onSelect }: { onSelect: (sectionId: string) => void }) {
           {/* Subsection preview */}
           <div className="flex flex-wrap gap-x-2 gap-y-0.5 mt-2">
             {section.subsections.map((sub) => (
-              <span key={sub.id} className="text-[0.625rem] text-muted-foreground">
+              <span key={sub.id} className="text-ui-label text-muted-foreground">
                 {sub.title}
               </span>
             ))}
@@ -202,22 +202,22 @@ function SectionView({ section, scrollAreaRef }: { section: HelpSection; scrollA
   return (
     <div className="space-y-6">
       {/* Section description */}
-      <p className="text-[0.75rem] text-muted-foreground leading-relaxed -mt-1">
+      <p className="text-ui-caption text-muted-foreground leading-relaxed -mt-1">
         {section.description}
       </p>
 
       {/* Table of contents */}
       <nav className="rounded-lg border border-border/20 bg-accent/10 px-4 py-3">
-        <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wider mb-2">On this page</p>
+        <p className="text-ui-label text-muted-foreground uppercase tracking-wider mb-2">On this page</p>
         <div className="space-y-1">
           {section.subsections.map((sub) => (
-            <button
+            <button type="button"
               key={sub.id}
               onClick={() => {
                 if (scrollAreaRef.current) scrollToHelpAnchor(scrollAreaRef.current, sub.id)
               }}
               data-cuelume-toggle="page"
-              className="block text-left text-[0.71875rem] text-foreground/50 hover:text-foreground/80 transition-colors py-0.5"
+              className="block text-left text-ui-caption text-foreground/50 hover:text-foreground/80 transition-colors py-0.5"
               data-component-id={componentId('help-nav', sub.id)}
             >
               {sub.title}
@@ -234,7 +234,7 @@ function SectionView({ section, scrollAreaRef }: { section: HelpSection; scrollA
           className="scroll-mt-4"
         >
           {idx > 0 && <div className="h-px bg-border/15 mb-5" />}
-          <h3 className="font-display text-[0.9375rem] text-foreground/85 mb-3">
+          <h3 className="font-display text-base text-foreground/85 mb-3">
             {sub.title}
           </h3>
           <div>{sub.content}</div>

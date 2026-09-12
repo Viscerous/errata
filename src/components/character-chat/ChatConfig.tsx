@@ -131,7 +131,7 @@ export function ChatConfig({
               >
                 <CharacterThumb character={ch} mediaById={mediaById} />
                 <span className="font-display text-sm">{ch.name}</span>
-                <span className="text-[0.625rem] text-muted-foreground truncate ml-auto max-w-[120px]">
+                <span className="text-ui-label text-muted-foreground truncate ml-auto max-w-[120px]">
                   {ch.description}
                 </span>
               </DropdownMenuItem>
@@ -165,7 +165,7 @@ export function ChatConfig({
               <User className="size-3.5" />
               <div>
                 <div className="text-xs">Stranger</div>
-                <div className="text-[0.625rem] text-muted-foreground">Someone they just met</div>
+                <div className="text-ui-label text-muted-foreground">Someone they just met</div>
               </div>
             </DropdownMenuItem>
             <DropdownMenuSeparator />
@@ -196,7 +196,7 @@ export function ChatConfig({
               <Sparkles className="size-3.5" />
               <div>
                 <div className="text-xs">Custom persona</div>
-                <div className="text-[0.625rem] text-muted-foreground">Define who you are</div>
+                <div className="text-ui-label text-muted-foreground">Define who you are</div>
               </div>
             </DropdownMenuItem>
           </DropdownMenuContent>
@@ -219,7 +219,7 @@ export function ChatConfig({
               className="gap-2"
             >
               <span className="text-xs font-medium">Latest</span>
-              <span className="text-[0.625rem] text-muted-foreground ml-auto">All events</span>
+              <span className="text-ui-label text-muted-foreground ml-auto">All events</span>
             </DropdownMenuItem>
             {proseEntries.length > 0 && <DropdownMenuSeparator />}
             {proseEntries.map((entry) => (
@@ -228,7 +228,7 @@ export function ChatConfig({
                 onClick={() => onStoryPointChange(entry.id)}
                 className="gap-2"
               >
-                <span className="text-[0.625rem] text-muted-foreground font-mono w-5 text-right shrink-0">
+                <span className="text-ui-label text-muted-foreground font-mono w-5 text-right shrink-0">
                   {entry.index}
                 </span>
                 <span className="text-xs truncate">{entry.name}</span>
