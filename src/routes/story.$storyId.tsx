@@ -101,7 +101,7 @@ function StoryEditorPage() {
   const [askLibrarianPrefill, setAskLibrarianPrefill] = useState<string | null>(null)
   const [pendingAgentConfigImport, setPendingAgentConfigImport] = useState<{ agentName: string; displayName?: string; config: AgentBlockConfig } | null>(null)
   const [agentConfigImportError, setAgentConfigImportError] = useState<string | null>(null)
-  const [timelineBarVisible, setTimelineBarVisible] = useTimelineBar()
+  const [timelineBarVisible] = useTimelineBar()
   const OUTLINE_OPEN_KEY = 'errata:passages-panel-open'
   const [outlineOpen, setOutlineOpen] = useState(() => {
     if (typeof window === 'undefined') return false
@@ -581,7 +581,6 @@ function StoryEditorPage() {
             branches={branchesIndex.branches}
             activeBranchId={branchesIndex.activeBranchId}
             rootBranchId={branchesIndex.rootBranchId}
-            onHide={() => setTimelineBarVisible(false)}
           />
         )}
 

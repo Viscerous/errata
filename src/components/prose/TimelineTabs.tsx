@@ -8,7 +8,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { GitBranch, Plus, MoreVertical, Pencil, Trash2, EyeOff } from 'lucide-react'
+import { GitBranch, Plus, MoreVertical, Pencil, Trash2 } from 'lucide-react'
 import { useConfirm } from '@/components/ui/confirm-dialog'
 import { onActiveBranchChanged } from '@/lib/branch-cache'
 
@@ -17,10 +17,9 @@ interface TimelineTabsProps {
   branches: BranchMeta[]
   activeBranchId: string
   rootBranchId: string
-  onHide: () => void
 }
 
-export function TimelineTabs({ storyId, branches, activeBranchId, rootBranchId, onHide }: TimelineTabsProps) {
+export function TimelineTabs({ storyId, branches, activeBranchId, rootBranchId }: TimelineTabsProps) {
   const queryClient = useQueryClient()
   const confirm = useConfirm()
   const [renamingId, setRenamingId] = useState<string | null>(null)
@@ -186,20 +185,6 @@ export function TimelineTabs({ storyId, branches, activeBranchId, rootBranchId, 
           <Plus className="size-3" />
         </Button>
       )}
-
-      {/* Hide timeline bar */}
-      <div className="ml-auto shrink-0">
-        <Button
-          size="icon"
-          variant="ghost"
-          className="size-6 text-muted-foreground hover:text-muted-foreground shrink-0"
-          onClick={onHide}
-          title="Hide timeline bar"
-          data-component-id="timeline-hide-button"
-        >
-          <EyeOff className="size-3" />
-        </Button>
-      </div>
     </div>
   )
 }
