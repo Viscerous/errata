@@ -7,6 +7,7 @@ import { AssistantMessageView } from '@/components/chat/ChatMessageParts'
 import { ChatSendButton } from '@/components/chat/ChatSendButton'
 import { ChatComposerRow, ChatComposerTextarea, ComposerFrame } from '@/components/chat/ComposerSurface'
 import { useChatTurn, type ChatTurnMessage } from '@/components/chat/use-chat-turn'
+import { isEnterToSubmit } from '@/lib/enter-to-submit'
 
 interface LibrarianChatProps {
   storyId: string
@@ -133,7 +134,7 @@ export function LibrarianChat({ storyId, conversationId, initialInput }: Librari
   }, [messages, scrollToBottom])
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (isEnterToSubmit(e)) {
       e.preventDefault()
       send()
     }

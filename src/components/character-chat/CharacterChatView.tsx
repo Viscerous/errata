@@ -12,6 +12,7 @@ import { CharacterAvatar } from '@/components/shared/CharacterAvatar'
 import { ChatConfig } from './ChatConfig'
 import { ConversationList } from './ConversationList'
 import { q, useActiveBranchId } from '@/lib/query-keys'
+import { isEnterToSubmit } from '@/lib/enter-to-submit'
 
 interface CharacterChatViewProps {
   storyId: string
@@ -170,7 +171,7 @@ export function CharacterChatView({ storyId, initialCharacterId, onClose }: Char
   }, [storyId])
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (isEnterToSubmit(e)) {
       e.preventDefault()
       send()
     }

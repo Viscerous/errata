@@ -13,6 +13,7 @@ import { Eyebrow, MetaLabel } from '@/components/ui/prose-text'
 import { Spinner } from '@/components/ui/async-view'
 import { WorkspaceHeader, WorkspaceRail, WorkspaceTitle, WorkspaceToolbar } from '@/components/ui/workspace'
 import { cn } from '@/lib/utils'
+import { isEnterToSubmit } from '@/lib/enter-to-submit'
 import {
   STORY_SETUP_CHECKLIST,
   type StorySetupController,
@@ -190,7 +191,7 @@ export function StoryWizard({ controller, onClose }: StoryWizardProps) {
   }, [isStreaming])
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key === 'Enter' && !event.shiftKey) {
+    if (isEnterToSubmit(event)) {
       event.preventDefault()
       send(input)
     }

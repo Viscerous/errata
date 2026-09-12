@@ -17,6 +17,7 @@ import { QuestionCard } from './QuestionCard'
 import { Send, Eye, Square, Bug, ArrowLeft } from 'lucide-react'
 import type { ClarifyQuestion, Clarification } from '@/lib/api/types'
 import { generateRunId } from '@/lib/client-ids'
+import { isEnterToSubmit } from '@/lib/enter-to-submit'
 
 interface GenerationPanelProps {
   storyId: string
@@ -246,14 +247,14 @@ export function GenerationPanel({ storyId, onBack }: GenerationPanelProps) {
               className="min-h-[80px] resize-none text-sm bg-transparent placeholder:italic placeholder:text-muted-foreground"
               disabled={isGenerating}
               onKeyDown={(e) => {
-                if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                if (isEnterToSubmit(e)) {
                   e.preventDefault()
                   handleGenerate(true)
                 }
               }}
               data-component-id="generation-input"
             />
-            <div className="flex items-center justify-between">
+            <div className="flex items-center">
               <div className="flex gap-1.5">
                 {isGenerating ? (
                   <Button variant="outline" size="sm" className="h-7 text-xs gap-1.5" onClick={handleStop} data-component-id="generation-stop">
@@ -286,9 +287,6 @@ export function GenerationPanel({ storyId, onBack }: GenerationPanelProps) {
                   </>
                 )}
               </div>
-              <span className="text-ui-label text-muted-foreground">
-                Ctrl+Enter to generate & save
-              </span>
             </div>
           </div>
         </>

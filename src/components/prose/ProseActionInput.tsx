@@ -4,6 +4,7 @@ import { api } from '@/lib/api'
 import { invalidateStoryContent } from '@/lib/branch-cache'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
+import { isEnterToSubmit } from '@/lib/enter-to-submit'
 
 interface ProseActionInputProps {
   storyId: string
@@ -78,7 +79,7 @@ export function ProseActionInput({
           if (e.key === 'Escape') {
             onCancel()
           }
-          if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+          if (isEnterToSubmit(e)) {
             e.preventDefault()
             handleSubmit()
           }
@@ -88,10 +89,7 @@ export function ProseActionInput({
       {error && (
         <p className="text-sm text-destructive mt-2">{error}</p>
       )}
-      <div className="flex items-center justify-between mt-2.5">
-        <span className="text-ui-label text-muted-foreground">
-          Esc to cancel &middot; Ctrl+Enter to submit
-        </span>
+      <div className="flex items-center justify-end mt-2.5">
         <div className="flex gap-1.5">
           <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={onCancel} disabled={isLoading} data-component-id="prose-action-cancel">
             Cancel

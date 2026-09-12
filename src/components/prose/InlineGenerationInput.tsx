@@ -18,6 +18,7 @@ import { GenerationProviderSelect } from './GenerationProviderSelect'
 import { GuidedGenerationControls } from './GuidedGenerationControls'
 import { consumeGenerationStream, type ThoughtStep } from './generation-stream'
 import { ComposerFrame, ComposerTextarea, ComposerToolbar } from '@/components/chat/ComposerSurface'
+import { isEnterToSubmit } from '@/lib/enter-to-submit'
 
 // A round high enough that the server withholds the ask tool and must write —
 // used by "Skip & write" to proceed without answering.
@@ -450,7 +451,7 @@ export function InlineGenerationInput({
             style={{ minHeight: '44px', maxHeight: '200px', overflowY: 'auto', scrollbarWidth: 'none' }}
             disabled={isGenerating}
             onKeyDown={(e) => {
-              if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+              if (isEnterToSubmit(e)) {
                 e.preventDefault()
                 handleGenerate()
               }
@@ -512,9 +513,9 @@ export function InlineGenerationInput({
             )}
           </div>
 
-          {/* Right: Write/Stop/Add button + shortcut hint */}
+          {/* Right: Write/Stop/Add button */}
           <div className="flex items-center gap-2.5">
-            {(mode === 'primary' || mode === 'compose') && !isGenerating && !isComposing && (
+            {mode === 'compose' && !isComposing && (
               <span className="text-ui-label text-muted-foreground font-sans select-none hidden sm:inline">
                 Ctrl+Enter
               </span>

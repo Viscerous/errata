@@ -53,7 +53,7 @@ export function AboutSection() {
           rel="noopener noreferrer"
           className="underline transition-colors hover:text-foreground/70"
         >
-          Viscerous fork
+          Maintained by Viscerous
         </a>
         {' · '}GPL-2.0
       </p>

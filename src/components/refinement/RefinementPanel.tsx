@@ -6,6 +6,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Sparkles, Square, X } from 'lucide-react'
 import { StreamMarkdown } from '@/components/ui/stream-markdown'
 import { generateRunId } from '@/lib/client-ids'
+import { isEnterToSubmit } from '@/lib/enter-to-submit'
 
 interface RefinementPanelProps {
   storyId: string
@@ -145,14 +146,14 @@ export function RefinementPanel({
               placeholder="Optional: describe how to improve this fragment..."
               className="min-h-[60px] resize-none text-xs bg-transparent placeholder:italic placeholder:text-muted-foreground"
               onKeyDown={(e) => {
-                if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                if (isEnterToSubmit(e)) {
                   e.preventDefault()
                   handleRefine()
                 }
               }}
               data-component-id="refinement-input"
             />
-            <div className="flex items-center justify-between">
+            <div className="flex items-center">
               <Button
                 size="sm"
                 className="h-7 text-xs gap-1.5"
@@ -162,9 +163,6 @@ export function RefinementPanel({
                 <Sparkles className="size-3" />
                 Refine
               </Button>
-              <span className="text-ui-label text-muted-foreground">
-                Ctrl+Enter to start
-              </span>
             </div>
           </>
         )}

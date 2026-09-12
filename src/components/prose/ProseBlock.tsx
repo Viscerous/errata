@@ -16,6 +16,7 @@ import { Caption } from '@/components/ui/prose-text'
 import { useConfirm } from '@/components/ui/confirm-dialog'
 import { useTtsSettings, useIsReadingFragment, playFragment, stopTts } from '@/lib/tts'
 import { GenerationProviderSelect } from './GenerationProviderSelect'
+import { isEnterToSubmit } from '@/lib/enter-to-submit'
 
 interface ProseBlockProps {
   storyId: string
@@ -415,13 +416,10 @@ export const ProseBlock = memo(function ProseBlock({
                 autoFocus
                 onKeyDown={(e) => {
                   if (e.key === 'Escape') { setActionMode(null); setActionInput('') }
-                  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); handleActionSubmit() }
+                  if (isEnterToSubmit(e)) { e.preventDefault(); handleActionSubmit() }
                 }}
               />
-              <div className="flex items-center justify-between px-3 py-1.5 border-t border-border/20">
-                <span className="font-mono text-ui-label tracking-wide text-muted-foreground/50">
-                  ESC &middot; CTRL+ENTER
-                </span>
+              <div className="flex items-center justify-end px-3 py-1.5 border-t border-border/20">
                 <div className="flex items-center gap-1">
                   <Button
                     type="button"

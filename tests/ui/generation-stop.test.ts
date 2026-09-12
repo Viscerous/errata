@@ -99,4 +99,29 @@ describe('stopping a prose generation', () => {
 
     await waitFor(() => expect(textarea.value).toBe(''))
   })
+
+  it('submits Direct with Enter while reserving Shift+Enter for a newline', async () => {
+    generateAndSave.mockResolvedValue(eventStream([
+      { type: 'finish', finishReason: 'stop', stepCount: 1 },
+    ]))
+    const { textarea } = renderInput()
+    fireEvent.change(textarea, { target: { value: 'open the door' } })
+
+    expect(fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: true })).toBe(true)
+    expect(fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true })).toBe(true)
+    expect(generateAndSave).not.toHaveBeenCalled()
+
+    expect(fireEvent.keyDown(textarea, { key: 'Enter' })).toBe(false)
+    await waitFor(() => expect(generateAndSave).toHaveBeenCalledOnce())
+  })
+
+  it('keeps Ctrl+Enter only for adding a directly written section', () => {
+    const { container } = renderInput()
+    fireEvent.click(container.querySelector<HTMLButtonElement>('[role="tab"][aria-label="Write prose directly"]')!)
+    const prose = container.querySelector<HTMLTextAreaElement>('textarea[placeholder="Write your prose directly..."]')!
+
+    expect(container.textContent).toContain('Ctrl+Enter')
+    expect(fireEvent.keyDown(prose, { key: 'Enter' })).toBe(true)
+    expect(fireEvent.keyDown(prose, { key: 'Enter', ctrlKey: true })).toBe(false)
+  })
 })
