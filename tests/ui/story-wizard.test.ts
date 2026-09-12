@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 import React from 'react'
 import { renderToString } from 'react-dom/server'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { StoryWizard } from '@/components/wizard/StoryWizard'
 import type { StorySetupController } from '@/components/wizard/use-story-setup-controller'
 
@@ -24,6 +24,8 @@ const controller: StorySetupController = {
 }
 
 describe('StoryWizard', () => {
+  afterEach(cleanup)
+
   beforeEach(() => {
     HTMLElement.prototype.scrollIntoView = vi.fn()
   })
@@ -77,5 +79,23 @@ describe('StoryWizard', () => {
     rerender(React.createElement(StoryWizard, { controller: { ...activeController, isStreaming: true }, onClose }))
     fireEvent.click(screen.getByRole('button', { name: 'Stop Errata' }))
     expect(stop).toHaveBeenCalledOnce()
+  })
+
+  it('shows a retryable connection failure without enabling the composer', () => {
+    const retry = vi.fn()
+    render(React.createElement(StoryWizard, {
+      controller: {
+        ...controller,
+        contextReady: false,
+        error: 'Could not connect to the configured model. Start or reconnect its backend, then retry.',
+        retry,
+      },
+      onClose: () => undefined,
+    }))
+
+    expect(screen.getByRole('alert').textContent).toContain('Could not connect to the configured model')
+    expect(screen.getByRole('textbox', { name: 'Your story idea' }).hasAttribute('disabled')).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: 'Retry story setup' }))
+    expect(retry).toHaveBeenCalledOnce()
   })
 })

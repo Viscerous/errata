@@ -262,7 +262,7 @@ export function StoryWizard({ controller, onClose }: StoryWizardProps) {
                     onClick={retry}
                     className="mt-2 font-medium underline underline-offset-4 hover:no-underline"
                   >
-                    Try the conversation again
+                    Retry story setup
                   </button>
                 </div>
               )}

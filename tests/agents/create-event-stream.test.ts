@@ -43,4 +43,18 @@ describe('createEventStream cancellation contract', () => {
       { type: 'finish', finishReason: 'stop', stepCount: 0, stopped: true },
     ])
   })
+
+  it('sends a failed run as a terminal event without breaking the HTTP stream', async () => {
+    async function* source() {
+      yield { type: 'text-delta', text: 'Partial' }
+      throw new Error('socket hang up')
+    }
+
+    const result = createEventStream(source())
+    await expect(result.completion).rejects.toThrow('socket hang up')
+    await expect(readEvents(result.eventStream)).resolves.toEqual([
+      { type: 'text', text: 'Partial' },
+      { type: 'error', error: 'socket hang up' },
+    ])
+  })
 })

@@ -148,6 +148,18 @@ export async function fetchEventStream(
   const decoder = new TextDecoder()
   let buffer = ''
 
+  const enqueueLine = (controller: ReadableStreamDefaultController<ChatEvent>, line: string) => {
+    let event: ChatEvent | { type: 'error'; error: string }
+    try {
+      event = JSON.parse(line) as typeof event
+    } catch {
+      return
+    }
+    if (!event || typeof event !== 'object') return
+    if (event.type === 'error') throw new Error(event.error)
+    controller.enqueue(event)
+  }
+
   return new ReadableStream<ChatEvent>({
     async pull(controller) {
       while (true) {
@@ -156,13 +168,7 @@ export async function fetchEventStream(
         if (newlineIdx !== -1) {
           const line = buffer.slice(0, newlineIdx).trim()
           buffer = buffer.slice(newlineIdx + 1)
-          if (line) {
-            try {
-              controller.enqueue(JSON.parse(line) as ChatEvent)
-            } catch {
-              // Skip malformed lines
-            }
-          }
+          if (line) enqueueLine(controller, line)
           return
         }
 
@@ -171,13 +177,7 @@ export async function fetchEventStream(
         if (done) {
           // Process any remaining buffer
           const remaining = buffer.trim()
-          if (remaining) {
-            try {
-              controller.enqueue(JSON.parse(remaining) as ChatEvent)
-            } catch {
-              // Skip malformed
-            }
-          }
+          if (remaining) enqueueLine(controller, remaining)
           controller.close()
           return
         }

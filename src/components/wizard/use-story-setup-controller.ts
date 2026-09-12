@@ -63,6 +63,14 @@ function normalizeChecklist(items: StorySetupChecklistItem[]): StorySetupCheckli
   })
 }
 
+function storySetupErrorMessage(caught: unknown): string {
+  const message = caught instanceof Error ? caught.message : 'Errata could not continue the conversation.'
+  if (/socket hang up|ECONNREFUSED|ECONNRESET|ENOTFOUND|ETIMEDOUT|fetch failed|failed to fetch/i.test(message)) {
+    return 'Could not connect to the configured model. Start or reconnect its backend, then retry.'
+  }
+  return message
+}
+
 /**
  * Workspace-scoped owner for Story Setup conversation and agent-run state.
  * The panel may mount and unmount as navigation changes; this controller stays
@@ -187,7 +195,7 @@ export function useStorySetupController({
       if (lifecycle !== lifecycleRef.current) return
       setPaused(true)
       if ((caught as Error).name !== 'AbortError') {
-        setError(caught instanceof Error ? caught.message : 'Errata could not continue the conversation.')
+        setError(storySetupErrorMessage(caught))
       }
     } finally {
       if (lifecycle !== lifecycleRef.current) return

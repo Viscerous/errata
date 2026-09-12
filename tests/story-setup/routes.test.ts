@@ -98,6 +98,41 @@ describe('story setup routes', () => {
     }))
   })
 
+  it('returns a readable stream error when the model connection fails', async () => {
+    mockAgentStream.mockResolvedValue({
+      fullStream: (async function* () { throw new Error('socket hang up') })(),
+      totalUsage: Promise.resolve(undefined),
+    })
+
+    const response = await app.fetch(new Request(
+      'http://localhost/api/stories/story-setup-test/setup/chat',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: [] }),
+      },
+    ))
+
+    expect(response.status).toBe(200)
+    expect(await response.text()).toContain('"type":"error","error":"socket hang up"')
+  })
+
+  it('returns a structured error if the model fails before streaming starts', async () => {
+    mockAgentStream.mockRejectedValue(new Error('socket hang up'))
+
+    const response = await app.fetch(new Request(
+      'http://localhost/api/stories/story-setup-test/setup/chat',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: [] }),
+      },
+    ))
+
+    expect(response.status).toBe(502)
+    expect(await response.json()).toEqual({ error: 'socket hang up' })
+  })
+
   it('includes existing setup fragments when the writer returns to refine the story', async () => {
     await syncStorySetupSnapshot(dataDir, 'story-setup-test', {
       story: { name: 'The Memory Courier', description: 'A courier carries a stolen memory.' },

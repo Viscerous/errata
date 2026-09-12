@@ -67,7 +67,12 @@ export function createEventStream(
               controller.close()
             }
           } else if (!consumerCancelled) {
-            controller.error(err)
+            const errorEvent: AgentStreamEvent = {
+              type: 'error',
+              error: err instanceof Error ? err.message : String(err),
+            }
+            controller.enqueue(JSON.stringify(errorEvent) + '\n')
+            controller.close()
           }
           completionReject!(err)
         }

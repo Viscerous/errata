@@ -165,4 +165,39 @@ describe('useStorySetupController', () => {
     await waitFor(() => expect(result.current.error).toContain('before asking its next question'))
     expect(result.current.contextReady).toBe(false)
   })
+
+  it('explains an offline model connection and recovers when retried', async () => {
+    chat.mockRejectedValueOnce(new Error('socket hang up'))
+    chat.mockResolvedValueOnce(new ReadableStream({
+      start(controller) {
+        controller.enqueue({
+          type: 'tool-result',
+          id: 'ok-1',
+          toolName: 'updateStorySetup',
+          result: { saved: false, checklist: [], fragments: [] },
+        })
+        controller.enqueue({ type: 'text', text: 'Where would you like to begin?' })
+        controller.close()
+      },
+    }))
+
+    const { result } = renderHook(
+      () => useStorySetupController({
+        storyId: 'story-test',
+        sessionScope: 'main',
+        contentRevision: 'revision-1',
+        active: true,
+      }),
+      { wrapper: makeWrapper() },
+    )
+
+    await waitFor(() => expect(result.current.error).toContain('Start or reconnect its backend'))
+    expect(result.current.contextReady).toBe(false)
+    expect(chat).toHaveBeenCalledTimes(1)
+
+    act(() => result.current.retry())
+    await waitFor(() => expect(result.current.contextReady).toBe(true))
+    expect(result.current.error).toBeNull()
+    expect(result.current.messages.at(-1)?.content).toBe('Where would you like to begin?')
+  })
 })
