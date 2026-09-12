@@ -1,11 +1,11 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
-import { Textarea } from '@/components/ui/textarea'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { EmptyHint } from '@/components/ui/prose-text'
 import { AssistantMessageView } from '@/components/chat/ChatMessageParts'
 import { ChatSendButton } from '@/components/chat/ChatSendButton'
+import { ComposerFrame, ComposerTextarea, ComposerToolbar } from '@/components/chat/ComposerSurface'
 import { useChatTurn, type ChatTurnMessage } from '@/components/chat/use-chat-turn'
 
 interface LibrarianChatProps {
@@ -188,32 +188,32 @@ export function LibrarianChat({ storyId, conversationId, initialInput }: Librari
       </ScrollArea>
 
       {/* Input area */}
-      <div className="border-t border-border/30 p-3 space-y-2">
-        <div className="flex gap-2 items-end">
-          <Textarea
+      <div className="p-3">
+        <ComposerFrame>
+          <ComposerTextarea
             ref={textareaRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
+            aria-label="Ask the librarian"
             placeholder="Ask the librarian..."
             disabled={isStreaming}
-            className="min-h-[40px] max-h-[400px] resize-none text-xs bg-transparent placeholder:italic placeholder:text-muted-foreground flex-1"
+            className="min-h-11 max-h-[400px]"
             rows={1}
             data-component-id="librarian-chat-input"
           />
-          <ChatSendButton
-            isStreaming={isStreaming}
-            canSend={!!input.trim()}
-            onSend={send}
-            onStop={stop}
-            stopLabel="Stop the librarian"
-            idPrefix="librarian-chat"
-          />
-        </div>
-
-        <p className="text-ui-label text-muted-foreground text-center">
-          Enter to send, Shift+Enter for newline
-        </p>
+          <ComposerToolbar>
+            <span className="text-ui-label text-muted-foreground">Enter to send · Shift+Enter for newline</span>
+            <ChatSendButton
+              isStreaming={isStreaming}
+              canSend={!!input.trim()}
+              onSend={send}
+              onStop={stop}
+              stopLabel="Stop the librarian"
+              idPrefix="librarian-chat"
+            />
+          </ComposerToolbar>
+        </ComposerFrame>
       </div>
     </div>
   )

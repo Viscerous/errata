@@ -2,11 +2,11 @@ import { useState, useRef, useCallback, useEffect, useMemo } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, type Fragment } from '@/lib/api'
 import type { PersonaMode, CharacterChatConversationSummary } from '@/lib/api/types'
-import { Textarea } from '@/components/ui/textarea'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Caption, EmptyHint } from '@/components/ui/prose-text'
 import { AssistantMessageView } from '@/components/chat/ChatMessageParts'
 import { ChatSendButton } from '@/components/chat/ChatSendButton'
+import { ComposerFrame, ComposerTextarea, ComposerToolbar } from '@/components/chat/ComposerSurface'
 import { useChatTurn, type ChatTurnMessage } from '@/components/chat/use-chat-turn'
 import { CharacterAvatar } from '@/components/shared/CharacterAvatar'
 import { ChatConfig } from './ChatConfig'
@@ -287,40 +287,38 @@ export function CharacterChatView({ storyId, initialCharacterId, onClose }: Char
       </ScrollArea>
 
       {/* Input */}
-      <div className="border-t border-border/20 bg-card/20">
+      <div>
         <div className="max-w-2xl mx-auto px-4 py-3">
-          <div className="flex gap-2 items-end">
-            <Textarea
+          <ComposerFrame>
+            <ComposerTextarea
               ref={textareaRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
+              aria-label="Message to character"
               placeholder={
                 selectedCharacter
                   ? `Say something to ${selectedCharacter.name}...`
                   : 'Select a character first...'
               }
               disabled={isStreaming || !characterId}
-              className="min-h-[44px] max-h-[400px] resize-none text-ui-body bg-transparent
-                placeholder:italic placeholder:text-muted-foreground flex-1 border-border/30
-                focus-visible:ring-primary/20"
+              className="min-h-11 max-h-[400px]"
               rows={1}
               data-component-id="character-chat-input"
             />
-            <ChatSendButton
-              isStreaming={isStreaming}
-              canSend={!!input.trim() && !!characterId}
-              onSend={send}
-              onStop={stop}
-              stopLabel={`Stop ${selectedCharacter?.name ?? 'the character'}`}
-              idPrefix="character-chat"
-              size="md"
-            />
-          </div>
-
-          <p className="text-ui-label text-muted-foreground text-center mt-2">
-            Enter to send · Shift+Enter for newline
-          </p>
+            <ComposerToolbar>
+              <span className="text-ui-label text-muted-foreground">Enter to send · Shift+Enter for newline</span>
+              <ChatSendButton
+                isStreaming={isStreaming}
+                canSend={!!input.trim() && !!characterId}
+                onSend={send}
+                onStop={stop}
+                stopLabel={`Stop ${selectedCharacter?.name ?? 'the character'}`}
+                idPrefix="character-chat"
+                size="md"
+              />
+            </ComposerToolbar>
+          </ComposerFrame>
         </div>
       </div>
 

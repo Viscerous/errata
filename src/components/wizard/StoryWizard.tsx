@@ -5,10 +5,10 @@ import {
   type StorySetupDraftFragment,
 } from '@/lib/api'
 import { Button } from '@/components/ui/button'
-import { Textarea } from '@/components/ui/textarea'
 import { StreamMarkdown } from '@/components/ui/stream-markdown'
 import { ErrataMark } from '@/components/ErrataLogo'
 import { ChatSendButton } from '@/components/chat/ChatSendButton'
+import { ComposerFrame, ComposerTextarea, ComposerToolbar } from '@/components/chat/ComposerSurface'
 import { Eyebrow, MetaLabel } from '@/components/ui/prose-text'
 import { Spinner } from '@/components/ui/async-view'
 import { WorkspaceHeader, WorkspaceRail, WorkspaceTitle, WorkspaceToolbar } from '@/components/ui/workspace'
@@ -270,10 +270,10 @@ export function StoryWizard({ controller, onClose }: StoryWizardProps) {
             </div>
           </div>
 
-          <div className="shrink-0 border-t border-border/40 bg-panel-muted/45" data-component-id="story-setup-composer-column">
+          <div className="shrink-0" data-component-id="story-setup-composer-column">
             <div className="mx-auto w-full max-w-2xl px-4 py-3 sm:px-6">
-              <div className="flex items-end gap-2">
-                <Textarea
+              <ComposerFrame>
+                <ComposerTextarea
                   ref={textareaRef}
                   value={input}
                   onChange={event => setInput(event.target.value)}
@@ -283,19 +283,21 @@ export function StoryWizard({ controller, onClose }: StoryWizardProps) {
                   autoFocus
                   aria-label="Your story idea"
                   placeholder="Tell Errata whatever you have..."
-                  className="max-h-44 min-h-11 flex-1 resize-none border-border/40 bg-elevated/60 text-ui-body leading-6 shadow-none placeholder:italic focus-visible:ring-primary/20"
+                  className="min-h-11 max-h-44"
                 />
-                <ChatSendButton
-                  isStreaming={isStreaming}
-                  canSend={contextReady && Boolean(input.trim())}
-                  onSend={() => send(input)}
-                  onStop={stop}
-                  stopLabel="Stop Errata"
-                  idPrefix="story-setup"
-                  size="md"
-                />
-              </div>
-              <p className="mt-2 text-center text-ui-label text-muted-foreground">Enter to send · Shift+Enter for a new line</p>
+                <ComposerToolbar>
+                  <span className="text-ui-label text-muted-foreground">Enter to send · Shift+Enter for newline</span>
+                  <ChatSendButton
+                    isStreaming={isStreaming}
+                    canSend={contextReady && Boolean(input.trim())}
+                    onSend={() => send(input)}
+                    onStop={stop}
+                    stopLabel="Stop Errata"
+                    idPrefix="story-setup"
+                    size="md"
+                  />
+                </ComposerToolbar>
+              </ComposerFrame>
             </div>
           </div>
         </div>

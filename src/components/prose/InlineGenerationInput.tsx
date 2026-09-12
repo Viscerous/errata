@@ -17,6 +17,7 @@ import { GUIDED_CONTINUE_PROMPT, GUIDED_SCENE_SETTING_PROMPT } from '@/lib/guide
 import { GenerationProviderSelect } from './GenerationProviderSelect'
 import { GuidedGenerationControls } from './GuidedGenerationControls'
 import { consumeGenerationStream, type ThoughtStep } from './generation-stream'
+import { ComposerFrame, ComposerTextarea, ComposerToolbar } from '@/components/chat/ComposerSurface'
 
 // A round high enough that the server withholds the ask tool and must write —
 // used by "Skip & write" to proceed without answering.
@@ -61,7 +62,6 @@ export function InlineGenerationInput({
   const [composeInput, setComposeInput] = useState('')
   const [isComposing, setIsComposing] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [isFocused, setIsFocused] = useState(false)
   const [inputModeOverride, setInputModeOverride] = useState<AuthorInputMode | null>(null)
   const [pendingQuestions, setPendingQuestions] = useState<ClarifyQuestion[] | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -383,14 +383,7 @@ export function InlineGenerationInput({
       )}
 
       {/* Unified input container */}
-      <div
-        className={cn(
-          'relative rounded-xl border transition-all duration-300 shadow-lg bg-card',
-          (mode === 'primary' || mode === 'compose') && isFocused
-            ? 'border-primary/25 shadow-[0_0_0_1px_var(--primary)/8%,0_4px_16px_-2px_var(--primary)/6%]'
-            : 'border-border/30 hover:border-border/50',
-        )}
-      >
+      <ComposerFrame>
         {/* Mode toggle */}
         <div className="flex items-center gap-0.5 px-3 pb-1 pt-2.5" role="tablist" aria-label="Writing mode">
           <button
@@ -447,16 +440,13 @@ export function InlineGenerationInput({
 
         {/* The story owns whether this primary composer is Play or Direct. */}
         {mode === 'primary' && (
-          <textarea
+          <ComposerTextarea
             ref={textareaRef}
             data-component-id="inline-generation-input"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            onFocus={() => setIsFocused(true)}
-            onBlur={() => setIsFocused(false)}
             placeholder={effectiveInputMode === 'play' ? 'What do you do or say next?' : 'What should happen next?'}
             rows={1}
-            className="w-full resize-none bg-transparent border-none outline-none px-4 pt-1.5 pb-2 font-prose text-base leading-relaxed text-foreground placeholder:text-muted-foreground placeholder:italic disabled:opacity-40"
             style={{ minHeight: '44px', maxHeight: '200px', overflowY: 'auto', scrollbarWidth: 'none' }}
             disabled={isGenerating}
             onKeyDown={(e) => {
@@ -484,15 +474,12 @@ export function InlineGenerationInput({
 
         {/* Compose mode */}
         {mode === 'compose' && (
-          <textarea
+          <ComposerTextarea
             ref={composeTextareaRef}
             value={composeInput}
             onChange={(e) => setComposeInput(e.target.value)}
-            onFocus={() => setIsFocused(true)}
-            onBlur={() => setIsFocused(false)}
             placeholder="Write your prose directly..."
             rows={3}
-            className="w-full resize-none bg-transparent border-none outline-none px-4 pt-1.5 pb-2 font-prose text-base leading-relaxed text-foreground placeholder:text-muted-foreground placeholder:italic disabled:opacity-40"
             style={{ minHeight: '100px', maxHeight: '400px', overflowY: 'auto', scrollbarWidth: 'none' }}
             disabled={isComposing}
             onKeyDown={(e) => {
@@ -505,7 +492,7 @@ export function InlineGenerationInput({
         )}
 
         {/* Bottom toolbar */}
-        <div className="flex items-center justify-between px-3 pb-2.5 pt-0.5">
+        <ComposerToolbar>
           {/* Left: Model selector + Follow toggle (hidden in compose mode) */}
           <div className="flex items-center gap-2">
             {mode === 'primary' && (
@@ -571,8 +558,8 @@ export function InlineGenerationInput({
               </Button>
             ) : null}
           </div>
-        </div>
-      </div>
+        </ComposerToolbar>
+      </ComposerFrame>
     </div>
   )
 }
