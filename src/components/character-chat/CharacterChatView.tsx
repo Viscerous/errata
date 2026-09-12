@@ -120,13 +120,13 @@ export function CharacterChatView({ storyId, initialCharacterId, onClose }: Char
     }
     scrollArea.addEventListener('scroll', handleScroll, { passive: true })
     return () => scrollArea.removeEventListener('scroll', handleScroll)
-  }, [])
+  }, [showConversations])
 
   useEffect(() => {
     if (isNearBottomRef.current) {
       scrollToBottom()
     }
-  }, [messages, scrollToBottom])
+  }, [messages, scrollToBottom, showConversations])
 
   // Handle character change — reset conversation
   const handleCharacterChange = useCallback((id: string) => {
@@ -142,7 +142,7 @@ export function CharacterChatView({ storyId, initialCharacterId, onClose }: Char
     setMessages([])
     setError(null)
     setShowConversations(false)
-    textareaRef.current?.focus()
+    requestAnimationFrame(() => textareaRef.current?.focus())
   }, [])
 
   // Resume a conversation
@@ -190,12 +190,25 @@ export function CharacterChatView({ storyId, initialCharacterId, onClose }: Char
         proseFragments={proseFragments}
         storyPointId={storyPointId}
         onStoryPointChange={setStoryPointId}
-        onShowConversations={() => setShowConversations(true)}
+        onShowConversations={() => setShowConversations(open => !open)}
+        historyOpen={showConversations}
         onClose={onClose}
         disabled={isStreaming}
         mediaById={mediaById}
       />
 
+      {showConversations ? (
+        <ConversationList
+          storyId={storyId}
+          characterId={characterId}
+          characters={characters}
+          mediaById={mediaById}
+          onSelect={resumeConversation}
+          onNew={startNewConversation}
+          onClose={() => setShowConversations(false)}
+        />
+      ) : (
+      <>
       {/* Messages */}
       <ScrollArea className="flex-1 min-h-0" data-component-id="character-chat-scroll">
         <div className="max-w-2xl mx-auto px-4 py-6 space-y-4">
@@ -322,17 +335,7 @@ export function CharacterChatView({ storyId, initialCharacterId, onClose }: Char
         </div>
       </div>
 
-      {/* Conversation list overlay */}
-      {showConversations && (
-        <ConversationList
-          storyId={storyId}
-          characterId={characterId}
-          characters={characters}
-          mediaById={mediaById}
-          onSelect={resumeConversation}
-          onNew={startNewConversation}
-          onClose={() => setShowConversations(false)}
-        />
+      </>
       )}
     </div>
   )

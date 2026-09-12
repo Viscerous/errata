@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import type { Fragment, PersonaMode, ProseChainResponse } from '@/lib/api/types'
 import { resolveFragmentVisual } from '@/lib/fragment-visuals'
 import { Button } from '@/components/ui/button'
+import { StoryChatSwitcher } from '@/components/shared/StoryChatSwitcher'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -10,7 +11,6 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import {
-  X,
   User,
   Users,
   Sparkles,
@@ -30,6 +30,7 @@ interface ChatConfigProps {
   storyPointId: string | null
   onStoryPointChange: (id: string | null) => void
   onShowConversations: () => void
+  historyOpen: boolean
   onClose: () => void
   disabled?: boolean
   mediaById: Map<string, Fragment>
@@ -73,6 +74,7 @@ export function ChatConfig({
   storyPointId,
   onStoryPointChange,
   onShowConversations,
+  historyOpen,
   onClose,
   disabled,
   mediaById,
@@ -243,29 +245,19 @@ export function ChatConfig({
         data-component-id="character-chat-config-actions"
       >
         <Button
-          variant="ghost"
+          variant={historyOpen ? 'secondary' : 'ghost'}
           size="sm"
-          className="h-7 gap-1.5 text-xs text-muted-foreground"
+          className={`h-7 gap-1.5 text-xs ${historyOpen ? '' : 'text-muted-foreground'}`}
           onClick={onShowConversations}
           disabled={disabled}
           aria-label="Previous conversations"
+          aria-pressed={historyOpen}
         >
           <History className="size-3" />
           <span className="hidden sm:inline">History</span>
         </Button>
 
-        <Button
-          variant="ghost"
-          size="icon"
-          className="size-7 text-muted-foreground hover:text-foreground"
-          onClick={onClose}
-          title="Return to story"
-          aria-label="Return to story"
-          data-component-id="character-chat-return-to-story"
-        >
-          <BookOpen className="size-3.5 md:hidden" />
-          <X className="hidden size-3.5 md:block" />
-        </Button>
+        <StoryChatSwitcher value="character-chat" onChange={(view) => { if (view === 'prose') onClose() }} />
       </div>
     </div>
   )

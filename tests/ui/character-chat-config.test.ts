@@ -2,8 +2,9 @@ import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 import { ChatConfig } from '@/components/character-chat/ChatConfig'
+import { StoryChatSwitcher } from '@/components/shared/StoryChatSwitcher'
 
-function renderConfig(): string {
+function renderConfig(historyOpen = false): string {
   return renderToStaticMarkup(React.createElement(ChatConfig, {
     characters: [],
     selectedCharacterId: null,
@@ -15,6 +16,7 @@ function renderConfig(): string {
     storyPointId: null,
     onStoryPointChange: vi.fn(),
     onShowConversations: vi.fn(),
+    historyOpen,
     onClose: vi.fn(),
     mediaById: new Map(),
   }))
@@ -38,14 +40,29 @@ describe('character chat config', () => {
     expect(actions).toContain('shrink-0')
   })
 
-  it('uses an explicit mobile return-to-story affordance', () => {
+  it('keeps Story and Chat navigation available in the chat header', () => {
     const html = renderConfig()
-    const buttonStart = elementWithComponentId(html, 'character-chat-return-to-story')
-    const button = html.slice(html.indexOf(buttonStart), html.indexOf('</button>', html.indexOf(buttonStart)))
+    expect(html).toContain('data-component-id="story-chat-switcher"')
+    expect(html).toContain('aria-label="Story view"')
+    expect(html).toContain('aria-label="Character chat view"')
+    expect(html).not.toContain('character-chat-return-to-story')
+  })
 
-    expect(buttonStart).toContain('aria-label="Return to story"')
-    expect(buttonStart).toContain('title="Return to story"')
-    expect(button).toContain('md:hidden')
-    expect(button).toContain('md:block')
+  it('marks History as selected only while that subview is open', () => {
+    expect(renderConfig(false)).toContain('aria-label="Previous conversations" aria-pressed="false"')
+    expect(renderConfig(true)).toContain('aria-label="Previous conversations" aria-pressed="true"')
+  })
+
+  it('compacts the shared switcher without losing accessible view names', () => {
+    const html = renderToStaticMarkup(React.createElement(StoryChatSwitcher, {
+      value: 'prose',
+      onChange: vi.fn(),
+      compact: true,
+    }))
+    expect(html).toContain('aria-label="Story view"')
+    expect(html).toContain('aria-label="Character chat view"')
+    expect(html).not.toContain('>Story</span>')
+    expect(html).not.toContain('>Chat</span>')
+    expect(html).toContain('size-7')
   })
 })

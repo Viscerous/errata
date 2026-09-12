@@ -35,7 +35,8 @@ import {
   DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog'
-import { Upload, BookOpen, MessageSquare, List } from 'lucide-react'
+import { Upload, List } from 'lucide-react'
+import { StoryChatSwitcher } from '@/components/shared/StoryChatSwitcher'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { useWindowFileDrop } from '@/hooks/use-window-file-drop'
 import { TimelineTabs } from '@/components/prose/TimelineTabs'
@@ -552,22 +553,11 @@ function StoryEditorPage() {
           <SidebarTrigger className="size-9 border border-border/50 bg-elevated/90 shadow-sm backdrop-blur-md" />
         </div>
 
-        {/* Mobile view entry — jump to character chat (prose view only; the
-            chat surface has its own header with a control back to prose). The
-            desktop Prose/Chat toggle is hidden below md, so without this the
-            chat view is unreachable on touch. */}
+        {/* Keep the same view control on mobile and desktop. Chat renders it in
+            its own config bar, so only the prose view needs this floating copy. */}
         {mainView === 'prose' && (
           <div className="md:hidden absolute top-3 right-3 z-20">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="size-9 border border-border/50 bg-elevated/90 shadow-sm backdrop-blur-md"
-              onClick={() => setMainView('character-chat')}
-              title="Character chat"
-              aria-label="Open character chat"
-            >
-              <MessageSquare className="size-4" />
-            </Button>
+            <StoryChatSwitcher value={mainView} onChange={setMainView} compact />
           </div>
         )}
 
@@ -584,11 +574,8 @@ function StoryEditorPage() {
           />
         )}
 
-        {/* Unified view + outline toolbar — hidden in character chat (has its own header) */}
-        {mainView === 'prose' && <div className={`hidden md:flex absolute top-3 right-0 z-20 items-center gap-1 ${
-          outlineOpen ? 'w-56 px-3' : ''
-        }`}>
-          {/* Outline collapse — before view group when expanded */}
+        {/* Match the outline rail when open, and keep a compact toolbar when closed. */}
+        {mainView === 'prose' && <div className={`hidden md:flex absolute top-3 right-0 z-20 items-center gap-1 ${outlineOpen ? 'w-56 px-3' : ''}`}>
           {outlineOpen && (
             <Button
               variant="secondary"
@@ -601,59 +588,7 @@ function StoryEditorPage() {
               <List className="size-3.5" />
             </Button>
           )}
-
-          {/* View toggle group */}
-          <div className={`flex items-center gap-0.5 rounded-lg border border-border/50 bg-elevated/90 p-0.5 shadow-sm backdrop-blur-md ${
-            outlineOpen ? 'flex-1' : ''
-          }`}>
-            {outlineOpen ? (
-              <>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  className="h-7 flex-1 gap-1.5 text-xs"
-                  onClick={() => setMainView('prose')}
-                  title="Prose view"
-                >
-                  <BookOpen className="size-3.5" />
-                  Story
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 flex-1 gap-1.5 text-xs"
-                  onClick={() => setMainView('character-chat')}
-                  title="Character chat"
-                >
-                  <MessageSquare className="size-3.5" />
-                  Chat
-                </Button>
-              </>
-            ) : (
-              <>
-                <Button
-                  variant="secondary"
-                  size="icon"
-                  className="size-7"
-                  onClick={() => setMainView('prose')}
-                  title="Prose view"
-                >
-                  <BookOpen className="size-3.5" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="size-7"
-                  onClick={() => setMainView('character-chat')}
-                  title="Character chat"
-                >
-                  <MessageSquare className="size-3.5" />
-                </Button>
-              </>
-            )}
-          </div>
-
-          {/* Outline expand — after view group when collapsed, centered in the w-7 rail */}
+          <StoryChatSwitcher value={mainView} onChange={setMainView} compact={!outlineOpen} fill={outlineOpen} />
           {!outlineOpen && (
             <div className="w-7 flex justify-center">
               <Button

@@ -11,7 +11,7 @@ import {
   PanelHeaderText,
   PanelTitle,
 } from '@/components/ui/panel'
-import { X, Plus, Trash2, MessageSquare, User, Users, Sparkles } from 'lucide-react'
+import { ArrowLeft, Plus, Trash2, MessageSquare, User, Users, Sparkles } from 'lucide-react'
 import { resolveFragmentVisual } from '@/lib/fragment-visuals'
 
 function personaIcon(persona: PersonaMode) {
@@ -89,12 +89,21 @@ export function ConversationList({
 
   return (
     <Panel
-      className="absolute inset-0 z-20 bg-background/95 backdrop-blur-sm"
+      className="min-h-0 flex-1"
       data-component-id="character-chat-conversation-list"
     >
       <PanelHeader className="px-4 py-3">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-7 text-muted-foreground"
+          onClick={onClose}
+          aria-label="Back to chat"
+        >
+          <ArrowLeft className="size-3.5" />
+        </Button>
         <PanelHeaderText>
-          <PanelTitle>Conversations</PanelTitle>
+          <PanelTitle>Conversation history</PanelTitle>
         </PanelHeaderText>
         <PanelActions className="gap-2">
           <Button
@@ -105,14 +114,6 @@ export function ConversationList({
           >
             <Plus className="size-3" />
             New
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="size-7 text-muted-foreground"
-            onClick={onClose}
-          >
-            <X className="size-3.5" />
           </Button>
         </PanelActions>
       </PanelHeader>
