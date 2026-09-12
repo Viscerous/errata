@@ -54,7 +54,7 @@ export function GenerationProviderSelect({
       disabled={disabled || updateProvider.isPending}
       title={selectedProvider?.defaultModel}
       className={cn(
-        'max-w-[180px] cursor-pointer appearance-none truncate py-1 pl-2 pr-5 font-mono text-ui-label text-foreground/70',
+        'max-w-[180px] cursor-pointer appearance-none truncate py-1 pl-2 pr-5 font-sans text-ui-caption text-foreground/70',
         'hover:border-border/60 disabled:cursor-default disabled:opacity-30',
         className,
       )}

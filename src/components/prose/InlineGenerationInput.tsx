@@ -403,7 +403,7 @@ export function InlineGenerationInput({
               ? 'Story setting: your input becomes manuscript prose and is included in exports'
               : 'Story setting: your input directs the assistant and stays out of the manuscript'}
             className={cn(
-              'rounded-md px-2.5 py-1 text-ui-label transition-colors duration-200',
+              'rounded-md px-2.5 py-1 text-ui-caption transition-colors duration-200',
               mode === 'primary'
                 ? 'text-foreground/80 bg-muted/60 font-medium'
                 : 'text-muted-foreground hover:text-foreground/60 hover:bg-muted/30',
@@ -419,7 +419,7 @@ export function InlineGenerationInput({
             role="tab"
             aria-selected={mode === 'guided'}
             className={cn(
-              'rounded-md px-2.5 py-1 text-ui-label transition-colors duration-200',
+              'rounded-md px-2.5 py-1 text-ui-caption transition-colors duration-200',
               mode === 'guided'
                 ? 'text-foreground/80 bg-muted/60 font-medium'
                 : 'text-muted-foreground hover:text-foreground/60 hover:bg-muted/30',
@@ -435,7 +435,7 @@ export function InlineGenerationInput({
             aria-label="Write prose directly"
             title="Add your prose to the story without generation"
             className={cn(
-              'rounded-md px-2.5 py-1 text-ui-label transition-colors duration-200',
+              'rounded-md px-2.5 py-1 text-ui-caption transition-colors duration-200',
               mode === 'compose'
                 ? 'text-foreground/80 bg-muted/60 font-medium'
                 : 'text-muted-foreground hover:text-foreground/60 hover:bg-muted/30',

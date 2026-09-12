@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, type StoryMeta, type GlobalConfigSafe } from '@/lib/api'
+import { cn } from '@/lib/utils'
 import { useQuickSwitch, useMentionTypes, BASE_MENTION_TYPES, useTimelineBar, useProseWidth, useUiFontSize, UI_FONT_SIZE_LABELS, useProseFontSize, PROSE_FONT_SIZE_LABELS, useFontPreferences, getActiveFont, FONT_CATALOGUE, loadFullFontCatalogue, useCustomCss, useWritingTransforms, useTransformContext, TRANSFORM_CONTEXT_LABELS, type TransformContext, type FontRole, type ProseWidth, type UiFontSize, type ProseFontSize } from '@/lib/theme'
 import { ChevronRight, ExternalLink, Eye, EyeOff, Puzzle, RotateCcw, CircleHelp, Code } from 'lucide-react'
 import { useHelp } from '@/hooks/use-help'
@@ -128,7 +129,12 @@ function MentionTypePicker({
             size="xs"
             aria-pressed={active}
             onClick={() => toggleType(option.type)}
-            className="gap-1 px-1.5 text-ui-label"
+            className={cn(
+              'gap-1 px-2 text-ui-caption',
+              active
+                ? 'bg-foreground text-background hover:bg-foreground/90'
+                : 'border-border/60 bg-transparent text-muted-foreground hover:bg-accent/40',
+            )}
             title={option.label}
           >
             <FragmentTypeDisplayIcon type={option.type} customTypes={customTypes} className="size-3" />
