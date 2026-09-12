@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { ArrowUp, Check, Circle, FileText, Minus, Square, X } from 'lucide-react'
+import { ArrowLeft, ChevronDown, ChevronRight, Circle, CircleCheck, CircleDot } from 'lucide-react'
 import {
   type StorySetupChecklistItem,
   type StorySetupDraftFragment,
@@ -8,6 +8,11 @@ import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { StreamMarkdown } from '@/components/ui/stream-markdown'
 import { ErrataMark } from '@/components/ErrataLogo'
+import { ChatSendButton } from '@/components/chat/ChatSendButton'
+import { Eyebrow, MetaLabel } from '@/components/ui/prose-text'
+import { Spinner } from '@/components/ui/async-view'
+import { WorkspaceHeader, WorkspaceRail, WorkspaceTitle, WorkspaceToolbar } from '@/components/ui/workspace'
+import { cn } from '@/lib/utils'
 import {
   STORY_SETUP_CHECKLIST,
   type StorySetupController,
@@ -15,7 +20,7 @@ import {
 
 interface StoryWizardProps {
   controller: StorySetupController
-  onComplete: () => void
+  onClose: () => void
 }
 
 const STARTING_POINTS = [
@@ -27,19 +32,18 @@ const STARTING_POINTS = [
 
 function AssistantTurn({ content, streaming = false }: { content: string; streaming?: boolean }) {
   return (
-    <article className="flex items-start gap-3 sm:gap-4" data-component-id="story-setup-assistant-turn">
-      <div className="mt-0.5 flex size-7 shrink-0 items-center justify-center text-primary/75" aria-hidden>
-        <ErrataMark size={18} />
+    <article className="flex items-start gap-3" data-component-id="story-setup-assistant-turn">
+      <div className="mt-1 flex size-6 shrink-0 items-center justify-center text-primary/65" aria-hidden>
+        <ErrataMark size={14} />
       </div>
-      <div className="min-w-0 max-w-[70ch] flex-1 font-prose text-base leading-7 text-foreground/90 sm:text-base">
+      <div className="min-w-0 max-w-[70ch] flex-1 font-prose text-base leading-7 text-foreground/90">
         <span className="sr-only">Errata: </span>
         {content ? (
           <StreamMarkdown content={content} streaming={streaming} variant="prose" />
         ) : (
-          <div className="flex h-7 items-center gap-1.5 text-muted-foreground" aria-label="Errata is thinking">
-            <span className="size-1 rounded-full bg-current motion-safe:animate-wisp-breathe" />
-            <span className="size-1 rounded-full bg-current motion-safe:animate-wisp-breathe [animation-delay:180ms]" />
-            <span className="size-1 rounded-full bg-current motion-safe:animate-wisp-breathe [animation-delay:360ms]" />
+          <div className="flex h-7 items-center gap-2 text-ui-caption text-muted-foreground">
+            <Spinner size="sm" label="Errata is thinking" />
+            <span>Thinking…</span>
           </div>
         )}
       </div>
@@ -49,9 +53,8 @@ function AssistantTurn({ content, streaming = false }: { content: string; stream
 
 function WriterTurn({ content }: { content: string }) {
   return (
-    <article className="ml-10 sm:ml-11" data-component-id="story-setup-writer-turn">
-      <p className="mb-1.5 text-xs font-medium text-muted-foreground">You</p>
-      <p className="max-w-[68ch] whitespace-pre-wrap rounded-lg bg-muted/45 px-4 py-3 font-prose text-base leading-6 text-foreground sm:text-base">
+    <article className="flex justify-end" data-component-id="story-setup-writer-turn">
+      <p className="max-w-[85%] whitespace-pre-wrap rounded-lg bg-primary/8 px-4 py-2.5 text-ui-body leading-relaxed text-foreground">
         {content}
       </p>
     </article>
@@ -60,46 +63,42 @@ function WriterTurn({ content }: { content: string }) {
 
 function ChecklistStatus({ status }: { status: StorySetupChecklistItem['status'] }) {
   if (status === 'covered') {
-    return (
-      <span className="flex size-4 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground" aria-label="Covered">
-        <Check className="size-2.5" aria-hidden />
-      </span>
-    )
+    return <CircleCheck className="size-4 shrink-0 text-foreground/75" aria-label="Covered" />
   }
   if (status === 'partial') {
-    return (
-      <span className="flex size-4 shrink-0 items-center justify-center rounded-full bg-primary/15 text-primary" aria-label="Partly covered">
-        <Minus className="size-2.5" aria-hidden />
-      </span>
-    )
+    return <CircleDot className="size-4 shrink-0 text-muted-foreground" aria-label="Partly covered" />
   }
-  return <Circle className="size-4 shrink-0 text-muted-foreground/45" aria-label="Not covered yet" />
+  return <Circle className="size-4 shrink-0 text-muted-foreground/35" aria-label="Not covered yet" />
 }
 
 function StorySetupRail({
   checklist,
   draftFragments,
   updating,
+  className,
+  idPrefix,
 }: {
   checklist: StorySetupChecklistItem[]
   draftFragments: StorySetupDraftFragment[]
   updating: boolean
+  className?: string
+  idPrefix: string
 }) {
   const covered = checklist.filter(item => item.status === 'covered').length
   const explored = checklist.filter(item => item.status !== 'missing').length
   const checklistByKey = new Map(checklist.map(item => [item.key, item]))
 
   return (
-    <aside className="space-y-7 lg:sticky lg:top-8" data-component-id="story-setup-progress">
-      <section aria-labelledby="story-checklist-heading">
+    <WorkspaceRail className={cn('gap-7 overflow-y-auto px-5 py-6', className)} data-component-id="story-setup-progress">
+      <section aria-labelledby={`${idPrefix}-checklist-heading`}>
         <div className="flex items-baseline justify-between gap-3">
-          <h2 id="story-checklist-heading" className="text-sm font-semibold text-foreground">Story checklist</h2>
-          <span className="text-xs tabular-nums text-muted-foreground">{explored} of {STORY_SETUP_CHECKLIST.length} explored</span>
+          <Eyebrow asChild><h2 id={`${idPrefix}-checklist-heading`}>Story outline</h2></Eyebrow>
+          <MetaLabel className="shrink-0 tabular-nums">{explored} / {STORY_SETUP_CHECKLIST.length}</MetaLabel>
         </div>
-        <p className="mt-1 text-xs leading-5 text-muted-foreground">
-          {covered} complete. Based on this conversation and existing story material; not a requirement.
+        <p className="mt-2 text-ui-caption leading-5 text-muted-foreground">
+          {covered} complete · Suggestions, not requirements.
         </p>
-        <ul className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 lg:grid-cols-1">
+        <ul className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 xl:grid-cols-1">
           {STORY_SETUP_CHECKLIST.map(definition => {
             const item = checklistByKey.get(definition.key) ?? {
               key: definition.key,
@@ -110,7 +109,7 @@ function StorySetupRail({
               <li key={definition.key} className="flex min-w-0 items-start gap-2.5">
                 <span className="mt-0.5"><ChecklistStatus status={item.status} /></span>
                 <div className="min-w-0">
-                  <p className={`text-xs leading-5 ${item.status === 'missing' ? 'text-muted-foreground' : 'text-foreground/85'}`}>
+                  <p className={`text-ui-caption leading-5 ${item.status === 'missing' ? 'text-muted-foreground' : 'text-foreground/85'}`}>
                     {definition.label}
                   </p>
                   {item.note && <p className="line-clamp-2 text-ui-label leading-4 text-muted-foreground">{item.note}</p>}
@@ -121,18 +120,15 @@ function StorySetupRail({
         </ul>
       </section>
 
-      <section aria-labelledby="draft-fragments-heading">
+      <section aria-labelledby={`${idPrefix}-fragments-heading`}>
         <div className="flex items-center justify-between gap-3">
-          <h2 id="draft-fragments-heading" className="text-sm font-semibold text-foreground">Story fragments</h2>
+          <Eyebrow asChild><h2 id={`${idPrefix}-fragments-heading`}>Fragments</h2></Eyebrow>
           {updating && <span className="text-ui-label text-muted-foreground">Updating</span>}
         </div>
-        <p className="mt-1 text-xs leading-5 text-muted-foreground">Saved as the conversation develops. Open one to read it.</p>
+        <p className="mt-2 text-ui-caption leading-5 text-muted-foreground">Saved as the conversation develops.</p>
 
         {draftFragments.length === 0 ? (
-          <div className="mt-4 flex items-start gap-2.5 text-xs leading-5 text-muted-foreground">
-            <FileText className="mt-0.5 size-4 shrink-0 opacity-50" aria-hidden />
-            <p>Fragments will appear here as the idea takes shape.</p>
-          </div>
+          <p className="mt-4 text-ui-caption leading-5 text-muted-foreground">Fragments will appear here as the idea takes shape.</p>
         ) : (
           <div className="mt-3 divide-y divide-border/30 border-y border-border/30">
             {draftFragments.map(fragment => (
@@ -143,7 +139,7 @@ function StorySetupRail({
                       <p className="truncate text-xs font-medium text-foreground/90">{fragment.name}</p>
                       <p className="mt-0.5 text-ui-label text-muted-foreground">{fragment.type}</p>
                     </div>
-                    <span className="mt-0.5 text-xs text-muted-foreground transition-transform group-open:rotate-90" aria-hidden>›</span>
+                    <ChevronRight className="mt-0.5 size-3.5 shrink-0 text-muted-foreground transition-transform group-open:rotate-90" aria-hidden />
                   </div>
                   <p className="mt-1.5 text-ui-label leading-4 text-muted-foreground">{fragment.description}</p>
                 </summary>
@@ -153,11 +149,11 @@ function StorySetupRail({
           </div>
         )}
       </section>
-    </aside>
+    </WorkspaceRail>
   )
 }
 
-export function StoryWizard({ controller, onComplete }: StoryWizardProps) {
+export function StoryWizard({ controller, onClose }: StoryWizardProps) {
   const {
     messages,
     input,
@@ -176,6 +172,7 @@ export function StoryWizard({ controller, onComplete }: StoryWizardProps) {
   const endRef = useRef<HTMLDivElement | null>(null)
 
   const userTurnCount = messages.filter(message => message.role === 'user').length
+  const exploredCount = checklist.filter(item => item.status !== 'missing').length
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: isStreaming ? 'auto' : 'smooth', block: 'end' })
@@ -192,11 +189,6 @@ export function StoryWizard({ controller, onComplete }: StoryWizardProps) {
     if (!isStreaming) textareaRef.current?.focus()
   }, [isStreaming])
 
-  const handleSubmit = (event: React.FormEvent) => {
-    event.preventDefault()
-    send(input)
-  }
-
   const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault()
@@ -205,84 +197,82 @@ export function StoryWizard({ controller, onComplete }: StoryWizardProps) {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-background" data-component-id="story-setup-root">
-      <header className="shrink-0 border-b border-border/25 bg-background/95 px-4 py-3 sm:px-6">
-        <div className="mx-auto flex max-w-5xl items-center justify-between gap-4">
-          <div className="flex min-w-0 items-center gap-3">
-            <ErrataMark size={22} className="shrink-0 text-primary" />
-            <div className="min-w-0">
-              <h1 className="truncate font-display text-xl italic leading-tight sm:text-2xl">Shape your story</h1>
-              <p className="hidden text-xs text-muted-foreground sm:block">Talk it through; your story takes shape as you go.</p>
-            </div>
-          </div>
-
-          <div className="flex shrink-0 items-center gap-2">
-            <Button size="sm" onClick={onComplete}>Open story</Button>
-            <Button variant="ghost" size="icon-sm" onClick={onComplete} aria-label="Close story setup">
-              <X className="size-4" aria-hidden />
-            </Button>
-          </div>
+    <div className="flex h-full min-h-0 flex-col bg-panel" data-component-id="story-setup-root">
+      <WorkspaceHeader>
+        <div className="flex min-w-0 items-center gap-2.5">
+          <ErrataMark size={16} className="shrink-0 text-primary/70" />
+          <WorkspaceTitle>Story setup</WorkspaceTitle>
         </div>
-      </header>
+        <WorkspaceToolbar>
+          <Button variant="ghost" size="sm" onClick={onClose} className="gap-1.5 text-ui-caption text-muted-foreground hover:text-foreground">
+            <ArrowLeft className="size-3.5" aria-hidden />
+            Back to story
+          </Button>
+        </WorkspaceToolbar>
+      </WorkspaceHeader>
 
-      <main className="min-h-0 flex-1 overflow-y-auto" data-component-id="story-setup-transcript">
-            <div className="mx-auto grid w-full max-w-5xl gap-10 px-5 py-8 sm:px-8 sm:py-12 lg:grid-cols-[minmax(0,1fr)_17rem]">
-              <div className="order-2 space-y-8 lg:order-1" aria-live="polite">
-                {messages.map((message, index) => message.role === 'assistant' ? (
-                  <AssistantTurn key={`assistant-${index}`} content={message.content} />
-                ) : (
-                  <WriterTurn key={`user-${index}`} content={message.content} />
-                ))}
+      <main className="flex min-h-0 flex-1" data-component-id="story-setup-main">
+        <div className="flex min-w-0 flex-1 flex-col">
+          <details className="shrink-0 border-b border-border/40 bg-panel-muted/50 xl:hidden">
+            <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-2.5 text-ui-caption text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 [&::-webkit-details-marker]:hidden">
+              Story outline
+              <span className="flex items-center gap-2 tabular-nums">
+                {exploredCount} / {STORY_SETUP_CHECKLIST.length}
+                <ChevronDown className="size-3.5" aria-hidden />
+              </span>
+            </summary>
+            <StorySetupRail idPrefix="mobile" checklist={checklist} draftFragments={draftFragments} updating={isStreaming} className="max-h-[45vh] border-l-0 border-t border-border/30" />
+          </details>
 
-                {isStreaming && <AssistantTurn content={streamingText} streaming={Boolean(streamingText)} />}
+          <div className="min-h-0 flex-1 overflow-y-auto" data-component-id="story-setup-transcript">
+            <div className="mx-auto w-full max-w-2xl space-y-7 px-4 py-8 sm:px-6 sm:py-10" aria-live="polite">
+              {messages.map((message, index) => message.role === 'assistant' ? (
+                <AssistantTurn key={`assistant-${index}`} content={message.content} />
+              ) : (
+                <WriterTurn key={`user-${index}`} content={message.content} />
+              ))}
 
-                {userTurnCount === 0 && !isStreaming && messages.some(message => message.role === 'assistant') && (
-                  <div className="ml-10 space-y-3 sm:ml-11">
-                    <p className="text-xs text-muted-foreground">You can start anywhere</p>
-                    <div className="flex flex-wrap gap-2">
-                      {STARTING_POINTS.map(point => (
-                        <button
-                          key={point.label}
-                          type="button"
-                          onClick={() => send(point.message)}
-                          className="rounded-md border border-border/50 px-3 py-2 text-sm text-foreground/75 transition-colors hover:border-foreground/30 hover:bg-muted/40 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-                        >
-                          {point.label}
-                        </button>
-                      ))}
-                    </div>
+              {isStreaming && <AssistantTurn content={streamingText} streaming={Boolean(streamingText)} />}
+
+              {userTurnCount === 0 && !isStreaming && messages.some(message => message.role === 'assistant') && (
+                <div className="space-y-2.5 pl-9">
+                  <MetaLabel asChild><p>You can start anywhere</p></MetaLabel>
+                  <div className="flex flex-wrap gap-1.5">
+                    {STARTING_POINTS.map(point => (
+                      <Button
+                        key={point.label}
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => send(point.message)}
+                        className="h-7 border-border/50 bg-transparent text-ui-caption font-normal text-foreground/75"
+                      >
+                        {point.label}
+                      </Button>
+                    ))}
                   </div>
-                )}
+                </div>
+              )}
 
-                {error && (
-                  <div className="ml-10 rounded-lg bg-destructive/8 px-4 py-3 text-sm text-destructive sm:ml-11" role="alert">
-                    <p>{error}</p>
-                    <button
-                      type="button"
-                      onClick={retry}
-                      className="mt-2 font-medium underline underline-offset-4 hover:no-underline"
-                    >
-                      Try the conversation again
-                    </button>
-                  </div>
-                )}
-                <div ref={endRef} />
-              </div>
-
-              <div className="order-1 lg:order-2">
-                <StorySetupRail checklist={checklist} draftFragments={draftFragments} updating={isStreaming} />
-              </div>
+              {error && (
+                <div className="rounded-lg border border-destructive/20 bg-destructive/5 px-4 py-3 text-ui-body text-destructive" role="alert">
+                  <p>{error}</p>
+                  <button
+                    type="button"
+                    onClick={retry}
+                    className="mt-2 font-medium underline underline-offset-4 hover:no-underline"
+                  >
+                    Try the conversation again
+                  </button>
+                </div>
+              )}
+              <div ref={endRef} />
             </div>
-      </main>
+          </div>
 
-      <footer className="shrink-0 border-t border-border/25 bg-background">
-        <div className="mx-auto grid w-full max-w-5xl gap-10 px-5 py-3 sm:px-8 sm:py-4 lg:grid-cols-[minmax(0,1fr)_17rem]">
-          <form
-            onSubmit={handleSubmit}
-            className="min-w-0 lg:col-start-1"
-            data-component-id="story-setup-composer-column"
-          >
-              <div className="flex items-end gap-2 rounded-xl border border-border/55 bg-card/25 p-2 focus-within:border-foreground/35">
+          <div className="shrink-0 border-t border-border/40 bg-panel-muted/45" data-component-id="story-setup-composer-column">
+            <div className="mx-auto w-full max-w-2xl px-4 py-3 sm:px-6">
+              <div className="flex items-end gap-2">
                 <Textarea
                   ref={textareaRef}
                   value={input}
@@ -293,31 +283,24 @@ export function StoryWizard({ controller, onComplete }: StoryWizardProps) {
                   autoFocus
                   aria-label="Your story idea"
                   placeholder="Tell Errata whatever you have..."
-                  className="max-h-44 min-h-10 flex-1 resize-none border-0 bg-transparent px-2 py-2 font-prose text-base leading-6 shadow-none focus-visible:ring-0 placeholder:text-muted-foreground"
+                  className="max-h-44 min-h-11 flex-1 resize-none border-border/40 bg-elevated/60 text-ui-body leading-6 shadow-none placeholder:italic focus-visible:ring-primary/20"
                 />
-                {isStreaming ? (
-                  <Button
-                    type="button"
-                    size="icon-sm"
-                    variant="ghost"
-                    onClick={stop}
-                    aria-label="Stop Errata"
-                  >
-                    <Square className="size-3 fill-current" aria-hidden />
-                  </Button>
-                ) : (
-                  <Button type="submit" size="icon-sm" disabled={!contextReady || !input.trim()} aria-label="Send message">
-                    <ArrowUp className="size-4" aria-hidden />
-                  </Button>
-                )}
+                <ChatSendButton
+                  isStreaming={isStreaming}
+                  canSend={contextReady && Boolean(input.trim())}
+                  onSend={() => send(input)}
+                  onStop={stop}
+                  stopLabel="Stop Errata"
+                  idPrefix="story-setup"
+                  size="md"
+                />
               </div>
-              <div className="mt-2 flex items-center justify-between gap-4 px-1 text-ui-label text-muted-foreground">
-                <p>Fragments are saved as the conversation develops.</p>
-                <p className="hidden sm:block">Enter to send, Shift+Enter for a new line</p>
-              </div>
-          </form>
+              <p className="mt-2 text-center text-ui-label text-muted-foreground">Enter to send · Shift+Enter for a new line</p>
+            </div>
+          </div>
         </div>
-      </footer>
+        <StorySetupRail idPrefix="desktop" checklist={checklist} draftFragments={draftFragments} updating={isStreaming} className="hidden w-72 xl:flex" />
+      </main>
     </div>
   )
 }

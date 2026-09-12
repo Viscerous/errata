@@ -710,7 +710,7 @@ function StoryEditorPage() {
               <StoryWizard
                 key={`${storyId}:${activeBranchId ?? 'main'}`}
                 controller={storySetupController}
-                onComplete={() => transitionWorkspaceSurface(null)}
+                onClose={() => transitionWorkspaceSurface(null)}
               />
             </Suspense>
           </div>
