@@ -6,7 +6,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/async-view'
 import { StreamMarkdown } from '@/components/ui/stream-markdown'
-import { Wand2, Bookmark, List } from 'lucide-react'
+import { Wand2, Bookmark } from 'lucide-react'
 import { Caption } from '@/components/ui/prose-text'
 import { useQuickSwitch, useProseWidth, PROSE_WIDTH_VALUES, useMentionTypes, BASE_MENTION_TYPES } from '@/lib/theme'
 import { parseVisualRefs } from '@/lib/fragment-visuals'
@@ -22,11 +22,15 @@ import { qk, q, useActiveBranchId } from '@/lib/query-keys'
 import { createGenerationStreamStore, EMPTY_STREAM_SNAPSHOT, type GenerationStreamStore } from './generation-stream-store'
 import type { AuthorInputMode } from '@/contracts/generation'
 import { useLiveAnalysisProgress } from '@/components/librarian/use-live-analysis-progress'
+import type { StoryChatView } from '@/components/shared/StoryChatSwitcher'
+import { ProseViewToolbar } from './ProseViewToolbar'
 
 interface ProseChainViewProps {
   storyId: string
   coverImage?: string | null
-  outlineOpen?: boolean
+  outlineOpen: boolean
+  onOutlineOpenChange: (open: boolean) => void
+  onMainViewChange: (view: StoryChatView) => void
   onSelectFragment: (fragment: Fragment) => void
   onEditProse?: (fragmentId: string, selectedText?: string) => void
   onDebugLog?: (logId: string) => void
@@ -158,6 +162,8 @@ export function ProseChainView({
   storyId,
   coverImage,
   outlineOpen,
+  onOutlineOpenChange,
+  onMainViewChange,
   onSelectFragment,
   onEditProse,
   onDebugLog,
@@ -428,6 +434,8 @@ export function ProseChainView({
     }
     return orderedItems
   }, [orderedItems, pendingOutlineFragment])
+  const hasOutline = outlineFragments.length > 1
+  const desktopOutlineOpen = hasOutline && outlineOpen
 
   const visibleOrderedItems = useMemo(() => {
     if (!pendingGeneration) return orderedItems
@@ -1159,52 +1167,41 @@ export function ProseChainView({
       </div>
 
       {/* Outline panel — side rail on desktop */}
-      {outlineFragments.length > 1 && (
+      {hasOutline && (
         <div className="hidden md:flex">
           <ProseOutlinePanel
             storyId={storyId}
             fragments={outlineFragments}
             activeIndex={activeIndex}
-            open={outlineOpen ?? false}
+            open={desktopOutlineOpen}
             onJump={scrollToIndex}
           />
         </div>
       )}
 
-      {/* Outline on mobile — a trigger that opens the passages as a full-screen
-          overlay (no room for a persistent rail). Sits left of the chat button. */}
-      {outlineFragments.length > 1 && (
-        <>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            onClick={() => setMobileTocOpen(true)}
-            title="Passages"
-            aria-label="Open passages outline"
-            data-component-id="prose-mobile-toc-trigger"
-            className="absolute right-14 top-3 z-20 size-9 border border-border/50 bg-elevated/90 shadow-sm backdrop-blur-md md:hidden"
-          >
-            <List className="size-4" />
-          </Button>
-          {mobileTocOpen && (
-            <div
-              className="fixed inset-0 z-40 animate-in bg-panel fade-in duration-150 md:hidden"
-              data-cuelume-surface="bloom"
-              data-component-id="prose-mobile-toc-overlay"
-            >
-              <ProseOutlinePanel
-                storyId={storyId}
-                fragments={outlineFragments}
-                activeIndex={activeIndex}
-                open
-                mobile
-                onClose={() => setMobileTocOpen(false)}
-                onJump={(i) => { scrollToIndex(i); setMobileTocOpen(false) }}
-              />
-            </div>
-          )}
-        </>
+      <ProseViewToolbar
+        hasOutline={hasOutline}
+        outlineOpen={outlineOpen}
+        onOutlineOpenChange={onOutlineOpenChange}
+        onMobileOutlineOpen={() => setMobileTocOpen(true)}
+        onMainViewChange={onMainViewChange}
+      />
+      {hasOutline && mobileTocOpen && (
+        <div
+          className="fixed inset-0 z-40 animate-in bg-panel fade-in duration-150 md:hidden"
+          data-cuelume-surface="bloom"
+          data-component-id="prose-mobile-toc-overlay"
+        >
+          <ProseOutlinePanel
+            storyId={storyId}
+            fragments={outlineFragments}
+            activeIndex={activeIndex}
+            open
+            mobile
+            onClose={() => setMobileTocOpen(false)}
+            onJump={(i) => { scrollToIndex(i); setMobileTocOpen(false) }}
+          />
+        </div>
       )}
     </div>
   )

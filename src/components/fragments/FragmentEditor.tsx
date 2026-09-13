@@ -677,7 +677,9 @@ export function FragmentEditor({
             />
           ) : (
             <FragmentTextField
+              key={fragment?.id ?? 'new'}
               content={content}
+              initialView={fragment?.content.trim() ? 'preview' : 'write'}
               frozenSections={frozenSections}
               editable={isEditing}
               canFreeze={!!fragment && !fragment.archived && !isLocked && fragment.type !== 'prose'}

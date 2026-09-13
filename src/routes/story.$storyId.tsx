@@ -35,8 +35,7 @@ import {
   DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog'
-import { Upload, List } from 'lucide-react'
-import { StoryChatSwitcher } from '@/components/shared/StoryChatSwitcher'
+import { Upload } from 'lucide-react'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { useWindowFileDrop } from '@/hooks/use-window-file-drop'
 import { TimelineTabs } from '@/components/prose/TimelineTabs'
@@ -553,14 +552,6 @@ function StoryEditorPage() {
           <SidebarTrigger className="size-9 border border-border/50 bg-elevated/90 shadow-sm backdrop-blur-md" />
         </div>
 
-        {/* Keep the same view control on mobile and desktop. Chat renders it in
-            its own config bar, so only the prose view needs this floating copy. */}
-        {mainView === 'prose' && (
-          <div className="md:hidden absolute top-3 right-3 z-20">
-            <StoryChatSwitcher value={mainView} onChange={setMainView} compact />
-          </div>
-        )}
-
         {/* Floating agent activity wisps */}
         <AgentActivityIndicator storyId={storyId} />
 
@@ -574,37 +565,6 @@ function StoryEditorPage() {
           />
         )}
 
-        {/* Match the outline rail when open, and keep a compact toolbar when closed. */}
-        {mainView === 'prose' && <div className={`hidden md:flex absolute top-3 right-0 z-20 items-center gap-1 ${outlineOpen ? 'w-56 px-3' : ''}`}>
-          {outlineOpen && (
-            <Button
-              variant="secondary"
-              size="icon-xs"
-              onClick={() => setOutlineOpen(false)}
-              title="Collapse outline"
-              aria-label="Collapse outline"
-              data-component-id="prose-outline-toggle"
-            >
-              <List className="size-3.5" />
-            </Button>
-          )}
-          <StoryChatSwitcher value={mainView} onChange={setMainView} compact={!outlineOpen} fill={outlineOpen} />
-          {!outlineOpen && (
-            <div className="w-7 flex justify-center">
-              <Button
-                variant="ghost"
-                size="icon-xs"
-                onClick={() => setOutlineOpen(true)}
-                title="Expand outline"
-                aria-label="Expand outline"
-                data-component-id="prose-outline-toggle"
-              >
-                <List className="size-3.5" />
-              </Button>
-            </div>
-          )}
-        </div>}
-
         {/* Main view */}
         {mainView === 'prose' ? (
           <ProseChainView
@@ -612,6 +572,8 @@ function StoryEditorPage() {
             storyId={storyId}
             coverImage={story.coverImage}
             outlineOpen={outlineOpen}
+            onOutlineOpenChange={setOutlineOpen}
+            onMainViewChange={setMainView}
             onSelectFragment={handleSelectFragment}
             onEditProse={(fragmentId, selectedText) => {
               transitionWorkspaceSurface({

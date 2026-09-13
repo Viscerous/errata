@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { StreamMarkdown } from '@/components/ui/stream-markdown'
 import { Eyebrow, Hint, Metric } from '@/components/ui/prose-text'
 
 interface FragmentMediaFieldProps {
@@ -156,6 +157,7 @@ export function segmentFrozenContent(content: string, frozenSections: FrozenSect
 
 interface FragmentTextFieldProps {
   content: string
+  initialView: 'write' | 'preview'
   frozenSections: FrozenSection[]
   editable: boolean
   canFreeze: boolean
@@ -167,6 +169,7 @@ interface FragmentTextFieldProps {
 
 export function FragmentTextField({
   content,
+  initialView,
   frozenSections,
   editable,
   canFreeze,
@@ -175,6 +178,7 @@ export function FragmentTextField({
   onFreeze,
   onUnfreeze,
 }: FragmentTextFieldProps) {
+  const [view, setView] = useState<'write' | 'preview'>(initialView)
   const [selection, setSelection] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const segments = useMemo(() => segmentFrozenContent(content, frozenSections), [content, frozenSections])
@@ -197,9 +201,23 @@ export function FragmentTextField({
 
   return (
     <section>
-      <Eyebrow asChild><label>Content</label></Eyebrow>
+      <div className="flex items-center justify-between gap-3">
+        <Eyebrow asChild><label>Content</label></Eyebrow>
+        <div role="group" aria-label="Content view" className="flex items-center gap-0.5 rounded-lg border border-border/50 bg-elevated/90 p-0.5">
+          <button type="button" aria-pressed={view === 'write'} onClick={() => setView('write')} className={cn('rounded-md px-2.5 py-1 text-ui-caption transition-colors', view === 'write' ? 'bg-secondary text-secondary-foreground' : 'text-muted-foreground hover:text-foreground')}>
+            Write
+          </button>
+          <button type="button" aria-pressed={view === 'preview'} onClick={() => setView('preview')} className={cn('rounded-md px-2.5 py-1 text-ui-caption transition-colors', view === 'preview' ? 'bg-secondary text-secondary-foreground' : 'text-muted-foreground hover:text-foreground')}>
+            Preview
+          </button>
+        </div>
+      </div>
       <div className="mt-2">
-        {segments ? (
+        {view === 'preview' ? (
+          <div className="min-h-[40vh] overflow-x-auto rounded-md border border-input bg-transparent px-3 py-3 text-sm leading-relaxed" data-component-id="fragment-markdown-preview">
+            {content.trim() ? <StreamMarkdown content={content} /> : <span className="text-muted-foreground">Nothing to preview yet.</span>}
+          </div>
+        ) : segments ? (
           <div className="min-h-[200px] overflow-hidden rounded-md border border-input focus-within:ring-1 focus-within:ring-ring">
             {segments.map((segment, index) => segment.type === 'editable' ? (
               <textarea
@@ -251,7 +269,7 @@ export function FragmentTextField({
       </div>
 
       <div className="mt-1.5 flex items-center justify-between">
-        {canFreeze ? (
+        {view === 'write' && canFreeze ? (
           <button
             type="button"
             onClick={() => onFreeze(selection)}

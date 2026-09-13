@@ -564,9 +564,12 @@ function MarkdownBlock({
           return <code className={s.codeInline}>{children}</code>
         },
         pre: ({ children }) => <>{children}</>,
-        h1: ({ children }) => <p className={s.heading} {...anchorAttrs()}>{tx(children)}</p>,
-        h2: ({ children }) => <p className={s.heading} {...anchorAttrs()}>{tx(children)}</p>,
-        h3: ({ children }) => <p className={s.heading} {...anchorAttrs()}>{tx(children)}</p>,
+        h1: ({ children }) => variant === 'prose' ? <p className={s.heading} {...anchorAttrs()}>{tx(children)}</p> : <h1 className={s.heading} {...anchorAttrs()}>{tx(children)}</h1>,
+        h2: ({ children }) => variant === 'prose' ? <p className={s.heading} {...anchorAttrs()}>{tx(children)}</p> : <h2 className={s.heading} {...anchorAttrs()}>{tx(children)}</h2>,
+        h3: ({ children }) => variant === 'prose' ? <p className={s.heading} {...anchorAttrs()}>{tx(children)}</p> : <h3 className={s.heading} {...anchorAttrs()}>{tx(children)}</h3>,
+        h4: ({ children }) => variant === 'prose' ? <p className={s.heading} {...anchorAttrs()}>{tx(children)}</p> : <h4 className={s.heading} {...anchorAttrs()}>{tx(children)}</h4>,
+        h5: ({ children }) => variant === 'prose' ? <p className={s.heading} {...anchorAttrs()}>{tx(children)}</p> : <h5 className={s.heading} {...anchorAttrs()}>{tx(children)}</h5>,
+        h6: ({ children }) => variant === 'prose' ? <p className={s.heading} {...anchorAttrs()}>{tx(children)}</p> : <h6 className={s.heading} {...anchorAttrs()}>{tx(children)}</h6>,
         blockquote: ({ children }) => (
           <blockquote className={s.blockquote} {...anchorAttrs()}>{tx(children)}</blockquote>
         ),
