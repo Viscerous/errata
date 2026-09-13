@@ -1,7 +1,8 @@
 import type { Fragment } from '@/contracts/story'
 import { createLogger } from '../logging'
 import { getActiveBranchId, getScopedBranchId, isBranchDeleting, withBranch } from '../fragments/branches'
-import { getStory } from '../fragments/storage'
+import { getStory, getFragment } from '../fragments/storage'
+import { revertAllAppliedProposalsForFragment } from './suggestions'
 import { getAgentBlockConfig } from '../agents/agent-block-storage'
 import { clearAnalysisIndexEntry, setAnalysisFailure } from './storage'
 import type { LibrarianRuntimeStatus } from '@/contracts/librarian'
@@ -149,9 +150,13 @@ async function runAnalysis(
   } catch (err) {
     lastError = err instanceof Error ? err.message : String(err)
     requestLogger.error('Librarian analysis failed', { fragmentId: fragment.id, error: lastError })
-    await withBranch(dataDir, storyId, () => setAnalysisFailure(dataDir, storyId, fragment.id, lastError), branchId).catch((writeError) => {
-      requestLogger.error('Could not record analysis warning', { error: writeError instanceof Error ? writeError.message : String(writeError) })
-    })
+    if (lastError.includes('not found or archived')) {
+      requestLogger.info('Fragment was archived or removed; skipping recording failure', { fragmentId: fragment.id })
+    } else {
+      await withBranch(dataDir, storyId, () => setAnalysisFailure(dataDir, storyId, fragment.id, lastError), branchId).catch((writeError) => {
+        requestLogger.error('Could not record analysis warning', { error: writeError instanceof Error ? writeError.message : String(writeError) })
+      })
+    }
   }
 
   // Drain the latest queued trigger (no idle flicker between coalesced runs, so the UI's
@@ -233,6 +238,7 @@ export async function reanalyzeAfterProseChange(
   after: Fragment,
 ): Promise<void> {
   if (after.type !== 'prose' || !hasMaterialProseChange(before, after)) return
+  await revertAllAppliedProposalsForFragment(dataDir, storyId, after.id).catch(() => {})
   await clearAnalysisIndexEntry(dataDir, storyId, after.id).catch(() => {})
   if (await isAutoAnalysisDisabled(dataDir, storyId)) return
   await triggerLibrarian(dataDir, storyId, after).catch((err) => {
@@ -261,6 +267,17 @@ export function clearPending(): void {
     run.resolve()
   }
   activeRuns.clear()
+}
+
+/** Remove deferred work for a specific fragment before it is archived or replaced. */
+export function cancelPendingLibrarianForFragment(storyId: string, fragmentId: string): void {
+  const state = scheduler.get(storyId)
+  if (!state?.queued || state.queued.fragment.id !== fragmentId) return
+  state.queued = null
+  setRuntimeStatus(storyId, {
+    pendingFragmentId: null,
+    runStatus: state.running ? 'running' : 'idle',
+  })
 }
 
 /** Remove deferred work for a timeline before its active agents are cancelled. */

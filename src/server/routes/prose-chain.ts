@@ -11,8 +11,19 @@ import {
   getProseChain,
   switchActiveProse,
   removeProseSection,
+  removeProseVariation,
   reorderProseSections,
 } from '../fragments/prose-chain'
+import {
+  revertAllAppliedProposalsForFragment,
+} from '../librarian/suggestions'
+import {
+  clearAnalysisIndexEntry,
+  clearFragmentFromState,
+} from '../librarian/storage'
+import {
+  cancelPendingLibrarianForFragment,
+} from '../librarian/scheduler'
 import { generateFragmentId } from '@/lib/fragment-ids'
 import { withBranch } from '../fragments/branches'
 import { invokeAgent } from '../agents'
@@ -139,10 +150,14 @@ export function proseChainRoutes(dataDir: string) {
 
       try {
         const fragmentIds = await removeProseSection(dataDir, params.storyId, sectionIndex)
-        // Archive all fragments that were in the section
+        // Cascade: cancel pending, revert proposals, clear index & state, archive fragments
         const archivedFragmentIds: string[] = []
         for (const fid of fragmentIds) {
           try {
+            cancelPendingLibrarianForFragment(params.storyId, fid)
+            await revertAllAppliedProposalsForFragment(dataDir, params.storyId, fid)
+            await clearAnalysisIndexEntry(dataDir, params.storyId, fid)
+            await clearFragmentFromState(dataDir, params.storyId, fid)
             await archiveFragment(dataDir, params.storyId, fid)
             archivedFragmentIds.push(fid)
           } catch {
@@ -156,6 +171,39 @@ export function proseChainRoutes(dataDir: string) {
       }
     }, {
       detail: { summary: 'Remove a section and archive its fragments' },
+    })
+
+    .delete('/stories/:storyId/prose-chain/:sectionIndex/variations/:fragmentId', async ({ params, set }) => {
+      const story = await getStory(dataDir, params.storyId)
+      if (!story) {
+        set.status = 404
+        return { error: 'Story not found' }
+      }
+
+      const sectionIndex = parseInt(params.sectionIndex, 10)
+      if (isNaN(sectionIndex) || sectionIndex < 0) {
+        set.status = 400
+        return { error: 'Invalid section index' }
+      }
+
+      try {
+        const result = await removeProseVariation(dataDir, params.storyId, sectionIndex, params.fragmentId)
+        try {
+          cancelPendingLibrarianForFragment(params.storyId, params.fragmentId)
+          await revertAllAppliedProposalsForFragment(dataDir, params.storyId, params.fragmentId)
+          await clearAnalysisIndexEntry(dataDir, params.storyId, params.fragmentId)
+          await clearFragmentFromState(dataDir, params.storyId, params.fragmentId)
+          await archiveFragment(dataDir, params.storyId, params.fragmentId)
+        } catch {
+          // Fragment may already be archived or deleted
+        }
+        return { ok: true, ...result }
+      } catch (err) {
+        set.status = 400
+        return { error: err instanceof Error ? err.message : 'Failed to remove prose variation' }
+      }
+    }, {
+      detail: { summary: 'Remove a single variation and archive its fragment' },
     })
 
     .patch('/stories/:storyId/prose-chain/reorder', async ({ params, body, set }) => {

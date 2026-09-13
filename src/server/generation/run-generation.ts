@@ -31,7 +31,16 @@ import {
   runAfterGeneration,
   runAfterSave,
 } from '../plugins/hooks'
-import { triggerLibrarian } from '../librarian/scheduler'
+import {
+  triggerLibrarian,
+  cancelPendingLibrarianForFragment,
+} from '../librarian/scheduler'
+import {
+  revertAllAppliedProposalsForFragment,
+} from '../librarian/suggestions'
+import {
+  clearFragmentFromState,
+} from '../librarian/storage'
 import { getAgentBlockConfig } from '../agents/agent-block-storage'
 import { beginAgentRun } from '../agents/agent-run'
 import type { ActivityStreamEvent } from '../agents/activity-stream'
@@ -622,6 +631,11 @@ export async function runGeneration(
               } else {
                 requestLogger.warn('Original fragment not found in prose chain, creating new section')
                 await addProseSection(dataDir, storyId, id)
+              }
+              if (mode === 'regenerate') {
+                cancelPendingLibrarianForFragment(storyId, existingFragment!.id)
+                await revertAllAppliedProposalsForFragment(dataDir, storyId, existingFragment!.id).catch(() => {})
+                await clearFragmentFromState(dataDir, storyId, existingFragment!.id).catch(() => {})
               }
             } else {
               await addProseSection(dataDir, storyId, id)

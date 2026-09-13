@@ -107,9 +107,9 @@ async function runLibrarianInner(
   }
 
   const fragment = await getFragment(dataDir, storyId, fragmentId)
-  if (!fragment) {
-    requestLogger.error('Fragment not found', { fragmentId })
-    throw new Error(`Fragment ${fragmentId} not found`)
+  if (!fragment || fragment.archived) {
+    requestLogger.info('Fragment not found or archived; aborting analysis', { fragmentId })
+    throw new Error(`Fragment ${fragmentId} not found or archived`)
   }
 
   // Load current librarian state for context

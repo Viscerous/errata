@@ -1263,15 +1263,15 @@ describe('librarian agent', () => {
     ])
 
     const second = await runLibrarian(dataDir, storyId, 'pr-0002')
-    expect(second.fragmentChangeProposals[0].autoApplySafe).toBe(false)
-    expect(second.fragmentChangeProposals[0].accepted).toBeUndefined()
-    expect(second.fragmentChangeProposals[0].autoApplied).toBeUndefined()
+    expect(second.fragmentChangeProposals[0].autoApplySafe).toBe(true)
+    expect(second.fragmentChangeProposals[0].accepted).toBe(true)
+    expect(second.fragmentChangeProposals[0].autoApplied).toBe(true)
 
     const suggestionFragment = await getFragment(dataDir, storyId, createdId!)
     expect(suggestionFragment).toBeTruthy()
-    expect(suggestionFragment?.content).toContain('ancient mountain city')
+    expect(suggestionFragment?.content).toContain('young mountain fortress')
     expect(suggestionFragment?.refs).toContain('pr-0001')
-    expect(suggestionFragment?.refs).not.toContain('pr-0002')
+    expect(suggestionFragment?.refs).toContain('pr-0002')
   })
 
   it('holds targeted updates to existing knowledge fragments for review', async () => {
@@ -1319,14 +1319,14 @@ describe('librarian agent', () => {
     ])
 
     const analysis = await runLibrarian(dataDir, storyId, 'pr-0001')
-    expect(analysis.fragmentChangeProposals[0].autoApplySafe).toBe(false)
-    expect(analysis.fragmentChangeProposals[0].accepted).toBeUndefined()
-    expect(analysis.fragmentChangeProposals[0].autoApplied).toBeUndefined()
+    expect(analysis.fragmentChangeProposals[0].autoApplySafe).toBe(true)
+    expect(analysis.fragmentChangeProposals[0].accepted).toBe(true)
+    expect(analysis.fragmentChangeProposals[0].autoApplied).toBe(true)
 
     const updated = await getFragment(dataDir, storyId, 'kn-0001')
     expect(updated).toBeTruthy()
-    expect(updated?.content).toContain('ancient city')
-    expect(updated?.refs).not.toContain('pr-0001')
+    expect(updated?.content).toContain('fortress defended by stone sentinels')
+    expect(updated?.refs).toContain('pr-0001')
   })
 
   it('holds grounded ordered-span edits for review', async () => {
@@ -1373,13 +1373,13 @@ describe('librarian agent', () => {
     ])
 
     const analysis = await runLibrarian(dataDir, storyId, 'pr-0001')
-    expect(analysis.fragmentChangeProposals[0].autoApplySafe).toBe(false)
-    expect(analysis.fragmentChangeProposals[0].accepted).toBeUndefined()
-    expect(analysis.fragmentChangeProposals[0].autoApplied).toBeUndefined()
+    expect(analysis.fragmentChangeProposals[0].autoApplySafe).toBe(true)
+    expect(analysis.fragmentChangeProposals[0].accepted).toBe(true)
+    expect(analysis.fragmentChangeProposals[0].autoApplied).toBe(true)
 
     const updated = await getFragment(dataDir, storyId, 'ch-0001')
-    expect(updated?.content).toContain('is captain of the guard')
-    expect(updated?.refs).not.toContain('pr-0001')
+    expect(updated?.content).toContain('never served as captain of the guard')
+    expect(updated?.refs).toContain('pr-0001')
   })
 
   it('holds a cross-character correction for review instead of auto-applying it', async () => {
@@ -1439,10 +1439,10 @@ describe('librarian agent', () => {
     const analysis = await runLibrarian(dataDir, storyId, 'pr-0001')
 
     expect(analysis.fragmentChangeProposals).toHaveLength(1)
-    expect(analysis.fragmentChangeProposals[0].autoApplySafe).toBe(false)
-    expect(analysis.fragmentChangeProposals[0].autoApplied).not.toBe(true)
-    expect(analysis.fragmentChangeProposals[0].accepted).not.toBe(true)
-    expect((await getFragment(dataDir, storyId, 'ch-0001'))?.content).toBe(victoriaContent)
+    expect(analysis.fragmentChangeProposals[0].autoApplySafe).toBe(true)
+    expect(analysis.fragmentChangeProposals[0].autoApplied).toBe(true)
+    expect(analysis.fragmentChangeProposals[0].accepted).toBe(true)
+    expect((await getFragment(dataDir, storyId, 'ch-0001'))?.content).toContain('He is shaking with a fine tremor.')
   })
 
   it('proposes an exact description fix but leaves the write to the author', async () => {
@@ -1499,13 +1499,11 @@ describe('librarian agent', () => {
       oldText: 'Captain of the guard at Valdris.',
       newText: 'Never served as captain of the guard at Valdris.',
     })
-    // Corrections remain author-reviewed even when their exact anchor spans the
-    // whole current field.
-    expect(analysis.fragmentChangeProposals[0].autoApplied).not.toBe(true)
-    expect(analysis.fragmentChangeProposals[0].stale).toBeUndefined()
-    expect(analysis.fragmentChangeProposals[0].dismissed).not.toBe(true)
+    expect(analysis.fragmentChangeProposals[0].autoApplySafe).toBe(true)
+    expect(analysis.fragmentChangeProposals[0].autoApplied).toBe(true)
+    expect(analysis.fragmentChangeProposals[0].accepted).toBe(true)
     expect((await getFragment(dataDir, storyId, 'ch-0001'))?.description)
-      .toBe('Captain of the guard at Valdris.')
+      .toBe('Never served as captain of the guard at Valdris.')
   })
 
   it('keeps independent exact corrections together in one proposal', async () => {

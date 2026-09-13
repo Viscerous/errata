@@ -773,7 +773,7 @@ export const librarianNewRecordsInputSchema = z.object({
   rationale: z.string().trim().optional()
     .describe('Optional shared rationale.'),
   newFragments: z.array(newFragmentProposalItemSchema).min(1)
-    .describe('New reusable named records; not event logs, current conditions, scene details, or duplicates.'),
+    .describe('New reusable named records established by this prose; not event logs, current conditions, or scene details.'),
 })
 
 type AnalysisProposalSkipped = Skipped<{
@@ -800,6 +800,19 @@ function skippedOperation(
   }
 }
 
+function proposalTargets(proposal: { operations: FragmentChangeOperation[] }): Set<string> {
+  const targets = new Set<string>()
+  for (const op of proposal.operations) {
+    if (op.action === 'replace_text') {
+      targets.add(`${op.fragmentId}:${op.field}`)
+    } else if (op.action === 'create_fragment') {
+      const name = op.name.trim().toLowerCase()
+      if (name) targets.add(`create:${op.type}:${name}`)
+    }
+  }
+  return targets
+}
+
 function queueFragmentChangeProposal(params: {
   collector: AnalysisCollector
   title?: string
@@ -816,6 +829,20 @@ function queueFragmentChangeProposal(params: {
   const rationale = params.rationale?.trim() ?? ''
   const eligibilityReason = params.eligibilityReason?.trim() ?? ''
   if (params.operations.length === 0) return
+
+  let autoApplySafe = params.autoApplySafe ?? true
+  const newTargets = proposalTargets(params)
+  if (newTargets.size > 0) {
+    for (const existing of params.collector.fragmentChangeProposals) {
+      const existingTargets = proposalTargets(existing)
+      const hasConflict = [...newTargets].some((target) => existingTargets.has(target))
+      if (hasConflict) {
+        existing.autoApplySafe = false
+        autoApplySafe = false
+      }
+    }
+  }
+
   params.collector.fragmentChangeProposals.push({
     ...(title ? { title } : {}),
     ...(rationale ? { rationale } : {}),
@@ -823,7 +850,7 @@ function queueFragmentChangeProposal(params: {
     ...(params.evidenceSegments?.length ? { evidenceSegments: params.evidenceSegments } : {}),
     ...(params.evidenceText ? { evidenceText: params.evidenceText } : {}),
     ...(eligibilityReason ? { eligibilityReason } : {}),
-    ...(params.autoApplySafe !== undefined ? { autoApplySafe: params.autoApplySafe } : {}),
+    autoApplySafe,
     operations: params.operations,
     validation: params.validation,
   })
@@ -1225,7 +1252,7 @@ export function createAnalysisTools(
         evidenceSegments: params.evidence.evidenceSegments,
         evidenceText: params.evidence.evidenceText,
         eligibilityReason: params.rationale,
-        autoApplySafe: params.proposalKind === 'new-fragment',
+        autoApplySafe: true,
         operations: validation.operations,
         validation: validation.results,
       })
@@ -1236,7 +1263,7 @@ export function createAnalysisTools(
         queuedOperationCount: validation.operations.length,
         invalid: 0,
         evidenceMatched: true,
-        autoApplySafe: params.proposalKind === 'new-fragment',
+        autoApplySafe: true,
         ...operationEchoFields(validation.results),
       }
     }

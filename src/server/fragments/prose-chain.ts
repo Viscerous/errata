@@ -172,6 +172,52 @@ export async function switchActiveProse(
 }
 
 /**
+ * Remove a single variation from a prose section.
+ * If the section becomes empty, the section itself is removed.
+ * If the active variation was removed, the active is switched to another remaining variation.
+ */
+export async function removeProseVariation(
+  dataDir: string,
+  storyId: string,
+  sectionIndex: number,
+  fragmentId: string,
+): Promise<{ sectionRemoved: boolean; newActive: string | null }> {
+  return withKeyLock(lockKey(storyId), async () => {
+    const chain = await getProseChain(dataDir, storyId)
+    if (!chain) {
+      throw new Error(`No prose chain found for story ${storyId}`)
+    }
+
+    if (sectionIndex < 0 || sectionIndex >= chain.entries.length) {
+      throw new Error(`Invalid section index ${sectionIndex}`)
+    }
+
+    const entry = chain.entries[sectionIndex]
+    const idx = entry.proseFragments.indexOf(fragmentId)
+    if (idx === -1) {
+      throw new Error(`Fragment ${fragmentId} is not a variation of section ${sectionIndex}`)
+    }
+
+    entry.proseFragments.splice(idx, 1)
+
+    if (entry.proseFragments.length === 0) {
+      chain.entries.splice(sectionIndex, 1)
+      await saveProseChain(dataDir, storyId, chain)
+      return { sectionRemoved: true, newActive: null }
+    }
+
+    let newActive = entry.active
+    if (entry.active === fragmentId) {
+      newActive = entry.proseFragments[entry.proseFragments.length - 1]
+      entry.active = newActive
+    }
+
+    await saveProseChain(dataDir, storyId, chain)
+    return { sectionRemoved: false, newActive }
+  })
+}
+
+/**
  * Get all active prose fragment IDs in order.
  * This represents the current "timeline" of the story.
  */

@@ -386,7 +386,7 @@ export function fragmentCatalogContent(
   const nonEmpty = sections.filter((section) => section.fragments.length > 0)
   return joinMarkdownBlocks([
     markdownHeading(2, opts.heading ?? 'Fragment Catalog'),
-    'Summary rows: `id` | name | summary.',
+    'Current story records/fragments (single-line summaries).\nSummary rows: `id` | name | summary.',
     ...nonEmpty.map((section) =>
       markdownSection(3, section.label,
         section.fragments.map((fragment) => fragmentSummaryLine(fragment, section.summaryNote?.(fragment))).join('\n')

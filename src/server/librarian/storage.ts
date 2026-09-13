@@ -572,6 +572,42 @@ export async function saveState(
   await writeJsonAtomic(await statePath(dataDir, storyId), state)
 }
 
+export async function clearFragmentFromState(
+  dataDir: string,
+  storyId: string,
+  fragmentId: string,
+): Promise<void> {
+  const state = await getState(dataDir, storyId)
+  let changed = false
+
+  if (state.lastAnalyzedFragmentId === fragmentId) {
+    state.lastAnalyzedFragmentId = null
+    changed = true
+  }
+
+  const newTimeline = state.timeline.filter((entry) => entry.fragmentId !== fragmentId)
+  if (newTimeline.length !== state.timeline.length) {
+    state.timeline = newTimeline
+    changed = true
+  }
+
+  for (const [mentionedId, sourceIds] of Object.entries(state.recentMentions)) {
+    if (sourceIds.includes(fragmentId)) {
+      const remaining = sourceIds.filter((id) => id !== fragmentId)
+      if (remaining.length === 0) {
+        delete state.recentMentions[mentionedId]
+      } else {
+        state.recentMentions[mentionedId] = remaining
+      }
+      changed = true
+    }
+  }
+
+  if (changed) {
+    await saveState(dataDir, storyId, state)
+  }
+}
+
 // --- Backfill jobs ---
 
 function normalizeBackfillJob(data: Record<string, unknown>): LibrarianBackfillJob {

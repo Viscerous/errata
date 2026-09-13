@@ -15,7 +15,12 @@ import {
   type AppliedChange,
   type RevertResult,
 } from '../fragments/change-apply'
-import type { LibrarianAnalysis } from './storage'
+import {
+  getAnalysis,
+  listAnalyses,
+  saveAnalysis,
+  type LibrarianAnalysis,
+} from './storage'
 import { evidenceAppearsInText } from './evidence'
 
 export interface ApplyFragmentChangeProposalResult {
@@ -418,4 +423,53 @@ export async function markFragmentChangeProposalReverted(args: {
   const validation = await validateOperations(dataDir, storyId, proposal.operations)
   proposal.operations = validation.operations
   proposal.validation = validation.results
+}
+
+/**
+ * Reverts any applied proposals (auto-applied or manually accepted) tied to a prose fragment.
+ * Used during prose section removal or variation deletion to prevent orphaned fragment mutations.
+ */
+export async function revertAllAppliedProposalsForFragment(
+  dataDir: string,
+  storyId: string,
+  fragmentId: string,
+): Promise<{ revertedCount: number }> {
+  const summaries = await listAnalyses(dataDir, storyId)
+  const matching = summaries.filter((s) => s.fragmentId === fragmentId)
+  let revertedCount = 0
+
+  for (const summary of matching) {
+    const analysis = await getAnalysis(dataDir, storyId, summary.id)
+    if (!analysis) continue
+    let changed = false
+    for (let i = 0; i < analysis.fragmentChangeProposals.length; i++) {
+      const proposal = analysis.fragmentChangeProposals[i]
+      if (proposal.accepted && !proposal.reverted && proposal.appliedChanges?.length) {
+        try {
+          const result = await revertFragmentChangeProposal({
+            dataDir,
+            storyId,
+            analysis,
+            proposalIndex: i,
+          })
+          await markFragmentChangeProposalReverted({
+            dataDir,
+            storyId,
+            analysis,
+            proposalIndex: i,
+            result,
+          })
+          changed = true
+          revertedCount += 1
+        } catch {
+          // If target fragment was already deleted or conflicting, continue best-effort
+        }
+      }
+    }
+    if (changed) {
+      await saveAnalysis(dataDir, storyId, analysis)
+    }
+  }
+
+  return { revertedCount }
 }

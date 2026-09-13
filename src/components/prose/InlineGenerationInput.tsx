@@ -400,38 +400,77 @@ export function InlineGenerationInput({
       <ComposerFrame>
         {/* Mode toggle */}
         <div className="flex items-center gap-0.5 px-3 pb-1 pt-2.5" role="tablist" aria-label="Writing mode">
-          <button
-            type="button"
-            onClick={() => handleModeChange('play')}
-            role="tab"
-            aria-selected={mode === 'play'}
-            aria-label="Play the protagonist"
-            title="Play mode: your input is the protagonist's intended move, staged near the opening of the passage before the world answers"
-            className={cn(
-              'rounded-md px-2.5 py-1 text-ui-caption transition-colors duration-200',
-              mode === 'play'
-                ? 'text-foreground/80 bg-muted/60 font-medium'
-                : 'text-muted-foreground hover:text-foreground/60 hover:bg-muted/30',
-            )}
-          >
-            Play
-          </button>
-          <button
-            type="button"
-            onClick={() => handleModeChange('direct')}
-            role="tab"
-            aria-selected={mode === 'direct'}
-            aria-label="Direct the writing assistant"
-            title="Direct mode: your input is an authorial scene brief that guides the whole passage and stays out of the manuscript"
-            className={cn(
-              'rounded-md px-2.5 py-1 text-ui-caption transition-colors duration-200',
-              mode === 'direct'
-                ? 'text-foreground/80 bg-muted/60 font-medium'
-                : 'text-muted-foreground hover:text-foreground/60 hover:bg-muted/30',
-            )}
-          >
-            Direct
-          </button>
+          {story?.settings.authorInputMode === 'play' ? (
+            <>
+              <button
+                type="button"
+                onClick={() => handleModeChange('play')}
+                role="tab"
+                aria-selected={mode === 'play'}
+                aria-label="Play the protagonist"
+                title="Play mode: your input is the protagonist's intended move, staged near the opening of the passage before the world answers"
+                className={cn(
+                  'rounded-md px-2.5 py-1 text-ui-caption transition-colors duration-200',
+                  mode === 'play'
+                    ? 'text-foreground/80 bg-muted/60 font-medium'
+                    : 'text-muted-foreground hover:text-foreground/60 hover:bg-muted/30',
+                )}
+              >
+                Play
+              </button>
+              <button
+                type="button"
+                onClick={() => handleModeChange('direct')}
+                role="tab"
+                aria-selected={mode === 'direct'}
+                aria-label="Direct the writing assistant"
+                title="Direct mode: your input is an authorial scene brief that guides the whole passage and stays out of the manuscript"
+                className={cn(
+                  'rounded-md px-2.5 py-1 text-ui-caption transition-colors duration-200',
+                  mode === 'direct'
+                    ? 'text-foreground/80 bg-muted/60 font-medium'
+                    : 'text-muted-foreground hover:text-foreground/60 hover:bg-muted/30',
+                )}
+              >
+                Direct
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={() => handleModeChange('direct')}
+                role="tab"
+                aria-selected={mode === 'direct'}
+                aria-label="Direct the writing assistant"
+                title="Direct mode: your input is an authorial scene brief that guides the whole passage and stays out of the manuscript"
+                className={cn(
+                  'rounded-md px-2.5 py-1 text-ui-caption transition-colors duration-200',
+                  mode === 'direct'
+                    ? 'text-foreground/80 bg-muted/60 font-medium'
+                    : 'text-muted-foreground hover:text-foreground/60 hover:bg-muted/30',
+                )}
+              >
+                Direct
+              </button>
+              <button
+                type="button"
+                onClick={() => handleModeChange('play')}
+                role="tab"
+                aria-selected={mode === 'play'}
+                aria-label="Play the protagonist"
+                title="Play mode: your input is the protagonist's intended move, staged near the opening of the passage before the world answers"
+                className={cn(
+                  'rounded-md px-2.5 py-1 text-ui-caption transition-colors duration-200',
+                  mode === 'play'
+                    ? 'text-foreground/80 bg-muted/60 font-medium'
+                    : 'text-muted-foreground hover:text-foreground/60 hover:bg-muted/30',
+                )}
+              >
+                Play
+              </button>
+            </>
+          )}
           <button
             type="button"
             onClick={() => handleModeChange('guided')}

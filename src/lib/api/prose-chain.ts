@@ -20,6 +20,11 @@ export const proseChain = {
     apiFetch<{ ok: boolean; archivedFragmentIds: string[] }>(`/stories/${storyId}/prose-chain/${sectionIndex}`, {
       method: 'DELETE',
     }),
+  removeVariation: (storyId: string, sectionIndex: number, fragmentId: string) =>
+    apiFetch<{ ok: boolean; sectionRemoved: boolean; newActive: string | null }>(
+      `/stories/${storyId}/prose-chain/${sectionIndex}/variations/${fragmentId}`,
+      { method: 'DELETE' }
+    ),
   reorder: (storyId: string, order: number[]) =>
     apiFetch<{ ok: boolean }>(`/stories/${storyId}/prose-chain/reorder`, {
       method: 'PATCH',
