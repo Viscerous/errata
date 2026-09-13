@@ -174,6 +174,7 @@ export function agentBlockRoutes(dataDir: string) {
       const defaultBlocks = def.createDefaultBlocks(previewCtx)
       const builtinBlocks = defaultBlocks.map(b => ({
         id: b.id,
+        name: b.name ?? b.id,
         role: b.role,
         order: b.order,
         source: b.source,

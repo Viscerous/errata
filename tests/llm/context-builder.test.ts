@@ -922,10 +922,10 @@ describe('context blocks', () => {
       const block = blocks.find(candidate => candidate.id === 'author-input')!
       const contract = blocks.find(candidate => candidate.id === 'play-output-contract')!
 
-      expect(block.content).toBe(turn)
+      expect(block.content).toBe(`## Protagonist Move\n\n${turn}`)
       expect(block.content).not.toContain('## Author Direction')
       expect(contract.role).toBe('system')
-      expect(contract.content).toContain('PLAY MODE CONTRACT')
+      expect(contract.content).toContain('## Protagonist Move')
       expect(contract.content).toContain('Terminate on an external beat')
     })
 

@@ -307,6 +307,7 @@ export function storySummaryBlock(
   if (!body) return null
   return {
     id: opts.id ?? 'summary',
+    name: 'Story Summary',
     role: 'user',
     content: markdownSection(2, STORY_SUMMARY_HEADING, body),
     order: opts.order,
@@ -344,6 +345,7 @@ export function proseWindowBlock(
     if (!opts.newStoryGuidance) return null
     return {
       id: 'new-story',
+      name: 'New Story',
       role: 'user',
       content: markdownSection(2, 'New Story', opts.newStoryGuidance),
       order: opts.order,
@@ -352,6 +354,7 @@ export function proseWindowBlock(
   }
   return {
     id: 'prose-recent',
+    name: 'Recent Prose',
     role: 'user',
     content: proseWindowContent(proseFragments, { includeEndMarker: true }),
     order: opts.order,
@@ -407,6 +410,7 @@ export function fragmentCatalogBlock(opts: {
   if (sections.length === 0) return null
   return {
     id: opts.id ?? 'fragment-catalog',
+    name: opts.heading ?? 'Fragment Catalog',
     role: opts.role ?? 'user',
     content: fragmentCatalogContent(sections, {
       heading: opts.heading,
@@ -468,6 +472,7 @@ export function fragmentFullContextBlock(opts: {
   if (sections.length === 0) return null
   return {
     id: opts.id,
+    name: opts.heading,
     role: opts.role ?? 'user',
     content: fragmentFullContextContent(sections, {
       heading: opts.heading,

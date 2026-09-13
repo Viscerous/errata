@@ -239,7 +239,7 @@ export async function buildContextState(
     excludeFragmentId,
     proseBeforeFragmentId,
     excludeStorySummary,
-    authorInputMode = 'direct',
+    authorInputMode: explicitAuthorInputMode,
   } = opts
   const requestLogger = logger.child({ storyId })
   requestLogger.info('Building context state...')
@@ -249,6 +249,9 @@ export async function buildContextState(
     requestLogger.error('Story not found', { storyId })
     throw new Error(`Story not found: ${storyId}`)
   }
+  const authorInputMode = explicitAuthorInputMode
+    ?? story.settings.authorInputMode
+    ?? 'direct'
 
   // One storage snapshot, then cheap in-memory grouping. `listFragments(type)`
   // still scans and parses every file, so doing that once per type multiplied
@@ -547,6 +550,7 @@ export function createDefaultBlocks(state: ContextBuildState): ContextBlock[] {
 
   blocks.push({
     id: 'instructions',
+    name: 'Instructions',
     role: 'system',
     content: instructionRegistry.resolve('generation.system'),
     order: 100,
@@ -568,6 +572,7 @@ export function createDefaultBlocks(state: ContextBuildState): ContextBlock[] {
 
   blocks.push({
     id: 'story-info',
+    name: 'Story Information',
     role: 'user',
     // The story title is the one h1 in the prompt — the document the writer is
     // continuing; every section beneath it is `##`.
@@ -588,6 +593,7 @@ export function createDefaultBlocks(state: ContextBuildState): ContextBlock[] {
   if (continuity) {
     blocks.push({
       id: 'continuity-observations',
+      name: 'Continuity',
       role: 'user',
       content: continuity,
       order: 420,

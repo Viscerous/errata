@@ -25,6 +25,7 @@ describe('generation input prompt contract', () => {
     })
 
     expect(blocks.map(block => block.id)).toEqual(['author-input'])
+    expect(blocks[0].name).toBe('Author Direction')
     expect(blocks[0].content).toBe(`## Author Direction\n\n${AUTHOR_INPUT}`)
     expect(auditGenerationInputSurface(blocks, AUTHOR_INPUT)).toMatchObject({
       authorInputOccurrences: 1,
@@ -39,7 +40,9 @@ describe('generation input prompt contract', () => {
     })
 
     expect(blocks.map(block => block.id)).toEqual(['play-output-contract', 'author-input'])
-    expect(blocks.find(block => block.id === 'author-input')?.content).toBe(AUTHOR_INPUT)
+    expect(blocks.find(block => block.id === 'author-input')?.name).toBe('Protagonist Move')
+    expect(blocks.find(block => block.id === 'author-input')?.content).toBe(`## Protagonist Move\n\n${AUTHOR_INPUT}`)
+    expect(blocks.find(block => block.id === 'play-output-contract')?.name).toBe('Play Output Contract')
     expect(auditGenerationInputSurface(blocks, AUTHOR_INPUT)).toMatchObject({
       authorInputOccurrences: 1,
       playOutputContractBlocks: 1,

@@ -51,7 +51,12 @@ export function generationRoutes(dataDir: string) {
         return { error: 'Story not found' }
       }
 
-      const inputMode = body.inputMode ?? 'direct'
+      const inputMode = body.inputMode ?? story.settings.authorInputMode ?? 'direct'
+      const authorInput = body.input.trim()
+        ? body.input
+        : inputMode === 'play'
+          ? '(your protagonist move will appear here)'
+          : '(your direction for the next passage will appear here)'
       const enabledPlugins = pluginRegistry.getEnabled(story.settings.enabledPlugins)
       let modelId: string | undefined
       let contextWindowPromise: Promise<number | undefined> = Promise.resolve(undefined)
@@ -71,7 +76,7 @@ export function generationRoutes(dataDir: string) {
       const compiled = await compileGenerationWriterContext({
         dataDir,
         storyId: params.storyId,
-        authorInput: body.input,
+        authorInput,
         enabledPlugins,
         contextOptions: { authorInputMode: inputMode },
         modelId,

@@ -11,7 +11,7 @@ export const GENERATION_SYSTEM_PROMPT = [
 ].join('\n')
 
 export const PLAY_CONTINUATION_SYSTEM_PROMPT = [
-  'PLAY MODE CONTRACT: The final user input is the protagonist\'s move.',
+  'The input under ## Protagonist Move is the protagonist\'s intended action or dialogue.',
   'Render the protagonist performing this move, speaking any provided dialogue verbatim.',
   'The protagonist acts or speaks once from this input; the remainder of the passage belongs to the world\'s response.',
   'Terminate on an external beat—another character\'s reaction, spoken reply, or a shift in the scene.',

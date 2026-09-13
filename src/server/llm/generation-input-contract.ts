@@ -26,6 +26,7 @@ export function createGenerationInputBlocks(args: {
   if (inputMode === 'play') {
     blocks.push({
       id: 'play-output-contract',
+      name: 'Play Output Contract',
       role: 'system',
       content: instructionRegistry.resolve('generation.play-continuation'),
       order: 150,
@@ -35,9 +36,10 @@ export function createGenerationInputBlocks(args: {
 
   blocks.push({
     id: 'author-input',
+    name: inputMode === 'play' ? 'Protagonist Move' : 'Author Direction',
     role: 'user',
     content: inputMode === 'play'
-      ? authorInput
+      ? `## Protagonist Move\n\n${authorInput}`
       : `## Author Direction\n\n${authorInput}`,
     order: inputOrder,
     source: 'builtin',

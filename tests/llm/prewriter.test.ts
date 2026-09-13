@@ -319,9 +319,9 @@ describe('prewriter', () => {
       const contract = blocks.find((block) => block.id === 'play-output-contract')!
 
       expect(storyTurn.role).toBe('user')
-      expect(storyTurn.content).toBe(turn)
+      expect(storyTurn.content).toBe(`## Protagonist Move\n\n${turn}`)
       expect(contract.role).toBe('system')
-      expect(contract.content).toContain('PLAY MODE CONTRACT')
+      expect(contract.content).toContain('## Protagonist Move')
       expect(storyTurn.order).toBeGreaterThan(blocks.find((block) => block.id === 'writing-brief')!.order)
     })
 

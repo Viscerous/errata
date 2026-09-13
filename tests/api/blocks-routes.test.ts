@@ -91,6 +91,34 @@ describe('Context previews preserve agent access boundaries', () => {
     })
     expect(preview.toolCharacters).toBe(preview.tools[0].characters)
   })
+
+  it('surfaces play contract and protagonist move placeholder for writer in Play mode', async () => {
+    const storyId = await createStory()
+    await api('/agent-blocks')
+    await apiJson(`/stories/${storyId}/settings`, { authorInputMode: 'play' }, 'PATCH')
+
+    const res = await api(`/stories/${storyId}/agent-blocks/generation.writer`)
+    expect(res.status).toBe(200)
+    const data = await res.json()
+    expect(data.builtinBlocks.some((b: { id: string; name: string }) => b.id === 'play-output-contract' && b.name === 'Play Output Contract')).toBe(true)
+    expect(data.builtinBlocks.some((b: { id: string; name: string }) => b.id === 'author-input' && b.name === 'Protagonist Move')).toBe(true)
+
+    const preview = await (await api(`/stories/${storyId}/agent-blocks/generation.writer/preview`)).json()
+    const prompt = preview.messages.map((m: { content: string }) => m.content).join('\n')
+    expect(prompt).toContain('## Protagonist Move')
+    expect(prompt).toContain('(your protagonist move will appear here)')
+  })
+
+  it('surfaces play contract for writer in Play mode when generationMode is prewriter', async () => {
+    const storyId = await createStory()
+    await api('/agent-blocks')
+    await apiJson(`/stories/${storyId}/settings`, { authorInputMode: 'play', generationMode: 'prewriter' }, 'PATCH')
+
+    const res = await api(`/stories/${storyId}/agent-blocks/generation.writer`)
+    expect(res.status).toBe(200)
+    const data = await res.json()
+    expect(data.builtinBlocks.some((b: { id: string }) => b.id === 'play-output-contract')).toBe(true)
+  })
 })
 
 describe('Per-agent config export/import routes', () => {

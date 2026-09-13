@@ -188,7 +188,7 @@ function AgentBlockEditor({ storyId, agentName, agents, onBack }: AgentBlockEdit
       const override = config.overrides[b.id]
       blocks.push({
         id: b.id,
-        name: b.id,
+        name: b.name ?? b.id,
         role: b.role,
         order: orderMap.get(b.id) ?? b.order,
         source: 'builtin',

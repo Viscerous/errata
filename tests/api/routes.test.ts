@@ -105,7 +105,7 @@ describe('Story API routes', () => {
     expect(data.toolCharacters).toBeGreaterThan(0)
     expect(data.tools.every((tool: { schema: string }) => tool.schema.length > 0)).toBe(true)
     const authorBlock = data.blocks.find((block: { id: string }) => block.id === 'author-input')
-    expect(authorBlock.content).toBe(turn)
+    expect(authorBlock.content).toBe(`## Protagonist Move\n\n${turn}`)
     expect(authorBlock.estimatedTokens).toBeGreaterThan(0)
     expect(data.messages.some((message: { content: string }) => message.content.includes(turn))).toBe(true)
     expect(data.messages.every((message: { content: string }) => !message.content.includes('[@block='))).toBe(true)
@@ -146,7 +146,63 @@ describe('Story API routes', () => {
       inputMode: 'play',
     })
     expect(preview.status).toBe(200)
-    expect((await preview.json()).inputMode).toBe('play')
+    const data = await preview.json()
+    expect(data.inputMode).toBe('play')
+    expect(data.blocks.some((b: { id: string; name: string }) => b.id === 'play-output-contract' && b.name === 'Play Output Contract')).toBe(true)
+    expect(data.blocks.some((b: { id: string; name: string; content: string }) => b.id === 'author-input' && b.name === 'Protagonist Move' && b.content === '## Protagonist Move\n\nI step into the rain.')).toBe(true)
+    expect(data.messages.some((m: { content: string }) => m.content.includes('## Protagonist Move'))).toBe(true)
+    expect(data.messages.some((m: { content: string }) => m.content.includes('I step into the rain.'))).toBe(true)
+  })
+
+  it('generation context preview uses story authorInputMode when omitted and surfaces play contract on empty input', async () => {
+    const created = await (await apiJson('/stories', story)).json()
+    await apiJson(
+      `/stories/${created.id}/settings`,
+      { authorInputMode: 'play' },
+      'PATCH',
+    )
+
+    const preview = await apiJson(`/stories/${created.id}/generation-context-preview`, {
+      input: '',
+    })
+    expect(preview.status).toBe(200)
+    const data = await preview.json()
+    expect(data.inputMode).toBe('play')
+    expect(data.blocks.some((b: { id: string }) => b.id === 'play-output-contract')).toBe(true)
+    expect(data.blocks.some((b: { id: string; content: string }) => b.id === 'author-input' && b.content === '## Protagonist Move\n\n(your protagonist move will appear here)')).toBe(true)
+    expect(data.messages.some((m: { content: string }) => m.content.includes('## Protagonist Move'))).toBe(true)
+    expect(data.messages.some((m: { content: string }) => m.content.includes('(your protagonist move will appear here)'))).toBe(true)
+  })
+
+  it('generation context preview uses Author Direction placeholder on empty input in direct mode', async () => {
+    const created = await (await apiJson('/stories', story)).json()
+    const preview = await apiJson(`/stories/${created.id}/generation-context-preview`, {
+      input: '',
+      inputMode: 'direct',
+    })
+    expect(preview.status).toBe(200)
+    const data = await preview.json()
+    expect(data.inputMode).toBe('direct')
+    expect(data.blocks.some((b: { id: string; name: string; content: string }) =>
+      b.id === 'author-input' &&
+      b.name === 'Author Direction' &&
+      b.content === '## Author Direction\n\n(your direction for the next passage will appear here)'
+    )).toBe(true)
+  })
+
+  it('PATCH /api/stories/:id/settings updates authorInputMode', async () => {
+    const created = await (await apiJson('/stories', story)).json()
+    const res = await apiJson(
+      `/stories/${created.id}/settings`,
+      { authorInputMode: 'play' },
+      'PATCH',
+    )
+    expect(res.status).toBe(200)
+    const data = await res.json()
+    expect(data.settings.authorInputMode).toBe('play')
+
+    const fetched = await (await api(`/stories/${created.id}`)).json()
+    expect(fetched.settings.authorInputMode).toBe('play')
   })
 
   it('PATCH /api/stories/:id/settings persists per-agent sampling overrides', async () => {

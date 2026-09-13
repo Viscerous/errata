@@ -269,6 +269,7 @@ export interface PluginManifestInfo {
 
 export interface BuiltinBlockMeta {
   id: string
+  name?: string
   role: 'system' | 'user'
   order: number
   source: string

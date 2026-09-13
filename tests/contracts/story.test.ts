@@ -41,6 +41,28 @@ describe('shared story contracts', () => {
     expect(story.settings.enabledBuiltinTools).toEqual([])
     expect(story.settings.modelOverrides).toEqual({})
     expect(story.settings.contextCompact).toEqual({ type: 'proseLimit', value: 10 })
+    expect(story.settings.authorInputMode).toBe('direct')
+  })
+
+  it('validates authorInputMode settings', () => {
+    const base = {
+      id: 'story-input-mode',
+      name: 'Input mode test',
+      description: '',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    }
+
+    const playParsed = StoryMetaSchema.parse({
+      ...base,
+      settings: { authorInputMode: 'play' },
+    })
+    expect(playParsed.settings.authorInputMode).toBe('play')
+
+    expect(StoryMetaSchema.safeParse({
+      ...base,
+      settings: { authorInputMode: 'invalid-mode' },
+    }).success).toBe(false)
   })
 
   it('validates per-agent top-p and top-k overrides', () => {

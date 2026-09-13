@@ -432,6 +432,7 @@ export function createPrewriterBlocks(ctx: AgentBlockContext): ContextBlock[] {
   return [
     {
       id: 'instructions',
+      name: 'Instructions',
       role: 'system' as const,
       content: instructionRegistry.resolve('generation.prewriter.system'),
       order: 100,
@@ -439,6 +440,7 @@ export function createPrewriterBlocks(ctx: AgentBlockContext): ContextBlock[] {
     },
     {
       id: 'full-context',
+      name: 'Full Context',
       role: 'user' as const,
       content: '(the full story context will appear here)',
       order: 100,
@@ -449,6 +451,7 @@ export function createPrewriterBlocks(ctx: AgentBlockContext): ContextBlock[] {
     // unreachable from the block editor and shows only a placeholder in preview.
     ...(planningContinuity ? [{
       id: 'continuity-observations',
+      name: 'Continuity',
       role: 'user' as const,
       content: planningContinuity,
       order: 150,
@@ -456,6 +459,7 @@ export function createPrewriterBlocks(ctx: AgentBlockContext): ContextBlock[] {
     }] : []),
     {
       id: 'planning-request',
+      name: 'Planning Request',
       role: 'user' as const,
       content: '(the planning request will appear here, based on generation mode)',
       order: 200,
@@ -514,6 +518,7 @@ export function createWriterBriefBlocks(
 
   blocks.push({
     id: 'writing-brief',
+    name: 'Writing Brief',
     role: 'user' as const,
     content: `## Writing Brief\n\n${normalizedBrief}`,
     order: 200,

@@ -1,4 +1,5 @@
 import { z } from 'zod/v4'
+import { AUTHOR_INPUT_MODES } from './generation'
 
 export const FragmentIdSchema = z.string().regex(/^[a-z]{2,4}-[a-z0-9]{4,12}$/, {
   message: "Invalid fragment ID format. Must consist of a lowercase type prefix (2-4 letters), a hyphen, and 4-12 lowercase alphanumeric characters (e.g., 'ch-nezeze', 'loca-thehague'). No uppercase letters, spaces, or hyphens inside the suffix are allowed.",
@@ -89,6 +90,7 @@ export const StoryMetaSchema = z.object({
         topP: z.number().min(0).max(1).nullable().optional(),
         topK: z.number().int().min(1).max(1000).nullable().optional(),
       })).default({}),
+      authorInputMode: z.enum(AUTHOR_INPUT_MODES).default('direct'),
       generationMode: z.enum(['standard', 'prewriter']).default('standard'),
       // Let the prewriter ask the author clarifying questions before writing.
       // Only takes effect in prewriter mode. Off by default.
@@ -146,7 +148,7 @@ export const StoryMetaSchema = z.object({
         })
         .optional(),
     })
-    .default({ outputFormat: 'markdown', enabledPlugins: [], maxSteps: 10, modelOverrides: {}, generationMode: 'standard', clarifyBeforeGenerate: false, prewriterReasoning: 'normal', disableLibrarianAutoAnalysis: false, autoApplyLibrarianSuggestions: false, disableLibrarianDirections: false, disableLibrarianSuggestions: false, contextOrderMode: 'simple', fragmentOrder: [], customFragmentTypes: [], enabledBuiltinTools: [], contextCompact: { type: 'proseLimit', value: 10 }, disableThinking: false, expandThoughtsByDefault: true }),
+    .default({ outputFormat: 'markdown', enabledPlugins: [], maxSteps: 10, modelOverrides: {}, authorInputMode: 'direct', generationMode: 'standard', clarifyBeforeGenerate: false, prewriterReasoning: 'normal', disableLibrarianAutoAnalysis: false, autoApplyLibrarianSuggestions: false, disableLibrarianDirections: false, disableLibrarianSuggestions: false, contextOrderMode: 'simple', fragmentOrder: [], customFragmentTypes: [], enabledBuiltinTools: [], contextCompact: { type: 'proseLimit', value: 10 }, disableThinking: false, expandThoughtsByDefault: true }),
 })
 
 export type StoryMeta = z.infer<typeof StoryMetaSchema>
