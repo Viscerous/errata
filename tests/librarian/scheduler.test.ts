@@ -31,9 +31,11 @@ vi.mock('../../src/server/fragments/branches', () => ({
 // Mock librarian storage so reanalyzeAfterProseChange's index clear doesn't touch disk
 vi.mock('@/server/librarian/storage', () => ({
   clearAnalysisIndexEntry: vi.fn(() => Promise.resolve()),
+  setAnalysisFailure: vi.fn(() => Promise.resolve()),
 }))
 vi.mock('../../src/server/librarian/storage', () => ({
   clearAnalysisIndexEntry: vi.fn(() => Promise.resolve()),
+  setAnalysisFailure: vi.fn(() => Promise.resolve()),
 }))
 
 vi.mock('@/server/agents/agent-block-storage', () => ({
@@ -48,10 +50,12 @@ vi.mock('../../src/server/librarian/summary-rollup-maintenance', () => ({ reques
 
 // Import mocked modules AFTER vi.mock (vitest hoists mocks to top)
 import { invokeAgent } from '@/server/agents'
+import { setAnalysisFailure } from '@/server/librarian/storage'
 import { triggerLibrarian, reanalyzeAfterProseChange, holdLibrarianAnalysis, clearPending, getPendingCount, getLibrarianRuntimeStatus } from '@/server/librarian/scheduler'
 import type { Fragment } from '@/contracts/story'
 
 const mockedInvokeAgent = vi.mocked(invokeAgent)
+const mockedSetAnalysisFailure = vi.mocked(setAnalysisFailure)
 
 function makeFragment(id: string): Fragment {
   const now = new Date().toISOString()
@@ -121,6 +125,7 @@ describe('librarian scheduler', () => {
       input: { fragmentId: 'pr-0001' },
     })
     await vi.waitFor(() => expect(getLibrarianRuntimeStatus('story-1').runStatus).toBe('idle'))
+    expect(mockedSetAnalysisFailure).toHaveBeenCalledWith('/data', 'story-1', 'pr-0001', null)
     expect(requestSummaryRollupMaintenance.mock.calls[0]?.slice(0, 2)).toEqual(['/data', 'story-1'])
     expect(getPendingCount()).toBe(0)
   })
@@ -181,6 +186,7 @@ describe('librarian scheduler', () => {
       expect(errorCall).toBeDefined()
     })
     expect(getLibrarianRuntimeStatus('story-1').runStatus).toBe('error')
+    expect(mockedSetAnalysisFailure).toHaveBeenCalledWith('/data', 'story-1', 'pr-0001', 'LLM failed')
     consoleSpy.mockRestore()
   })
 

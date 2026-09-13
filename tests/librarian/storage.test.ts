@@ -14,6 +14,8 @@ import {
   saveState,
   getLatestAnalysisIdsByFragment,
   getAnalysisIndex,
+  setAnalysisFailure,
+  clearAnalysisIndexEntry,
   rebuildAnalysisIndex,
   type LibrarianAnalysis,
 } from '@/server/librarian/storage'
@@ -274,6 +276,22 @@ describe('librarian storage', () => {
       const index = await getAnalysisIndex(dataDir, storyId)
       expect(index?.latestByFragmentId['pr-0001']?.analysisId).toBe('analysis-partial')
       expect(index?.latestProjectionByFragmentId['pr-0001']?.analysisId).toBe('analysis-complete')
+    })
+
+    it('records a failed attempt without inventing an analysis, and clears it after a retry', async () => {
+      await setAnalysisFailure(dataDir, storyId, 'pr-0001', 'LLM failed')
+      const failed = await getAnalysisIndex(dataDir, storyId)
+      expect(failed?.failedByFragmentId['pr-0001']).toBe('LLM failed')
+      expect(failed?.latestByFragmentId['pr-0001']).toBeUndefined()
+
+      await setAnalysisFailure(dataDir, storyId, 'pr-0001', null)
+      expect((await getAnalysisIndex(dataDir, storyId))?.failedByFragmentId['pr-0001']).toBeUndefined()
+    })
+
+    it('clears an old failure when prose is changed', async () => {
+      await setAnalysisFailure(dataDir, storyId, 'pr-0001', 'LLM failed')
+      await clearAnalysisIndexEntry(dataDir, storyId, 'pr-0001')
+      expect((await getAnalysisIndex(dataDir, storyId))?.failedByFragmentId['pr-0001']).toBeUndefined()
     })
 
     it('rebuilds an obsolete index into the current dual-pointer shape', async () => {

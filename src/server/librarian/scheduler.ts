@@ -3,7 +3,7 @@ import { createLogger } from '../logging'
 import { getActiveBranchId, getScopedBranchId, isBranchDeleting, withBranch } from '../fragments/branches'
 import { getStory } from '../fragments/storage'
 import { getAgentBlockConfig } from '../agents/agent-block-storage'
-import { clearAnalysisIndexEntry } from './storage'
+import { clearAnalysisIndexEntry, setAnalysisFailure } from './storage'
 import type { LibrarianRuntimeStatus } from '@/contracts/librarian'
 
 export type {
@@ -134,16 +134,24 @@ async function runAnalysis(
     // Imported lazily: the agents runtime cycles back through the llm tools, and
     // it's only needed here at run time.
     const { invokeAgent } = await import('../agents')
-    await withBranch(dataDir, storyId, () => invokeAgent({
-      dataDir,
-      storyId,
-      agentName: 'librarian.analyze',
-      input: { fragmentId: fragment.id },
-    }), branchId)
+    await withBranch(dataDir, storyId, async () => {
+      await invokeAgent({
+        dataDir,
+        storyId,
+        agentName: 'librarian.analyze',
+        input: { fragmentId: fragment.id },
+      })
+      await setAnalysisFailure(dataDir, storyId, fragment.id, null).catch((err) => {
+        requestLogger.error('Could not clear resolved analysis warning', { error: err instanceof Error ? err.message : String(err) })
+      })
+    }, branchId)
     requestLogger.info('Librarian analysis completed', { fragmentId: fragment.id, durationMs: Date.now() - startTime })
   } catch (err) {
     lastError = err instanceof Error ? err.message : String(err)
     requestLogger.error('Librarian analysis failed', { fragmentId: fragment.id, error: lastError })
+    await withBranch(dataDir, storyId, () => setAnalysisFailure(dataDir, storyId, fragment.id, lastError), branchId).catch((writeError) => {
+      requestLogger.error('Could not record analysis warning', { error: writeError instanceof Error ? writeError.message : String(writeError) })
+    })
   }
 
   // Drain the latest queued trigger (no idle flicker between coalesced runs, so the UI's

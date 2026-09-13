@@ -11,7 +11,7 @@ import { resolveHeaderImage } from '@/lib/fragment-visuals'
 import { GenerationThoughts } from './GenerationThoughts'
 import { consumeGenerationStream, type ThoughtStep } from './generation-stream'
 import { buildAnnotationHighlighter, filterMentionAnnotations, formatDialogue, composeTextTransforms, stripEmphasisInDialogue, type Annotation } from '@/lib/fragment-mentions'
-import { RefreshCw, Undo2, PenLine, Bug, Trash2, GitBranch, MessageSquare, ChevronLeft, ChevronRight, Info, BookOpen, Volume2, Square } from 'lucide-react'
+import { RefreshCw, Undo2, PenLine, Bug, Trash2, GitBranch, MessageSquare, ChevronLeft, ChevronRight, Info, BookOpen, Volume2, Square, AlertTriangle } from 'lucide-react'
 import { Caption } from '@/components/ui/prose-text'
 import { useConfirm } from '@/components/ui/confirm-dialog'
 import { useTtsSettings, useIsReadingFragment, playFragment, stopTts } from '@/lib/tts'
@@ -33,6 +33,7 @@ interface ProseBlockProps {
   onAskLibrarian?: (fragmentId: string, prefill?: string) => void
   onAnalyze?: (fragmentId: string) => void
   hasAnalysis?: boolean
+  analysisWarning?: string
   quickSwitch: boolean
   enabledMentionTypes?: ReadonlySet<string>
   mentionFragmentTypesById?: ReadonlyMap<string, string>
@@ -59,6 +60,7 @@ export const ProseBlock = memo(function ProseBlock({
   onAskLibrarian,
   onAnalyze,
   hasAnalysis,
+  analysisWarning,
   quickSwitch,
   enabledMentionTypes,
   mentionFragmentTypesById,
@@ -237,21 +239,29 @@ export const ProseBlock = memo(function ProseBlock({
 
   return (
     <div ref={blockRef} className="group relative mb-6" data-prose-index={displayIndex} data-component-id={`prose-${fragment.id}-block`}>
-      {/* Analyzed indicator — subtle dot in the top-right corner */}
-      {hasAnalysis && (
-        <div className="absolute -top-1 -right-1 z-[1]" title="Analyzed by librarian">
-          <div className="size-2 rounded-full bg-emerald-500/70 shadow-[0_0_4px_rgba(16,185,129,0.3)]" />
-        </div>
-      )}
-
       {/* Linked image — framed plate at the top of the passage */}
       {headerImage && (
         <ProseImageHeader storyId={storyId} fragment={fragment} header={headerImage} />
       )}
 
+      {analysisWarning && onAnalyze && (
+        <div className="relative z-30">
+          <button
+            type="button"
+            className="absolute -top-1 right-0 flex size-6 items-center justify-center rounded-md border border-amber-500/20 bg-card text-amber-600 shadow-sm transition-colors hover:bg-amber-500/10 dark:text-amber-400"
+            onClick={() => onAnalyze(fragment.id)}
+            aria-label="Retry incomplete analysis"
+            title={`Analysis incomplete: ${analysisWarning}. Click to retry.`}
+            data-component-id={`prose-${fragment.id}-analysis-status`}
+          >
+            <AlertTriangle className="size-3.5" aria-hidden />
+          </button>
+        </div>
+      )}
+
       {/* User prompt header — left-aligned accent bar, display font, inline editable */}
       {fragment.description && (
-        <div className="mb-3 -mt-2">
+        <div className={`mb-3 -mt-2 ${analysisWarning ? 'pr-7' : ''}`}>
           {editingPrompt ? (
             /* Inline editing — input replaces the header text in place */
             <div className="flex items-start gap-2.5">
@@ -368,7 +378,7 @@ export const ProseBlock = memo(function ProseBlock({
             if (!isStreamingAction) setShowActions(v => !v)
           }
         }}
-        className={`text-left rounded-lg p-4 -mx-4 transition-all duration-150 cursor-default ${
+        className={`text-left rounded-lg p-4 -mx-4 transition-all duration-150 cursor-default ${analysisWarning && !fragment.description ? 'pr-7' : ''} ${
           showActions ? 'bg-card/50 ring-1 ring-primary/10' : 'hover:bg-card/40'
         }`}
         data-component-id={`prose-${fragment.id}-select`}
@@ -612,7 +622,7 @@ export const ProseBlock = memo(function ProseBlock({
                     data-component-id={`prose-${fragment.id}-analyze`}
                   >
                     <BookOpen className="size-3.5" />
-                    Analyze
+                    {analysisWarning ? 'Retry analysis' : hasAnalysis ? 'Re-analyze' : 'Analyze'}
                   </Button>
                 )}
                 <Button

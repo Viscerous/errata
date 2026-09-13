@@ -105,6 +105,8 @@ export interface LibrarianAnalysisIndex {
   latestByFragmentId: Record<string, LibrarianAnalysisIndexEntry>
   /** Latest completed projection; partial reruns never displace this pointer. */
   latestProjectionByFragmentId: Record<string, LibrarianAnalysisIndexEntry>
+  /** Runs that failed before or after saving an inspectable analysis. */
+  failedByFragmentId: Record<string, string>
   appliedSummarySequence?: string[]
 }
 
@@ -199,6 +201,7 @@ function defaultAnalysisIndex(): LibrarianAnalysisIndex {
     updatedAt: new Date().toISOString(),
     latestByFragmentId: {},
     latestProjectionByFragmentId: {},
+    failedByFragmentId: {},
   }
 }
 
@@ -228,6 +231,7 @@ export async function getAnalysisIndex(
     updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : new Date().toISOString(),
     latestByFragmentId: parsed.latestByFragmentId ?? {},
     latestProjectionByFragmentId: parsed.latestProjectionByFragmentId,
+    failedByFragmentId: parsed.failedByFragmentId ?? {},
     appliedSummarySequence: Array.isArray(parsed.appliedSummarySequence) ? parsed.appliedSummarySequence : undefined,
   }
 }
@@ -269,9 +273,30 @@ export async function clearAnalysisIndexEntry(
     const index = await getAnalysisIndex(dataDir, storyId)
     if (!index) return
     if (!(fragmentId in index.latestByFragmentId)
-      && !(fragmentId in index.latestProjectionByFragmentId)) return
+      && !(fragmentId in index.latestProjectionByFragmentId)
+      && !(fragmentId in index.failedByFragmentId)) return
     delete index.latestByFragmentId[fragmentId]
     delete index.latestProjectionByFragmentId[fragmentId]
+    delete index.failedByFragmentId[fragmentId]
+    index.updatedAt = new Date().toISOString()
+    await saveAnalysisIndex(dataDir, storyId, index)
+  })
+}
+
+export async function setAnalysisFailure(
+  dataDir: string,
+  storyId: string,
+  fragmentId: string,
+  error: string | null,
+): Promise<void> {
+  await withIndexLock(storyId, async () => {
+    const index = await getAnalysisIndex(dataDir, storyId) ?? defaultAnalysisIndex()
+    if (error === null) {
+      if (!(fragmentId in index.failedByFragmentId)) return
+      delete index.failedByFragmentId[fragmentId]
+    } else {
+      index.failedByFragmentId[fragmentId] = error
+    }
     index.updatedAt = new Date().toISOString()
     await saveAnalysisIndex(dataDir, storyId, index)
   })

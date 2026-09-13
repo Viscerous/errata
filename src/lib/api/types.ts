@@ -31,6 +31,7 @@ export type {
   LibrarianAnalysisProgress,
   LibrarianAnalysisProgressStage,
   LibrarianAnalysisSummary,
+  LibrarianAnalysisStatusResponse,
   LibrarianAnalyzeLaneCompletion,
   LibrarianAnalyzeLaneRequirement,
   LibrarianAnalyzeLaneStatus,

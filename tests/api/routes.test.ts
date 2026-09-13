@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { createTempDir } from '../setup'
 import { createApp } from '@/server/api'
+import { awaitPending } from '@/server/librarian/scheduler'
 
 let dataDir: string
 let cleanup: () => Promise<void>
@@ -14,6 +15,7 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
+  await awaitPending()
   await cleanup()
 })
 

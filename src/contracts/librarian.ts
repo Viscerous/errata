@@ -170,6 +170,13 @@ export interface LibrarianAnalysisSummary {
   continuityStale?: boolean
 }
 
+export interface LibrarianAnalysisStatusResponse {
+  autoAnalysisDisabled: boolean
+  latestByFragmentId: Record<string, string>
+  /** Only attempted analyses that did not finish; missing entries are not warnings. */
+  warningByFragmentId: Record<string, string>
+}
+
 export interface StoredLibrarianState {
   lastAnalyzedFragmentId: string | null
   recentMentions: Record<string, string[]>

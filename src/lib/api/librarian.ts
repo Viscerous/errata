@@ -2,6 +2,7 @@ import { apiFetch, fetchEventStream } from './client'
 import type {
   LibrarianStatusResponse,
   LibrarianAnalysisSummary,
+  LibrarianAnalysisStatusResponse,
   LibrarianAnalysis,
   LibrarianAcceptChangeProposalResponse,
   LibrarianRevertChangeProposalResponse,
@@ -14,7 +15,7 @@ export const librarian = {
   getStatus: (storyId: string) =>
     apiFetch<LibrarianStatusResponse>(`/stories/${storyId}/librarian/status`),
   getAnalysisIndex: (storyId: string) =>
-    apiFetch<Record<string, string>>(`/stories/${storyId}/librarian/analysis-index`),
+    apiFetch<LibrarianAnalysisStatusResponse>(`/stories/${storyId}/librarian/analysis-index`),
   analyze: (storyId: string, fragmentId: string) =>
     apiFetch<{ ok: boolean; fragmentId: string }>(`/stories/${storyId}/librarian/analyze`, {
       method: 'POST',

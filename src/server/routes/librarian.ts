@@ -5,6 +5,7 @@ import {
   listGenerationLogs,
 } from '../llm/generation-logs'
 import { getLibrarianRuntimeStatus, triggerLibrarian } from '../librarian/scheduler'
+import { getAgentBlockConfig } from '../agents/agent-block-storage'
 import { createAgentInstance, listAgentRuns } from '../agents'
 import {
   getState as getLibrarianState,
@@ -16,7 +17,8 @@ import {
   deleteConversation,
   getConversationHistory,
   saveConversationHistory,
-  getLatestAnalysisIdsByFragment,
+  getAnalysisIndex,
+  rebuildAnalysisIndex,
 } from '../librarian/storage'
 import {
   applyFragmentChangeProposal,
@@ -31,7 +33,7 @@ import {
 import { RevertConflictError } from '../fragments/change-apply'
 import { createLogger } from '../logging'
 import { encodeStream } from './encode-stream'
-import type { LibrarianStatusResponse } from '@/contracts/librarian'
+import type { LibrarianAnalysisStatusResponse, LibrarianStatusResponse } from '@/contracts/librarian'
 
 export function librarianRoutes(dataDir: string) {
   const logger = createLogger('api:librarian', { dataDir })
@@ -62,9 +64,27 @@ export function librarianRoutes(dataDir: string) {
     }, { detail: { summary: 'Get librarian status' } })
 
     .get('/stories/:storyId/librarian/analysis-index', async ({ params }) => {
-      const index = await getLatestAnalysisIdsByFragment(dataDir, params.storyId)
-      return Object.fromEntries(index)
-    }, { detail: { summary: 'Get fragment → analysis ID mapping' } })
+      const [storedIndex, story, librarianConfig] = await Promise.all([
+        getAnalysisIndex(dataDir, params.storyId),
+        getStory(dataDir, params.storyId),
+        getAgentBlockConfig(dataDir, params.storyId, 'librarian.analyze'),
+      ])
+      const index = storedIndex ?? await rebuildAnalysisIndex(dataDir, params.storyId)
+      const warningByFragmentId = { ...index.failedByFragmentId }
+      for (const [fragmentId, latest] of Object.entries(index.latestByFragmentId)) {
+        if (index.latestProjectionByFragmentId[fragmentId]?.analysisId !== latest.analysisId) {
+          warningByFragmentId[fragmentId] ??= 'Analysis did not complete'
+        }
+      }
+      return {
+        autoAnalysisDisabled: story?.settings.disableLibrarianAutoAnalysis === true
+          || librarianConfig.disableAutoAnalysis === true,
+        latestByFragmentId: Object.fromEntries(
+          Object.entries(index.latestByFragmentId).map(([fragmentId, entry]) => [fragmentId, entry.analysisId]),
+        ),
+        warningByFragmentId,
+      } satisfies LibrarianAnalysisStatusResponse
+    }, { detail: { summary: 'Get completed and failed passage-analysis status' } })
 
     .post('/stories/:storyId/librarian/analyze', async ({ params, body, set }) => {
       const story = await getStory(dataDir, params.storyId)

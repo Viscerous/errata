@@ -285,7 +285,7 @@ export function ProseChainView({
   })
 
   const analyzedFragments = useMemo(
-    () => new Set(Object.keys(analysisIndex ?? {})),
+    () => new Set(Object.keys(analysisIndex?.latestByFragmentId ?? {})),
     [analysisIndex],
   )
 
@@ -971,6 +971,7 @@ export function ProseChainView({
             onAskLibrarian={onAskLibrarian}
             onAnalyze={handleAnalyze}
             hasAnalysis={analyzedFragments.has(fragment.id)}
+            analysisWarning={analysisIndex?.autoAnalysisDisabled ? undefined : analysisIndex?.warningByFragmentId[fragment.id]}
             quickSwitch={quickSwitch}
             enabledMentionTypes={enabledMentionTypes}
             mentionFragmentTypesById={mentionFragmentTypesById}
@@ -1090,6 +1091,7 @@ export function ProseChainView({
                   onAskLibrarian={onAskLibrarian}
                   onAnalyze={handleAnalyze}
                   hasAnalysis={analyzedFragments.has(savedGenerationHandoffFragment.id)}
+                  analysisWarning={analysisIndex?.autoAnalysisDisabled ? undefined : analysisIndex?.warningByFragmentId[savedGenerationHandoffFragment.id]}
                   quickSwitch={quickSwitch}
                   enabledMentionTypes={enabledMentionTypes}
                   mentionFragmentTypesById={mentionFragmentTypesById}
