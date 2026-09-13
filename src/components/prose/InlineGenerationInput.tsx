@@ -24,7 +24,7 @@ import { isEnterToSubmit } from '@/lib/enter-to-submit'
 // used by "Skip & write" to proceed without answering.
 const FORCE_PROCEED_ROUND = 99
 
-type InputMode = 'primary' | 'guided' | 'compose'
+type InputMode = 'play' | 'direct' | 'guided' | 'compose'
 
 interface InlineGenerationInputProps {
   storyId: string
@@ -63,7 +63,6 @@ export function InlineGenerationInput({
   const [composeInput, setComposeInput] = useState('')
   const [isComposing, setIsComposing] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [inputModeOverride, setInputModeOverride] = useState<AuthorInputMode | null>(null)
   const [pendingQuestions, setPendingQuestions] = useState<ClarifyQuestion[] | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const composeTextareaRef = useRef<HTMLTextAreaElement>(null)
@@ -84,12 +83,21 @@ export function InlineGenerationInput({
   const [mode, setMode] = useState<InputMode>(() => {
     try {
       const stored = localStorage.getItem(STORAGE_KEY)
-      if (stored === 'guided' || stored === 'compose') return stored
-      // `freeform`, `direct`, and `play` were per-turn composer modes. The
-      // primary contract now belongs to the story instead.
-      return 'primary'
+      if (stored === 'play' || stored === 'direct' || stored === 'guided' || stored === 'compose') {
+        return stored
+      }
+      return 'direct'
     } catch {
-      return 'primary'
+      return 'direct'
+    }
+  })
+
+  const [hasUserSelectedMode, setHasUserSelectedMode] = useState(() => {
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY)
+      return stored === 'play' || stored === 'direct' || stored === 'guided' || stored === 'compose'
+    } catch {
+      return false
     }
   })
 
@@ -153,19 +161,25 @@ export function InlineGenerationInput({
     }))
   }, [manualSuggestions, manualAnchor, analysisDirections, latestFragmentId, liveDirectionsAreCurrent, latestAnalysisId, invalidatedAnalysisId])
 
-  const handleModeChange = (newMode: InputMode) => {
-    setMode(newMode)
-    if (newMode === 'primary') setInputModeOverride(null)
-    try { localStorage.setItem(STORAGE_KEY, newMode) } catch {}
-  }
-
   // Provider quick-switch queries
   const { data: story } = useQuery({
     queryKey: ['story', storyId],
     queryFn: () => api.stories.get(storyId),
   })
-  const storyInputMode: AuthorInputMode = story?.settings.authorInputMode ?? 'direct'
-  const effectiveInputMode = inputModeOverride ?? storyInputMode
+
+  useEffect(() => {
+    if (!hasUserSelectedMode && story?.settings.authorInputMode) {
+      setMode(story.settings.authorInputMode)
+    }
+  }, [hasUserSelectedMode, story?.settings.authorInputMode])
+
+  const handleModeChange = (newMode: InputMode) => {
+    setMode(newMode)
+    setHasUserSelectedMode(true)
+    try { localStorage.setItem(STORAGE_KEY, newMode) } catch {}
+  }
+
+  const effectiveInputMode: AuthorInputMode = mode === 'play' ? 'play' : 'direct'
 
   // Auto-resize textareas
   useEffect(() => {
@@ -254,7 +268,6 @@ export function InlineGenerationInput({
       }
 
       setInput('')
-      setInputModeOverride(null)
       onGenerationComplete()
     } catch (err) {
       // User-initiated abort — not an error
@@ -345,17 +358,17 @@ export function InlineGenerationInput({
   const handleChooseSuggestion = (suggestion: SuggestionDirection) => {
     setManualSuggestions(null)
     setSuggestions([])
-    void handleGenerateWithInput(suggestion.instruction)
+    void handleGenerateWithInput(suggestion.instruction, 'direct')
   }
 
   const handleEditSuggestion = (suggestion: SuggestionDirection) => {
     // iOS opens the keyboard only when focus remains in the click task, so mount
-    // the primary textarea synchronously before focusing it.
+    // the textarea synchronously before focusing it.
     flushSync(() => {
       setInput(suggestion.instruction)
-      setInputModeOverride('direct')
-      setMode('primary')
-      try { localStorage.setItem(STORAGE_KEY, 'primary') } catch {}
+      setMode('direct')
+      setHasUserSelectedMode(true)
+      try { localStorage.setItem(STORAGE_KEY, 'direct') } catch {}
     })
     const textarea = textareaRef.current
     textarea?.focus()
@@ -389,23 +402,35 @@ export function InlineGenerationInput({
         <div className="flex items-center gap-0.5 px-3 pb-1 pt-2.5" role="tablist" aria-label="Writing mode">
           <button
             type="button"
-            onClick={() => handleModeChange('primary')}
+            onClick={() => handleModeChange('play')}
             role="tab"
-            aria-selected={mode === 'primary'}
-            aria-label={storyInputMode === 'play' ? 'Write a canonical Play turn' : 'Direct the writing assistant'}
-            title={storyInputMode === 'play'
-              ? 'Story setting: your input becomes manuscript prose and is included in exports'
-              : 'Story setting: your input directs the assistant and stays out of the manuscript'}
+            aria-selected={mode === 'play'}
+            aria-label="Play the protagonist"
+            title="Play mode: your input is the protagonist's intended move, staged near the opening of the passage before the world answers"
             className={cn(
               'rounded-md px-2.5 py-1 text-ui-caption transition-colors duration-200',
-              mode === 'primary'
+              mode === 'play'
                 ? 'text-foreground/80 bg-muted/60 font-medium'
                 : 'text-muted-foreground hover:text-foreground/60 hover:bg-muted/30',
             )}
           >
-            {inputModeOverride === 'direct' && storyInputMode === 'play'
-              ? 'Direction draft'
-              : storyInputMode === 'play' ? 'Play' : 'Direct'}
+            Play
+          </button>
+          <button
+            type="button"
+            onClick={() => handleModeChange('direct')}
+            role="tab"
+            aria-selected={mode === 'direct'}
+            aria-label="Direct the writing assistant"
+            title="Direct mode: your input is an authorial scene brief that guides the whole passage and stays out of the manuscript"
+            className={cn(
+              'rounded-md px-2.5 py-1 text-ui-caption transition-colors duration-200',
+              mode === 'direct'
+                ? 'text-foreground/80 bg-muted/60 font-medium'
+                : 'text-muted-foreground hover:text-foreground/60 hover:bg-muted/30',
+            )}
+          >
+            Direct
           </button>
           <button
             type="button"
@@ -439,14 +464,14 @@ export function InlineGenerationInput({
           </button>
         </div>
 
-        {/* The story owns whether this primary composer is Play or Direct. */}
-        {mode === 'primary' && (
+        {/* Play or Direct composer */}
+        {(mode === 'play' || mode === 'direct') && (
           <ComposerTextarea
             ref={textareaRef}
             data-component-id="inline-generation-input"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder={effectiveInputMode === 'play' ? 'What do you do or say next?' : 'What should happen next?'}
+            placeholder={mode === 'play' ? 'What do you do or say next?' : 'What should happen next?'}
             rows={1}
             style={{ minHeight: '44px', maxHeight: '200px', overflowY: 'auto', scrollbarWidth: 'none' }}
             disabled={isGenerating}
@@ -496,7 +521,7 @@ export function InlineGenerationInput({
         <ComposerToolbar>
           {/* Left: Model selector + Follow toggle (hidden in compose mode) */}
           <div className="flex items-center gap-2">
-            {mode === 'primary' && (
+            {(mode === 'play' || mode === 'direct') && (
               <ContextPreviewDialog
                 storyId={storyId}
                 input={input}
@@ -531,7 +556,7 @@ export function InlineGenerationInput({
                 <span className="size-1.5 bg-destructive rounded-[2px]" />
                 Stop
               </Button>
-            ) : mode === 'primary' ? (
+            ) : (mode === 'play' || mode === 'direct') ? (
               <Button
                 size="sm"
                 className="h-7 text-xs gap-1.5 rounded-lg font-medium"

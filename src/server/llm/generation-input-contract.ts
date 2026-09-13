@@ -7,8 +7,8 @@ export type GenerationOperation = 'generate' | 'regenerate' | 'refine'
 /**
  * Build the model-facing Writer blocks for an explicit author input.
  *
- * Direct input is an instruction. Play input is manuscript, so it carries the
- * continuation-only output contract and becomes the raw final user input.
+ * Direct input is an instruction. Play input is the protagonist's intended move,
+ * so it carries the staged play continuation contract and becomes the raw final user input.
  */
 export function createGenerationInputBlocks(args: {
   authorInput: string
@@ -58,7 +58,7 @@ export function createPlanningRequest(
     return `The author wants to REFINE/EDIT the latest passage. Their direction: ${authorInput}\n\nCreate a writing brief that addresses the author's refinement request while maintaining continuity.`
   }
   return inputMode === 'play'
-    ? `## Author Story Turn\n\nThis is canonical manuscript text. Plan from its endpoint.\n\n${authorInput}`
+    ? `## Protagonist Move\n\nThis is the protagonist's intended move. Stage this beat near the opening of the passage and plan the world's answering response.\n\n${authorInput}`
     : `## Author Request\n\n${authorInput}`
 }
 

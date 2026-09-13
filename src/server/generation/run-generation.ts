@@ -465,10 +465,13 @@ export async function runGeneration(
         }
       }
 
-      const generatedContinuation = inputMode === 'play'
-        ? stripAuthorTurnEcho(body.input, fullText)
-        : fullText
-      const commitAssessment = assessGenerationForCommit(generatedContinuation, lastFinishReason)
+      // In Play mode, the model stages the protagonist's move and resolves with the world's answer.
+      // If the model produced only an exact echo of the input with no continuation, reject it as empty.
+      const hasContinuation = inputMode !== 'play' || stripAuthorTurnEcho(body.input, fullText).trim().length > 0
+      const commitAssessment = assessGenerationForCommit(
+        hasContinuation ? fullText : '',
+        lastFinishReason,
+      )
 
       // Keep rejected attempts inspectable, but never turn them into prose or
       // launch downstream analysis. This is intentionally before plugin hooks:
@@ -500,7 +503,7 @@ export async function runGeneration(
               content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
             })),
             toolCalls,
-            generatedText: generatedContinuation,
+            generatedText: fullText,
             fragmentId: null,
             model: servedModelId,
             sampling: samplingDiagnostics(runtime),
@@ -541,23 +544,22 @@ export async function runGeneration(
           const durationMs = Date.now() - startTime
           requestLogger.info('LLM generation completed', {
             durationMs,
-            textLength: generatedContinuation.length,
+            textLength: fullText.length,
           })
 
           requestLogger.info('Tool calls extracted', { toolCallCount: toolCalls.length })
 
           // Run afterGeneration hooks
           const genResult = await runAfterGeneration(enabledPlugins, {
-            text: generatedContinuation,
+            text: fullText,
             fragmentId: (mode === 'regenerate' || mode === 'refine') ? body.fragmentId! : null,
             toolCalls,
           })
           abortController.signal.throwIfAborted()
           requestLogger.info('AfterGeneration hooks completed')
 
-          // In Play, the author's input is manuscript rather than an instruction.
-          // Commit it atomically with the generated continuation so a failed or
-          // cancelled run never leaves a half-turn in the story.
+          // In Play, the model stages and integrates the protagonist's intended move
+          // near the opening of the generated passage and resolves with the world's answer.
           const committedText = composeGeneratedProse(body.input, genResult.text, inputMode)
 
           const now = new Date().toISOString()

@@ -32,7 +32,7 @@ All registered keys grouped by module:
 |---|---|---|
 | `generation.system` | `src/server/llm/agents.ts` | Main writer system prompt |
 | `generation.writer-brief.system` | `src/server/llm/agents.ts` | Writer system prompt when receiving a prewriter brief |
-| `generation.play-continuation` | `src/server/llm/agents.ts` | Continuation-only contract for Play input |
+| `generation.play-continuation` | `src/server/llm/agents.ts` | Staged continuation contract for Play input |
 | `generation.prewriter.system` | `src/server/llm/agents.ts` | Prewriter agent system prompt |
 
 ### Librarian (5)

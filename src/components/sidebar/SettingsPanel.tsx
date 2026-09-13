@@ -600,16 +600,16 @@ export function SettingsPanel({
         <div className="space-y-3">
           <SettingsGroup title="Workflow" description="How prose generation runs and what the model is allowed to do.">
             <SettingRow
-              label="Writing relationship"
+              label="Default composer mode"
               description={(story.settings.authorInputMode ?? 'direct') === 'play'
-                ? 'Your primary input is story prose. A successful turn is saved verbatim before the continuation and included in exports.'
-                : 'Your primary input directs the assistant and is not included in the manuscript or exports.'}
+                ? "New sessions default to Play mode. Your input is the protagonist's intended move, staged near the opening before the world answers."
+                : 'New sessions default to Direct mode. Your input is an authorial scene brief for the Writer and stays out of the manuscript.'}
             >
               <SegmentedControl
                 value={(story.settings.authorInputMode ?? 'direct') as 'direct' | 'play'}
                 options={[
-                  { value: 'direct' as const, label: 'Assistant' },
                   { value: 'play' as const, label: 'Play' },
+                  { value: 'direct' as const, label: 'Direct' },
                 ]}
                 onChange={(v) => updateMutation.mutate({ authorInputMode: v })}
               />

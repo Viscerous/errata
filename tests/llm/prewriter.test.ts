@@ -321,7 +321,7 @@ describe('prewriter', () => {
       expect(storyTurn.role).toBe('user')
       expect(storyTurn.content).toBe(turn)
       expect(contract.role).toBe('system')
-      expect(contract.content).toContain('Return only new prose that follows it.')
+      expect(contract.content).toContain('PLAY MODE CONTRACT')
       expect(storyTurn.order).toBeGreaterThan(blocks.find((block) => block.id === 'writing-brief')!.order)
     })
 

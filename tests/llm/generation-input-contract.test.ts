@@ -58,7 +58,7 @@ describe('generation input prompt contract', () => {
       authorInputOccurrences: 1,
       playOutputContractBlocks: 0,
     })
-    expect(play[0].content).toContain('Plan from its endpoint.')
+    expect(play[0].content).toContain("protagonist's intended move")
   })
 
   it('keeps Direct input out of the brief writer while carrying Play manuscript once', () => {

@@ -925,8 +925,8 @@ describe('context blocks', () => {
       expect(block.content).toBe(turn)
       expect(block.content).not.toContain('## Author Direction')
       expect(contract.role).toBe('system')
-      expect(contract.content).toContain('Return only new prose that follows it.')
-      expect(contract.content).toContain('Do not repeat or paraphrase the turn')
+      expect(contract.content).toContain('PLAY MODE CONTRACT')
+      expect(contract.content).toContain('Return only the new prose passage.')
     })
 
     it('assigns correct roles to blocks', async () => {

@@ -3,8 +3,9 @@ export const AUTHOR_INPUT_MODES = ['direct', 'play'] as const
 /**
  * How prose generation interprets the author's text.
  *
- * `direct` is an instruction to the writing assistant. `play` is a canonical
- * turn inside the fiction that the writer must preserve and continue from.
+ * `direct` is an instruction or scene brief for the writing assistant.
+ * `play` is the protagonist's intended move, staged near the opening of the
+ * new passage by the model before pivoting outward to the world's answer.
  */
 export type AuthorInputMode = (typeof AUTHOR_INPUT_MODES)[number]
 
@@ -27,19 +28,19 @@ export function stripAuthorTurnEcho(authorInput: string, generatedText: string):
 
 /**
  * Build the canonical manuscript text committed for a successful generation.
- * Direction text is prompt-only. In Play, the author's turn is prose, so it is
- * stored immediately before the model's continuation.
+ *
+ * In Direct mode, the author's input is a directing brief, and the generated
+ * prose is the complete manuscript passage.
+ *
+ * In Play mode, the model stages and integrates the protagonist's intended move
+ * near the opening of the passage and resolves with the world's answer. The
+ * generated prose is the complete staged passage; the author's input is not
+ * mechanically prepended.
  */
 export function composeGeneratedProse(
-  authorInput: string,
+  _authorInput: string,
   generatedText: string,
-  inputMode: AuthorInputMode,
+  _inputMode: AuthorInputMode,
 ): string {
-  if (inputMode !== 'play') return generatedText
-
-  const authorTurn = authorInput.trim()
-  const continuation = stripAuthorTurnEcho(authorInput, generatedText).trimStart()
-  if (!authorTurn) return generatedText
-  if (!continuation) return authorTurn
-  return `${authorTurn}\n\n${continuation}`
+  return generatedText
 }

@@ -10,8 +10,11 @@ export const GENERATION_SYSTEM_PROMPT = [
 ].join('\n')
 
 export const PLAY_CONTINUATION_SYSTEM_PROMPT = [
-  'PLAY OUTPUT CONTRACT: The user context ends with an already-authored manuscript turn. The application will place that turn immediately before your response.',
-  'Return only new prose that follows it. Do not repeat or paraphrase the turn, and do not add actions or dialogue on the author\'s behalf.',
+  'PLAY MODE CONTRACT: The final user input is the protagonist\'s intended move (dialogue, action, or gesture).',
+  'Stage and integrate this move near the opening of the passage in natural voice, pacing, and sensory blocking matching the story\'s established POV.',
+  'Pivot outward to depict the reaction of counterparties and the environment. Terminate on the world\'s answer—an external act, spoken response, or concrete change of state—returning agency to the player.',
+  'Do not invent subsequent unprompted decisions, thoughts, or actions for the protagonist beyond the immediate mechanics of the move. Never end with choices, menus, or prompt questions.',
+  'Return only the new prose passage.',
 ].join('\n')
 
 export const WRITER_BRIEF_SYSTEM_PROMPT = [

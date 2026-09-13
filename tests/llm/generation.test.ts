@@ -11,7 +11,7 @@ import { saveAgentBlockConfig } from '@/server/agents/agent-block-storage'
 import { listAgentRuns, clearAgentRuns } from '@/server/agents/traces'
 import { clearPending, getPendingCount } from '@/server/librarian/scheduler'
 import type { StoryMeta, Fragment } from '@/contracts/story'
-import { stripAuthorTurnEcho } from '@/contracts/generation'
+import { composeGeneratedProse, stripAuthorTurnEcho } from '@/contracts/generation'
 
 const { mockAgentCtor, mockAgentStream } = vi.hoisted(() => ({
   mockAgentCtor: vi.fn(),
@@ -48,6 +48,13 @@ describe('Play turn joining', () => {
   it('removes only a complete echoed turn', () => {
     expect(stripAuthorTurnEcho('I wait.', 'I wait.\n\nThe door opens.')).toBe('The door opens.')
     expect(stripAuthorTurnEcho('I', 'It starts to rain.')).toBe('It starts to rain.')
+  })
+})
+
+describe('composeGeneratedProse', () => {
+  it('returns generated prose directly for both direct and play modes', () => {
+    expect(composeGeneratedProse('Direction brief', 'The storm arrived.', 'direct')).toBe('The storm arrived.')
+    expect(composeGeneratedProse('I wait.', 'I wait at the station. The train pulls in.', 'play')).toBe('I wait at the station. The train pulls in.')
   })
 })
 
@@ -568,7 +575,7 @@ describe('generation endpoint', () => {
     const [summary] = await listGenerationLogs(dataDir, storyId)
     const log = await getGenerationLog(dataDir, storyId, summary.id)
     expect(log).toMatchObject({
-      generatedText: 'The lock gives way with a soft click.',
+      generatedText: `${authorTurn}\n\nThe lock gives way with a soft click.`,
     })
   })
 
@@ -577,7 +584,7 @@ describe('generation endpoint', () => {
     const authorTurn = 'I close the shutters and turn from the window.'
     mockAgentStream
       .mockResolvedValueOnce(createMockStreamResult('Thunder rolls over the hills.') as any)
-      .mockResolvedValueOnce(createMockStreamResult('The room falls into blue-grey shadow.') as any)
+      .mockResolvedValueOnce(createMockStreamResult(`${authorTurn}\n\nThe room falls into blue-grey shadow.`) as any)
 
     for (const body of [
       { input: direction, inputMode: 'direct' },

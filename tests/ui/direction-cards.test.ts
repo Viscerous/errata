@@ -150,7 +150,7 @@ describe('direction card activation', () => {
   })
 
   it('sends an explicit play contract for action and dialogue input', async () => {
-    localStorage.setItem('errata:generation-mode', 'primary')
+    localStorage.setItem('errata:generation-mode', 'play')
     getStory.mockResolvedValue({ settings: { authorInputMode: 'play', modelOverrides: {} } })
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     render(React.createElement(
@@ -173,7 +173,8 @@ describe('direction card activation', () => {
 
     await waitFor(() => expect(generateAndSave).toHaveBeenCalled())
     expect(generateAndSave.mock.calls[0][3]).toMatchObject({ inputMode: 'play' })
-    expect(screen.queryByText('Direct')).toBeNull()
+    expect(screen.getByRole('tab', { name: 'Play the protagonist' }).getAttribute('aria-selected')).toBe('true')
+    expect(screen.getByRole('tab', { name: 'Direct the writing assistant' }).getAttribute('aria-selected')).toBe('false')
   })
 
   it('commits on Enter for a keyboard user, whose focus was its own interaction', async () => {
