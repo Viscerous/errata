@@ -17,7 +17,6 @@ import { FragmentTypeDisplayIcon } from '@/components/fragments/fragment-type-ic
 import { SettingsSelect } from '@/components/settings/primitives'
 import { LibrarianAnalysisCard } from './LibrarianAnalysisCard'
 import { buildMentionGroups, type MentionGroup } from './librarian-mention-groups'
-import { useLiveAnalysisProgress } from './use-live-analysis-progress'
 import { mentionLinkCount } from '@/components/sidebar/librarian-panel-helpers'
 
 interface LibrarianStoryViewProps {
@@ -31,8 +30,6 @@ export function LibrarianStoryView({ storyId, status, onOpenChat }: LibrarianSto
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [showAllAnalyses, setShowAllAnalyses] = useState(false)
   const branchId = useActiveBranchId(storyId)
-  const liveProgress = useLiveAnalysisProgress(storyId, status?.runStatus === 'running')
-
   const { data: characters } = useQuery(q.fragments(storyId, branchId, 'character'))
   const { data: guidelines } = useQuery(q.fragments(storyId, branchId, 'guideline'))
   const { data: knowledge } = useQuery(q.fragments(storyId, branchId, 'knowledge'))
@@ -57,32 +54,8 @@ export function LibrarianStoryView({ storyId, status, onOpenChat }: LibrarianSto
     ?? fragmentById.get(id)?.name
     ?? id
 
-  const liveAnalysis = useMemo<LibrarianAnalysis | null>(() => liveProgress ? {
-    id: `live-${liveProgress.fragmentId}`,
-    createdAt: new Date().toISOString(),
-    fragmentId: liveProgress.fragmentId,
-    summaryUpdate: liveProgress.summaryUpdate,
-    continuityProjection: liveProgress.continuityProjection,
-    mentions: liveProgress.mentions,
-    contradictions: liveProgress.contradictions,
-    fragmentChangeProposals: liveProgress.fragmentChangeProposals,
-    timelineEvents: liveProgress.timelineEvents,
-    directions: liveProgress.directions,
-  } : null, [liveProgress])
-  const liveSummary = useMemo<LibrarianAnalysisSummary | null>(() => liveAnalysis ? {
-    id: liveAnalysis.id,
-    createdAt: liveAnalysis.createdAt,
-    fragmentId: liveAnalysis.fragmentId,
-    contradictionCount: liveAnalysis.contradictions.length,
-    suggestionCount: liveAnalysis.fragmentChangeProposals.length,
-    pendingSuggestionCount: liveAnalysis.fragmentChangeProposals.length,
-    timelineEventCount: liveAnalysis.timelineEvents.length,
-    directionsCount: liveAnalysis.directions?.length ?? 0,
-    hasContinuityProjection: true,
-  } : null, [liveAnalysis])
-
-  const totalContradictions = (analyses?.reduce((count, item) => count + item.contradictionCount, 0) ?? 0) + (liveSummary?.contradictionCount ?? 0)
-  const totalSuggestions = (analyses?.reduce((count, item) => count + item.pendingSuggestionCount, 0) ?? 0) + (liveSummary?.pendingSuggestionCount ?? 0)
+  const totalContradictions = analyses?.reduce((count, item) => count + item.contradictionCount, 0) ?? 0
+  const totalSuggestions = analyses?.reduce((count, item) => count + item.pendingSuggestionCount, 0) ?? 0
   const mentionGroups = status ? buildMentionGroups(Object.entries(status.recentMentions ?? {}), fragmentById, customTypeByType) : []
   const hasTimeline = !!status?.timeline?.length
 
@@ -99,25 +72,11 @@ export function LibrarianStoryView({ storyId, status, onOpenChat }: LibrarianSto
           </section>
         )}
 
-        {(!!analyses?.length || !!liveSummary) && (
+        {!!analyses?.length && (
           <section>
             <SectionLabel>Analyses</SectionLabel>
             <div className="mt-1.5 space-y-1.5">
-              {liveAnalysis && liveSummary && liveProgress && (
-                <LibrarianAnalysisCard
-                  key={liveSummary.id}
-                  storyId={storyId}
-                  summary={liveSummary}
-                  expanded={expandedId === liveSummary.id}
-                  analysis={liveAnalysis}
-                  onToggle={() => setExpandedId(expandedId === liveSummary.id ? null : liveSummary.id)}
-                  charName={fragmentName}
-                  fragmentById={fragmentById}
-                  customTypeByType={customTypeByType}
-                  provisionalStage={liveProgress.stage}
-                />
-              )}
-              {(showAllAnalyses ? analyses : analyses?.slice(0, 6))?.map(summary => (
+              {(showAllAnalyses ? analyses : analyses.slice(0, 6)).map(summary => (
                 <LibrarianAnalysisCard
                   key={summary.id}
                   storyId={storyId}
@@ -131,7 +90,7 @@ export function LibrarianStoryView({ storyId, status, onOpenChat }: LibrarianSto
                   customTypeByType={customTypeByType}
                 />
               ))}
-              {!showAllAnalyses && (analyses?.length ?? 0) > 6 && (
+              {!showAllAnalyses && analyses.length > 6 && (
                 <Button
                   type="button"
                   size="xs"
@@ -139,14 +98,14 @@ export function LibrarianStoryView({ storyId, status, onOpenChat }: LibrarianSto
                   className="w-full text-muted-foreground"
                   onClick={() => setShowAllAnalyses(true)}
                 >
-                  Show {(analyses?.length ?? 0) - 6} more
+                  Show {analyses.length - 6} more
                 </Button>
               )}
             </div>
           </section>
         )}
 
-        {!analyses?.length && mentionGroups.length === 0 && !hasTimeline && !liveAnalysis && (
+        {!analyses?.length && mentionGroups.length === 0 && !hasTimeline && (
           <EmptyState icon={<BookOpen className="size-5" />} title="Nothing tracked yet" hint="Generate some prose and the librarian will annotate your story here." variant="panel" />
         )}
 
