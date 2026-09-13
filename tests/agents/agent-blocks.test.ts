@@ -900,7 +900,7 @@ describe('Writer Blocks', () => {
     const blocks = def.createDefaultBlocks(makeBaseContext())
     const instructions = blocks.find((block) => block.id === 'instructions')
     expect(instructions?.content).toContain('not knowledge automatically possessed by characters')
-    expect(instructions?.content).toContain('Character awareness boundaries')
+    expect(instructions?.content).toContain('character awareness boundaries')
   })
 
   it('includes recent full blocks and one catalog for built-in and custom fragments when provided', () => {

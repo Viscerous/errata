@@ -638,7 +638,9 @@ export function createDefaultBlocks(state: ContextBuildState): ContextBlock[] {
   {
     const prose = proseWindowBlock(proseFragments, {
       order: 500,
-      newStoryGuidance: 'Write the opening from the author input below.',
+      newStoryGuidance: authorInputMode === 'play'
+        ? 'Write the opening, staging the protagonist move below.'
+        : 'Write the opening from the author input below.',
     })
     if (prose) blocks.push(prose)
   }

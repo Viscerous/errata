@@ -19,7 +19,7 @@ import { createGenerationInputBlocks, createPlanningRequest } from './generation
 
 const logger = createLogger('prewriter')
 
-export const PREWRITER_INSTRUCTIONS = `Plan the next passage for a separate fiction writer. Use the supplied story context and author request; do not write the passage yourself.
+export const PREWRITER_INSTRUCTIONS = `Plan the next passage for a separate fiction writer. Use the supplied story context and author request or protagonist move; do not write the passage yourself.
 
 Produce a concise, self-contained writing brief covering:
 - the immediate starting point and passage objective;
