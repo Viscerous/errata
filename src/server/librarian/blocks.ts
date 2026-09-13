@@ -105,7 +105,7 @@ export function buildAnalyzeSystemPrompt(opts?: {
     guidance.push('Before the first **reportAnalysis**, make any optional record-maintenance proposals supported by records already shown. If the report supplies additional record bodies, inspect them and make any resulting proposals; call **reportAnalysis** again only when those records change its findings or directions, otherwise stop.')
   }
   if (canSuggestDirections) {
-    guidance.push('Include next directions in the final report only after the analysis is complete.')
+    guidance.push('When ready to report, include three distinct next-passage directions in the first **reportAnalysis** call. If newly supplied records change the findings, include revised directions in the replacement report.')
   }
 
   return `

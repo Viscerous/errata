@@ -345,57 +345,61 @@ function AgentBlockEditor({ storyId, agentName, agents, onBack }: AgentBlockEdit
   return (
     <div className="flex h-full min-h-0 flex-col">
       {/* Header with back button */}
-      <div className="px-3 py-2.5 border-b border-border/30 flex items-center gap-2">
-        <button
-          type="button"
-          className="shrink-0 size-7 rounded-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent/30 transition-all"
-          onClick={onBack}
-          aria-label="Back to agents"
-        >
-          <ChevronLeft className="size-4" />
-        </button>
-        <div className="flex-1 min-w-0">
-          <p className="text-ui-caption font-medium truncate">{agent?.displayName ?? agentName}</p>
-          <p className="text-ui-label text-muted-foreground truncate">{agent?.description}</p>
+      <div className="border-b border-border/30 px-3 py-2.5">
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            className="shrink-0 size-7 rounded-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent/30 transition-all"
+            onClick={onBack}
+            aria-label="Back to agents"
+          >
+            <ChevronLeft className="size-4" />
+          </button>
+          <p className="min-w-0 flex-1 truncate text-ui-caption font-medium">{agent?.displayName ?? agentName}</p>
+          <div className="flex shrink-0 items-center gap-1">
+            <Button
+              size="sm"
+              variant="ghost"
+              className="size-7 p-0"
+              onClick={handleExport}
+              title="Export config"
+              aria-label="Export agent configuration"
+            >
+              <Download className="size-3.5" />
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="size-7 p-0"
+              onClick={() => fileInputRef.current?.click()}
+              title="Import config"
+              aria-label="Import agent configuration"
+            >
+              <Upload className="size-3.5" />
+            </Button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".json"
+              className="hidden"
+              onChange={handleImport}
+            />
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-xs gap-1.5"
+              onClick={() => setShowPreview(true)}
+            >
+              <Eye className="size-3" />
+              Preview
+            </Button>
+          </div>
         </div>
-        <div className="flex items-center gap-1 shrink-0">
-          <Button
-            size="sm"
-            variant="ghost"
-            className="size-7 p-0"
-            onClick={handleExport}
-            title="Export config"
-            aria-label="Export agent configuration"
-          >
-            <Download className="size-3.5" />
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            className="size-7 p-0"
-            onClick={() => fileInputRef.current?.click()}
-            title="Import config"
-            aria-label="Import agent configuration"
-          >
-            <Upload className="size-3.5" />
-          </Button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".json"
-            className="hidden"
-            onChange={handleImport}
-          />
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-7 text-xs gap-1.5"
-            onClick={() => setShowPreview(true)}
-          >
-            <Eye className="size-3" />
-            Preview
-          </Button>
-        </div>
+        {agent?.description && (
+          <p className="mt-1 pl-9 text-ui-label leading-snug text-muted-foreground">
+            {agent.description}
+          </p>
+        )}
       </div>
 
       {transferError && (

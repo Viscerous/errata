@@ -57,7 +57,7 @@ export function registerGenerationBlocks(): void {
   agentBlockRegistry.register({
     agentName: 'generation.writer',
     displayName: 'Writer',
-    description: 'Prose continuation and generation',
+    description: 'Prose continuation and generation.',
     availableTools: getAvailableTools(),
     resolveTools: ({ dataDir, storyId }) => createFragmentTools(dataDir, storyId, { readOnly: true }),
     createDefaultBlocks: createGenerationBlocks,

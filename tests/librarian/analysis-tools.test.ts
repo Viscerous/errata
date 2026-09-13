@@ -68,6 +68,17 @@ describe('analysis tool contracts', () => {
     expect(parsed).not.toHaveProperty('witnessIds')
   })
 
+  it('accepts a useful report with fewer than three directions without retrying the analysis', () => {
+    const directions = [
+      { title: 'Wait', description: 'The pause lengthens.', instruction: 'Continue the pause.' },
+      { title: 'Enter', description: 'A visitor arrives.', instruction: 'Introduce the visitor.' },
+    ]
+    expect(reportAnalysisInputSchema.safeParse({ summary: 'Alice waited.', directions }).success).toBe(true)
+    expect(reportAnalysisInputSchema.safeParse({ summary: 'Alice waited.', directions: directions.slice(0, 1) }).success).toBe(true)
+    expect(reportAnalysisInputSchema.safeParse({ summary: 'Alice waited.', directions: [] }).success).toBe(false)
+    expect(buildReportAnalysisInputSchema({}, { includeDirections: false }).safeParse({ summary: 'Alice waited.' }).success).toBe(true)
+  })
+
   it('requires proposal evidence and work in every proposal call', () => {
     expect(librarianRecordCorrectionsInputSchema.safeParse({
       evidenceSegments: [], corrections: [],

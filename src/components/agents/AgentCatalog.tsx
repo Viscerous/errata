@@ -68,7 +68,7 @@ export function AgentCatalog({ agents, onSelect }: { agents: AgentBlockInfo[]; o
                       <Bot className="size-4 shrink-0 text-muted-foreground" />
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-medium leading-tight">{agent.displayName}</p>
-                        <Hint className="mt-0.5 truncate leading-snug">{agent.description}</Hint>
+                        <Hint className="mt-0.5 leading-snug">{agent.description}</Hint>
                       </div>
                       <ChevronRight className="size-3.5 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
                     </div>

@@ -612,16 +612,16 @@ describe('Librarian Analyze Prompt', () => {
     expect(prompt).toContain('revise only findings those records change')
     expect(prompt).toContain('record-maintenance proposals supported by records already shown')
     expect(prompt).toContain('call **reportAnalysis** again only when')
-    expect(prompt).toContain('Include next directions in the final report')
+    expect(prompt).toContain('three distinct next-passage directions in the first **reportAnalysis** call')
   })
 
   it('derives workflow guidance from the tools that are actually available', () => {
     const noDirections = buildAnalyzeSystemPrompt({ disableDirections: true })
     expect(noDirections).toContain('optional record-maintenance proposals')
-    expect(noDirections).not.toContain('Suggest next directions')
+    expect(noDirections).not.toContain('next-passage directions')
 
     const noSuggestions = buildAnalyzeSystemPrompt({ disableSuggestions: true })
-    expect(noSuggestions).toContain('Include next directions')
+    expect(noSuggestions).toContain('three distinct next-passage directions')
     expect(noSuggestions).not.toContain('optional record-maintenance proposals')
 
     const noOptionalTools = buildAnalyzeSystemPrompt({

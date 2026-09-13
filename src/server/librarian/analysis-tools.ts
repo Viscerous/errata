@@ -335,8 +335,8 @@ export function buildReportAnalysisInputSchema(
   return options.includeDirections === false
     ? report
     : report.extend({
-        directions: z.array(suggestionDirectionSchema).min(3).max(5)
-          .describe('Story-specific options for the passage that follows this one.'),
+        directions: z.array(suggestionDirectionSchema).min(1)
+          .describe('Story-specific options for the next passage; aim for three distinct directions.'),
       })
 }
 
