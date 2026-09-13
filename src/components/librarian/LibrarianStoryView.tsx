@@ -29,7 +29,6 @@ interface LibrarianStoryViewProps {
 export function LibrarianStoryView({ storyId, status, onOpenChat }: LibrarianStoryViewProps) {
   const [refineTarget, setRefineTarget] = useState<{ fragmentId: string; fragmentName: string } | null>(null)
   const [expandedId, setExpandedId] = useState<string | null>(null)
-  const [liveExpanded, setLiveExpanded] = useState(true)
   const [showAllAnalyses, setShowAllAnalyses] = useState(false)
   const branchId = useActiveBranchId(storyId)
   const liveProgress = useLiveAnalysisProgress(storyId, status?.runStatus === 'running')
@@ -57,8 +56,6 @@ export function LibrarianStoryView({ storyId, status, onOpenChat }: LibrarianSto
     ?? knowledge?.find(fragment => fragment.id === id)?.name
     ?? fragmentById.get(id)?.name
     ?? id
-
-  useEffect(() => { if (liveProgress) setLiveExpanded(true) }, [liveProgress?.fragmentId])
 
   const liveAnalysis = useMemo<LibrarianAnalysis | null>(() => liveProgress ? {
     id: `live-${liveProgress.fragmentId}`,
@@ -102,21 +99,49 @@ export function LibrarianStoryView({ storyId, status, onOpenChat }: LibrarianSto
           </section>
         )}
 
-        {liveAnalysis && liveSummary && liveProgress && (
-          <section>
-            <SectionLabel>Analysis in progress</SectionLabel>
-            <div className="mt-1.5"><LibrarianAnalysisCard storyId={storyId} summary={liveSummary} expanded={liveExpanded} analysis={liveAnalysis} onToggle={() => setLiveExpanded(value => !value)} charName={fragmentName} fragmentById={fragmentById} customTypeByType={customTypeByType} provisionalStage={liveProgress.stage} /></div>
-          </section>
-        )}
-
-        {!!analyses?.length && (
+        {(!!analyses?.length || !!liveSummary) && (
           <section>
             <SectionLabel>Analyses</SectionLabel>
             <div className="mt-1.5 space-y-1.5">
-              {(showAllAnalyses ? analyses : analyses.slice(0, 6)).map(summary => (
-                <LibrarianAnalysisCard key={summary.id} storyId={storyId} summary={summary} expanded={expandedId === summary.id} analysis={expandedId === summary.id ? expandedAnalysis ?? null : null} onToggle={() => setExpandedId(expandedId === summary.id ? null : summary.id)} onOpenChat={onOpenChat} charName={fragmentName} fragmentById={fragmentById} customTypeByType={customTypeByType} />
+              {liveAnalysis && liveSummary && liveProgress && (
+                <LibrarianAnalysisCard
+                  key={liveSummary.id}
+                  storyId={storyId}
+                  summary={liveSummary}
+                  expanded={expandedId === liveSummary.id}
+                  analysis={liveAnalysis}
+                  onToggle={() => setExpandedId(expandedId === liveSummary.id ? null : liveSummary.id)}
+                  charName={fragmentName}
+                  fragmentById={fragmentById}
+                  customTypeByType={customTypeByType}
+                  provisionalStage={liveProgress.stage}
+                />
+              )}
+              {(showAllAnalyses ? analyses : analyses?.slice(0, 6))?.map(summary => (
+                <LibrarianAnalysisCard
+                  key={summary.id}
+                  storyId={storyId}
+                  summary={summary}
+                  expanded={expandedId === summary.id}
+                  analysis={expandedId === summary.id ? expandedAnalysis ?? null : null}
+                  onToggle={() => setExpandedId(expandedId === summary.id ? null : summary.id)}
+                  onOpenChat={onOpenChat}
+                  charName={fragmentName}
+                  fragmentById={fragmentById}
+                  customTypeByType={customTypeByType}
+                />
               ))}
-              {!showAllAnalyses && analyses.length > 6 && <Button type="button" size="xs" variant="ghost" className="w-full text-muted-foreground" onClick={() => setShowAllAnalyses(true)}>Show {analyses.length - 6} more</Button>}
+              {!showAllAnalyses && (analyses?.length ?? 0) > 6 && (
+                <Button
+                  type="button"
+                  size="xs"
+                  variant="ghost"
+                  className="w-full text-muted-foreground"
+                  onClick={() => setShowAllAnalyses(true)}
+                >
+                  Show {(analyses?.length ?? 0) - 6} more
+                </Button>
+              )}
             </div>
           </section>
         )}
