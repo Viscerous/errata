@@ -15,9 +15,8 @@ import type { AgentStreamEvent } from '../agents/stream-types'
 import { buildProviderOptions, resolveAgentRuntime, samplingCallSettings } from '../llm/client'
 import { resolveAndReportServedUsage } from '../llm/usage-normalizer'
 import { getObservedServedModelId } from '../llm/served-models'
-import { proseContentHash } from './continuity-source'
-import { getAnalysis, getAnalysisIndex } from './storage'
-import { SUMMARY_CONTRACT_VERSION } from './summary-contract'
+import { getAnalysisIndex } from './storage'
+import { inspectSummarySource } from './summary-source'
 import { DEFAULT_TOOL_LOOP_IDLE_TIMEOUT_MS, terminalToolSucceeded } from './tool-runner'
 
 export const SUMMARY_ROLLUP_CONTRACT_VERSION = 2
@@ -195,33 +194,25 @@ async function currentLeafSegments(dataDir: string, storyId: string): Promise<Su
       continue
     }
     const analysisId = index?.latestByFragmentId[proseId]?.analysisId
-    const analysis = analysisId ? await getAnalysis(dataDir, storyId, analysisId) : null
-    const summary = analysis?.summaryUpdate?.trim()
-    const sourceHash = proseContentHash(fragment)
-    if (
-      !analysisId
-      || !analysis
-      || !summary
-      || analysis.summaryContractVersion !== SUMMARY_CONTRACT_VERSION
-      || analysis.sourceRevision?.contentHash !== sourceHash
-    ) {
+    const source = await inspectSummarySource(dataDir, storyId, fragment, analysisId)
+    if ('gapReason' in source) {
       flush()
       continue
     }
     current.push({
       id: summaryRollupLeafId({
         proseId,
-        analysisId,
-        sourceHash,
-        summary,
-        contractVersion: analysis.summaryContractVersion,
+        analysisId: source.analysisId,
+        sourceHash: source.sourceHash,
+        summary: source.text,
+        contractVersion: source.contractVersion,
       }),
       proseId,
-      analysisId,
-      sourceHash,
-      summaryHash: hash(summary),
-      contractVersion: analysis.summaryContractVersion,
-      text: summary,
+      analysisId: source.analysisId,
+      sourceHash: source.sourceHash,
+      summaryHash: hash(source.text),
+      contractVersion: source.contractVersion,
+      text: source.text,
     })
   }
   flush()

@@ -1,10 +1,12 @@
 import { Elysia, t } from 'elysia'
-import { getStory, getFragment } from '../fragments/storage'
+import { getStory, getFragment, listFragments } from '../fragments/storage'
+import { getActiveProseIds } from '../fragments/prose-chain'
 import {
   getGenerationLog,
   listGenerationLogs,
 } from '../llm/generation-logs'
 import { getLibrarianRuntimeStatus, triggerLibrarian } from '../librarian/scheduler'
+import { inspectSummarySource, type SummaryGapReason } from '../librarian/summary-source'
 import { getAgentBlockConfig } from '../agents/agent-block-storage'
 import { createAgentInstance, listAgentRuns } from '../agents'
 import {
@@ -35,6 +37,14 @@ import { createLogger } from '../logging'
 import { encodeStream } from './encode-stream'
 import type { LibrarianAnalysisStatusResponse, LibrarianStatusResponse } from '@/contracts/librarian'
 
+const summaryGapWarning: Record<SummaryGapReason, string> = {
+  'missing-analysis': 'No analysis for this passage',
+  'empty-summary': 'Analysis recorded no story summary',
+  'unverified-source': 'Analysis cannot be matched to this passage',
+  'stale-source': 'Passage changed since analysis',
+  'old-contract': 'Analysis uses an older story-summary format',
+}
+
 export function librarianRoutes(dataDir: string) {
   const logger = createLogger('api:librarian', { dataDir })
 
@@ -64,27 +74,39 @@ export function librarianRoutes(dataDir: string) {
     }, { detail: { summary: 'Get librarian status' } })
 
     .get('/stories/:storyId/librarian/analysis-index', async ({ params }) => {
-      const [storedIndex, story, librarianConfig] = await Promise.all([
+      const [storedIndex, story, librarianConfig, activeProseIds] = await Promise.all([
         getAnalysisIndex(dataDir, params.storyId),
         getStory(dataDir, params.storyId),
         getAgentBlockConfig(dataDir, params.storyId, 'librarian.analyze'),
+        getActiveProseIds(dataDir, params.storyId),
       ])
       const index = storedIndex ?? await rebuildAnalysisIndex(dataDir, params.storyId)
-      const warningByFragmentId = { ...index.failedByFragmentId }
-      for (const [fragmentId, latest] of Object.entries(index.latestByFragmentId)) {
-        if (index.latestProjectionByFragmentId[fragmentId]?.analysisId !== latest.analysisId) {
-          warningByFragmentId[fragmentId] ??= 'Analysis did not complete'
+      const autoAnalysisDisabled = story?.settings.disableLibrarianAutoAnalysis === true
+        || librarianConfig.disableAutoAnalysis === true
+      const { runningFragmentId, pendingFragmentId } = getLibrarianRuntimeStatus(params.storyId)
+      const prose = autoAnalysisDisabled ? [] : activeProseIds.length === 0
+        ? await listFragments(dataDir, params.storyId, 'prose')
+        : (await Promise.all(activeProseIds.map((id) => getFragment(dataDir, params.storyId, id))))
+            .filter((fragment): fragment is NonNullable<typeof fragment> => fragment?.type === 'prose' && !fragment.archived)
+      const warningEntries = await Promise.all(prose.map(async (fragment): Promise<[string, string] | null> => {
+        if (fragment.id === runningFragmentId || fragment.id === pendingFragmentId) return null
+        const latest = index.latestByFragmentId[fragment.id]?.analysisId
+        const failed = index.failedByFragmentId[fragment.id]
+        if (failed) return [fragment.id, failed]
+        if (latest && index.latestProjectionByFragmentId[fragment.id]?.analysisId !== latest) {
+          return [fragment.id, 'Analysis did not complete']
         }
-      }
+        const source = await inspectSummarySource(dataDir, params.storyId, fragment, latest)
+        return 'gapReason' in source ? [fragment.id, summaryGapWarning[source.gapReason]] : null
+      }))
       return {
-        autoAnalysisDisabled: story?.settings.disableLibrarianAutoAnalysis === true
-          || librarianConfig.disableAutoAnalysis === true,
+        autoAnalysisDisabled,
         latestByFragmentId: Object.fromEntries(
           Object.entries(index.latestByFragmentId).map(([fragmentId, entry]) => [fragmentId, entry.analysisId]),
         ),
-        warningByFragmentId,
+        warningByFragmentId: Object.fromEntries(warningEntries.filter((entry): entry is [string, string] => entry !== null)),
       } satisfies LibrarianAnalysisStatusResponse
-    }, { detail: { summary: 'Get completed and failed passage-analysis status' } })
+    }, { detail: { summary: 'Get passage-analysis and story-summary coverage' } })
 
     .post('/stories/:storyId/librarian/analyze', async ({ params, body, set }) => {
       const story = await getStory(dataDir, params.storyId)

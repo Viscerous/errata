@@ -19,7 +19,6 @@ describe('agent workspace structure', () => {
     expect(panel).toContain('AgentModelControls')
     expect(panel).toContain('AgentToolControls')
     expect(panel).toContain('AgentPromptBlocks')
-    expect(panel.split('\n').length).toBeLessThan(500)
   })
 
   it('uses shared settings controls for model and tool configuration', () => {

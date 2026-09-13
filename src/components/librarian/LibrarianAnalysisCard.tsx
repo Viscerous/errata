@@ -56,7 +56,10 @@ export function LibrarianAnalysisCard({
   }
   const deleteAnalysis = useMutation({
     mutationFn: () => api.librarian.deleteAnalysis(storyId, summary.id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['librarian-analyses', storyId] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['librarian-analyses', storyId] })
+      queryClient.invalidateQueries({ queryKey: ['librarian-analysis-index', storyId] })
+    },
   })
   const updateSummary = useMutation({
     mutationFn: (summaryUpdate: string) => api.librarian.updateAnalysis(storyId, summary.id, { summaryUpdate }),
@@ -141,7 +144,7 @@ export function LibrarianAnalysisCard({
           {mentionGroups.map(group => (
             <div key={group.type} className="flex flex-wrap items-center gap-1">
               <span className="mr-1"><FieldLabel>{group.visual.label}</FieldLabel></span>
-              {group.entries.map(([id]) => <Badge key={id} variant="outline" className="h-4 px-1.5 text-ui-label">{charName(id)}</Badge>)}
+              {group.entries.map(([id]) => <Badge key={id} variant="outline" className="h-4 px-1.5 text-ui-label font-normal">{charName(id)}</Badge>)}
             </div>
           ))}
 
@@ -169,7 +172,7 @@ export function LibrarianAnalysisCard({
               <FieldLabel>Timeline events</FieldLabel>
               <AnalysisList marker={false} items={analysis.timelineEvents.map(event => ({
                 key: `${event.position}-${event.event}`,
-                content: <><Badge variant="outline" className="mr-1 h-4 px-1 align-middle text-ui-label">{event.position}</Badge>{event.event}</>,
+                content: <><Badge variant="outline" className="mr-1 h-4 px-1 align-middle text-ui-label font-normal">{event.position}</Badge>{event.event}</>,
               }))} />
             </div>
           )}

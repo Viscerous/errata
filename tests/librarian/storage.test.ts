@@ -14,6 +14,7 @@ import {
   saveState,
   getLatestAnalysisIdsByFragment,
   getAnalysisIndex,
+  getAnalysisSummarySource,
   setAnalysisFailure,
   clearAnalysisIndexEntry,
   rebuildAnalysisIndex,
@@ -77,6 +78,17 @@ describe('librarian storage', () => {
 
       const second = await getAnalysis(dataDir, storyId, analysis.id)
       expect(second!.summaryUpdate).toBe('The hero entered the cave.')
+    })
+
+    it('refreshes lightweight summary coverage after an analysis rewrite or deletion', async () => {
+      await saveAnalysis(dataDir, storyId, makeAnalysis({ id: 'analysis-source', summaryUpdate: 'First summary' }))
+      expect((await getAnalysisSummarySource(dataDir, storyId, 'analysis-source'))?.text).toBe('First summary')
+
+      await saveAnalysis(dataDir, storyId, makeAnalysis({ id: 'analysis-source', summaryUpdate: 'Revised summary' }))
+      expect((await getAnalysisSummarySource(dataDir, storyId, 'analysis-source'))?.text).toBe('Revised summary')
+
+      await deleteAnalysis(dataDir, storyId, 'analysis-source')
+      expect(await getAnalysisSummarySource(dataDir, storyId, 'analysis-source')).toBeNull()
     })
 
     it('returns null for non-existent analysis', async () => {

@@ -1,17 +1,16 @@
 import type { Fragment } from '@/contracts/story'
 import {
-  getAnalysis,
   getAnalysisIndex,
   type LibrarianAnalysisIndex,
 } from './storage'
 import { proseContentHash } from './continuity-source'
+import { inspectSummarySource, type SummaryGapReason } from './summary-source'
 import {
   listSummaryRollupNodes,
   selectSummaryRollupFrontier,
   summaryRollupLeafId,
 } from './summary-rollups'
 import { markSummaryRollupNeeded } from './summary-rollup-maintenance'
-import { SUMMARY_CONTRACT_VERSION } from './summary-contract'
 
 export { SUMMARY_CONTRACT_VERSION } from './summary-contract'
 export const SUMMARY_TOKEN_BUDGET = 3000
@@ -22,8 +21,6 @@ export type SummaryReader =
   | 'directions.suggest'
   | 'librarian.analyze'
   | 'editing'
-
-export type SummaryGapReason = 'missing-analysis' | 'empty-summary' | 'unverified-source' | 'stale-source' | 'old-contract'
 
 export interface SummaryProjectionItem {
   kind: 'contribution' | 'gap' | 'rollup'
@@ -189,40 +186,24 @@ export async function buildSummaryProjection(
   const items = await Promise.all(candidates.map(async (fragment, indexInProjection): Promise<SummaryProjectionItem> => {
     const position = indexInProjection + 1
     const analysisId = index?.latestByFragmentId[fragment.id]?.analysisId
-    if (!analysisId) {
-      return { kind: 'gap', level: 0, proseId: fragment.id, position, gapReason: 'missing-analysis', tokenCount: 12 }
+    const source = await inspectSummarySource(params.dataDir, params.storyId, fragment, analysisId)
+    if ('gapReason' in source) {
+      return { kind: 'gap', level: 0, proseId: fragment.id, position, analysisId, gapReason: source.gapReason, tokenCount: 12 }
     }
-
-    const analysis = await getAnalysis(params.dataDir, params.storyId, analysisId)
-    if (!analysis?.summaryUpdate?.trim()) {
-      return { kind: 'gap', level: 0, proseId: fragment.id, position, analysisId, gapReason: 'empty-summary', tokenCount: 12 }
-    }
-    if (!analysis.sourceRevision) {
-      return { kind: 'gap', level: 0, proseId: fragment.id, position, analysisId, gapReason: 'unverified-source', tokenCount: 12 }
-    }
-    if (analysis.sourceRevision.contentHash !== proseContentHash(fragment)) {
-      return { kind: 'gap', level: 0, proseId: fragment.id, position, analysisId, gapReason: 'stale-source', tokenCount: 12 }
-    }
-    if (analysis.summaryContractVersion !== SUMMARY_CONTRACT_VERSION) {
-      return { kind: 'gap', level: 0, proseId: fragment.id, position, analysisId, gapReason: 'old-contract', tokenCount: 12 }
-    }
-
-    const text = analysis.summaryUpdate.trim()
-    const sourceHash = analysis.sourceRevision.contentHash
     return {
       kind: 'contribution',
       level: 0,
       proseId: fragment.id,
       position,
-      analysisId,
-      text,
-      tokenCount: estimateTokens(text),
+      analysisId: source.analysisId,
+      text: source.text,
+      tokenCount: estimateTokens(source.text),
       rollupLeafId: summaryRollupLeafId({
         proseId: fragment.id,
-        analysisId,
-        sourceHash,
-        summary: text,
-        contractVersion: analysis.summaryContractVersion,
+        analysisId: source.analysisId,
+        sourceHash: source.sourceHash,
+        summary: source.text,
+        contractVersion: source.contractVersion,
       }),
     }
   }))

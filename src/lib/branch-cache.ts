@@ -30,5 +30,6 @@ export function invalidateStoryContent(queryClient: QueryClient, storyId: string
   return Promise.all([
     queryClient.invalidateQueries({ queryKey: ['proseChain', storyId] }),
     queryClient.invalidateQueries({ queryKey: ['fragments', storyId] }),
+    queryClient.invalidateQueries({ queryKey: ['librarian-analysis-index', storyId] }),
   ]).then(() => undefined)
 }

@@ -288,6 +288,7 @@ export function ProseChainView({
     () => new Set(Object.keys(analysisIndex?.latestByFragmentId ?? {})),
     [analysisIndex],
   )
+  const showAnalysisWarnings = !story?.settings.disableLibrarianAutoAnalysis && !analysisIndex?.autoAnalysisDisabled
 
   const analyzeMutation = useMutation({
     mutationFn: (fragmentId: string) => api.librarian.analyze(storyId, fragmentId),
@@ -971,7 +972,7 @@ export function ProseChainView({
             onAskLibrarian={onAskLibrarian}
             onAnalyze={handleAnalyze}
             hasAnalysis={analyzedFragments.has(fragment.id)}
-            analysisWarning={analysisIndex?.autoAnalysisDisabled ? undefined : analysisIndex?.warningByFragmentId[fragment.id]}
+            analysisWarning={showAnalysisWarnings ? analysisIndex?.warningByFragmentId[fragment.id] : undefined}
             quickSwitch={quickSwitch}
             enabledMentionTypes={enabledMentionTypes}
             mentionFragmentTypesById={mentionFragmentTypesById}
@@ -1091,7 +1092,7 @@ export function ProseChainView({
                   onAskLibrarian={onAskLibrarian}
                   onAnalyze={handleAnalyze}
                   hasAnalysis={analyzedFragments.has(savedGenerationHandoffFragment.id)}
-                  analysisWarning={analysisIndex?.autoAnalysisDisabled ? undefined : analysisIndex?.warningByFragmentId[savedGenerationHandoffFragment.id]}
+                  analysisWarning={showAnalysisWarnings ? analysisIndex?.warningByFragmentId[savedGenerationHandoffFragment.id] : undefined}
                   quickSwitch={quickSwitch}
                   enabledMentionTypes={enabledMentionTypes}
                   mentionFragmentTypesById={mentionFragmentTypesById}

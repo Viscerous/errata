@@ -143,8 +143,11 @@ function AgentBlockEditor({ storyId, agentName, agents, onBack }: AgentBlockEdit
   const configMutation = useMutation({
     mutationFn: (params: { overrides?: Record<string, BlockOverride>; blockOrder?: string[]; disabledTools?: string[]; disableAutoAnalysis?: boolean }) =>
       api.agentBlocks.updateConfig(storyId, agentName, params),
-    onSuccess: () => {
+    onSuccess: (_config, variables) => {
       queryClient.invalidateQueries({ queryKey: ['agent-blocks', storyId, agentName] })
+      if (variables.disableAutoAnalysis !== undefined) {
+        queryClient.invalidateQueries({ queryKey: ['librarian-analysis-index', storyId] })
+      }
     },
   })
 

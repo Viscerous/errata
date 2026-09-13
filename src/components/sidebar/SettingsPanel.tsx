@@ -412,8 +412,11 @@ export function SettingsPanel({
     scope: { id: `story-settings:${storyId}` },
     mutationFn: (data: Parameters<typeof api.settings.update>[1]) =>
       api.settings.update(storyId, data),
-    onSuccess: (updated) => {
+    onSuccess: (updated, variables) => {
       queryClient.setQueryData(['story', storyId], updated)
+      if (variables.disableLibrarianAutoAnalysis !== undefined) {
+        queryClient.invalidateQueries({ queryKey: ['librarian-analysis-index', storyId] })
+      }
     },
     onSettled: () => {
       if (queryClient.isMutating({ mutationKey: ['story-settings', storyId] }) === 1) {

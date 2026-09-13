@@ -173,7 +173,7 @@ export interface LibrarianAnalysisSummary {
 export interface LibrarianAnalysisStatusResponse {
   autoAnalysisDisabled: boolean
   latestByFragmentId: Record<string, string>
-  /** Only attempted analyses that did not finish; missing entries are not warnings. */
+  /** Missing or unusable story-summary coverage for settled prose passages. */
   warningByFragmentId: Record<string, string>
 }
 

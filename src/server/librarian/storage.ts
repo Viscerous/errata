@@ -329,6 +329,7 @@ export async function saveAnalysis(
     normalized,
   )
   cacheAnalysisRead(path, Promise.resolve(cloneAnalysis(normalized)))
+  summaryCache.delete(path)
 
   // Index read-modify-write must be serialized: concurrent saves would each read
   // the same index and the later write would drop the earlier entry.
@@ -406,6 +407,7 @@ export async function deleteAnalysis(
 
   await unlink(path)
   analysisReadCache.delete(path)
+  summaryCache.delete(path)
 
   // If either pointer named the deleted artifact, promote the next eligible
   // artifact instead of leaving the fragment unindexed until a full rebuild.
@@ -452,6 +454,7 @@ export async function deleteAnalysis(
 interface CachedAnalysisSummary {
   signature: string
   summary: LibrarianAnalysisSummary
+  source: { text: string; sourceHash?: string; contractVersion?: number }
   /** Present only when the analysis carries a projection worth staleness-checking. */
   projectionContentHash: string | null
 }
@@ -468,6 +471,11 @@ async function readAnalysisSummary(path: string): Promise<CachedAnalysisSummary>
   const analysis = normalizeAnalysis(JSON.parse(await readFile(path, 'utf-8')))
   const entry: CachedAnalysisSummary = {
     signature,
+    source: {
+      text: analysis.summaryUpdate.trim(),
+      sourceHash: analysis.sourceRevision?.contentHash,
+      contractVersion: analysis.summaryContractVersion,
+    },
     summary: {
       id: analysis.id,
       createdAt: analysis.createdAt,
@@ -492,6 +500,17 @@ async function readAnalysisSummary(path: string): Promise<CachedAnalysisSummary>
     summaryCache.delete(oldest)
   }
   return entry
+}
+
+/** Lightweight source metadata for coverage checks; avoids cloning a full agent trace on every UI poll. */
+export async function getAnalysisSummarySource(
+  dataDir: string,
+  storyId: string,
+  analysisId: string,
+): Promise<CachedAnalysisSummary['source'] | null> {
+  const path = await analysisPath(dataDir, storyId, analysisId)
+  if (!existsSync(path)) return null
+  return (await readAnalysisSummary(path)).source
 }
 
 export async function listAnalyses(
