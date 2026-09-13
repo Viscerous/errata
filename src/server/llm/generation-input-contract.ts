@@ -51,15 +51,19 @@ export function createPlanningRequest(
   inputMode: AuthorInputMode,
   operation: GenerationOperation,
 ): string {
-  if (operation === 'regenerate') {
-    return `The author wants to REGENERATE the latest passage. Their direction: ${authorInput}\n\nCreate a writing brief for an alternative version of the most recent prose.`
-  }
   if (operation === 'refine') {
     return `The author wants to REFINE/EDIT the latest passage. Their direction: ${authorInput}\n\nCreate a writing brief that addresses the author's refinement request while maintaining continuity.`
   }
-  return inputMode === 'play'
-    ? `## Protagonist Move\n\nThis is the protagonist's intended move. Stage this beat near the opening of the passage and plan the world's answering response.\n\n${authorInput}`
-    : `## Author Request\n\n${authorInput}`
+  if (inputMode === 'play') {
+    const action = operation === 'regenerate'
+      ? 'The author wants an alternative regeneration of the passage from this protagonist\'s intended move.'
+      : 'This is the protagonist\'s intended move.'
+    return `## Protagonist Move\n\n${action} Stage this beat and plan the world's answering response.\n\n${authorInput}`
+  }
+  if (operation === 'regenerate') {
+    return `The author wants to REGENERATE the latest passage. Their direction: ${authorInput}\n\nCreate a writing brief for an alternative version of the most recent prose.`
+  }
+  return `## Author Request\n\n${authorInput}`
 }
 
 export interface GenerationInputSurfaceAudit {

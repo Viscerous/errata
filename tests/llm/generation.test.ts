@@ -756,6 +756,80 @@ describe('generation endpoint', () => {
     expect(allFragments.length).toBe(2)
   })
 
+  it('regenerate mode inherits generatedFromMode from the existing fragment', async () => {
+    const original = makeFragment({
+      id: 'pr-regen-play',
+      content: 'Original prose content in play mode.',
+      meta: {
+        generatedFromMode: 'play',
+      },
+    })
+    await createFragment(dataDir, storyId, original)
+    await addProseSection(dataDir, storyId, original.id)
+
+    mockAgentStream.mockResolvedValue(
+      createMockStreamResult('Regenerated play prose content.') as any,
+    )
+
+    const res = await api(`/stories/${storyId}/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        input: 'I step forward boldly.',
+        saveResult: true,
+        mode: 'regenerate',
+        fragmentId: 'pr-regen-play',
+      }),
+    })
+
+    expect(res.status).toBe(200)
+    await res.text()
+    await new Promise((r) => setTimeout(r, 100))
+
+    const allFragments = await listFragments(dataDir, storyId, 'prose')
+    const variation = allFragments.find((f) => f.meta?.variationOf === 'pr-regen-play')
+    expect(variation).toBeDefined()
+    expect(variation!.meta.generatedFromMode).toBe('play')
+    expect(variation!.meta.generationMode).toBe('regenerate')
+  })
+
+  it('regenerate mode inherits direct mode from the existing fragment', async () => {
+    const original = makeFragment({
+      id: 'pr-regen-direct',
+      content: 'Original prose content in direct mode.',
+      meta: {
+        generatedFromMode: 'direct',
+      },
+    })
+    await createFragment(dataDir, storyId, original)
+    await addProseSection(dataDir, storyId, original.id)
+
+    mockAgentStream.mockResolvedValue(
+      createMockStreamResult('Regenerated direct prose content.') as any,
+    )
+
+    const res = await api(`/stories/${storyId}/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        input: 'Make the dialogue sharper',
+        saveResult: true,
+        mode: 'regenerate',
+        fragmentId: 'pr-regen-direct',
+      }),
+    })
+
+    expect(res.status).toBe(200)
+    await res.text()
+    await new Promise((r) => setTimeout(r, 100))
+
+    const allFragments = await listFragments(dataDir, storyId, 'prose')
+    const variation = allFragments.find((f) => f.meta?.variationOf === 'pr-regen-direct')
+    expect(variation).toBeDefined()
+    expect(variation!.meta.generatedFromMode).toBe('direct')
+    expect(variation!.meta.generationMode).toBe('regenerate')
+  })
+
   // --- Refine mode ---
 
   it('refine mode includes existing content in prompt and replaces fragment', async () => {

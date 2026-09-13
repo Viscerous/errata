@@ -87,4 +87,15 @@ describe('generation input prompt contract', () => {
     expect(brief.find(block => block.id === 'play-output-contract')?.content)
       .toBe(standard.find(block => block.id === 'play-output-contract')?.content)
   })
+
+  it('frames regenerate with Play mode as protagonist move rather than author direction', () => {
+    const playRegen = planningBlock(createPlanningRequest(AUTHOR_INPUT, 'play', 'regenerate'))
+    expect(playRegen[0].content).toContain("protagonist's intended move")
+    expect(playRegen[0].content).toContain('## Protagonist Move')
+    expect(playRegen[0].content).not.toContain('Their direction:')
+
+    const directRegen = planningBlock(createPlanningRequest(AUTHOR_INPUT, 'direct', 'regenerate'))
+    expect(directRegen[0].content).toContain('Their direction:')
+    expect(directRegen[0].content).not.toContain('## Protagonist Move')
+  })
 })

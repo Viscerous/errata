@@ -119,17 +119,6 @@ export async function runGeneration(
   abortController.signal.throwIfAborted()
 
   const mode = body.mode ?? 'generate'
-  const inputMode: AuthorInputMode = mode === 'generate'
-    ? body.inputMode ?? 'direct'
-    : 'direct'
-  const librarianConfig = await getAgentBlockConfig(dataDir, storyId, 'librarian.analyze')
-  const disableLibrarianAutoAnalysis = (story.settings.disableLibrarianAutoAnalysis ?? false) || (librarianConfig.disableAutoAnalysis ?? false)
-  const modeLabel = mode === 'regenerate'
-    ? 'Regenerate'
-    : mode === 'refine'
-      ? 'Refine'
-      : 'Continuation'
-  const proseFragmentName = `[${modeLabel}] ${body.input.trim()}`.slice(0, 100)
 
   // Validate fragmentId for regenerate/refine
   let existingFragment: Fragment | null = null
@@ -144,6 +133,19 @@ export async function runGeneration(
       return { ok: false, status: 404, error: 'Fragment not found' }
     }
   }
+
+  const inputMode: AuthorInputMode = body.inputMode
+    ?? (mode === 'regenerate' ? (existingFragment?.meta?.generatedFromMode as AuthorInputMode | undefined) : undefined)
+    ?? (mode !== 'refine' ? story.settings.authorInputMode : undefined)
+    ?? 'direct'
+  const librarianConfig = await getAgentBlockConfig(dataDir, storyId, 'librarian.analyze')
+  const disableLibrarianAutoAnalysis = (story.settings.disableLibrarianAutoAnalysis ?? false) || (librarianConfig.disableAutoAnalysis ?? false)
+  const modeLabel = mode === 'regenerate'
+    ? 'Regenerate'
+    : mode === 'refine'
+      ? 'Refine'
+      : 'Continuation'
+  const proseFragmentName = `[${modeLabel}] ${body.input.trim()}`.slice(0, 100)
 
   // Compose prompt based on mode
   let effectiveInput = body.input

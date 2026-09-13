@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo, memo } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { api, type Fragment, type ProseChainResponseEntry } from '@/lib/api'
+import type { AuthorInputMode } from '@/contracts/generation'
 import { copyText } from '@/lib/clipboard'
 import { invalidateStoryContent } from '@/lib/branch-cache'
 import { Button } from '@/components/ui/button'
@@ -173,7 +174,8 @@ export const ProseBlock = memo(function ProseBlock({
     setActionThoughtSteps([])
 
     try {
-      const stream = await api.generation.regenerate(storyId, fragment.id, instruction)
+      const inputMode = (fragment.meta?.generatedFromMode as AuthorInputMode) || undefined
+      const stream = await api.generation.regenerate(storyId, fragment.id, instruction, undefined, { inputMode })
       await consumeGenerationStream(stream, ({ text, thoughts }) => {
         setStreamedActionText(text)
         if (thoughts.length > 0) setActionThoughtSteps(thoughts)
