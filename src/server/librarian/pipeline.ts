@@ -316,6 +316,21 @@ async function runOnlineAnalyzePass(
       sampling,
     })
 
+    emit({
+      type: 'analysis-progress',
+      progress: {
+        fragmentId: fragment.id,
+        stage: 'observation',
+        summaryUpdate: '',
+        continuityProjection: collector.continuityProjection,
+        mentions: [],
+        contradictions: [],
+        fragmentChangeProposals: [],
+        timelineEvents: [],
+        directions: [],
+      },
+    })
+
     const result = await runCompiledToolPass({
       compiled,
       model,

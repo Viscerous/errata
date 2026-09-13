@@ -391,7 +391,7 @@ function ToolsTab({ log }: { log: GenerationLog }) {
               )}
 
               {/* Tool name */}
-              <span className="text-ui-label font-mono font-medium text-foreground/70 shrink-0">
+              <span className="text-ui-label font-mono font-normal text-foreground/70 shrink-0">
                 {tc.toolName}
               </span>
 

@@ -87,7 +87,8 @@ export const ProseBlock = memo(function ProseBlock({
   const [ttsSettings] = useTtsSettings()
   const isReadingThis = useIsReadingFragment(fragment.id)
   const [editingPrompt, setEditingPrompt] = useState(false)
-  const [clickY, setClickY] = useState(0)
+  const [toolbarTop, setToolbarTop] = useState(0)
+  const [selectedText, setSelectedText] = useState('')
   const blockRef = useRef<HTMLDivElement>(null)
   const actionPanelRef = useRef<HTMLDivElement>(null)
   const actionInputRef = useRef<HTMLTextAreaElement>(null)
@@ -108,6 +109,7 @@ export const ProseBlock = memo(function ProseBlock({
         setActionMode(null)
         setActionInput('')
         setEditingPrompt(false)
+        setSelectedText('')
       }
     }
     document.addEventListener('mousedown', handler)
@@ -365,9 +367,26 @@ export const ProseBlock = memo(function ProseBlock({
         tabIndex={0}
         onClick={(e: React.MouseEvent) => {
           if (isStreamingAction) return
+          if (actionPanelRef.current?.contains(e.target as Node)) return
           if (!showActions && blockRef.current) {
             const blockRect = blockRef.current.getBoundingClientRect()
-            setClickY(e.clientY - blockRect.top)
+            const sel = window.getSelection()
+            let targetTop = e.clientY - blockRect.top
+            let targetBottom = targetTop
+            let text = ''
+            if (sel && !sel.isCollapsed && sel.rangeCount > 0) {
+              const range = sel.getRangeAt(0)
+              if (blockRef.current.contains(range.commonAncestorContainer)) {
+                const rangeRect = range.getBoundingClientRect()
+                if (rangeRect.height > 0) {
+                  targetTop = rangeRect.top - blockRect.top
+                  targetBottom = rangeRect.bottom - blockRect.top
+                }
+                text = sel.toString()
+              }
+            }
+            setSelectedText(text)
+            setToolbarTop(targetBottom + 8)
           }
           setShowActions(v => !v)
         }}
@@ -410,7 +429,7 @@ export const ProseBlock = memo(function ProseBlock({
         <div
           ref={actionPanelRef}
           className="absolute left-0 right-0 z-10 flex justify-center animate-in fade-in zoom-in-95 duration-150"
-          style={{ top: clickY, transform: 'translateY(-50%)' }}
+          style={{ top: toolbarTop }}
           data-component-id="prose-block-actions"
         >
           {actionMode ? (
@@ -564,7 +583,7 @@ export const ProseBlock = memo(function ProseBlock({
                   variant="ghost"
                   size="sm"
                   className="h-7 px-2.5 text-ui-label text-muted-foreground"
-                  onClick={() => { if (onEdit) { onEdit(fragment.id, window.getSelection()?.toString() || undefined); setShowActions(false) } }}
+                  onClick={() => { if (onEdit) { onEdit(fragment.id, selectedText || window.getSelection()?.toString() || undefined); setShowActions(false) } }}
                   disabled={!onEdit}
                   data-component-id={`prose-${fragment.id}-edit`}
                 >

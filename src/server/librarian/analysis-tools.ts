@@ -307,7 +307,7 @@ export function buildReportAnalysisInputSchema(
     mentions: z.array(mentionInputSchema).default([])
       .describe('Distinct listed-fragment mentions using exact prose text, never bare pronouns.'),
     candidateFragmentIds: z.array(FragmentIdSchema).default([])
-      .describe('Existing record IDs needing full text for durable-memory or contradiction review.'),
+      .describe('Existing record IDs whose claims potentially conflict with the prose, requesting full text for review or correction. Leave empty if no records need inspection or correction.'),
     contradictions: z.array(z.object({
       description: z.string().describe('What the contradiction is'),
       recordCorrectionReason: z.string().trim().min(1).max(500).optional()
@@ -906,7 +906,8 @@ export function createAnalysisTools(
   // Normalized once here; every lookup below reads the same shape and numbering.
   const continuityRegistry = completeRegistry(opts?.continuityKeys ?? {})
   const emitProgress = (stage: LibrarianAnalysisProgressStage) => {
-    if (!opts?.onProgress || !opts.proseFragmentId || !hasReported) return
+    if (!opts?.onProgress || !opts.proseFragmentId) return
+    if (!hasReported && stage !== 'observation') return
     opts.onProgress(structuredClone({
       fragmentId: opts.proseFragmentId,
       stage,
@@ -1036,7 +1037,7 @@ export function createAnalysisTools(
         // model explicitly asking to inspect durable assertions, so only a
         // newly delivered candidate keeps the inspection stage open.
         const candidateIds = new Set(candidateFragmentIds)
-        const inspectionRequired = resolvedFragments.some((fragment) => candidateIds.has(fragment.id))
+        const inspectionRequired = opts?.disableSuggestions !== true && resolvedFragments.some((fragment) => candidateIds.has(fragment.id))
 
         const skippedContradictions: Array<Skipped<{ description: string }>> = []
         const groundedContradictions: AnalysisCollector['contradictions'] = []

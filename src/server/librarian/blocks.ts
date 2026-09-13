@@ -96,13 +96,13 @@ export function buildAnalyzeSystemPrompt(opts?: {
   const guidance: string[] = []
 
   if (canReport) {
-    guidance.push('Before calling **reportAnalysis**, use the catalog descriptions to identify reusable records whose durable claims could materially change a finding, and include their IDs in candidateFragmentIds. If the result supplies additional record bodies, revise only findings those records change.')
+    guidance.push('Before calling **reportAnalysis**, if the new prose potentially contradicts or changes a reusable record whose full text was not already shown, include its ID in candidateFragmentIds to request its numbered sentences for correction; otherwise leave candidateFragmentIds empty. If the result supplies additional record bodies, revise only findings those records change.')
   } else {
     guidance.push('Review the new prose against the supplied context without inventing a replacement reporting tool.')
   }
 
   if (canReport && canMaintainRecords) {
-    guidance.push('Before the first **reportAnalysis**, make any optional record-maintenance proposals supported by records already shown. If the report supplies additional record bodies, inspect them and make any resulting proposals; call **reportAnalysis** again only when those records change its findings or directions, otherwise stop.')
+    guidance.push('Before the first **reportAnalysis**, make any optional record-maintenance proposals supported by records already shown. If candidate record bodies were requested, inspect them and make any resulting proposals; call **reportAnalysis** again only when those records change its findings or directions, otherwise stop.')
   }
   if (canSuggestDirections) {
     guidance.push('When ready to report, include three distinct next-passage directions in the first **reportAnalysis** call. If newly supplied records change the findings, include revised directions in the replacement report.')
