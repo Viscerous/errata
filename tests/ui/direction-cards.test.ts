@@ -151,7 +151,7 @@ describe('direction card activation', () => {
 
   it('sends an explicit play contract for action and dialogue input', async () => {
     localStorage.setItem('errata:generation-mode', 'play')
-    getStory.mockResolvedValue({ settings: { authorInputMode: 'play', modelOverrides: {} } })
+    getStory.mockResolvedValue({ settings: { modelOverrides: {} } })
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     render(React.createElement(
       QueryClientProvider,
@@ -175,6 +175,28 @@ describe('direction card activation', () => {
     expect(generateAndSave.mock.calls[0][3]).toMatchObject({ inputMode: 'play' })
     expect(screen.getByRole('tab', { name: 'Play the protagonist' }).getAttribute('aria-selected')).toBe('true')
     expect(screen.getByRole('tab', { name: 'Direct the writing assistant' }).getAttribute('aria-selected')).toBe('false')
+  })
+
+  it('keeps Direct first while remembering the last selected tab globally', async () => {
+    localStorage.removeItem('errata:generation-mode')
+    const mount = (storyId: string) => render(React.createElement(
+      QueryClientProvider,
+      { client: new QueryClient({ defaultOptions: { queries: { retry: false } } }) },
+      React.createElement(TooltipProvider, null, React.createElement(InlineGenerationInput, {
+        storyId, isGenerating: false, latestFragmentId: undefined, onGenerationStart,
+        onGenerationStream: () => undefined, onGenerationComplete: () => undefined,
+        onGenerationError: () => undefined,
+      })),
+    ))
+    const first = mount('story-one')
+    expect(screen.getAllByRole('tab').slice(0, 2).map((tab) => tab.textContent)).toEqual(['Direct', 'Play'])
+    expect(screen.getByRole('tab', { name: 'Direct the writing assistant' }).getAttribute('aria-selected')).toBe('true')
+    fireEvent.click(screen.getByRole('tab', { name: 'Play the protagonist' }))
+    expect(localStorage.getItem('errata:generation-mode')).toBe('play')
+    first.unmount()
+    mount('story-two')
+    expect(screen.getAllByRole('tab').slice(0, 2).map((tab) => tab.textContent)).toEqual(['Direct', 'Play'])
+    expect(screen.getByRole('tab', { name: 'Play the protagonist' }).getAttribute('aria-selected')).toBe('true')
   })
 
   it('commits on Enter for a keyboard user, whose focus was its own interaction', async () => {

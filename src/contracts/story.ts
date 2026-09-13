@@ -89,9 +89,6 @@ export const StoryMetaSchema = z.object({
         topP: z.number().min(0).max(1).nullable().optional(),
         topK: z.number().int().min(1).max(1000).nullable().optional(),
       })).default({}),
-      // Story-level contract for interpreting the primary writing composer.
-      // Direct input is prompt-only; Play input becomes canonical manuscript.
-      authorInputMode: z.enum(['direct', 'play']).default('direct'),
       generationMode: z.enum(['standard', 'prewriter']).default('standard'),
       // Let the prewriter ask the author clarifying questions before writing.
       // Only takes effect in prewriter mode. Off by default.
@@ -149,7 +146,7 @@ export const StoryMetaSchema = z.object({
         })
         .optional(),
     })
-    .default({ outputFormat: 'markdown', enabledPlugins: [], maxSteps: 10, modelOverrides: {}, authorInputMode: 'direct', generationMode: 'standard', clarifyBeforeGenerate: false, prewriterReasoning: 'normal', disableLibrarianAutoAnalysis: false, autoApplyLibrarianSuggestions: false, disableLibrarianDirections: false, disableLibrarianSuggestions: false, contextOrderMode: 'simple', fragmentOrder: [], customFragmentTypes: [], enabledBuiltinTools: [], contextCompact: { type: 'proseLimit', value: 10 }, disableThinking: false, expandThoughtsByDefault: true }),
+    .default({ outputFormat: 'markdown', enabledPlugins: [], maxSteps: 10, modelOverrides: {}, generationMode: 'standard', clarifyBeforeGenerate: false, prewriterReasoning: 'normal', disableLibrarianAutoAnalysis: false, autoApplyLibrarianSuggestions: false, disableLibrarianDirections: false, disableLibrarianSuggestions: false, contextOrderMode: 'simple', fragmentOrder: [], customFragmentTypes: [], enabledBuiltinTools: [], contextCompact: { type: 'proseLimit', value: 10 }, disableThinking: false, expandThoughtsByDefault: true }),
 })
 
 export type StoryMeta = z.infer<typeof StoryMetaSchema>

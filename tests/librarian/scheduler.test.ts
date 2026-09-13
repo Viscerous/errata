@@ -28,14 +28,31 @@ vi.mock('../../src/server/fragments/branches', () => ({
   withBranch: vi.fn((_dataDir: string, _storyId: string, fn: () => Promise<unknown>, _branchId?: string) => fn()),
 }))
 
+vi.mock('@/server/fragments/storage', () => ({
+  getStory: vi.fn().mockResolvedValue(null),
+  getFragment: vi.fn(async (_dataDir: string, _storyId: string, id: string) => makeFragment(id)),
+}))
+vi.mock('../../src/server/fragments/storage', () => ({
+  getStory: vi.fn().mockResolvedValue(null),
+  getFragment: vi.fn(async (_dataDir: string, _storyId: string, id: string) => makeFragment(id)),
+}))
+
 // Mock librarian storage so reanalyzeAfterProseChange's index clear doesn't touch disk
 vi.mock('@/server/librarian/storage', () => ({
   clearAnalysisIndexEntry: vi.fn(() => Promise.resolve()),
+  clearFragmentFromState: vi.fn(() => Promise.resolve()),
   setAnalysisFailure: vi.fn(() => Promise.resolve()),
 }))
 vi.mock('../../src/server/librarian/storage', () => ({
   clearAnalysisIndexEntry: vi.fn(() => Promise.resolve()),
+  clearFragmentFromState: vi.fn(() => Promise.resolve()),
   setAnalysisFailure: vi.fn(() => Promise.resolve()),
+}))
+vi.mock('@/server/librarian/suggestions', () => ({
+  revertAllAppliedProposalsForFragment: vi.fn().mockResolvedValue({ revertedCount: 0 }),
+}))
+vi.mock('../../src/server/librarian/suggestions', () => ({
+  revertAllAppliedProposalsForFragment: vi.fn().mockResolvedValue({ revertedCount: 0 }),
 }))
 
 vi.mock('@/server/agents/agent-block-storage', () => ({

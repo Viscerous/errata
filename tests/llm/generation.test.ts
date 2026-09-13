@@ -10,6 +10,9 @@ import {
 import { saveAgentBlockConfig } from '@/server/agents/agent-block-storage'
 import { listAgentRuns, clearAgentRuns } from '@/server/agents/traces'
 import { clearPending, getPendingCount } from '@/server/librarian/scheduler'
+import { addProseSection, getProseChain } from '@/server/fragments/prose-chain'
+import { saveAnalysis, getAnalysisIndex, type LibrarianAnalysis } from '@/server/librarian/storage'
+import { SUMMARY_CONTRACT_VERSION } from '@/server/librarian/summary-contract'
 import type { StoryMeta, Fragment } from '@/contracts/story'
 import { composeGeneratedProse, stripAuthorTurnEcho } from '@/contracts/generation'
 
@@ -88,6 +91,15 @@ function makeFragment(overrides: Partial<Fragment>): Fragment {
     order: 0,
     meta: {},
     ...overrides,
+  }
+}
+
+function makeAnalysis(fragmentId: string): LibrarianAnalysis {
+  return {
+    id: `la-${fragmentId}`, fragmentId, createdAt: new Date().toISOString(),
+    summaryUpdate: 'Previous report.', summaryContractVersion: SUMMARY_CONTRACT_VERSION,
+    mentions: [], candidateFragmentIds: [], candidateFragments: [], contradictions: [],
+    timelineEvents: [], fragmentChangeProposals: [], directions: [], passes: [], trace: [],
   }
 }
 
@@ -544,8 +556,6 @@ describe('generation endpoint', () => {
   })
 
   it('commits a successful Play turn and continuation as one canonical passage', async () => {
-    const story = makeStory({ authorInputMode: 'play' })
-    await updateStory(dataDir, story)
     const authorTurn = 'I test the old brass key. "Please work."'
     mockAgentStream.mockResolvedValue(
       // Completion-oriented models sometimes replay the final input before
@@ -556,7 +566,7 @@ describe('generation endpoint', () => {
     const res = await api(`/stories/${storyId}/generate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ input: authorTurn, saveResult: true }),
+      body: JSON.stringify({ input: authorTurn, inputMode: 'play', saveResult: true }),
     })
 
     expect(res.status).toBe(200)
@@ -613,14 +623,13 @@ describe('generation endpoint', () => {
   })
 
   it('rejects a Play response that only echoes the authored turn', async () => {
-    await updateStory(dataDir, makeStory({ authorInputMode: 'play' }))
     const authorTurn = 'I close the ledger and stand.'
     mockAgentStream.mockResolvedValue(createMockStreamResult(authorTurn) as any)
 
     const res = await api(`/stories/${storyId}/generate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ input: authorTurn, saveResult: true }),
+      body: JSON.stringify({ input: authorTurn, inputMode: 'play', saveResult: true }),
     })
 
     expect(res.status).toBe(200)
@@ -708,6 +717,8 @@ describe('generation endpoint', () => {
       content: 'Original prose content.',
     })
     await createFragment(dataDir, storyId, original)
+    await addProseSection(dataDir, storyId, original.id)
+    await saveAnalysis(dataDir, storyId, makeAnalysis(original.id))
 
     mockAgentStream.mockResolvedValue(
       createMockStreamResult('Regenerated prose content.') as any,
@@ -738,6 +749,8 @@ describe('generation endpoint', () => {
     expect(variation).toBeDefined()
     expect(variation!.content).toBe('Regenerated prose content.')
     expect(variation!.meta.generationMode).toBe('regenerate')
+    expect((await getProseChain(dataDir, storyId))?.entries[0].active).toBe(variation!.id)
+    expect((await getAnalysisIndex(dataDir, storyId))?.latestByFragmentId[original.id]).toBeUndefined()
 
     // Should have 2 fragments now (original + variation)
     expect(allFragments.length).toBe(2)
@@ -751,6 +764,8 @@ describe('generation endpoint', () => {
       content: 'The hero walked slowly through the forest.',
     })
     await createFragment(dataDir, storyId, original)
+    await addProseSection(dataDir, storyId, original.id)
+    await saveAnalysis(dataDir, storyId, makeAnalysis(original.id))
 
     mockAgentStream.mockResolvedValue(
       createMockStreamResult('The hero crept through the dark forest.') as any,
@@ -788,6 +803,8 @@ describe('generation endpoint', () => {
     expect(variation).toBeDefined()
     expect(variation!.content).toBe('The hero crept through the dark forest.')
     expect(variation!.meta.generationMode).toBe('refine')
+    expect((await getProseChain(dataDir, storyId))?.entries[0].active).toBe(variation!.id)
+    expect((await getAnalysisIndex(dataDir, storyId))?.latestByFragmentId[original.id]).toBeUndefined()
   })
 
   // --- Validation ---

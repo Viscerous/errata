@@ -385,6 +385,17 @@ describe('record proposals', () => {
     expect(first).toMatchObject({ inspectionRequired: true })
     expect(second).not.toHaveProperty('resolvedFragments')
   })
+
+  it('still inspects a specifically requested record when suggestions are disabled', async () => {
+    const tools = createAnalysisTools(createEmptyCollector(), {
+      dataDir: '/tmp', storyId: 'story-test', proseFragmentId: prose.id,
+      disableSuggestions: true, disableDirections: true, numberedFragmentIds: [],
+    })
+    const result = await tools.reportAnalysis.execute!({
+      summary: 'Alice resigned.', candidateFragmentIds: [record.id],
+    }, executionContext)
+    expect(result).toMatchObject({ inspectionRequired: true })
+  })
 })
 
 describe('continuity registry addressing', () => {

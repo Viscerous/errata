@@ -4,7 +4,8 @@ import { getActiveBranchId, getScopedBranchId, isBranchDeleting, withBranch } fr
 import { getStory, getFragment } from '../fragments/storage'
 import { revertAllAppliedProposalsForFragment } from './suggestions'
 import { getAgentBlockConfig } from '../agents/agent-block-storage'
-import { clearAnalysisIndexEntry, setAnalysisFailure } from './storage'
+import { listActiveAgents, requestAgentCancellation } from '../agents/active-registry'
+import { clearAnalysisIndexEntry, clearFragmentFromState, setAnalysisFailure } from './storage'
 import type { LibrarianRuntimeStatus } from '@/contracts/librarian'
 
 export type {
@@ -150,7 +151,8 @@ async function runAnalysis(
   } catch (err) {
     lastError = err instanceof Error ? err.message : String(err)
     requestLogger.error('Librarian analysis failed', { fragmentId: fragment.id, error: lastError })
-    if (lastError.includes('not found or archived')) {
+    const currentFragment = await withBranch(dataDir, storyId, () => getFragment(dataDir, storyId, fragment.id), branchId).catch(() => null)
+    if (!currentFragment || currentFragment.archived) {
       requestLogger.info('Fragment was archived or removed; skipping recording failure', { fragmentId: fragment.id })
     } else {
       await withBranch(dataDir, storyId, () => setAnalysisFailure(dataDir, storyId, fragment.id, lastError), branchId).catch((writeError) => {
@@ -217,13 +219,39 @@ function hasMaterialProseChange(before: Fragment, after: Fragment): boolean {
     || before.content !== after.content
 }
 
-async function isAutoAnalysisDisabled(dataDir: string, storyId: string): Promise<boolean> {
+export async function isAutoAnalysisDisabled(dataDir: string, storyId: string): Promise<boolean> {
   const [story, librarianConfig] = await Promise.all([
     getStory(dataDir, storyId),
     getAgentBlockConfig(dataDir, storyId, 'librarian.analyze'),
   ])
   return story?.settings.disableLibrarianAutoAnalysis === true
     || librarianConfig.disableAutoAnalysis === true
+}
+
+/** Retire the analysis-derived effects of prose that changed or left the active chain. */
+export async function invalidateLibrarianForFragment(
+  dataDir: string,
+  storyId: string,
+  fragmentId: string,
+): Promise<void> {
+  let revertError: unknown
+  try {
+    await revertAllAppliedProposalsForFragment(dataDir, storyId, fragmentId)
+  } catch (error) {
+    revertError = error
+  }
+  // Even a conflicting revert must not leave the old report marked current.
+  const cleanup = await Promise.allSettled([
+    clearAnalysisIndexEntry(dataDir, storyId, fragmentId),
+    clearFragmentFromState(dataDir, storyId, fragmentId),
+  ])
+  const errors = [
+    ...(revertError ? [revertError] : []),
+    ...cleanup.filter((result): result is PromiseRejectedResult => result.status === 'rejected').map((result) => result.reason),
+  ]
+  if (errors.length > 0) {
+    throw new Error(`Could not fully invalidate analysis for ${fragmentId}: ${errors.map((error) => error instanceof Error ? error.message : String(error)).join('; ')}`)
+  }
 }
 
 /**
@@ -238,8 +266,17 @@ export async function reanalyzeAfterProseChange(
   after: Fragment,
 ): Promise<void> {
   if (after.type !== 'prose' || !hasMaterialProseChange(before, after)) return
-  await revertAllAppliedProposalsForFragment(dataDir, storyId, after.id).catch(() => {})
-  await clearAnalysisIndexEntry(dataDir, storyId, after.id).catch(() => {})
+  try {
+    await invalidateLibrarianForFragment(dataDir, storyId, after.id)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    logger.child({ storyId }).error('Could not fully invalidate analysis after prose change', {
+      fragmentId: after.id,
+      error: message,
+    })
+    await setAnalysisFailure(dataDir, storyId, after.id, message)
+    return
+  }
   if (await isAutoAnalysisDisabled(dataDir, storyId)) return
   await triggerLibrarian(dataDir, storyId, after).catch((err) => {
     logger.child({ storyId }).error('triggerLibrarian failed after prose change', {
@@ -278,6 +315,17 @@ export function cancelPendingLibrarianForFragment(storyId: string, fragmentId: s
     pendingFragmentId: null,
     runStatus: state.running ? 'running' : 'idle',
   })
+}
+
+/** Ask an active analysis of this passage to stop before its lifecycle changes. */
+export function cancelLibrarianForFragment(storyId: string, fragmentId: string): void {
+  cancelPendingLibrarianForFragment(storyId, fragmentId)
+  if (runtimeStatus.get(storyId)?.runningFragmentId !== fragmentId) return
+  for (const agent of listActiveAgents(storyId)) {
+    if (agent.agentName === 'librarian.analyze' && agent.runId) {
+      requestAgentCancellation(storyId, agent.runId)
+    }
+  }
 }
 
 /** Remove deferred work for a timeline before its active agents are cancelled. */

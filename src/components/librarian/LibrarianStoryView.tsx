@@ -1,10 +1,8 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { AlertTriangle, BookOpen, ChevronDown, ChevronRight, Clock, Lightbulb, Sparkles } from 'lucide-react'
 import {
   api,
-  type LibrarianAnalysis,
-  type LibrarianAnalysisSummary,
   type LibrarianStatusResponse,
 } from '@/lib/api'
 import { q, qk, useActiveBranchId } from '@/lib/query-keys'

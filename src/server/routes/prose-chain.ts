@@ -15,18 +15,16 @@ import {
   reorderProseSections,
 } from '../fragments/prose-chain'
 import {
-  revertAllAppliedProposalsForFragment,
-} from '../librarian/suggestions'
-import {
-  clearAnalysisIndexEntry,
-  clearFragmentFromState,
-} from '../librarian/storage'
-import {
-  cancelPendingLibrarianForFragment,
+  cancelLibrarianForFragment,
+  invalidateLibrarianForFragment,
+  isAutoAnalysisDisabled,
+  triggerLibrarian,
 } from '../librarian/scheduler'
+import { withKeyLock } from '../async-lock'
 import { generateFragmentId } from '@/lib/fragment-ids'
 import { withBranch } from '../fragments/branches'
 import { invokeAgent } from '../agents'
+import { createLogger } from '../logging'
 import type {
   Fragment,
   ProseChainResponse,
@@ -44,6 +42,8 @@ function toProseVariationSummary(fragment: Fragment): ProseVariationSummary {
     ...(typeof generationMode === 'string' ? { generationMode } : {}),
   }
 }
+
+const logger = createLogger('prose-chain')
 
 export function proseChainRoutes(dataDir: string) {
   return new Elysia({ detail: { tags: ['Prose Chain'] } })
@@ -122,7 +122,29 @@ export function proseChainRoutes(dataDir: string) {
       }
 
       try {
-        await switchActiveProse(dataDir, params.storyId, sectionIndex, body.fragmentId)
+        const chain = await getProseChain(dataDir, params.storyId)
+        const previousActive = chain?.entries[sectionIndex]?.active
+        if (previousActive && previousActive !== body.fragmentId) {
+          cancelLibrarianForFragment(params.storyId, previousActive)
+        }
+        let changed = false
+        await withKeyLock(`librarian:${params.storyId}`, async () => {
+          const current = (await getProseChain(dataDir, params.storyId))?.entries[sectionIndex]
+          if (!current?.proseFragments.includes(body.fragmentId)) {
+            throw new Error(`Fragment ${body.fragmentId} is not a variation of section ${sectionIndex}`)
+          }
+          if (current.active === body.fragmentId) return
+          await invalidateLibrarianForFragment(dataDir, params.storyId, body.fragmentId)
+          await invalidateLibrarianForFragment(dataDir, params.storyId, current.active)
+          await switchActiveProse(dataDir, params.storyId, sectionIndex, body.fragmentId)
+          changed = true
+        })
+        if (changed && !await isAutoAnalysisDisabled(dataDir, params.storyId)) {
+          const active = await getFragment(dataDir, params.storyId, body.fragmentId)
+          if (active && !active.archived) await triggerLibrarian(dataDir, params.storyId, active).catch((error) => {
+            logger.error('Could not schedule analysis after variation switch', { error: error instanceof Error ? error.message : String(error) })
+          })
+        }
         return { ok: true }
       } catch (err) {
         set.status = 400
@@ -149,21 +171,21 @@ export function proseChainRoutes(dataDir: string) {
       }
 
       try {
-        const fragmentIds = await removeProseSection(dataDir, params.storyId, sectionIndex)
-        // Cascade: cancel pending, revert proposals, clear index & state, archive fragments
-        const archivedFragmentIds: string[] = []
-        for (const fid of fragmentIds) {
-          try {
-            cancelPendingLibrarianForFragment(params.storyId, fid)
-            await revertAllAppliedProposalsForFragment(dataDir, params.storyId, fid)
-            await clearAnalysisIndexEntry(dataDir, params.storyId, fid)
-            await clearFragmentFromState(dataDir, params.storyId, fid)
-            await archiveFragment(dataDir, params.storyId, fid)
-            archivedFragmentIds.push(fid)
-          } catch {
-            // Fragment may already be archived or deleted
-          }
+        const chain = await getProseChain(dataDir, params.storyId)
+        for (const fid of chain?.entries[sectionIndex]?.proseFragments ?? []) {
+          cancelLibrarianForFragment(params.storyId, fid)
         }
+        const archivedFragmentIds = await withKeyLock(`librarian:${params.storyId}`, () =>
+          removeProseSection(dataDir, params.storyId, sectionIndex, async (fragmentIds) => {
+            for (const fid of fragmentIds) {
+              cancelLibrarianForFragment(params.storyId, fid)
+              await invalidateLibrarianForFragment(dataDir, params.storyId, fid)
+              if (!await archiveFragment(dataDir, params.storyId, fid)) {
+                throw new Error(`Could not archive prose fragment ${fid}`)
+              }
+            }
+          }),
+        )
         return { ok: true, archivedFragmentIds }
       } catch (err) {
         set.status = 400
@@ -187,15 +209,26 @@ export function proseChainRoutes(dataDir: string) {
       }
 
       try {
-        const result = await removeProseVariation(dataDir, params.storyId, sectionIndex, params.fragmentId)
-        try {
-          cancelPendingLibrarianForFragment(params.storyId, params.fragmentId)
-          await revertAllAppliedProposalsForFragment(dataDir, params.storyId, params.fragmentId)
-          await clearAnalysisIndexEntry(dataDir, params.storyId, params.fragmentId)
-          await clearFragmentFromState(dataDir, params.storyId, params.fragmentId)
-          await archiveFragment(dataDir, params.storyId, params.fragmentId)
-        } catch {
-          // Fragment may already be archived or deleted
+        cancelLibrarianForFragment(params.storyId, params.fragmentId)
+        let replacement: string | null = null
+        const result = await withKeyLock(`librarian:${params.storyId}`, () =>
+          removeProseVariation(dataDir, params.storyId, sectionIndex, params.fragmentId, async (nextActive) => {
+            cancelLibrarianForFragment(params.storyId, params.fragmentId)
+            if (nextActive) {
+              await invalidateLibrarianForFragment(dataDir, params.storyId, nextActive)
+              replacement = nextActive
+            }
+            await invalidateLibrarianForFragment(dataDir, params.storyId, params.fragmentId)
+            if (!await archiveFragment(dataDir, params.storyId, params.fragmentId)) {
+              throw new Error(`Could not archive prose fragment ${params.fragmentId}`)
+            }
+          }),
+        )
+        if (replacement && !await isAutoAnalysisDisabled(dataDir, params.storyId)) {
+          const active = await getFragment(dataDir, params.storyId, replacement)
+          if (active && !active.archived) await triggerLibrarian(dataDir, params.storyId, active).catch((error) => {
+            logger.error('Could not schedule analysis after variation removal', { error: error instanceof Error ? error.message : String(error) })
+          })
         }
         return { ok: true, ...result }
       } catch (err) {

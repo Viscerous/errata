@@ -437,6 +437,7 @@ export async function revertAllAppliedProposalsForFragment(
   const summaries = await listAnalyses(dataDir, storyId)
   const matching = summaries.filter((s) => s.fragmentId === fragmentId)
   let revertedCount = 0
+  const failures: string[] = []
 
   for (const summary of matching) {
     const analysis = await getAnalysis(dataDir, storyId, summary.id)
@@ -461,14 +462,18 @@ export async function revertAllAppliedProposalsForFragment(
           })
           changed = true
           revertedCount += 1
-        } catch {
-          // If target fragment was already deleted or conflicting, continue best-effort
+        } catch (error) {
+          failures.push(`${summary.id} proposal ${i + 1}: ${error instanceof Error ? error.message : String(error)}`)
         }
       }
     }
     if (changed) {
       await saveAnalysis(dataDir, storyId, analysis)
     }
+  }
+
+  if (failures.length > 0) {
+    throw new Error(`Could not revert all applied proposals for ${fragmentId}: ${failures.join('; ')}`)
   }
 
   return { revertedCount }

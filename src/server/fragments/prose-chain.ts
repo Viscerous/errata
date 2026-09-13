@@ -181,6 +181,7 @@ export async function removeProseVariation(
   storyId: string,
   sectionIndex: number,
   fragmentId: string,
+  beforeRemove?: (nextActive: string | null) => Promise<void>,
 ): Promise<{ sectionRemoved: boolean; newActive: string | null }> {
   return withKeyLock(lockKey(storyId), async () => {
     const chain = await getProseChain(dataDir, storyId)
@@ -197,6 +198,11 @@ export async function removeProseVariation(
     if (idx === -1) {
       throw new Error(`Fragment ${fragmentId} is not a variation of section ${sectionIndex}`)
     }
+
+    const nextActive = entry.active === fragmentId
+      ? entry.proseFragments.filter((id) => id !== fragmentId).at(-1) ?? null
+      : null
+    await beforeRemove?.(nextActive)
 
     entry.proseFragments.splice(idx, 1)
 
@@ -241,6 +247,7 @@ export async function removeProseSection(
   dataDir: string,
   storyId: string,
   sectionIndex: number,
+  beforeRemove?: (fragmentIds: string[]) => Promise<void>,
 ): Promise<string[]> {
   return withKeyLock(lockKey(storyId), async () => {
     const chain = await getProseChain(dataDir, storyId)
@@ -252,6 +259,7 @@ export async function removeProseSection(
       throw new Error(`Invalid section index ${sectionIndex}`)
     }
 
+    await beforeRemove?.([...chain.entries[sectionIndex].proseFragments])
     const removed = chain.entries.splice(sectionIndex, 1)[0]
     await saveProseChain(dataDir, storyId, chain)
     return removed.proseFragments

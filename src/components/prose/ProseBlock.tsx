@@ -686,6 +686,12 @@ export const ProseBlock = memo(function ProseBlock({
         </div>
       )}
 
+      {(switchMutation.error || deleteMutation.error) && (
+        <p role="alert" className="mt-2 px-4 text-ui-caption text-destructive">
+          {switchMutation.error?.message ?? deleteMutation.error?.message}
+        </p>
+      )}
+
     </div>
   )
 })

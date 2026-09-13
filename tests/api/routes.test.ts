@@ -139,19 +139,11 @@ describe('Story API routes', () => {
     expect(data.settings.disableLibrarianAutoAnalysis).toBe(true)
   })
 
-  it('PATCH /api/stories/:id/settings persists the story-level author input contract', async () => {
+  it('generation context preview uses the requested writing mode', async () => {
     const created = await (await apiJson('/stories', story)).json()
-    const res = await apiJson(
-      `/stories/${created.id}/settings`,
-      { authorInputMode: 'play' },
-      'PATCH',
-    )
-
-    expect(res.status).toBe(200)
-    expect((await res.json()).settings.authorInputMode).toBe('play')
-
     const preview = await apiJson(`/stories/${created.id}/generation-context-preview`, {
       input: 'I step into the rain.',
+      inputMode: 'play',
     })
     expect(preview.status).toBe(200)
     expect((await preview.json()).inputMode).toBe('play')

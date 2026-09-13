@@ -6,10 +6,11 @@ vi.mock('@/server/agents', () => ({
 }))
 
 import { invokeAgent } from '@/server/agents'
-import { clearPending, cancelPendingLibrarianForFragment } from '@/server/librarian/scheduler'
+import { awaitPending, clearPending, cancelPendingLibrarianForFragment } from '@/server/librarian/scheduler'
 import { createApp } from '@/server/api'
 import {
   getFragment,
+  updateFragment,
 } from '@/server/fragments/storage'
 import {
   addProseVariation,
@@ -24,6 +25,7 @@ import {
   markFragmentChangeProposalApplied,
 } from '@/server/librarian/suggestions'
 import { SUMMARY_CONTRACT_VERSION } from '@/server/librarian/summary-contract'
+import { withKeyLock } from '@/server/async-lock'
 
 const mockedInvokeAgent = vi.mocked(invokeAgent)
 
@@ -74,6 +76,61 @@ async function createStoryWithProse(storyName = 'Lifecycle Story') {
 }
 
 describe('prose and analysis lifecycle guarantees', () => {
+  it('switches old → new → old without retaining either variation’s stale report', async () => {
+    const { storyId, fragmentId: originalId } = await createStoryWithProse()
+    const alternate = await (await apiJson(`/stories/${storyId}/fragments`, {
+      type: 'prose', name: 'Alternate', description: 'Alternate', content: 'Marcus remained outside.',
+    })).json() as { id: string }
+    await addProseVariation(dataDir, storyId, 0, alternate.id)
+
+    const report = (fragmentId: string, id: string): LibrarianAnalysis => ({
+      id, fragmentId, createdAt: new Date().toISOString(), summaryUpdate: 'A passage.',
+      summaryContractVersion: SUMMARY_CONTRACT_VERSION, mentions: [], candidateFragmentIds: [],
+      candidateFragments: [], contradictions: [], timelineEvents: [], fragmentChangeProposals: [],
+      directions: [], passes: [], trace: [],
+    })
+    await saveAnalysis(dataDir, storyId, report(originalId, 'la-original'))
+    await saveAnalysis(dataDir, storyId, report(alternate.id, 'la-alternate'))
+
+    const invalid = await apiJson(`/stories/${storyId}/prose-chain/0/switch`, { fragmentId: 'not-a-variation' })
+    expect(invalid.status).toBe(400)
+    expect((await getAnalysisIndex(dataDir, storyId))?.latestByFragmentId[alternate.id]).toBeDefined()
+
+    expect((await apiJson(`/stories/${storyId}/prose-chain/0/switch`, { fragmentId: originalId })).status).toBe(200)
+    await awaitPending()
+    expect((await getAnalysisIndex(dataDir, storyId))?.latestByFragmentId[originalId]).toBeUndefined()
+    expect((await getAnalysisIndex(dataDir, storyId))?.latestByFragmentId[alternate.id]).toBeUndefined()
+    expect(mockedInvokeAgent).toHaveBeenCalledWith(expect.objectContaining({
+      agentName: 'librarian.analyze', input: { fragmentId: originalId },
+    }))
+
+    expect((await apiJson(`/stories/${storyId}/prose-chain/0/switch`, { fragmentId: alternate.id })).status).toBe(200)
+    await awaitPending()
+    expect(mockedInvokeAgent).toHaveBeenCalledWith(expect.objectContaining({
+      agentName: 'librarian.analyze', input: { fragmentId: alternate.id },
+    }))
+    const chain = await (await api(`/stories/${storyId}/prose-chain`)).json() as { entries: Array<{ active: string }> }
+    expect(chain.entries[0].active).toBe(alternate.id)
+  })
+
+  it('waits for analysis before archiving a passage', async () => {
+    const { storyId, fragmentId } = await createStoryWithProse()
+    let release!: () => void
+    const held = withKeyLock(`librarian:${storyId}`, () => new Promise<void>((resolve) => { release = resolve }))
+    let settled = false
+    const removal = api(`/stories/${storyId}/prose-chain/0`, { method: 'DELETE' }).then((response) => {
+      settled = true
+      return response
+    })
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(settled).toBe(false)
+    expect((await getFragment(dataDir, storyId, fragmentId))?.archived).toBe(false)
+    release()
+    await held
+    expect((await removal).status).toBe(200)
+    expect((await getFragment(dataDir, storyId, fragmentId))?.archived).toBe(true)
+  })
+
   it('cascades section deletion to revert applied proposals and clean index & state', async () => {
     const { storyId, fragmentId } = await createStoryWithProse()
 
@@ -83,14 +140,13 @@ describe('prose and analysis lifecycle guarantees', () => {
       id: analysisId,
       createdAt: new Date().toISOString(),
       fragmentId,
-      sourceRevision: 'rev-1',
       summaryUpdate: 'Marcus entered the cave.',
       summaryContractVersion: SUMMARY_CONTRACT_VERSION,
       mentions: [],
       candidateFragmentIds: [],
       candidateFragments: [],
       contradictions: [],
-      timelineEvents: [{ event: 'Marcus entered the cave', fragmentId }],
+      timelineEvents: [{ event: 'Marcus entered the cave', position: 'after' }],
       fragmentChangeProposals: [
         {
           title: 'Add Torch knowledge',
@@ -111,7 +167,6 @@ describe('prose and analysis lifecycle guarantees', () => {
         },
       ],
       directions: [],
-      analyzeLanes: [],
       passes: [],
       trace: [],
     }
@@ -167,6 +222,39 @@ describe('prose and analysis lifecycle guarantees', () => {
     expect(chainRes.entries).toHaveLength(0)
   })
 
+  it('does not remove the passage when an applied record change cannot be reverted', async () => {
+    const { storyId, fragmentId } = await createStoryWithProse()
+    const analysis: LibrarianAnalysis = {
+      id: 'la-conflict', fragmentId, createdAt: new Date().toISOString(),
+      summaryUpdate: 'Marcus entered the cave.', summaryContractVersion: SUMMARY_CONTRACT_VERSION,
+      mentions: [], candidateFragmentIds: [], candidateFragments: [], contradictions: [],
+      timelineEvents: [], directions: [], passes: [], trace: [],
+      fragmentChangeProposals: [{
+        title: 'Add Torch', proposalKind: 'new-fragment', evidenceText: 'glowing torch',
+        autoApplySafe: true, validation: [],
+        operations: [{
+          action: 'create_fragment', type: 'knowledge', name: 'Torch',
+          description: 'A glowing torch.', content: 'A glowing torch.', reason: 'Scene detail.',
+        }],
+      }],
+    }
+    const applied = await applyFragmentChangeProposal({ dataDir, storyId, analysis, proposalIndex: 0, reason: 'auto-apply' })
+    markFragmentChangeProposalApplied({ analysis, proposalIndex: 0, result: applied, autoApplied: true })
+    await saveAnalysis(dataDir, storyId, analysis)
+    const recordId = applied.appliedResults[0].createdFragmentId!
+    const record = (await getFragment(dataDir, storyId, recordId))!
+    await updateFragment(dataDir, storyId, { ...record, content: 'User-edited torch detail.' })
+
+    const response = await api(`/stories/${storyId}/prose-chain/0`, { method: 'DELETE' })
+    expect(response.status).toBe(400)
+    expect((await response.json() as { error: string }).error).toContain('Could not revert')
+    expect((await getFragment(dataDir, storyId, fragmentId))?.archived).toBe(false)
+    expect((await getFragment(dataDir, storyId, recordId))?.archived).toBe(false)
+    const chain = await (await api(`/stories/${storyId}/prose-chain`)).json() as { entries: unknown[] }
+    expect(chain.entries).toHaveLength(1)
+    expect((await getAnalysisIndex(dataDir, storyId))?.latestByFragmentId[fragmentId]).toBeUndefined()
+  })
+
   it('cascades variation deletion: reverts its proposals, prunes variation, and switches active', async () => {
     const { storyId, fragmentId: frag1Id } = await createStoryWithProse()
 
@@ -192,14 +280,13 @@ describe('prose and analysis lifecycle guarantees', () => {
       id: analysisId,
       createdAt: new Date().toISOString(),
       fragmentId: frag2Id,
-      sourceRevision: 'rev-2',
       summaryUpdate: 'Marcus turned back.',
       summaryContractVersion: SUMMARY_CONTRACT_VERSION,
       mentions: [],
       candidateFragmentIds: [],
       candidateFragments: [],
       contradictions: [],
-      timelineEvents: [{ event: 'Marcus turned back', fragmentId: frag2Id }],
+      timelineEvents: [{ event: 'Marcus turned back', position: 'after' }],
       fragmentChangeProposals: [
         {
           title: 'Add Cave Entrance knowledge',
@@ -220,7 +307,6 @@ describe('prose and analysis lifecycle guarantees', () => {
         },
       ],
       directions: [],
-      analyzeLanes: [],
       passes: [],
       trace: [],
     }

@@ -51,7 +51,7 @@ export function generationRoutes(dataDir: string) {
         return { error: 'Story not found' }
       }
 
-      const inputMode = body.inputMode ?? story.settings.authorInputMode ?? 'direct'
+      const inputMode = body.inputMode ?? 'direct'
       const enabledPlugins = pluginRegistry.getEnabled(story.settings.enabledPlugins)
       let modelId: string | undefined
       let contextWindowPromise: Promise<number | undefined> = Promise.resolve(undefined)

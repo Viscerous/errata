@@ -96,7 +96,7 @@ export function buildAnalyzeSystemPrompt(opts?: {
   const guidance: string[] = []
 
   if (canReport) {
-    guidance.push('Before calling **reportAnalysis**, if the new prose potentially contradicts or changes a reusable record whose full text was not already shown, include its ID in candidateFragmentIds to request its numbered sentences for correction; otherwise leave candidateFragmentIds empty. If the result supplies additional record bodies, revise only findings those records change.')
+    guidance.push('Before calling **reportAnalysis**, include a record ID in candidateFragmentIds only when a specific material finding cannot be settled from the supplied context without that record\'s full text. Do not request records merely to check whether maintenance might be useful. If the result supplies additional record bodies, revise only findings those records change.')
   } else {
     guidance.push('Review the new prose against the supplied context without inventing a replacement reporting tool.')
   }

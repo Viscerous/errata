@@ -1,6 +1,5 @@
 import { apiFetch } from './client'
 import type { CustomFragmentType, StoryMeta } from './types'
-import type { AuthorInputMode } from '@/contracts/generation'
 
 export const settings = {
   update: (storyId: string, data: {
@@ -8,7 +7,6 @@ export const settings = {
     outputFormat?: 'plaintext' | 'markdown'
     maxSteps?: number
     modelOverrides?: StoryMeta['settings']['modelOverrides']
-    authorInputMode?: AuthorInputMode
     generationMode?: 'standard' | 'prewriter'
     clarifyBeforeGenerate?: boolean
     prewriterReasoning?: 'short' | 'normal' | 'extensive'

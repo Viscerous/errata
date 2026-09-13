@@ -168,6 +168,7 @@ export function ProseChainView({
   const [activeIndex, setActiveIndex] = useState(0)
   const activeIndexRef = useRef(0)
   const [mobileTocOpen, setMobileTocOpen] = useState(false)
+  const [chainError, setChainError] = useState<string | null>(null)
   const scrollAreaRef = useRef<HTMLDivElement>(null)
   const [isGenerating, setIsGenerating] = useState(false)
   const [pendingGeneration, setPendingGeneration] = useState<PendingGenerationMeta | null>(null)
@@ -453,7 +454,10 @@ export function ProseChainView({
 
   const handleDeleteSection = useCallback((sectionIndex: number) => {
     api.proseChain.removeSection(storyId, sectionIndex).then(() => {
+      setChainError(null)
       invalidateStoryContent(queryClient, storyId)
+    }).catch((error: unknown) => {
+      setChainError(error instanceof Error ? error.message : String(error))
     })
   }, [storyId, queryClient])
 
@@ -1019,6 +1023,7 @@ export function ProseChainView({
               maxWidth: PROSE_WIDTH_VALUES[proseWidth],
             }}
           >
+            {chainError && <p role="alert" className="mb-4 text-ui-caption text-destructive">{chainError}</p>}
             {orderedRows.length > 0 ? (
               <div ref={setVirtualListContainer} style={{ width: '100%', position: 'relative' }}>
                 {virtualizer.getVirtualItems().map((virtualItem) => {

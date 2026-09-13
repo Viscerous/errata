@@ -9,6 +9,7 @@ import {
   addProseSection,
   addProseVariation,
   findSectionIndex,
+  getProseChain,
 } from '../fragments/prose-chain'
 import { generateFragmentId } from '@/lib/fragment-ids'
 import { buildContextState, addCacheBreakpoints, type ContextBlock } from '../llm/context-builder'
@@ -33,14 +34,10 @@ import {
 } from '../plugins/hooks'
 import {
   triggerLibrarian,
-  cancelPendingLibrarianForFragment,
+  cancelLibrarianForFragment,
+  invalidateLibrarianForFragment,
 } from '../librarian/scheduler'
-import {
-  revertAllAppliedProposalsForFragment,
-} from '../librarian/suggestions'
-import {
-  clearFragmentFromState,
-} from '../librarian/storage'
+import { withKeyLock } from '../async-lock'
 import { getAgentBlockConfig } from '../agents/agent-block-storage'
 import { beginAgentRun } from '../agents/agent-run'
 import type { ActivityStreamEvent } from '../agents/activity-stream'
@@ -123,7 +120,7 @@ export async function runGeneration(
 
   const mode = body.mode ?? 'generate'
   const inputMode: AuthorInputMode = mode === 'generate'
-    ? body.inputMode ?? story.settings.authorInputMode ?? 'direct'
+    ? body.inputMode ?? 'direct'
     : 'direct'
   const librarianConfig = await getAgentBlockConfig(dataDir, storyId, 'librarian.analyze')
   const disableLibrarianAutoAnalysis = (story.settings.disableLibrarianAutoAnalysis ?? false) || (librarianConfig.disableAutoAnalysis ?? false)
@@ -626,16 +623,21 @@ export async function runGeneration(
             if (isRegenOrRefine) {
               const sectionIndex = await findSectionIndex(dataDir, storyId, existingFragment!.id)
               if (sectionIndex !== -1) {
-                await addProseVariation(dataDir, storyId, sectionIndex, id)
+                const previousActive = (await getProseChain(dataDir, storyId))?.entries[sectionIndex]?.active
+                if (previousActive) cancelLibrarianForFragment(storyId, previousActive)
+                await withKeyLock(`librarian:${storyId}`, async () => {
+                  const current = (await getProseChain(dataDir, storyId))?.entries[sectionIndex]
+                  if (!current?.proseFragments.includes(existingFragment!.id)) {
+                    throw new Error(`Original fragment ${existingFragment!.id} is no longer in the prose chain`)
+                  }
+                  cancelLibrarianForFragment(storyId, current.active)
+                  await invalidateLibrarianForFragment(dataDir, storyId, current.active)
+                  await addProseVariation(dataDir, storyId, sectionIndex, id)
+                })
                 requestLogger.info('Added as variation to prose chain', { sectionIndex })
               } else {
                 requestLogger.warn('Original fragment not found in prose chain, creating new section')
                 await addProseSection(dataDir, storyId, id)
-              }
-              if (mode === 'regenerate') {
-                cancelPendingLibrarianForFragment(storyId, existingFragment!.id)
-                await revertAllAppliedProposalsForFragment(dataDir, storyId, existingFragment!.id).catch(() => {})
-                await clearFragmentFromState(dataDir, storyId, existingFragment!.id).catch(() => {})
               }
             } else {
               await addProseSection(dataDir, storyId, id)
