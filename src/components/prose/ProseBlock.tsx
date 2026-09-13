@@ -147,6 +147,8 @@ export const ProseBlock = memo(function ProseBlock({
     : ''
   const quickRegenerateInput = generatedFrom || fragment.description?.trim() || ''
   const canQuickRegenerate = !!quickRegenerateInput
+  const isPlayReroll = fragment.meta?.generatedFromMode === 'play'
+  const rerollPlaceholder = isPlayReroll ? 'Edit protagonist move...' : 'New direction...'
 
   const switchVariation = (dir: -1 | 1) => {
     if (!chainEntry) return
@@ -277,7 +279,7 @@ export const ProseBlock = memo(function ProseBlock({
                   value={actionInput}
                   onChange={(e) => setActionInput(e.target.value)}
                   className="w-full bg-transparent font-display italic text-sm text-foreground/80 placeholder:text-muted-foreground outline-none border-none p-0 caret-primary"
-                  placeholder="New direction..."
+                  placeholder={rerollPlaceholder}
                   autoFocus
                   onKeyDown={(e) => {
                     if (e.key === 'Escape') {
@@ -303,7 +305,7 @@ export const ProseBlock = memo(function ProseBlock({
                     disabled={!actionInput.trim()}
                     onClick={handlePromptSubmit}
                   >
-                    Regenerate
+                    {isPlayReroll ? 'Reroll move' : 'Regenerate'}
                   </Button>
                 </div>
               </div>
@@ -320,7 +322,7 @@ export const ProseBlock = memo(function ProseBlock({
                   promptInputRef.current?.select()
                 })
               }}
-              title="Click to edit prompt and regenerate"
+              title={isPlayReroll ? 'Click to edit protagonist move and regenerate' : 'Click to edit direction and regenerate'}
             >
               <div className="w-0.5 min-h-[1.25rem] rounded-full bg-primary/20 group-hover/prompt:bg-primary/45 transition-colors shrink-0 mt-0.5" />
               <Caption asChild size="sm" className="font-display italic group-hover/prompt:text-muted-foreground truncate transition-colors">
@@ -441,7 +443,7 @@ export const ProseBlock = memo(function ProseBlock({
                 ref={actionInputRef}
                 value={actionInput}
                 onChange={(e) => setActionInput(e.target.value)}
-                placeholder="New direction..."
+                placeholder={rerollPlaceholder}
                 className="w-full resize-none bg-transparent px-3.5 py-2.5 text-sm placeholder:italic placeholder:text-muted-foreground/60 focus:outline-none"
                 rows={2}
                 autoFocus
@@ -468,7 +470,7 @@ export const ProseBlock = memo(function ProseBlock({
                     disabled={!actionInput.trim()}
                     onClick={handleActionSubmit}
                   >
-                    Regenerate
+                    {isPlayReroll ? 'Reroll move' : 'Regenerate'}
                   </Button>
                 </div>
               </div>

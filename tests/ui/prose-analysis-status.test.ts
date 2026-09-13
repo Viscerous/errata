@@ -24,14 +24,14 @@ const fragment: Fragment = {
   archived: false,
 }
 
-function renderBlock(hasAnalysis: boolean, analysisWarning?: string) {
+function renderBlock(hasAnalysis: boolean, analysisWarning?: string, shownFragment: Fragment = fragment) {
   const onAnalyze = vi.fn()
   const result = render(
     createElement(QueryClientProvider, { client: new QueryClient() },
       createElement(ConfirmProvider, null,
         createElement(ProseBlock, {
           storyId: 'story-one',
-          fragment,
+          fragment: shownFragment,
           displayIndex: 0,
           sectionIndex: 0,
           chainEntry: null,
@@ -50,6 +50,18 @@ function renderBlock(hasAnalysis: boolean, analysisWarning?: string) {
 
 describe('prose analysis status', () => {
   afterEach(cleanup)
+
+  it('labels the reroll field as a protagonist move for Play passages', () => {
+    const playFragment: Fragment = {
+      ...fragment,
+      description: 'I raise my hand. "Wait," I say.',
+      meta: { generatedFrom: 'I raise my hand. "Wait," I say.', generatedFromMode: 'play' },
+    }
+    renderBlock(false, undefined, playFragment)
+    fireEvent.click(screen.getByTitle('Click to edit protagonist move and regenerate'))
+    expect(screen.getByPlaceholderText('Edit protagonist move...')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Reroll move' })).toBeTruthy()
+  })
 
   it('leaves a completed passage unmarked and offers Re-analyze', () => {
     const { container } = renderBlock(true)

@@ -8,7 +8,7 @@ export type GenerationOperation = 'generate' | 'regenerate' | 'refine'
  * Build the model-facing Writer blocks for an explicit author input.
  *
  * Direct input is an instruction. Play input is the protagonist's intended move,
- * so it carries the staged play continuation contract and becomes the raw final user input.
+ * so it carries the staged play continuation contract in the final user block.
  */
 export function createGenerationInputBlocks(args: {
   authorInput: string
