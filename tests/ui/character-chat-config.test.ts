@@ -4,8 +4,9 @@ import { describe, expect, it, vi } from 'vitest'
 import { ChatConfig } from '@/components/character-chat/ChatConfig'
 import { StoryChatSwitcher } from '@/components/shared/StoryChatSwitcher'
 
-function renderConfig(historyOpen = false): string {
+function renderConfig(historyOpen = false, mobileMenuTrigger?: React.ReactNode): string {
   return renderToStaticMarkup(React.createElement(ChatConfig, {
+    mobileMenuTrigger,
     characters: [],
     selectedCharacterId: null,
     onCharacterChange: vi.fn(),
@@ -38,6 +39,12 @@ describe('character chat config', () => {
     expect(selectors).toContain('flex-1')
     expect(selectors).toContain('overflow-hidden')
     expect(actions).toContain('shrink-0')
+  })
+
+  it('places the mobile menu in the chat header flow', () => {
+    const html = renderConfig(false, React.createElement('button', { 'data-component-id': 'mobile-menu-trigger' }, 'Menu'))
+    const header = html.match(/<div[^>]+data-component-id="character-chat-config"[^>]*>[\s\S]*?<div[^>]+data-component-id="character-chat-config-selectors"/)?.[0]
+    expect(header).toContain('data-component-id="mobile-menu-trigger"')
   })
 
   it('keeps Story and Chat navigation available in the chat header', () => {

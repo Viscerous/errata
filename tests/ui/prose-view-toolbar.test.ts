@@ -11,11 +11,18 @@ describe('prose view toolbar', () => {
     const onOutlineOpenChange = vi.fn()
     const onMobileOutlineOpen = vi.fn()
     const onMainViewChange = vi.fn()
-    const props = { hasOutline: true, onOutlineOpenChange, onMobileOutlineOpen, onMainViewChange }
+    const props = {
+      mobileMenuTrigger: createElement('button', { type: 'button', 'data-component-id': 'mobile-menu-trigger' }, 'Menu'),
+      hasOutline: true,
+      onOutlineOpenChange,
+      onMobileOutlineOpen,
+      onMainViewChange,
+    }
     const { container, rerender } = render(createElement(ProseViewToolbar, { ...props, outlineOpen: false }))
 
     const toolbar = container.querySelector('[data-component-id="prose-view-toolbar"]')
     expect(toolbar).not.toBeNull()
+    expect(toolbar?.querySelector('[data-component-id="mobile-menu-trigger"]')).not.toBeNull()
     expect(toolbar?.querySelector('[data-component-id="prose-mobile-toc-trigger"]')).not.toBeNull()
     expect(toolbar?.querySelectorAll('[data-component-id="story-chat-switcher"]')).toHaveLength(2)
 

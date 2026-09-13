@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect, useMemo } from 'react'
+import { useState, useRef, useCallback, useEffect, useMemo, type ReactNode } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, type Fragment } from '@/lib/api'
 import type { PersonaMode, CharacterChatConversationSummary } from '@/lib/api/types'
@@ -16,11 +16,12 @@ import { isEnterToSubmit } from '@/lib/enter-to-submit'
 
 interface CharacterChatViewProps {
   storyId: string
+  mobileMenuTrigger?: ReactNode
   initialCharacterId?: string | null
   onClose: () => void
 }
 
-export function CharacterChatView({ storyId, initialCharacterId, onClose }: CharacterChatViewProps) {
+export function CharacterChatView({ storyId, mobileMenuTrigger, initialCharacterId, onClose }: CharacterChatViewProps) {
   const queryClient = useQueryClient()
   const branchId = useActiveBranchId(storyId)
 
@@ -181,6 +182,7 @@ export function CharacterChatView({ storyId, initialCharacterId, onClose }: Char
     <div className="flex flex-col h-full relative" data-component-id="character-chat-view">
       {/* Config bar */}
       <ChatConfig
+        mobileMenuTrigger={mobileMenuTrigger}
         characters={characters}
         selectedCharacterId={characterId}
         onCharacterChange={handleCharacterChange}

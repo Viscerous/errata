@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, type ReactNode } from 'react'
 import type { Fragment, PersonaMode, ProseChainResponse } from '@/lib/api/types'
 import { resolveFragmentVisual } from '@/lib/fragment-visuals'
 import { Button } from '@/components/ui/button'
@@ -20,6 +20,7 @@ import {
 } from 'lucide-react'
 
 interface ChatConfigProps {
+  mobileMenuTrigger?: ReactNode
   characters: Fragment[]
   selectedCharacterId: string | null
   onCharacterChange: (id: string) => void
@@ -64,6 +65,7 @@ function CharacterThumb({ character, mediaById }: { character: Fragment; mediaBy
 }
 
 export function ChatConfig({
+  mobileMenuTrigger,
   characters,
   selectedCharacterId,
   onCharacterChange,
@@ -108,6 +110,7 @@ export function ChatConfig({
 
   return (
     <div className="flex items-center gap-1.5 px-3 py-2 border-b border-border/30 bg-card/30" data-component-id="character-chat-config">
+      {mobileMenuTrigger && <div className="shrink-0 md:hidden">{mobileMenuTrigger}</div>}
       {/* Selectors may contract on narrow screens; navigation stays pinned. */}
       <div
         className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden"

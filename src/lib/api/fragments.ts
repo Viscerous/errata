@@ -12,6 +12,11 @@ export const fragments = {
     const qs = params.toString()
     return apiFetch<Fragment[]>(`/stories/${storyId}/fragments${qs ? `?${qs}` : ''}`)
   },
+  listRevisions: (storyId: string, branchId?: string) => {
+    const params = new URLSearchParams({ projection: 'revision' })
+    if (branchId) params.set('branch', branchId)
+    return apiFetch<Array<Pick<Fragment, 'id' | 'version' | 'updatedAt'>>>(`/stories/${storyId}/fragments?${params}`)
+  },
   get: (storyId: string, fragmentId: string, branchId?: string) =>
     apiFetch<Fragment>(`/stories/${storyId}/fragments/${fragmentId}${branchId ? `?branch=${encodeURIComponent(branchId)}` : ''}`),
   create: (storyId: string, data: { type: string; name: string; description: string; content: string; id?: string; tags?: string[]; meta?: Record<string, unknown> }) =>

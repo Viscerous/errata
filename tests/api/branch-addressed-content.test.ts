@@ -109,6 +109,16 @@ describe('branch-addressed content endpoints', () => {
     expect(altProse2).toHaveLength(2)
   })
 
+  it('GET /fragments?projection=revision stays branch-addressed', async () => {
+    const { id, altId } = await setupDivergedTimelines()
+    const main = await (await api(`/stories/${id}/fragments?projection=revision&branch=main`)).json()
+    const alt = await (await api(`/stories/${id}/fragments?projection=revision&branch=${altId}`)).json()
+    expect(main).toHaveLength(1)
+    expect(alt).toHaveLength(2)
+    expect(alt.map((fragment: { id: string }) => fragment.id)).toContain(main[0].id)
+    expect(main[0]).not.toHaveProperty('content')
+  })
+
   it('GET /fragments/:id/versions?branch= is branch-addressed', async () => {
     const { id, altId, sharedFragmentId } = await setupDivergedTimelines() // active = alt
 

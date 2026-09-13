@@ -337,6 +337,25 @@ describe('Fragment API routes', () => {
     const res = await api(`/stories/${storyId}/fragments`)
     const data = await res.json()
     expect(data).toHaveLength(2)
+    expect(data[0]).toHaveProperty('content')
+    expect(data[0]).not.toHaveProperty('versions')
+  })
+
+  it('GET /api/stories/:sid/fragments?projection=revision omits fragment content', async () => {
+    const empty = await (await api(`/stories/${storyId}/fragments?projection=revision`)).json()
+    expect(empty).toEqual([])
+
+    const created = await (await apiJson(`/stories/${storyId}/fragments`, fragment)).json()
+    await apiJson(`/stories/${storyId}/fragments`, {
+      type: 'character', name: 'Alice', description: '', content: 'A brave hero',
+    })
+    const res = await api(`/stories/${storyId}/fragments?projection=revision&type=prose`)
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual([{
+      id: created.id,
+      version: created.version,
+      updatedAt: created.updatedAt,
+    }])
   })
 
   it('GET /api/stories/:sid/fragments?type=prose filters by type', async () => {
@@ -361,6 +380,7 @@ describe('Fragment API routes', () => {
     expect(res.status).toBe(200)
     const data = await res.json()
     expect(data.content).toBe('It was a dark and stormy night...')
+    expect(data.versions).toHaveLength(1)
   })
 
   it('GET /api/stories/:sid/fragments/:fid returns 404', async () => {

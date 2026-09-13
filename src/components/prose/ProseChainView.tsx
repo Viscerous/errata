@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo, useSyncExternalStore, memo } from 'react'
+import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo, useSyncExternalStore, memo, type ReactNode } from 'react'
 import { useQuery, useMutation, useQueries, useQueryClient } from '@tanstack/react-query'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { api, type Fragment, type ProseChainResponseEntry } from '@/lib/api'
@@ -27,6 +27,7 @@ import { ProseViewToolbar } from './ProseViewToolbar'
 
 interface ProseChainViewProps {
   storyId: string
+  mobileMenuTrigger: ReactNode
   coverImage?: string | null
   outlineOpen: boolean
   onOutlineOpenChange: (open: boolean) => void
@@ -160,6 +161,7 @@ function PendingGenerationBlock({
 
 export function ProseChainView({
   storyId,
+  mobileMenuTrigger,
   coverImage,
   outlineOpen,
   onOutlineOpenChange,
@@ -1180,6 +1182,7 @@ export function ProseChainView({
       )}
 
       <ProseViewToolbar
+        mobileMenuTrigger={mobileMenuTrigger}
         hasOutline={hasOutline}
         outlineOpen={outlineOpen}
         onOutlineOpenChange={onOutlineOpenChange}

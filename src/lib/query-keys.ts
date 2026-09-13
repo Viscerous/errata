@@ -48,6 +48,11 @@ export const qk = {
       ? ['fragments', storyId, branchId]
       : ['fragments', storyId, branchId, type]) as (string | undefined)[],
 
+  // A no-type projection of the same collection. Keeping the type slot empty
+  // lets ordinary all-fragment invalidations refresh Story Setup's revision.
+  fragmentRevisions: (storyId: string | undefined, branchId: BranchId) =>
+    ['fragments', storyId, branchId, undefined, 'revisions'] as const,
+
   fragmentsArchived: (storyId: string | undefined, branchId: BranchId, type?: string) =>
     (type === undefined
       ? ['fragments-archived', storyId, branchId]
@@ -113,6 +118,12 @@ export const q = {
     queryOptions({
       queryKey: qk.fragments(storyId, branchId, type),
       queryFn: () => api.fragments.list(storyId!, type, branchId),
+    }),
+
+  fragmentRevisions: (storyId: string | undefined, branchId: BranchId) =>
+    queryOptions({
+      queryKey: qk.fragmentRevisions(storyId, branchId),
+      queryFn: () => api.fragments.listRevisions(storyId!, branchId),
     }),
 
   fragmentsArchived: (storyId: string | undefined, branchId: BranchId) =>

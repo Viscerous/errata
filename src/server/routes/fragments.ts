@@ -132,17 +132,24 @@ export function fragmentRoutes(dataDir: string) {
       // `branch` pins the read to a specific timeline so the client can cache the
       // list per branch (branches share fragment IDs, so an active-branch read
       // would otherwise poison another timeline's cache). Omitted → active branch.
-      return withBranch(
+      const fragments = await withBranch(
         dataDir,
         params.storyId,
         () => listFragments(dataDir, params.storyId, type, { includeArchived }),
         query.branch,
       )
+      if (query.projection === 'revision') {
+        return fragments.map(({ id, version, updatedAt }) => ({ id, version, updatedAt }))
+      }
+      // Collection readers need the current fragment, not every historical
+      // snapshot of its content. History has its own per-fragment endpoint.
+      return fragments.map(({ versions: _versions, ...current }) => current)
     }, {
       query: t.Object({
         type: t.Optional(t.String()),
         includeArchived: t.Optional(t.String()),
         branch: t.Optional(t.String()),
+        projection: t.Optional(t.Literal('revision')),
       }),
       detail: { summary: 'List fragments, optionally filtered by type' },
     })

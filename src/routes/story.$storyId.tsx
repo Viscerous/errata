@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { lazy, Suspense, useEffect, useMemo, useState, useCallback } from 'react'
-import { api, type Fragment } from '@/lib/api'
+import { api, type Fragment, type StoryMeta } from '@/lib/api'
 import type { FragmentPrefill } from '@/components/fragments/FragmentEditor'
 import { Button } from '@/components/ui/button'
 import { SidebarProvider, SidebarInset, SidebarTrigger } from '@/components/ui/sidebar'
@@ -57,7 +57,7 @@ const CharacterCardImportDialog = lazy(() => import('@/components/fragments/Char
 const CharacterChatView = lazy(() => import('@/components/character-chat/CharacterChatView').then((module) => ({ default: module.CharacterChatView })))
 const ErratanetIntroPrompt = lazy(() => import('@/components/erratanet/ErratanetIntroPrompt').then((module) => ({ default: module.ErratanetIntroPrompt })))
 
-function fingerprintFragments(fragments: Fragment[]): string {
+function fingerprintFragments(fragments: Array<Pick<Fragment, 'id' | 'version' | 'updatedAt'>>): string {
   const source = fragments
     .map(fragment => `${fragment.id}:${fragment.version}:${fragment.updatedAt}`)
     .sort()
@@ -126,6 +126,9 @@ function StoryEditorPage() {
   const { data: story, isLoading } = useQuery({
     queryKey: ['story', storyId],
     queryFn: () => api.stories.get(storyId),
+    // Library navigation already fetched this metadata. Show it immediately
+    // while the detail request refreshes it; direct links still fetch normally.
+    placeholderData: () => queryClient.getQueryData<StoryMeta[]>(['stories'])?.find((item) => item.id === storyId),
   })
 
   const { data: plugins } = useQuery({
@@ -138,15 +141,16 @@ function StoryEditorPage() {
     queryFn: () => api.branches.list(storyId),
   })
 
-  // Share the normal branch-addressed fragment cache. Its invalidations also
-  // advance the Story setup session revision after ordinary editor changes.
+  // Story Setup only needs fragment identity and revision for its session
+  // fingerprint; fetching full fragment content here duplicates the prose and
+  // mention requests on every story open.
   const activeBranchId = branchesIndex?.activeBranchId
-  const { data: fragmentSnapshot } = useQuery({
-    ...q.fragments(storyId, activeBranchId ?? 'main'),
+  const { data: fragmentRevisions } = useQuery({
+    ...q.fragmentRevisions(storyId, activeBranchId),
     enabled: activeBranchId !== undefined,
   })
-  const storySetupRevision = story && fragmentSnapshot
-    ? `${story.updatedAt}:${fingerprintFragments(fragmentSnapshot)}`
+  const storySetupRevision = story && fragmentRevisions
+    ? `${story.updatedAt}:${fingerprintFragments(fragmentRevisions)}`
     : undefined
   const storySetupController = useStorySetupController({
     storyId,
@@ -261,15 +265,15 @@ function StoryEditorPage() {
   // effect rather than a render-time state update so React can commit the
   // query result before navigation state changes.
   useEffect(() => {
-    if (!activeBranchId || fragmentSnapshot === undefined) return
+    if (!activeBranchId || fragmentRevisions === undefined) return
     if (wizardCheckedBranchId === activeBranchId) return
     setWizardCheckedBranchId(activeBranchId)
-    if (fragmentSnapshot.length === 0 && workspaceSurface === null) {
+    if (fragmentRevisions.length === 0 && workspaceSurface === null) {
       transitionWorkspaceSurface({ kind: 'story-setup' })
     }
   }, [
     activeBranchId,
-    fragmentSnapshot,
+    fragmentRevisions,
     transitionWorkspaceSurface,
     wizardCheckedBranchId,
     workspaceSurface,
@@ -501,6 +505,10 @@ function StoryEditorPage() {
     )
   }
 
+  const mobileMenuTrigger = (
+    <SidebarTrigger className="size-8 border border-border/50 bg-elevated/90 shadow-sm backdrop-blur-md" />
+  )
+
   return (
     <SidebarProvider className="!min-h-dvh !max-h-dvh overflow-hidden bg-workspace" data-component-id="story-editor-root">
       <StorySidebar
@@ -547,11 +555,6 @@ function StoryEditorPage() {
 
       {/* Main Content */}
       <SidebarInset className="relative min-h-0 overflow-hidden bg-workspace" data-component-id="main-prose-pane">
-        {/* Mobile sidebar trigger — visible only below md breakpoint */}
-        <div className="md:hidden absolute top-3 left-3 z-20">
-          <SidebarTrigger className="size-9 border border-border/50 bg-elevated/90 shadow-sm backdrop-blur-md" />
-        </div>
-
         {/* Floating agent activity wisps */}
         <AgentActivityIndicator storyId={storyId} />
 
@@ -570,6 +573,7 @@ function StoryEditorPage() {
           <ProseChainView
             key={branchesIndex?.activeBranchId ?? 'main'}
             storyId={storyId}
+            mobileMenuTrigger={mobileMenuTrigger}
             coverImage={story.coverImage}
             outlineOpen={outlineOpen}
             onOutlineOpenChange={setOutlineOpen}
@@ -594,6 +598,7 @@ function StoryEditorPage() {
           <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-muted-foreground">Loading chat…</div>}>
             <CharacterChatView
               storyId={storyId}
+              mobileMenuTrigger={mobileMenuTrigger}
               onClose={() => setMainView('prose')}
             />
           </Suspense>

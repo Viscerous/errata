@@ -13,7 +13,7 @@ export function StoryChatSwitcher({ value, onChange, compact = false, fill = fal
     <div
       role="group"
       aria-label="Main view"
-      className={`flex shrink-0 items-center gap-0.5 rounded-lg border border-border/50 bg-elevated/90 p-0.5 shadow-sm backdrop-blur-md ${fill ? 'flex-1' : ''}`}
+      className={`flex shrink-0 items-center gap-0.5 rounded-lg border border-border/50 bg-elevated/90 shadow-sm backdrop-blur-md ${compact ? 'p-px' : 'p-0.5'} ${fill ? 'flex-1' : ''}`}
       data-component-id="story-chat-switcher"
     >
       <Button
