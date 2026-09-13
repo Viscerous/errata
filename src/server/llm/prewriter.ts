@@ -23,8 +23,9 @@ export const PREWRITER_INSTRUCTIONS = `Plan the next passage for a separate fict
 
 Produce a concise, self-contained writing brief covering:
 - the immediate starting point and passage objective;
-- active characters' current motives, emotions, and distinctive voices;
-- pacing and the exact stopping point;
+- active characters' current motives, distinctive voices, and friction (characters act out feelings through choices and conflict rather than therapeutic self-analysis);
+- off-stage momentum (if a character enters from off-stage, establish the physical or emotional residue of what they were doing);
+- pacing and the exact stopping point (terminate on a concrete world beat);
 - only the continuity facts, style, and point-of-view constraints needed now;
 - any boundary the passage must respect.
 
