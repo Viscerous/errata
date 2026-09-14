@@ -11,6 +11,7 @@ import {
 } from '@/lib/api'
 import { invalidateStoryContent } from '@/lib/branch-cache'
 import {
+  computeStorySetupGreeting,
   readStorySetupSession,
   writeStorySetupSession,
 } from './story-setup-session'
@@ -44,6 +45,7 @@ export interface StorySetupController {
   sessionLoaded: boolean
   contextReady: boolean
   hasExistingMaterial: boolean
+  initialGreeting?: string
   storyTitle?: string
   storyDescription?: string
   send: (content: string) => void
@@ -124,6 +126,8 @@ export function useStorySetupController({
   const [checklist, setChecklist] = useState<StorySetupChecklistItem[]>(INITIAL_CHECKLIST)
   const [draftFragments, setDraftFragments] = useState<StorySetupDraftFragment[]>([])
   const [options, setOptions] = useState<StorySetupOption[]>([])
+  const [initialGreeting, setInitialGreeting] = useState<string | null>(null)
+  const [hasExistingMaterial, setHasExistingMaterial] = useState(Boolean(hasStoryFragments))
   const [sessionLoaded, setSessionLoaded] = useState(false)
   const [loadedIdentity, setLoadedIdentity] = useState<string | null>(null)
   const [contextReady, setContextReady] = useState(false)
@@ -270,16 +274,38 @@ export function useStorySetupController({
       setChecklist(normalizeChecklist(saved.checklist))
       setDraftFragments(saved.draftFragments)
       setOptions(saved.options ?? [])
+      setInitialGreeting(saved.initialGreeting ?? null)
+      setHasExistingMaterial(saved.hasExistingMaterial ?? Boolean(hasStoryFragments))
       setAcceptedRevision(saved.contentRevision ?? contentRevision)
     } else {
       setMessages([])
       setChecklist(INITIAL_CHECKLIST)
       setDraftFragments([])
       setOptions([])
+      setInitialGreeting(null)
+      setHasExistingMaterial(Boolean(hasStoryFragments))
     }
     setLoadedIdentity(identity)
     setSessionLoaded(true)
-  }, [contentRevision, identity, sessionScope, storyId])
+  }, [contentRevision, hasStoryFragments, identity, sessionScope, storyId])
+
+  useEffect(() => {
+    if (messages.length === 0 && !sessionLoaded) {
+      setHasExistingMaterial(Boolean(hasStoryFragments))
+    }
+  }, [hasStoryFragments, messages.length, sessionLoaded])
+
+  const activeGreeting = initialGreeting ?? computeStorySetupGreeting({
+    hasExistingMaterial,
+    workingTitle: storyTitle,
+    storyDescription,
+  })
+
+  const lockGreeting = useCallback(() => {
+    if (!initialGreeting) {
+      setInitialGreeting(activeGreeting)
+    }
+  }, [activeGreeting, initialGreeting])
 
   // A story/timeline change or full route unmount is a real lifecycle boundary.
   // Merely hiding the Story Setup surface is intentionally not one.
@@ -306,30 +332,35 @@ export function useStorySetupController({
       checklist,
       draftFragments,
       options,
+      initialGreeting: activeGreeting,
+      hasExistingMaterial,
     })
-  }, [acceptedRevision, checklist, contextReady, draftFragments, identity, loadedIdentity, messages, options, sessionLoaded, sessionScope, storyId])
+  }, [acceptedRevision, activeGreeting, checklist, contextReady, draftFragments, hasExistingMaterial, identity, loadedIdentity, messages, options, sessionLoaded, sessionScope, storyId])
 
   const send = useCallback((content: string) => {
     const trimmed = content.trim()
     if (!trimmed || isStreaming || !contextReady || abortRef.current) return
+    lockGreeting()
     setOptions([])
     const history: StorySetupMessage[] = [...messages, { role: 'user', content: trimmed }]
     setMessages(history)
     setInput('')
     void requestAssistant(history, 'continue')
-  }, [contextReady, isStreaming, messages, requestAssistant])
+  }, [contextReady, isStreaming, lockGreeting, messages, requestAssistant])
 
   const start = useCallback(() => {
     if (isStreaming || abortRef.current) return
+    lockGreeting()
     setOptions([])
     void requestAssistant([], 'continue')
-  }, [isStreaming, requestAssistant])
+  }, [isStreaming, lockGreeting, requestAssistant])
 
   const assess = useCallback(() => {
     if (isStreaming || abortRef.current) return
+    lockGreeting()
     setOptions([])
     void requestAssistant(messages, 'assess')
-  }, [isStreaming, messages, requestAssistant])
+  }, [isStreaming, lockGreeting, messages, requestAssistant])
 
   const stop = useCallback(() => {
     if (!abortRef.current) return
@@ -342,10 +373,6 @@ export function useStorySetupController({
     setPaused(false)
     void requestAssistant(messages, retryModeRef.current)
   }, [messages, requestAssistant])
-
-  const hasExistingMaterial = Boolean(hasStoryFragments)
-    || draftFragments.length > 0
-    || checklist.some(item => item.status !== 'missing')
 
   return {
     messages,
@@ -360,6 +387,7 @@ export function useStorySetupController({
     sessionLoaded,
     contextReady,
     hasExistingMaterial,
+    initialGreeting: activeGreeting,
     storyTitle,
     storyDescription,
     send,

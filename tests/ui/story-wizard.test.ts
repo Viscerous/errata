@@ -313,5 +313,53 @@ describe('StoryWizard', () => {
       prompt: 'Arthur sits down at his beige desk.',
     })
   })
+
+  it('does not mutate welcome greeting when draft fragments or covered items arrive', () => {
+    const { rerender } = render(React.createElement(StoryWizard, {
+      controller: {
+        ...controller,
+        messages: [],
+        hasExistingMaterial: false,
+        storyTitle: 'The Average Man',
+        storyDescription: 'A satire of corporate promotion exams.',
+        initialGreeting: 'Welcome to Story Setup for "The Average Man". Starting from your premise—"A satire of corporate promotion exams"—we can explore early directions and characters together, or you can tell me where you\'d like to begin.',
+      },
+      onClose: () => undefined,
+    }))
+
+    expect(screen.getByText(/Welcome to Story Setup for "The Average Man"/i)).toBeDefined()
+    expect(screen.queryByText(/This story already has established characters/i)).toBeNull()
+
+    // Rerender with assistant messages and new draft fragments
+    rerender(React.createElement(StoryWizard, {
+      controller: {
+        ...controller,
+        messages: [
+          { role: 'assistant', content: 'Here are directions for Arthur.' },
+        ],
+        hasExistingMaterial: false,
+        storyTitle: 'The Average Man',
+        storyDescription: 'A satire of corporate promotion exams.',
+        initialGreeting: 'Welcome to Story Setup for "The Average Man". Starting from your premise—"A satire of corporate promotion exams"—we can explore early directions and characters together, or you can tell me where you\'d like to begin.',
+        draftFragments: [
+          {
+            key: 'ch-arthur',
+            type: 'character',
+            name: 'Arthur',
+            description: 'Protagonist clerk',
+            content: 'Arthur works at the ministry.',
+          },
+        ],
+        checklist: [
+          { key: 'starting-point', status: 'covered', note: 'Done' },
+        ],
+      },
+      onClose: () => undefined,
+    }))
+
+    // Welcome greeting is still the original and has not mutated into the existing story greeting
+    expect(screen.getByText(/Welcome to Story Setup for "The Average Man"/i)).toBeDefined()
+    expect(screen.queryByText(/This story already has established characters/i)).toBeNull()
+  })
 })
 

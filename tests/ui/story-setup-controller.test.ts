@@ -406,5 +406,60 @@ describe('useStorySetupController', () => {
     expect(result.current.messages[0].content).toBe('Here are a few ways we could develop this story...')
     expect(result.current.options).toEqual([{ label: 'Corporate Panopticon' }])
   })
+
+  it('preserves initialGreeting and keeps hasExistingMaterial false when setup creates fragments on a new story', async () => {
+    chat.mockResolvedValueOnce(new ReadableStream({
+      start(controller) {
+        controller.enqueue({
+          type: 'tool-result',
+          id: 'turn-start',
+          toolName: 'updateStorySetup',
+          result: {
+            saved: true,
+            checklist: [
+              { key: 'premise', status: 'covered', note: 'Corporate satire' },
+            ],
+            fragments: [
+              {
+                id: 'ch-arthur',
+                key: 'ch-arthur',
+                type: 'character',
+                name: 'Arthur',
+                description: 'The protagonist clerk',
+                content: 'Arthur is an obedient clerk.',
+              },
+            ],
+            options: [{ label: 'The Promotion Exam' }],
+          },
+        })
+        controller.enqueue({ type: 'text', text: 'Let us build Arthur.' })
+        controller.close()
+      },
+    }))
+
+    const { result } = renderHook(
+      () => useStorySetupController({
+        storyId: 'story-test',
+        sessionScope: 'main',
+        contentRevision: 'revision-1',
+        active: true,
+        hasStoryFragments: false,
+        storyTitle: 'The Average Man',
+        storyDescription: 'A satire of corporate promotion exams.',
+      }),
+      { wrapper: makeWrapper() },
+    )
+
+    const originalGreeting = result.current.initialGreeting
+    expect(originalGreeting).toContain('Welcome to Story Setup for "The Average Man"')
+    expect(result.current.hasExistingMaterial).toBe(false)
+
+    act(() => result.current.start())
+
+    await waitFor(() => expect(result.current.draftFragments.length).toBe(1))
+    // Greeting does not mutate into the existing story greeting
+    expect(result.current.initialGreeting).toBe(originalGreeting)
+    expect(result.current.hasExistingMaterial).toBe(false)
+  })
 })
 

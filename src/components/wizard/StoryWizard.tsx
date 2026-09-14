@@ -19,6 +19,7 @@ import {
   STORY_SETUP_CHECKLIST,
   type StorySetupController,
 } from './use-story-setup-controller'
+import { computeStorySetupGreeting } from './story-setup-session'
 
 export interface StorySetupHandoff {
   mode: 'generate' | 'write'
@@ -199,21 +200,14 @@ export function StoryWizard({ controller, onClose, onStartWriting }: StoryWizard
   }
 
   const hasExistingMaterial = controller.hasExistingMaterial
-    ?? (draftFragments.length > 0 || checklist.some(item => item.status !== 'missing'))
   const workingTitle = controller.storyTitle && controller.storyTitle !== 'New Story' ? controller.storyTitle : undefined
-  const storyDescription = controller.storyDescription?.trim()
-  const cleanDescription = storyDescription?.replace(/[.\s]+$/, '')
-  const hasWorkingStory = Boolean(workingTitle || storyDescription)
+  const hasWorkingStory = Boolean(workingTitle || controller.storyDescription?.trim())
 
-  const welcomeMessage = hasExistingMaterial
-    ? "Welcome to Story Setup. This story already has established characters, notes, and world details in place. You can tell me what you'd like to work on next, or we can review the foundation together to see what's settled and what still needs shaping."
-    : hasWorkingStory
-      ? workingTitle && cleanDescription
-        ? `Welcome to Story Setup for "${workingTitle}". Starting from your premise—"${cleanDescription}"—we can explore early directions and characters together, or you can tell me where you'd like to begin.`
-        : workingTitle
-          ? `Welcome to Story Setup for "${workingTitle}". We can explore early directions and characters sparked by your title, or you can tell me where you'd like to begin.`
-          : `Welcome to Story Setup. Starting from your premise—"${cleanDescription}"—we can explore early directions and characters together, or you can tell me where you'd like to begin.`
-      : "Welcome to Story Setup. What kind of story would you like to tell? Share whatever is in your head—a premise, a character, a mood, or a single scene—and we'll shape the foundation together."
+  const welcomeMessage = controller.initialGreeting ?? computeStorySetupGreeting({
+    hasExistingMaterial,
+    workingTitle,
+    storyDescription: controller.storyDescription,
+  })
 
   // Conscious model options from the tool call
   const activeOptions: StorySetupOption[] = !isStreaming ? options : []
