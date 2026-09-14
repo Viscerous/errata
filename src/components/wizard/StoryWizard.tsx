@@ -198,7 +198,16 @@ export function StoryWizard({ controller, onClose, onStartWriting }: StoryWizard
     }
   }
 
-  const hasExistingMaterial = draftFragments.length > 0 || checklist.some(item => item.status !== 'missing')
+  const hasExistingMaterial = controller.hasExistingMaterial
+    ?? (draftFragments.length > 0 || checklist.some(item => item.status !== 'missing'))
+  const workingTitle = controller.storyTitle && controller.storyTitle !== 'New Story' ? controller.storyTitle : undefined
+  const hasWorkingStory = Boolean(workingTitle || controller.storyDescription?.trim())
+
+  const welcomeMessage = hasExistingMaterial
+    ? "Welcome to Story Setup. This story already has existing fragments. You can start chatting directly below about what you'd like to develop, or ask me to assess your story against the foundation checklist."
+    : hasWorkingStory
+      ? `Welcome to Story Setup for "${controller.storyTitle ?? 'your story'}".${controller.storyDescription ? ` (${controller.storyDescription})` : ''} I can extrapolate initial directions and character concepts from what you have so far, or you can tell me where you'd like to begin.`
+      : "Welcome to Story Setup. What kind of story would you like to tell? Share whatever you have in mind—a premise, a character, a world detail, or a scene—and we'll build the foundation together."
 
   // Conscious model options from the tool call
   const activeOptions: StorySetupOption[] = !isStreaming ? options : []
@@ -278,6 +287,40 @@ export function StoryWizard({ controller, onClose, onStartWriting }: StoryWizard
 
           <div className="min-h-0 flex-1 overflow-y-auto" data-component-id="story-setup-transcript">
             <div className="mx-auto w-full max-w-2xl space-y-7 px-4 py-8 sm:px-6 sm:py-10" aria-live="polite">
+              <AssistantTurn content={welcomeMessage} />
+
+              {messages.length === 0 && !isStreaming && (
+                <div className="space-y-2.5 pl-9">
+                  <div className="flex flex-wrap gap-1.5">
+                    {hasExistingMaterial ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={!contextReady}
+                        onClick={controller.assess}
+                        className="h-7 border-border/50 bg-transparent text-ui-caption font-normal text-foreground/80 hover:border-primary/40 hover:bg-primary/5 hover:text-foreground"
+                        data-component-id="story-setup-assess-button"
+                      >
+                        Assess existing foundation
+                      </Button>
+                    ) : hasWorkingStory && controller.start ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={!contextReady}
+                        onClick={controller.start}
+                        className="h-7 border-border/50 bg-transparent text-ui-caption font-normal text-foreground/80 hover:border-primary/40 hover:bg-primary/5 hover:text-foreground"
+                        data-component-id="story-setup-explore-button"
+                      >
+                        Explore ideas for &ldquo;{controller.storyTitle}&rdquo;
+                      </Button>
+                    ) : null}
+                  </div>
+                </div>
+              )}
+
               {messages.map((message, index) => message.role === 'assistant' ? (
                 <AssistantTurn key={`assistant-${index}`} content={message.content} />
               ) : (
@@ -285,35 +328,6 @@ export function StoryWizard({ controller, onClose, onStartWriting }: StoryWizard
               ))}
 
               {isStreaming && <AssistantTurn content={streamingText} streaming={Boolean(streamingText)} />}
-
-              {messages.length === 0 && !isStreaming && (
-                <>
-                  <AssistantTurn
-                    content={
-                      hasExistingMaterial
-                        ? "Welcome to Story Setup. This story already has existing fragments. You can start chatting directly below about what you'd like to develop, or ask me to assess your story against the foundation checklist."
-                        : "Welcome to Story Setup. What kind of story would you like to tell? Share whatever you have in mind—a premise, a character, a world detail, or a scene—and we'll build the foundation together."
-                    }
-                  />
-                  {hasExistingMaterial && (
-                    <div className="space-y-2.5 pl-9">
-                      <div className="flex flex-wrap gap-1.5">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          disabled={!contextReady}
-                          onClick={controller.assess}
-                          className="h-7 border-border/50 bg-transparent text-ui-caption font-normal text-foreground/80 hover:border-primary/40 hover:bg-primary/5 hover:text-foreground"
-                          data-component-id="story-setup-assess-button"
-                        >
-                          Assess existing foundation
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-                </>
-              )}
 
               {activeOptions.length > 0 && (
                 <div className="space-y-2.5 pl-9" data-component-id="story-setup-suggestions">

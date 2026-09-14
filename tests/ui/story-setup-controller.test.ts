@@ -341,5 +341,70 @@ describe('useStorySetupController', () => {
     await waitFor(() => expect(result.current.messages.at(-1)?.content).toBe('Voice is saved.'))
     expect(result.current.options).toEqual([])
   })
+
+  it('reflects hasExistingMaterial when hasStoryFragments is true', () => {
+    const { result } = renderHook(
+      () => useStorySetupController({
+        storyId: 'story-test',
+        sessionScope: 'main',
+        contentRevision: 'revision-1',
+        active: true,
+        hasStoryFragments: true,
+        storyTitle: 'The Average Man',
+        storyDescription: 'Corporate satire',
+      }),
+      { wrapper: makeWrapper() },
+    )
+
+    expect(result.current.hasExistingMaterial).toBe(true)
+    expect(result.current.storyTitle).toBe('The Average Man')
+    expect(result.current.storyDescription).toBe('Corporate satire')
+  })
+
+  it('invokes chat in continue mode with empty history when start is called', async () => {
+    chat.mockResolvedValueOnce(new ReadableStream({
+      start(controller) {
+        controller.enqueue({
+          type: 'tool-result',
+          id: 'turn-start',
+          toolName: 'updateStorySetup',
+          result: {
+            saved: true,
+            checklist: [
+              { key: 'starting-point', status: 'covered', note: 'Corporate premise' },
+            ],
+            fragments: [],
+            options: [{ label: 'Corporate Panopticon' }],
+          },
+        })
+        controller.enqueue({ type: 'text', text: 'Here are a few ways we could develop this story...' })
+        controller.close()
+      },
+    }))
+
+    const { result } = renderHook(
+      () => useStorySetupController({
+        storyId: 'story-test',
+        sessionScope: 'main',
+        contentRevision: 'revision-1',
+        active: true,
+        storyTitle: 'The Average Man',
+      }),
+      { wrapper: makeWrapper() },
+    )
+
+    act(() => result.current.start())
+
+    await waitFor(() => expect(chat).toHaveBeenCalledWith(
+      'story-test',
+      [],
+      'continue',
+      expect.any(AbortSignal),
+    ))
+
+    await waitFor(() => expect(result.current.messages.length).toBe(1))
+    expect(result.current.messages[0].content).toBe('Here are a few ways we could develop this story...')
+    expect(result.current.options).toEqual([{ label: 'Corporate Panopticon' }])
+  })
 })
 

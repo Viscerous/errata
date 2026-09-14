@@ -20,7 +20,9 @@ const controller: StorySetupController = {
   options: [],
   sessionLoaded: true,
   contextReady: true,
+  hasExistingMaterial: false,
   send: () => undefined,
+  start: () => undefined,
   assess: () => undefined,
   stop: () => undefined,
   retry: () => undefined,
@@ -182,20 +184,30 @@ describe('StoryWizard', () => {
     expect(screen.queryByText('A scene or moment')).toBeNull()
   })
 
+  it('keeps welcoming greeting visible when messages are present in transcript', () => {
+    render(React.createElement(StoryWizard, {
+      controller: {
+        ...controller,
+        messages: [
+          { role: 'user', content: 'I have a story about a clerk.' },
+          { role: 'assistant', content: 'Tell me more about this clerk.' },
+        ],
+      },
+      onClose: () => undefined,
+    }))
+
+    expect(screen.getByText(/What kind of story would you like to tell/i)).toBeDefined()
+    expect(screen.getByText('I have a story about a clerk.')).toBeDefined()
+    expect(screen.getByText('Tell me more about this clerk.')).toBeDefined()
+  })
+
   it('offers explicit assessment button when opening a story with existing fragments', () => {
     const assess = vi.fn()
     render(React.createElement(StoryWizard, {
       controller: {
         ...controller,
         messages: [],
-        draftFragments: [{
-          id: 'ch-hero',
-          key: 'characters-hero',
-          type: 'character',
-          name: 'Arthur',
-          description: 'Protagonist',
-          content: 'An ordinary clerk.',
-        }],
+        hasExistingMaterial: true,
         assess,
       },
       onClose: () => undefined,
@@ -206,6 +218,27 @@ describe('StoryWizard', () => {
     expect(assessBtn).toBeDefined()
     fireEvent.click(assessBtn)
     expect(assess).toHaveBeenCalledOnce()
+  })
+
+  it('offers explore button when story has working title and description, and invokes controller.start', () => {
+    const start = vi.fn()
+    render(React.createElement(StoryWizard, {
+      controller: {
+        ...controller,
+        messages: [],
+        hasExistingMaterial: false,
+        storyTitle: 'The Average Man',
+        storyDescription: 'A satire of corporate promotion exams.',
+        start,
+      },
+      onClose: () => undefined,
+    }))
+
+    expect(screen.getByText(/Welcome to Story Setup for "The Average Man"/i)).toBeDefined()
+    const exploreBtn = screen.getByRole('button', { name: /Explore ideas for “The Average Man”/i })
+    expect(exploreBtn).toBeDefined()
+    fireEvent.click(exploreBtn)
+    expect(start).toHaveBeenCalledOnce()
   })
 
   it('renders structured controller options as compact outline pill buttons and dispatches label on click', () => {

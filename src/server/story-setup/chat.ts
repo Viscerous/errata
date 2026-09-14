@@ -47,7 +47,7 @@ export function createStorySetupTools(dataDir: string, storyId: string, mode: 'a
 
   return {
     updateStorySetup: tool({
-      description: 'Save the working story details and complete setup-fragment snapshot, and replace the visible checklist before asking the writer the next question. Author specific, informative descriptions (<250 chars) without placeholders, and actively update existing fragments as new details are revealed.',
+      description: 'Save the working story details and complete setup-fragment snapshot, and replace the visible checklist before asking the writer the next question. Propose 2 to 4 distinct elaborated directions in your conversational message and match them with concise, human-readable option labels in options. Author specific, informative descriptions (<250 chars) without placeholders, and actively update existing fragments as new details are revealed.',
       inputSchema: StorySetupSnapshotSchema,
       execute: async ({ story, checklist, fragments, options }) => {
         try {
@@ -83,9 +83,13 @@ const runStorySetupChat = createStreamingRunner<StorySetupChatOptions>({
   tools: ({ dataDir, storyId, opts }) => createStorySetupTools(dataDir, storyId, resolveStorySetupMode(opts)),
   toolChoice: 'auto',
   maxSteps: 3,
-  messages: ({ compiled, opts }) => {
+  messages: ({ compiled, opts, story }) => {
     const mode = resolveStorySetupMode(opts)
     const contextMessage = compiled.messages.find(message => message.role === 'user')
+    const hasWorkingStory = Boolean(
+      (story?.name && story.name !== 'New Story') ||
+      story?.description?.trim()
+    )
     const conversation = opts.messages.length > 0
       ? opts.messages
       : mode === 'assess' ? [{
@@ -93,7 +97,9 @@ const runStorySetupChat = createStreamingRunner<StorySetupChatOptions>({
           content: 'Assess the checklist against the current story material. Make no story changes. Then ask only about the highest-value genuinely unresolved point; if there is no meaningful material yet, invite any incomplete starting point.',
         }] : [{
           role: 'user' as const,
-          content: 'Begin the story setup conversation. Ask what starting point I have, and make it clear that an incomplete idea is welcome.',
+          content: hasWorkingStory
+            ? `Begin the story setup conversation by actively extrapolating from the working title "${story.name}"${story.description ? ` and description "${story.description}"` : ''}. Propose 2 to 3 vivid narrative directions or character concepts implied by this premise in rich conversational prose, and offer concrete choices in options for how to develop the foundation.`
+            : 'Begin the story setup conversation. Propose a few compelling starting sparks across different genres or styles with concrete choices in options, and invite the writer to pick one or share their own idea.',
         }]
     const assessment = mode === 'assess' && opts.messages.length > 0
       ? [{

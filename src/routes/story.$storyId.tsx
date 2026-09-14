@@ -159,6 +159,9 @@ function StoryEditorPage() {
     sessionScope: activeBranchId ?? 'main',
     contentRevision: storySetupRevision,
     active: workspaceSurface?.kind === 'story-setup',
+    hasStoryFragments: Boolean(fragmentRevisions && fragmentRevisions.length > 0),
+    storyTitle: story?.name,
+    storyDescription: story?.description,
   })
 
   useEffect(() => {

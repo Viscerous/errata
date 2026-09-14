@@ -43,7 +43,11 @@ export interface StorySetupController {
   options: StorySetupOption[]
   sessionLoaded: boolean
   contextReady: boolean
+  hasExistingMaterial: boolean
+  storyTitle?: string
+  storyDescription?: string
   send: (content: string) => void
+  start: () => void
   assess: () => void
   stop: () => void
   retry: () => void
@@ -54,6 +58,9 @@ interface UseStorySetupControllerOptions {
   sessionScope: string
   contentRevision: string | undefined
   active: boolean
+  hasStoryFragments?: boolean
+  storyTitle?: string
+  storyDescription?: string
 }
 
 function normalizeChecklist(
@@ -104,6 +111,9 @@ export function useStorySetupController({
   sessionScope,
   contentRevision,
   active,
+  hasStoryFragments,
+  storyTitle,
+  storyDescription,
 }: UseStorySetupControllerOptions): StorySetupController {
   const queryClient = useQueryClient()
   const [messages, setMessages] = useState<StorySetupMessage[]>([])
@@ -309,6 +319,12 @@ export function useStorySetupController({
     void requestAssistant(history, 'continue')
   }, [contextReady, isStreaming, messages, requestAssistant])
 
+  const start = useCallback(() => {
+    if (isStreaming || abortRef.current) return
+    setOptions([])
+    void requestAssistant([], 'continue')
+  }, [isStreaming, requestAssistant])
+
   const assess = useCallback(() => {
     if (isStreaming || abortRef.current) return
     setOptions([])
@@ -327,6 +343,10 @@ export function useStorySetupController({
     void requestAssistant(messages, retryModeRef.current)
   }, [messages, requestAssistant])
 
+  const hasExistingMaterial = Boolean(hasStoryFragments)
+    || draftFragments.length > 0
+    || checklist.some(item => item.status !== 'missing')
+
   return {
     messages,
     input,
@@ -339,7 +359,11 @@ export function useStorySetupController({
     options,
     sessionLoaded,
     contextReady,
+    hasExistingMaterial,
+    storyTitle,
+    storyDescription,
     send,
+    start,
     assess,
     stop,
     retry,
