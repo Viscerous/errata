@@ -10,11 +10,60 @@ const STORY_SETUP_CHECKLIST_KEYS = [
   'opening',
 ] as const
 
-export const StorySetupChecklistKeySchema = z.enum(STORY_SETUP_CHECKLIST_KEYS)
+export const StorySetupChecklistKeySchema = z.preprocess(
+  (value) => {
+    if (typeof value !== 'string') return value
+    const normalized = value.trim().toLowerCase()
+    const aliases: Record<string, typeof STORY_SETUP_CHECKLIST_KEYS[number]> = {
+      'starting point': 'starting-point',
+      'starting-point': 'starting-point',
+      premise: 'premise',
+      'premise or emotional center': 'premise',
+      characters: 'characters',
+      'central characters': 'characters',
+      goal: 'goal',
+      'goal and stakes': 'goal',
+      'goal, opposition, and stakes': 'goal',
+      setting: 'setting',
+      'setting and essential world rules': 'setting',
+      voice: 'voice',
+      'voice and tone': 'voice',
+      'viewpoint, tense, voice, and tone': 'voice',
+      opening: 'opening',
+      'opening direction': 'opening',
+      'what the opening passage should accomplish': 'opening',
+    }
+    return aliases[normalized] ?? aliases[normalized.replace(/\s+/g, '-')] ?? normalized.replace(/\s+/g, '-')
+  },
+  z.enum(STORY_SETUP_CHECKLIST_KEYS),
+)
+
+export const StorySetupChecklistStatusSchema = z.preprocess(
+  (value) => {
+    if (typeof value !== 'string') return value
+    const normalized = value.trim().toLowerCase()
+    const aliases: Record<string, 'missing' | 'partial' | 'covered'> = {
+      missing: 'missing',
+      none: 'missing',
+      uncovered: 'missing',
+      not_started: 'missing',
+      'not-started': 'missing',
+      partial: 'partial',
+      in_progress: 'partial',
+      'in-progress': 'partial',
+      covered: 'covered',
+      complete: 'covered',
+      completed: 'covered',
+      done: 'covered',
+    }
+    return aliases[normalized] ?? normalized
+  },
+  z.enum(['missing', 'partial', 'covered']),
+)
 
 export const StorySetupChecklistItemSchema = z.object({
   key: StorySetupChecklistKeySchema,
-  status: z.enum(['missing', 'partial', 'covered']),
+  status: StorySetupChecklistStatusSchema,
   note: z.string().max(120),
 })
 

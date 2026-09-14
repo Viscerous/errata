@@ -98,4 +98,32 @@ describe('StoryWizard', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Retry story setup' }))
     expect(retry).toHaveBeenCalledOnce()
   })
+
+  it('surfaces Start writing CTA when the story outline and opening are ready', () => {
+    const onClose = vi.fn()
+    const readyChecklist = [
+      { key: 'starting-point', status: 'covered' as const, note: 'Premise set' },
+      { key: 'premise', status: 'covered' as const, note: 'Satire' },
+      { key: 'characters', status: 'covered' as const, note: 'Arthur' },
+      { key: 'goal', status: 'covered' as const, note: 'Promotion' },
+      { key: 'setting', status: 'covered' as const, note: 'Beige' },
+      { key: 'voice', status: 'covered' as const, note: 'Deadpan' },
+      { key: 'opening', status: 'covered' as const, note: 'Office scale' },
+    ]
+
+    render(React.createElement(StoryWizard, {
+      controller: {
+        ...controller,
+        checklist: readyChecklist,
+      },
+      onClose,
+    }))
+
+    const startButtons = screen.getAllByRole('button', { name: 'Start writing' })
+    expect(startButtons.length).toBeGreaterThanOrEqual(1)
+    fireEvent.click(startButtons[0])
+    expect(onClose).toHaveBeenCalledOnce()
+    expect(screen.getAllByText('Foundation ready').length).toBeGreaterThanOrEqual(1)
+  })
 })
+

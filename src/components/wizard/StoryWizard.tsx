@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { ArrowLeft, ChevronDown, ChevronRight, Circle, CircleCheck, CircleDot } from 'lucide-react'
+import { ArrowLeft, ChevronDown, ChevronRight, Circle, CircleCheck, CircleDot, PenLine } from 'lucide-react'
 import {
   type StorySetupChecklistItem,
   type StorySetupDraftFragment,
@@ -78,16 +78,20 @@ function StorySetupRail({
   updating,
   className,
   idPrefix,
+  onStartWriting,
 }: {
   checklist: StorySetupChecklistItem[]
   draftFragments: StorySetupDraftFragment[]
   updating: boolean
   className?: string
   idPrefix: string
+  onStartWriting?: () => void
 }) {
   const covered = checklist.filter(item => item.status === 'covered').length
   const explored = checklist.filter(item => item.status !== 'missing').length
   const checklistByKey = new Map(checklist.map(item => [item.key, item]))
+  const openingExplored = checklist.some(item => item.key === 'opening' && item.status !== 'missing')
+  const readyToWrite = openingExplored || covered >= 4
 
   return (
     <WorkspaceRail className={cn('gap-7 overflow-y-auto px-5 py-6', className)} data-component-id="story-setup-progress">
@@ -119,6 +123,24 @@ function StorySetupRail({
             )
           })}
         </ul>
+        {readyToWrite && onStartWriting && (
+          <div className="mt-4 rounded-lg border border-primary/20 bg-primary/5 p-3 text-ui-caption" data-component-id={`${idPrefix}-foundation-ready`}>
+            <p className="font-medium text-foreground">Foundation ready</p>
+            <p className="mt-1 text-ui-label leading-relaxed text-muted-foreground">
+              Your story outline and opening direction are set. You can begin writing the opening passage in the manuscript.
+            </p>
+            <Button
+              type="button"
+              size="sm"
+              onClick={onStartWriting}
+              className="mt-2.5 w-full gap-1.5 text-ui-caption font-medium"
+              data-component-id={`${idPrefix}-start-writing-button`}
+            >
+              <PenLine className="size-3.5" aria-hidden />
+              Start writing
+            </Button>
+          </div>
+        )}
       </section>
 
       <section aria-labelledby={`${idPrefix}-fragments-heading`}>
@@ -174,6 +196,9 @@ export function StoryWizard({ controller, onClose }: StoryWizardProps) {
 
   const userTurnCount = messages.filter(message => message.role === 'user').length
   const exploredCount = checklist.filter(item => item.status !== 'missing').length
+  const openingExplored = checklist.some(item => item.key === 'opening' && item.status !== 'missing')
+  const coveredCount = checklist.filter(item => item.status === 'covered').length
+  const readyToWrite = openingExplored || coveredCount >= 4
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: isStreaming ? 'auto' : 'smooth', block: 'end' })
@@ -205,6 +230,18 @@ export function StoryWizard({ controller, onClose }: StoryWizardProps) {
           <WorkspaceTitle>Story setup</WorkspaceTitle>
         </div>
         <WorkspaceToolbar>
+          {readyToWrite && (
+            <Button
+              variant="default"
+              size="sm"
+              onClick={onClose}
+              className="gap-1.5 text-ui-caption font-medium"
+              data-component-id="story-setup-start-writing"
+            >
+              <PenLine className="size-3.5" aria-hidden />
+              Start writing
+            </Button>
+          )}
           <Button variant="ghost" size="sm" onClick={onClose} className="gap-1.5 text-ui-caption text-muted-foreground hover:text-foreground">
             <ArrowLeft className="size-3.5" aria-hidden />
             Back to story
@@ -222,7 +259,7 @@ export function StoryWizard({ controller, onClose }: StoryWizardProps) {
                 <ChevronDown className="size-3.5" aria-hidden />
               </span>
             </summary>
-            <StorySetupRail idPrefix="mobile" checklist={checklist} draftFragments={draftFragments} updating={isStreaming} className="max-h-[45vh] border-l-0 border-t border-border/30" />
+            <StorySetupRail idPrefix="mobile" checklist={checklist} draftFragments={draftFragments} updating={isStreaming} onStartWriting={onClose} className="max-h-[45vh] border-l-0 border-t border-border/30" />
           </details>
 
           <div className="min-h-0 flex-1 overflow-y-auto" data-component-id="story-setup-transcript">
@@ -301,7 +338,7 @@ export function StoryWizard({ controller, onClose }: StoryWizardProps) {
             </div>
           </div>
         </div>
-        <StorySetupRail idPrefix="desktop" checklist={checklist} draftFragments={draftFragments} updating={isStreaming} className="hidden w-72 xl:flex" />
+        <StorySetupRail idPrefix="desktop" checklist={checklist} draftFragments={draftFragments} updating={isStreaming} onStartWriting={onClose} className="hidden w-72 xl:flex" />
       </main>
     </div>
   )

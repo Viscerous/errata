@@ -39,11 +39,11 @@ function writerOwnedContext(ctx: AgentBlockContext): AgentBlockContext {
   }
 }
 
-export const STORY_SETUP_SYSTEM_PROMPT = `Collaborate with the writer to discover and shape a story from whatever they bring, including an incomplete idea. Build on their answers instead of following a fixed questionnaire. Ask one focused question at a time; offer a few concrete possibilities only when useful.
+export const STORY_SETUP_SYSTEM_PROMPT = `Collaborate with the writer to discover and shape a story foundation before writing begins. Build on their answers instead of following a fixed questionnaire. Ask one focused question at a time; offer a few concrete possibilities only when useful.
 
 Track seven concerns: starting point; premise or emotional center; central characters; goal, opposition, and stakes; setting and essential world rules; viewpoint, tense, voice, and tone; and what the opening passage should accomplish. Mark a concern partial when a meaningful decision remains, then ask about the highest-value missing or partial point.
 
-Keep replies concise and conversational. Do not mention tools or fragment mechanics, and do not delay the writer until every concern is complete.`
+Story setup creates foundation fragments (guidelines, characters, and knowledge); it does not write story scenes. Never generate narrative prose, opening passages, or roleplay here. When the seven concerns are established or the writer is ready to write, summarize the opening direction, confirm the foundation is saved, and invite them to begin writing in the manuscript editor. If the writer asks you to write the opening here, clarify that the foundation is ready and prompt them to generate or write the opening passage in the manuscript.`
 
 export function createStorySetupBlocks(ctx: AgentBlockContext): ContextBlock[] {
   const existingStory = ctx.story.name !== 'New Story' || Boolean(ctx.story.description.trim())
@@ -62,8 +62,8 @@ export function createStorySetupBlocks(ctx: AgentBlockContext): ContextBlock[] {
     : ''
 
   const toolPolicy = ctx.storySetupReadOnly
-    ? '\n\nThis is a read-only assessment. Before replying, call updateStorySetup once with the seven checklist entries in order and no story or fragment changes.'
-    : '\n\nBefore each reply, call updateStorySetup once with the complete checklist and current setup-fragment snapshot. Preserve existing fragment keys, add supported material promptly, and retain uncertainty rather than inventing decisions. Include the working title and description once they are useful.'
+    ? '\n\nThis is a read-only assessment. Before replying, call updateStorySetup once with the seven checklist entries in order (starting-point, premise, characters, goal, setting, voice, opening) and no story or fragment changes.'
+    : '\n\nBefore each reply, call updateStorySetup once with the complete checklist in order (keys: starting-point, premise, characters, goal, setting, voice, opening; statuses: missing, partial, covered) and current setup-fragment snapshot. Preserve existing fragment keys, add supported material promptly, and retain uncertainty rather than inventing decisions. Include the working title and description once they are useful.'
   const materialPolicy = '\n\nTreat the writer-owned context below as read-only evidence for checklist coverage. Do not copy it into the setup-fragment snapshot.'
   const blocks: ContextBlock[] = [{
     id: 'story-setup-instructions',

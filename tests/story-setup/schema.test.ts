@@ -50,4 +50,32 @@ describe('story setup tool schemas', () => {
       ],
     }).success).toBe(false)
   })
+
+  it('normalizes common key and status aliases gracefully', () => {
+    const aliasedChecklist = [
+      { key: 'starting point', status: 'complete', note: 'premise set' },
+      { key: 'premise or emotional center', status: 'done', note: 'satire' },
+      { key: 'central characters', status: 'covered', note: 'Arthur' },
+      { key: 'goal and stakes', status: 'in-progress', note: 'mild promotion' },
+      { key: 'setting and essential world rules', status: 'covered', note: 'infinite beige' },
+      { key: 'voice and tone', status: 'covered', note: 'deadpan' },
+      { key: 'what the opening passage should accomplish', status: 'covered', note: 'scale and adequacy' },
+    ]
+
+    const parsed = StorySetupAssessmentSchema.safeParse({ checklist: aliasedChecklist })
+    expect(parsed.success).toBe(true)
+    if (parsed.success) {
+      expect(parsed.data.checklist[0].key).toBe('starting-point')
+      expect(parsed.data.checklist[0].status).toBe('covered')
+      expect(parsed.data.checklist[1].key).toBe('premise')
+      expect(parsed.data.checklist[1].status).toBe('covered')
+      expect(parsed.data.checklist[2].key).toBe('characters')
+      expect(parsed.data.checklist[3].key).toBe('goal')
+      expect(parsed.data.checklist[3].status).toBe('partial')
+      expect(parsed.data.checklist[4].key).toBe('setting')
+      expect(parsed.data.checklist[5].key).toBe('voice')
+      expect(parsed.data.checklist[6].key).toBe('opening')
+      expect(parsed.data.checklist[6].status).toBe('covered')
+    }
+  })
 })
