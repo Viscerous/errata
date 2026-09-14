@@ -62,6 +62,7 @@ interface EmptyStateProps {
   icon?: ReactNode
   action?: ReactNode
   className?: string
+  hintClassName?: string
   /** "margin" = the default library-margin feel. "panel" = vertically centered inside a panel. */
   variant?: 'margin' | 'panel'
 }
@@ -77,6 +78,7 @@ export function EmptyState({
   icon,
   action,
   className,
+  hintClassName,
   variant = 'margin',
 }: EmptyStateProps) {
   return (
@@ -96,7 +98,7 @@ export function EmptyState({
         {title}
       </p>
       {hint && (
-        <p className="text-ui-label text-muted-foreground/70 leading-relaxed max-w-[220px]">
+        <p className={cn('text-ui-label text-muted-foreground/70 leading-relaxed max-w-[220px]', hintClassName)}>
           {hint}
         </p>
       )}

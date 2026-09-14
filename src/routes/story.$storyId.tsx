@@ -46,6 +46,7 @@ import { AgentBlockConfigSchema, type AgentBlockConfig } from '@/contracts/block
 import { q } from '@/lib/query-keys'
 import { useWorkspaceSurface } from '@/hooks/use-workspace-surface'
 import { useStorySetupController } from '@/components/wizard/use-story-setup-controller'
+import type { StorySetupHandoff } from '@/components/wizard/StoryWizard'
 
 const DebugPanel = lazy(() => import('@/components/generation/DebugPanel').then((module) => ({ default: module.DebugPanel })))
 const ProviderPanel = lazy(() => import('@/components/settings/ProviderManager').then((module) => ({ default: module.ProviderPanel })))
@@ -87,6 +88,7 @@ function StoryEditorPage() {
     updateFragment: updateWorkspaceFragment,
     updateProseFragment: updateWorkspaceProseFragment,
   } = useWorkspaceSurface(storyId)
+  const [proseHandoff, setProseHandoff] = useState<StorySetupHandoff | null>(null)
   const [wizardCheckedBranchId, setWizardCheckedBranchId] = useState<string | null>(null)
   const [showImportDialog, setShowImportDialog] = useState(false)
   const [importInitialData, setImportInitialData] = useState<ErrataExportData | null>(null)
@@ -593,6 +595,8 @@ function StoryEditorPage() {
               setAskLibrarianFragmentId(fragmentId)
               setAskLibrarianPrefill(prefill ?? null)
             }}
+            handoff={proseHandoff}
+            onConsumeHandoff={() => setProseHandoff(null)}
           />
         ) : (
           <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-muted-foreground">Loading chat…</div>}>
@@ -612,6 +616,13 @@ function StoryEditorPage() {
                 key={`${storyId}:${activeBranchId ?? 'main'}`}
                 controller={storySetupController}
                 onClose={() => transitionWorkspaceSurface(null)}
+                onStartWriting={(handoff) => {
+                  if (handoff) {
+                    setProseHandoff(handoff)
+                  }
+                  setMainView('prose')
+                  transitionWorkspaceSurface(null)
+                }}
               />
             </Suspense>
           </div>

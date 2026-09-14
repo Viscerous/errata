@@ -265,5 +265,72 @@ describe('useStorySetupController', () => {
     expect(updatedItem?.status).toBe('covered')
     expect(updatedItem?.note).toBe('Exploring manager style')
   })
+
+  it('captures structured options from tool results and clears them on send', async () => {
+    chat.mockResolvedValueOnce(new ReadableStream({
+      start(controller) {
+        controller.enqueue({
+          type: 'tool-result',
+          id: 'turn-1',
+          toolName: 'updateStorySetup',
+          result: {
+            saved: true,
+            checklist: [
+              { key: 'starting-point', status: 'covered', note: 'Office premise' },
+            ],
+            fragments: [],
+            options: [
+              { label: 'The Deadpan Tone', description: 'Dry and satirical' },
+              { label: 'The Surreal Absurdism', value: 'Surreal corporate dream logic' },
+            ],
+          },
+        })
+        controller.enqueue({ type: 'text', text: 'Which voice fits best?' })
+        controller.close()
+      },
+    }))
+
+    const { result } = renderHook(
+      () => useStorySetupController({
+        storyId: 'story-test',
+        sessionScope: 'main',
+        contentRevision: 'revision-1',
+        active: true,
+      }),
+      { wrapper: makeWrapper() },
+    )
+
+    await waitFor(() => expect(result.current.contextReady).toBe(true))
+    expect(result.current.options).toEqual([
+      { label: 'The Deadpan Tone', description: 'Dry and satirical' },
+      { label: 'The Surreal Absurdism', value: 'Surreal corporate dream logic' },
+    ])
+
+    // When the user responds or sends an option, options are cleared
+    chat.mockResolvedValueOnce(new ReadableStream({
+      start(controller) {
+        controller.enqueue({
+          type: 'tool-result',
+          id: 'turn-2',
+          toolName: 'updateStorySetup',
+          result: {
+            saved: true,
+            checklist: [
+              { key: 'starting-point', status: 'covered', note: 'Office premise' },
+              { key: 'voice', status: 'covered', note: 'Deadpan tone' },
+            ],
+            fragments: [],
+            options: [],
+          },
+        })
+        controller.enqueue({ type: 'text', text: 'Voice is saved.' })
+        controller.close()
+      },
+    }))
+
+    act(() => result.current.send('The Deadpan Tone'))
+    await waitFor(() => expect(result.current.messages.at(-1)?.content).toBe('Voice is saved.'))
+    expect(result.current.options).toEqual([])
+  })
 })
 

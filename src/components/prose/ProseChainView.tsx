@@ -12,7 +12,7 @@ import { useQuickSwitch, useProseWidth, PROSE_WIDTH_VALUES, useMentionTypes, BAS
 import { parseVisualRefs } from '@/lib/fragment-visuals'
 import { ProseBlock } from './ProseBlock'
 import { ChapterMarker } from './ChapterMarker'
-import { InlineGenerationInput } from './InlineGenerationInput'
+import { InlineGenerationInput, type InlineGenerationHandoff } from './InlineGenerationInput'
 import { GenerationThoughts } from './GenerationThoughts'
 import { ProseOutlinePanel } from './ProseOutlinePanel'
 import { MentionProvider } from './MentionContext'
@@ -37,6 +37,8 @@ interface ProseChainViewProps {
   onDebugLog?: (logId: string) => void
   onLaunchWizard?: () => void
   onAskLibrarian?: (fragmentId: string, prefill?: string) => void
+  handoff?: InlineGenerationHandoff | null
+  onConsumeHandoff?: () => void
 }
 
 const GENERATION_HANDOFF_ANCHOR = 'generation-handoff'
@@ -171,12 +173,22 @@ export function ProseChainView({
   onDebugLog,
   onLaunchWizard,
   onAskLibrarian,
+  handoff,
+  onConsumeHandoff,
 }: ProseChainViewProps) {
 
   const [activeIndex, setActiveIndex] = useState(0)
   const activeIndexRef = useRef(0)
   const [mobileTocOpen, setMobileTocOpen] = useState(false)
   const [chainError, setChainError] = useState<string | null>(null)
+  const [localHandoff, setLocalHandoff] = useState<InlineGenerationHandoff | null>(null)
+  const effectiveHandoff = handoff ?? localHandoff
+  const handleConsumeHandoff = useCallback(() => {
+    if (handoff) {
+      onConsumeHandoff?.()
+    }
+    setLocalHandoff(null)
+  }, [handoff, onConsumeHandoff])
   const scrollAreaRef = useRef<HTMLDivElement>(null)
   const [isGenerating, setIsGenerating] = useState(false)
   const [pendingGeneration, setPendingGeneration] = useState<PendingGenerationMeta | null>(null)
@@ -252,6 +264,13 @@ export function ProseChainView({
   const { data: fragments = [] } = useQuery(q.fragments(storyId, branchId, 'prose'))
 
   const { data: markerFragments = [] } = useQuery(q.fragments(storyId, branchId, 'marker'))
+
+  const { data: guidelineFragments = [] } = useQuery(q.fragments(storyId, branchId, 'guideline'))
+
+  const openingGuideline = useMemo(
+    () => guidelineFragments.find((f) => f.meta?.storySetupKey === 'opening' || f.name.toLowerCase().includes('opening direction')),
+    [guidelineFragments],
+  )
 
   const mentionFragmentQueries = useQueries({
     queries: mentionFragmentTypes.map((type) => ({
@@ -1061,14 +1080,42 @@ export function ProseChainView({
             ) : !showPendingGeneration ? (
               <EmptyState
                 variant="panel"
-                title="The page awaits."
-                hint="Write your first passage below, or let the wizard help you set up your story."
-                action={onLaunchWizard ? (
-                  <Button variant="outline" size="lg" onClick={onLaunchWizard}>
-                    <Wand2 className="size-4" />
-                    Story Setup Wizard
-                  </Button>
-                ) : undefined}
+                title={openingGuideline ? "Foundation ready." : "The page awaits."}
+                hint={openingGuideline ? (
+                  <span className="block max-w-sm text-left sm:text-center">
+                    <span className="font-semibold text-foreground/85 block mb-1">Opening direction:</span>
+                    <span className="line-clamp-3 text-muted-foreground/80">{openingGuideline.content}</span>
+                  </span>
+                ) : (
+                  "Write your first passage below, or let the wizard help you set up your story."
+                )}
+                hintClassName={openingGuideline ? "max-w-md" : undefined}
+                action={
+                  <div className="flex flex-wrap items-center justify-center gap-2 pt-2">
+                    {openingGuideline ? (
+                      <>
+                        <Button
+                          variant="default"
+                          size="lg"
+                          onClick={() => setLocalHandoff({ mode: 'generate', prompt: openingGuideline.content })}
+                        >
+                          <Wand2 className="size-4" />
+                          Generate opening scene
+                        </Button>
+                        {onLaunchWizard && (
+                          <Button variant="outline" size="lg" onClick={onLaunchWizard}>
+                            Story setup
+                          </Button>
+                        )}
+                      </>
+                    ) : onLaunchWizard ? (
+                      <Button variant="outline" size="lg" onClick={onLaunchWizard}>
+                        <Wand2 className="size-4" />
+                        Story Setup Wizard
+                      </Button>
+                    ) : undefined}
+                  </div>
+                }
                 className="py-20"
               />
             ) : null}
@@ -1136,6 +1183,8 @@ export function ProseChainView({
               isGenerating={isGenerating}
               latestFragmentId={lastProseFragment?.id}
               liveAnalysisProgress={liveAnalysisProgress}
+              handoff={effectiveHandoff}
+              onConsumeHandoff={handleConsumeHandoff}
               onGenerationStart={(prompt, inputMode) => {
                 followRef.current = true
                 generationAnchorTopRef.current = null

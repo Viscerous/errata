@@ -3,6 +3,7 @@ import type {
   StorySetupChecklistItem,
   StorySetupDraftFragment,
   StorySetupMessage,
+  StorySetupOption,
 } from '@/lib/api'
 
 interface StorageLike {
@@ -29,6 +30,11 @@ const StorySetupSessionSchema = z.object({
     description: z.string(),
     content: z.string(),
   })),
+  options: z.array(z.object({
+    label: z.string(),
+    description: z.string().optional(),
+    value: z.string().optional(),
+  })).optional(),
 })
 
 export interface StorySetupSession {
@@ -36,6 +42,7 @@ export interface StorySetupSession {
   messages: StorySetupMessage[]
   checklist: StorySetupChecklistItem[]
   draftFragments: StorySetupDraftFragment[]
+  options?: StorySetupOption[]
 }
 
 function sessionKey(storyId: string, scope: string) {

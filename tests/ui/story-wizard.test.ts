@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { extractAssistantSuggestions, StoryWizard } from '@/components/wizard/StoryWizard'
 import type { StorySetupController } from '@/components/wizard/use-story-setup-controller'
+import type { StorySetupChecklistItem } from '@/lib/api'
 
 const controller: StorySetupController = {
   messages: [],
@@ -16,6 +17,7 @@ const controller: StorySetupController = {
   error: null,
   checklist: [],
   draftFragments: [],
+  options: [],
   sessionLoaded: true,
   contextReady: true,
   send: () => undefined,
@@ -101,7 +103,7 @@ describe('StoryWizard', () => {
 
   it('surfaces Start writing CTA when the story outline and opening are ready', () => {
     const onClose = vi.fn()
-    const readyChecklist = [
+    const readyChecklist: StorySetupChecklistItem[] = [
       { key: 'starting-point', status: 'covered' as const, note: 'Premise set' },
       { key: 'premise', status: 'covered' as const, note: 'Satire' },
       { key: 'characters', status: 'covered' as const, note: 'Arthur' },
@@ -127,7 +129,7 @@ describe('StoryWizard', () => {
   })
 
   it('does not surface Foundation ready when voice is covered but opening is still missing or partial', () => {
-    const incompleteChecklist = [
+    const incompleteChecklist: StorySetupChecklistItem[] = [
       { key: 'starting-point', status: 'covered' as const, note: 'Premise set' },
       { key: 'premise', status: 'covered' as const, note: 'Satire' },
       { key: 'characters', status: 'covered' as const, note: 'Arthur' },
@@ -261,6 +263,108 @@ describe('StoryWizard', () => {
     expect(earnestBtn).toBeDefined()
     fireEvent.click(earnestBtn)
     expect(send).toHaveBeenCalledWith('The Earnest Professional')
+  })
+
+  it('renders structured controller options with descriptions and dispatches selection on click', () => {
+    const send = vi.fn()
+    const structuredOptions = [
+      { label: 'The Deadpan Tone', description: 'Third-person limited, dry British humor', value: 'Deadpan tone with dry wit' },
+      { label: 'The Satirical Voice', description: 'Institutional absurdity and memos' },
+    ]
+
+    render(React.createElement(StoryWizard, {
+      controller: {
+        ...controller,
+        options: structuredOptions,
+        send,
+      },
+      onClose: () => undefined,
+    }))
+
+    expect(screen.getByText('Suggestions')).toBeDefined()
+    expect(screen.getByText('The Deadpan Tone')).toBeDefined()
+    expect(screen.getByText('Third-person limited, dry British humor')).toBeDefined()
+    expect(screen.getByText('The Satirical Voice')).toBeDefined()
+    expect(screen.getByText('Institutional absurdity and memos')).toBeDefined()
+
+    // Clicking an option with a value sends that value
+    fireEvent.click(screen.getByRole('button', { name: /The Deadpan Tone/ }))
+    expect(send).toHaveBeenCalledWith('Deadpan tone with dry wit')
+
+    // Clicking an option without a value sends the label
+    fireEvent.click(screen.getByRole('button', { name: /The Satirical Voice/ }))
+    expect(send).toHaveBeenCalledWith('The Satirical Voice')
+  })
+
+  it('prefers structured controller options over regex-scraped assistant suggestions', () => {
+    const send = vi.fn()
+    const content = [
+      'Here are markdown suggestions:',
+      '* **Markdown One:** Old regex option.',
+      '* **Markdown Two:** Another old regex option.',
+    ].join('\n')
+
+    render(React.createElement(StoryWizard, {
+      controller: {
+        ...controller,
+        messages: [
+          { role: 'assistant', content },
+        ],
+        options: [
+          { label: 'Structured One', description: 'Explicit model choice' },
+        ],
+        send,
+      },
+      onClose: () => undefined,
+    }))
+
+    expect(screen.getByText('Structured One')).toBeDefined()
+    expect(screen.getByText('Explicit model choice')).toBeDefined()
+    expect(screen.queryByText('Markdown One')).toBeNull()
+    expect(screen.queryByText('Markdown Two')).toBeNull()
+  })
+
+  it('provides dual handoff actions when foundation is ready and invokes onStartWriting', () => {
+    const onStartWriting = vi.fn()
+    const onClose = vi.fn()
+    const readyChecklist: StorySetupChecklistItem[] = [
+      { key: 'starting-point', status: 'covered' as const, note: 'Premise set' },
+      { key: 'premise', status: 'covered' as const, note: 'Satire' },
+      { key: 'characters', status: 'covered' as const, note: 'Arthur' },
+      { key: 'goal', status: 'covered' as const, note: 'Promotion' },
+      { key: 'setting', status: 'covered' as const, note: 'Beige' },
+      { key: 'voice', status: 'covered' as const, note: 'Deadpan' },
+      { key: 'opening', status: 'covered' as const, note: 'Arthur sits down at his beige desk.' },
+    ]
+
+    render(React.createElement(StoryWizard, {
+      controller: {
+        ...controller,
+        checklist: readyChecklist,
+      },
+      onStartWriting,
+      onClose,
+    }))
+
+    // Check that both action buttons are rendered
+    const generateBtns = screen.getAllByRole('button', { name: 'Generate opening scene' })
+    const writeBtns = screen.getAllByRole('button', { name: 'Write in manuscript' })
+    expect(generateBtns.length).toBeGreaterThanOrEqual(1)
+    expect(writeBtns.length).toBeGreaterThanOrEqual(1)
+
+    // Clicking generate passes mode: 'generate' and the opening summary
+    fireEvent.click(generateBtns[0])
+    expect(onStartWriting).toHaveBeenCalledWith({
+      mode: 'generate',
+      prompt: 'Arthur sits down at his beige desk.',
+    })
+
+    // Clicking write passes mode: 'write' and the opening summary
+    fireEvent.click(writeBtns[0])
+    expect(onStartWriting).toHaveBeenCalledWith({
+      mode: 'write',
+      prompt: 'Arthur sits down at his beige desk.',
+    })
   })
 })
 

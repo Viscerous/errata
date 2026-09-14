@@ -88,8 +88,29 @@ const StorySetupChecklistSchema = z.array(StorySetupChecklistItemSchema).length(
   })
 })
 
+export const StorySetupOptionSchema = z.object({
+  label: z.string().trim().min(1).max(80),
+  description: z.string().trim().max(250).optional(),
+  value: z.string().trim().max(250).optional(),
+})
+
+export type StorySetupOption = z.infer<typeof StorySetupOptionSchema>
+
+export const StorySetupOptionInputSchema = z.preprocess(
+  (val) => {
+    if (typeof val === 'string') return { label: val.trim() }
+    if (val && typeof val === 'object' && 'title' in val && typeof (val as { title: unknown }).title === 'string' && !('label' in val)) {
+      const { title, ...rest } = val as { title: string } & Record<string, unknown>
+      return { label: title.trim(), ...rest }
+    }
+    return val
+  },
+  StorySetupOptionSchema,
+)
+
 export const StorySetupAssessmentSchema = z.object({
   checklist: StorySetupChecklistSchema,
+  options: z.array(StorySetupOptionInputSchema).max(6).optional(),
 })
 
 export const StorySetupSnapshotSchema = z.object({
@@ -111,6 +132,7 @@ export const StorySetupSnapshotSchema = z.object({
       seen.add(fragment.key)
     })
   }),
+  options: z.array(StorySetupOptionInputSchema).max(6).optional(),
 })
 
 export type StorySetupDraftFragment = z.infer<typeof StorySetupDraftFragmentSchema>

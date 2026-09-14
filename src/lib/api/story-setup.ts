@@ -22,6 +22,12 @@ export interface StorySetupChecklistItem {
   note: string
 }
 
+export interface StorySetupOption {
+  label: string
+  description?: string
+  value?: string
+}
+
 export interface StorySetupDraftFragment {
   id?: string
   key: string

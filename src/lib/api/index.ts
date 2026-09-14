@@ -29,6 +29,7 @@ export type {
   StorySetupChatMode,
   StorySetupDraftFragment,
   StorySetupMessage,
+  StorySetupOption,
 } from './story-setup'
 
 // HTTP Client utilities (exported for advanced use cases)

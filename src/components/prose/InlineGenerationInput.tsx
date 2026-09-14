@@ -26,6 +26,11 @@ const FORCE_PROCEED_ROUND = 99
 
 type InputMode = 'play' | 'direct' | 'guided' | 'compose'
 
+export interface InlineGenerationHandoff {
+  mode: 'generate' | 'write'
+  prompt?: string
+}
+
 interface InlineGenerationInputProps {
   storyId: string
   isGenerating: boolean
@@ -37,6 +42,8 @@ interface InlineGenerationInputProps {
    */
   latestFragmentId?: string
   liveAnalysisProgress?: LibrarianAnalysisProgress | null
+  handoff?: InlineGenerationHandoff | null
+  onConsumeHandoff?: () => void
   onGenerationStart: (prompt: string, inputMode: AuthorInputMode) => void
   onGenerationStream: (text: string) => void
   onGenerationThoughts?: (steps: ThoughtStep[]) => void
@@ -51,6 +58,8 @@ export function InlineGenerationInput({
   isGenerating,
   latestFragmentId,
   liveAnalysisProgress,
+  handoff,
+  onConsumeHandoff,
   onGenerationStart,
   onGenerationStream,
   onGenerationThoughts,
@@ -266,6 +275,29 @@ export function InlineGenerationInput({
       if (runIdRef.current === runId) runIdRef.current = null
     }
   }, [storyId, branchId, latestFragmentId, isGenerating, onGenerationStart, onGenerationStream, onGenerationThoughts, onGenerationComplete, onGenerationError, queryClient])
+
+  const consumedHandoffRef = useRef<InlineGenerationHandoff | null>(null)
+  useEffect(() => {
+    if (!handoff || isGenerating || consumedHandoffRef.current === handoff) return
+    consumedHandoffRef.current = handoff
+    const prompt = handoff.prompt?.trim()
+    if (!prompt) return
+    onConsumeHandoff?.()
+    if (handoff.mode === 'generate') {
+      void handleGenerateWithInput(prompt, effectiveInputMode)
+    } else {
+      if (mode === 'guided') {
+        handleModeChange('direct')
+        setInput(prompt)
+      } else if (mode === 'compose') {
+        setComposeInput(prompt)
+        composeTextareaRef.current?.focus()
+      } else {
+        setInput(prompt)
+        textareaRef.current?.focus()
+      }
+    }
+  }, [handoff, isGenerating, effectiveInputMode, mode, handleGenerateWithInput, handleModeChange, onConsumeHandoff])
 
   const handleGenerate = () => {
     handleGenerateWithInput(input, effectiveInputMode)

@@ -39,7 +39,7 @@ function writerOwnedContext(ctx: AgentBlockContext): AgentBlockContext {
   }
 }
 
-export const STORY_SETUP_SYSTEM_PROMPT = `Collaborate with the writer to discover and shape a story foundation before writing begins. Build on their answers instead of following a fixed questionnaire. Ask one focused question at a time; when offering concrete possibilities, format them as a bulleted list with bold titles (e.g. * **Option Name:** description) so the writer can choose quickly. Reserve this bold-titled list format specifically for choices you are offering the writer to select.
+export const STORY_SETUP_SYSTEM_PROMPT = `Collaborate with the writer to discover and shape a story foundation before writing begins. Build on their answers instead of following a fixed questionnaire. Ask one focused question at a time. When offering concrete choices, directions, or archetypes for the writer to decide on, provide them consciously in the options field of updateStorySetup (up to 4 options with short labels and optional descriptions) so they appear as interactive buttons in the interface. In your conversational message, ask the question naturally without needing to duplicate raw bulleted lists.
 
 Track seven concerns: starting point; premise or emotional center; central characters; goal, opposition, and stakes; setting and essential world rules; viewpoint, tense, voice, and tone; and what the opening passage should accomplish. Mark a concern partial when a meaningful decision remains, then ask about the highest-value missing or partial point. Once a concern is covered and its fragment is saved, keep its status as covered; exploring optional nuances does not regress a covered concern back to partial.
 
@@ -63,7 +63,7 @@ export function createStorySetupBlocks(ctx: AgentBlockContext): ContextBlock[] {
 
   const toolPolicy = ctx.storySetupReadOnly
     ? '\n\nThis is a read-only assessment. Before replying, call updateStorySetup once with the seven checklist entries in order (starting-point, premise, characters, goal, setting, voice, opening) and no story or fragment changes.'
-    : '\n\nBefore each reply, call updateStorySetup once with the complete checklist in order (keys: starting-point, premise, characters, goal, setting, voice, opening; statuses: missing, partial, covered) and current setup-fragment snapshot. Preserve existing fragment keys, add supported material promptly, and retain uncertainty rather than inventing decisions. Include the working title and description once they are useful.'
+    : '\n\nBefore each reply, call updateStorySetup once with the complete checklist in order (keys: starting-point, premise, characters, goal, setting, voice, opening; statuses: missing, partial, covered), current setup-fragment snapshot, and optional interactive options. Preserve existing fragment keys, add supported material promptly, and retain uncertainty rather than inventing decisions. Include the working title and description once they are useful.'
   const materialPolicy = '\n\nTreat the writer-owned context below as read-only evidence for checklist coverage. Do not copy it into the setup-fragment snapshot.'
   const blocks: ContextBlock[] = [{
     id: 'story-setup-instructions',

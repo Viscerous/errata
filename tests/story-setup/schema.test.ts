@@ -14,10 +14,13 @@ function containsUnion(value: unknown): boolean {
 }
 
 describe('story setup tool schemas', () => {
-  it('keeps assessment input to the checklist Errata actually consumes', async () => {
+  it('keeps assessment input to the checklist and options Errata actually consumes', async () => {
     const schema = await asSchema(StorySetupAssessmentSchema).jsonSchema
-    expect(schema.properties).toEqual(expect.objectContaining({ checklist: expect.any(Object) }))
-    expect(Object.keys(schema.properties ?? {})).toEqual(['checklist'])
+    expect(schema.properties).toEqual(expect.objectContaining({
+      checklist: expect.any(Object),
+      options: expect.any(Object),
+    }))
+    expect(Object.keys(schema.properties ?? {}).sort()).toEqual(['checklist', 'options'])
     expect(schema.required).toEqual(['checklist'])
     expect(containsUnion(schema)).toBe(false)
   })

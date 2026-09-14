@@ -3,6 +3,7 @@ import { ArrowLeft, ChevronDown, ChevronRight, Circle, CircleCheck, CircleDot, P
 import {
   type StorySetupChecklistItem,
   type StorySetupDraftFragment,
+  type StorySetupOption,
 } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { StreamMarkdown } from '@/components/ui/stream-markdown'
@@ -19,9 +20,15 @@ import {
   type StorySetupController,
 } from './use-story-setup-controller'
 
+export interface StorySetupHandoff {
+  mode: 'generate' | 'write'
+  prompt?: string
+}
+
 interface StoryWizardProps {
   controller: StorySetupController
   onClose: () => void
+  onStartWriting?: (handoff?: StorySetupHandoff) => void
 }
 
 const STARTING_POINTS = [
@@ -145,13 +152,15 @@ function StorySetupRail({
   updating: boolean
   className?: string
   idPrefix: string
-  onStartWriting?: () => void
+  onStartWriting?: (handoff?: StorySetupHandoff) => void
 }) {
   const covered = checklist.filter(item => item.status === 'covered').length
   const explored = checklist.filter(item => item.status !== 'missing').length
   const checklistByKey = new Map(checklist.map(item => [item.key, item]))
-  const openingCovered = checklist.some(item => item.key === 'opening' && item.status === 'covered')
+  const openingItem = checklist.find(item => item.key === 'opening')
+  const openingCovered = openingItem?.status === 'covered'
   const readyToWrite = openingCovered && checklist.length > 0 && checklist.every(item => item.status !== 'missing')
+  const openingSummary = openingItem?.note || 'Write the opening passage according to the story foundation guidelines.'
 
   return (
     <WorkspaceRail className={cn('gap-7 overflow-y-auto px-5 py-6', className)} data-component-id="story-setup-progress">
@@ -187,18 +196,30 @@ function StorySetupRail({
           <div className="mt-4 rounded-lg border border-primary/20 bg-primary/5 p-3 text-ui-caption" data-component-id={`${idPrefix}-foundation-ready`}>
             <p className="font-medium text-foreground">Foundation ready</p>
             <p className="mt-1 text-ui-label leading-relaxed text-muted-foreground">
-              Your story outline and opening direction are set. You can begin writing the opening passage in the manuscript.
+              {openingItem?.note ? `Opening direction: ${openingItem.note}` : 'Your story outline and opening direction are set.'}
             </p>
-            <Button
-              type="button"
-              size="sm"
-              onClick={onStartWriting}
-              className="mt-2.5 w-full gap-1.5 text-ui-caption font-medium"
-              data-component-id={`${idPrefix}-start-writing-button`}
-            >
-              <PenLine className="size-3.5" aria-hidden />
-              Start writing
-            </Button>
+            <div className="mt-3 flex flex-col gap-1.5">
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => onStartWriting({ mode: 'generate', prompt: openingSummary })}
+                className="w-full gap-1.5 text-ui-caption font-medium"
+                data-component-id={`${idPrefix}-generate-opening-button`}
+              >
+                <PenLine className="size-3.5" aria-hidden />
+                Generate opening scene
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => onStartWriting({ mode: 'write', prompt: openingSummary })}
+                className="w-full gap-1.5 text-ui-caption font-normal border-border/50 text-foreground/80 hover:text-foreground"
+                data-component-id={`${idPrefix}-start-writing-button`}
+              >
+                Write in manuscript
+              </Button>
+            </div>
           </div>
         )}
       </section>
@@ -236,7 +257,7 @@ function StorySetupRail({
   )
 }
 
-export function StoryWizard({ controller, onClose }: StoryWizardProps) {
+export function StoryWizard({ controller, onClose, onStartWriting }: StoryWizardProps) {
   const {
     messages,
     input,
@@ -246,6 +267,7 @@ export function StoryWizard({ controller, onClose }: StoryWizardProps) {
     error,
     checklist,
     draftFragments,
+    options = [],
     contextReady,
     send,
     stop,
@@ -256,14 +278,30 @@ export function StoryWizard({ controller, onClose }: StoryWizardProps) {
 
   const userTurnCount = messages.filter(message => message.role === 'user').length
   const exploredCount = checklist.filter(item => item.status !== 'missing').length
-  const openingCovered = checklist.some(item => item.key === 'opening' && item.status === 'covered')
+  const openingItem = checklist.find(item => item.key === 'opening')
+  const openingCovered = openingItem?.status === 'covered'
   const readyToWrite = openingCovered && checklist.length > 0 && checklist.every(item => item.status !== 'missing')
+  const openingSummary = openingItem?.note || 'Write the opening passage according to the story foundation guidelines.'
+
+  const handleStartWriting = (handoff?: StorySetupHandoff) => {
+    if (onStartWriting) {
+      onStartWriting(handoff ?? { mode: 'generate', prompt: openingSummary })
+    } else {
+      onClose()
+    }
+  }
 
   const latestAssistantMessage = messages.length > 0 && messages[messages.length - 1].role === 'assistant'
     ? messages[messages.length - 1]
     : null
-  const suggestions = !isStreaming && latestAssistantMessage
-    ? extractAssistantSuggestions(latestAssistantMessage.content)
+
+  // Conscious model options from the tool call take precedence; fallback to guarded markdown extraction
+  const activeOptions: StorySetupOption[] = !isStreaming
+    ? options.length > 0
+      ? options
+      : latestAssistantMessage
+        ? extractAssistantSuggestions(latestAssistantMessage.content).map(label => ({ label }))
+        : []
     : []
 
   useEffect(() => {
@@ -300,7 +338,7 @@ export function StoryWizard({ controller, onClose }: StoryWizardProps) {
             <Button
               variant="default"
               size="sm"
-              onClick={onClose}
+              onClick={() => handleStartWriting({ mode: 'generate', prompt: openingSummary })}
               className="gap-1.5 text-ui-caption font-medium"
               data-component-id="story-setup-start-writing"
             >
@@ -325,7 +363,7 @@ export function StoryWizard({ controller, onClose }: StoryWizardProps) {
                 <ChevronDown className="size-3.5" aria-hidden />
               </span>
             </summary>
-            <StorySetupRail idPrefix="mobile" checklist={checklist} draftFragments={draftFragments} updating={isStreaming} onStartWriting={onClose} className="max-h-[45vh] border-l-0 border-t border-border/30" />
+            <StorySetupRail idPrefix="mobile" checklist={checklist} draftFragments={draftFragments} updating={isStreaming} onStartWriting={handleStartWriting} className="max-h-[45vh] border-l-0 border-t border-border/30" />
           </details>
 
           <div className="min-h-0 flex-1 overflow-y-auto" data-component-id="story-setup-transcript">
@@ -338,7 +376,7 @@ export function StoryWizard({ controller, onClose }: StoryWizardProps) {
 
               {isStreaming && <AssistantTurn content={streamingText} streaming={Boolean(streamingText)} />}
 
-              {userTurnCount === 0 && !isStreaming && suggestions.length === 0 && messages.some(message => message.role === 'assistant') && (
+              {userTurnCount === 0 && !isStreaming && activeOptions.length === 0 && messages.some(message => message.role === 'assistant') && (
                 <div className="space-y-2.5 pl-9">
                   <MetaLabel asChild><p>You can start anywhere</p></MetaLabel>
                   <div className="flex flex-wrap gap-1.5">
@@ -358,22 +396,30 @@ export function StoryWizard({ controller, onClose }: StoryWizardProps) {
                 </div>
               )}
 
-              {suggestions.length > 0 && (
+              {activeOptions.length > 0 && (
                 <div className="space-y-2.5 pl-9" data-component-id="story-setup-suggestions">
                   <MetaLabel asChild><p>Suggestions</p></MetaLabel>
-                  <div className="flex flex-wrap gap-1.5">
-                    {suggestions.map(suggestion => (
+                  <div className="flex flex-wrap gap-2">
+                    {activeOptions.map(option => (
                       <Button
-                        key={suggestion}
+                        key={option.label}
                         type="button"
                         variant="outline"
                         size="sm"
                         disabled={!contextReady}
-                        onClick={() => send(suggestion)}
-                        className="h-7 border-border/50 bg-transparent text-ui-caption font-normal text-foreground/75 hover:border-primary/40 hover:bg-primary/5 hover:text-foreground"
+                        onClick={() => send(option.value ?? option.label)}
+                        className={cn(
+                          'h-auto py-1.5 px-3 border-border/50 bg-transparent text-left text-ui-caption font-normal text-foreground/80 hover:border-primary/40 hover:bg-primary/5 hover:text-foreground',
+                          option.description && 'flex-col items-start gap-0.5 min-w-[140px]',
+                        )}
                         data-component-id="story-setup-suggestion-button"
                       >
-                        {suggestion}
+                        <span className="font-medium text-foreground">{option.label}</span>
+                        {option.description && (
+                          <span className="text-ui-label text-muted-foreground line-clamp-2 leading-relaxed">
+                            {option.description}
+                          </span>
+                        )}
                       </Button>
                     ))}
                   </div>
@@ -426,7 +472,7 @@ export function StoryWizard({ controller, onClose }: StoryWizardProps) {
             </div>
           </div>
         </div>
-        <StorySetupRail idPrefix="desktop" checklist={checklist} draftFragments={draftFragments} updating={isStreaming} onStartWriting={onClose} className="hidden w-72 xl:flex" />
+        <StorySetupRail idPrefix="desktop" checklist={checklist} draftFragments={draftFragments} updating={isStreaming} onStartWriting={handleStartWriting} className="hidden w-72 xl:flex" />
       </main>
     </div>
   )

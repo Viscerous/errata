@@ -30,10 +30,14 @@ vi.mock('@/lib/api', async (importOriginal) => {
 })
 
 import { TooltipProvider } from '@/components/ui/tooltip'
-import { InlineGenerationInput } from '@/components/prose/InlineGenerationInput'
+import { InlineGenerationInput, type InlineGenerationHandoff } from '@/components/prose/InlineGenerationInput'
 import { eventStream } from './event-stream'
 
-function renderInput() {
+function renderInput(props?: {
+  handoff?: InlineGenerationHandoff | null
+  onConsumeHandoff?: () => void
+  onGenerationStart?: (prompt: string, inputMode: any) => void
+}) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const utils = render(
     React.createElement(QueryClientProvider, { client: queryClient },
@@ -41,7 +45,9 @@ function renderInput() {
         React.createElement(InlineGenerationInput, {
           storyId: 'story-1',
           isGenerating: false,
-          onGenerationStart: () => {},
+          handoff: props?.handoff,
+          onConsumeHandoff: props?.onConsumeHandoff,
+          onGenerationStart: props?.onGenerationStart ?? (() => {}),
           onGenerationStream: () => {},
           onGenerationComplete: () => {},
           onGenerationError: () => {},
@@ -69,6 +75,7 @@ describe('stopping a prose generation', () => {
   afterEach(cleanup)
 
   beforeEach(() => {
+    localStorage.clear()
     generateAndSave.mockReset()
     cancel.mockReset()
     cancel.mockResolvedValue({ ok: true, active: true })
@@ -123,5 +130,44 @@ describe('stopping a prose generation', () => {
     expect(container.textContent).toContain('Ctrl+Enter')
     expect(fireEvent.keyDown(prose, { key: 'Enter' })).toBe(true)
     expect(fireEvent.keyDown(prose, { key: 'Enter', ctrlKey: true })).toBe(false)
+  })
+
+  it('triggers immediate generation and consumes handoff when mode is generate', async () => {
+    generateAndSave.mockResolvedValue(eventStream([
+      { type: 'finish', finishReason: 'stop', stepCount: 1 },
+    ]))
+    const onConsumeHandoff = vi.fn()
+    const onGenerationStart = vi.fn()
+
+    renderInput({
+      handoff: { mode: 'generate', prompt: 'Arthur sits down at his beige desk.' },
+      onConsumeHandoff,
+      onGenerationStart,
+    })
+
+    await waitFor(() => expect(onConsumeHandoff).toHaveBeenCalledOnce())
+    await waitFor(() => expect(onGenerationStart).toHaveBeenCalledWith('Arthur sits down at his beige desk.', 'direct'))
+    expect(generateAndSave).toHaveBeenCalledWith(
+      'story-1',
+      'Arthur sits down at his beige desk.',
+      expect.any(AbortSignal),
+      expect.objectContaining({ inputMode: 'direct' }),
+    )
+  })
+
+  it('prefills textarea without generating when mode is write', async () => {
+    const onConsumeHandoff = vi.fn()
+    const onGenerationStart = vi.fn()
+
+    const { textarea } = renderInput({
+      handoff: { mode: 'write', prompt: 'Arthur examines the missing requisition form.' },
+      onConsumeHandoff,
+      onGenerationStart,
+    })
+
+    await waitFor(() => expect(onConsumeHandoff).toHaveBeenCalledOnce())
+    expect(textarea.value).toBe('Arthur examines the missing requisition form.')
+    expect(onGenerationStart).not.toHaveBeenCalled()
+    expect(generateAndSave).not.toHaveBeenCalled()
   })
 })

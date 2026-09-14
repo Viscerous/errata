@@ -7,6 +7,7 @@ import {
   type StorySetupChecklistKey,
   type StorySetupDraftFragment,
   type StorySetupMessage,
+  type StorySetupOption,
 } from '@/lib/api'
 import { invalidateStoryContent } from '@/lib/branch-cache'
 import {
@@ -40,6 +41,7 @@ export interface StorySetupController {
   error: string | null
   checklist: StorySetupChecklistItem[]
   draftFragments: StorySetupDraftFragment[]
+  options: StorySetupOption[]
   sessionLoaded: boolean
   contextReady: boolean
   send: (content: string) => void
@@ -111,6 +113,7 @@ export function useStorySetupController({
   const [error, setError] = useState<string | null>(null)
   const [checklist, setChecklist] = useState<StorySetupChecklistItem[]>(INITIAL_CHECKLIST)
   const [draftFragments, setDraftFragments] = useState<StorySetupDraftFragment[]>([])
+  const [options, setOptions] = useState<StorySetupOption[]>([])
   const [sessionLoaded, setSessionLoaded] = useState(false)
   const [loadedIdentity, setLoadedIdentity] = useState<string | null>(null)
   const [contextReady, setContextReady] = useState(false)
@@ -167,18 +170,26 @@ export function useStorySetupController({
           const snapshot = value.args as {
             checklist?: StorySetupChecklistItem[]
             fragments?: StorySetupDraftFragment[]
+            options?: Array<StorySetupOption | string>
           }
           if (Array.isArray(snapshot.checklist)) setChecklist(normalizeChecklist(snapshot.checklist, checklistRef.current))
           if (Array.isArray(snapshot.fragments)) setDraftFragments(snapshot.fragments)
+          if (Array.isArray(snapshot.options)) {
+            setOptions(snapshot.options.map(opt => typeof opt === 'string' ? { label: opt } : opt))
+          }
         } else if (value.type === 'tool-result' && value.toolName === 'updateStorySetup') {
           receivedSnapshot = true
           const saved = value.result as {
             saved?: boolean
             checklist?: StorySetupChecklistItem[]
             fragments?: StorySetupDraftFragment[]
+            options?: Array<StorySetupOption | string>
           }
           if (Array.isArray(saved.checklist)) setChecklist(normalizeChecklist(saved.checklist, checklistRef.current))
           if (Array.isArray(saved.fragments)) setDraftFragments(saved.fragments)
+          if (Array.isArray(saved.options)) {
+            setOptions(saved.options.map(opt => typeof opt === 'string' ? { label: opt } : opt))
+          }
           if (saved.saved !== false) {
             await Promise.all([
               queryClient.invalidateQueries({ queryKey: ['story', storyId] }),
@@ -248,6 +259,7 @@ export function useStorySetupController({
       setMessages(saved.messages)
       setChecklist(normalizeChecklist(saved.checklist))
       setDraftFragments(saved.draftFragments)
+      setOptions(saved.options ?? [])
       const needsRefresh = storySetupSessionNeedsRefresh(saved, contentRevision)
       setContextReady(!needsRefresh)
       setAcceptedRevision(needsRefresh ? undefined : contentRevision)
@@ -255,6 +267,7 @@ export function useStorySetupController({
       setMessages([])
       setChecklist(INITIAL_CHECKLIST)
       setDraftFragments([])
+      setOptions([])
     }
     setLoadedIdentity(identity)
     setSessionLoaded(true)
@@ -289,12 +302,14 @@ export function useStorySetupController({
       messages,
       checklist,
       draftFragments,
+      options,
     })
-  }, [acceptedRevision, checklist, contextReady, draftFragments, identity, loadedIdentity, messages, sessionLoaded, sessionScope, storyId])
+  }, [acceptedRevision, checklist, contextReady, draftFragments, identity, loadedIdentity, messages, options, sessionLoaded, sessionScope, storyId])
 
   const send = useCallback((content: string) => {
     const trimmed = content.trim()
     if (!trimmed || isStreaming || !contextReady || abortRef.current) return
+    setOptions([])
     const history: StorySetupMessage[] = [...messages, { role: 'user', content: trimmed }]
     setMessages(history)
     setInput('')
@@ -322,6 +337,7 @@ export function useStorySetupController({
     error,
     checklist,
     draftFragments,
+    options,
     sessionLoaded,
     contextReady,
     send,

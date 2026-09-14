@@ -18,7 +18,7 @@ export function createStorySetupTools(dataDir: string, storyId: string, mode: 'a
       updateStorySetup: tool({
         description: 'Report the seven checklist items from the existing story material without changing the story.',
         inputSchema: StorySetupAssessmentSchema,
-        execute: async ({ checklist }) => {
+        execute: async ({ checklist, options }) => {
           try {
             const setupFragments = await listStorySetupFragments(dataDir, storyId)
             return {
@@ -34,6 +34,7 @@ export function createStorySetupTools(dataDir: string, storyId: string, mode: 'a
                 description: fragment.description,
                 content: fragment.content,
               })),
+              options: options ?? [],
             }
           } catch (error) {
             const message = error instanceof Error ? error.message : String(error)
@@ -48,7 +49,7 @@ export function createStorySetupTools(dataDir: string, storyId: string, mode: 'a
     updateStorySetup: tool({
       description: 'Save the working story details and complete setup-fragment snapshot, and replace the visible checklist before asking the writer the next question.',
       inputSchema: StorySetupSnapshotSchema,
-      execute: async ({ story, checklist, fragments }) => {
+      execute: async ({ story, checklist, fragments, options }) => {
         try {
           const saved = await syncStorySetupSnapshot(dataDir, storyId, { story: story ?? null, fragments })
           return {
@@ -57,6 +58,7 @@ export function createStorySetupTools(dataDir: string, storyId: string, mode: 'a
             covered: checklist.filter(item => item.status === 'covered').length,
             story: saved.story,
             fragments: saved.fragments,
+            options: options ?? [],
           }
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error)
