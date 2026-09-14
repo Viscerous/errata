@@ -31,6 +31,49 @@ const STARTING_POINTS = [
   { label: 'Only a mood', message: 'I only have a mood or feeling so far.' },
 ] as const
 
+const CHECKLIST_CATEGORY_TITLES = new Set([
+  'starting point',
+  'premise',
+  'what it is about',
+  'characters',
+  'central characters',
+  'protagonist',
+  'goal',
+  'goal and stakes',
+  'stakes',
+  'setting',
+  'world rules',
+  'voice',
+  'voice and tone',
+  'tone',
+  'opening',
+  'opening direction',
+  'summary',
+  'note',
+  'notes',
+])
+
+export function extractAssistantSuggestions(content: string): string[] {
+  if (!content) return []
+  const suggestions: string[] = []
+  const lines = content.split('\n')
+  for (const line of lines) {
+    const match = line.match(/^\s*(?:[*•-]|(?:\d+[.)]))\s+\*\*([^*]+)\*\*/)
+    if (match) {
+      const label = match[1].replace(/[:\s–—-]+$/, '').trim()
+      if (
+        label.length > 0 &&
+        label.length <= 60 &&
+        !CHECKLIST_CATEGORY_TITLES.has(label.toLowerCase()) &&
+        !suggestions.includes(label)
+      ) {
+        suggestions.push(label)
+      }
+    }
+  }
+  return suggestions.length >= 2 && suggestions.length <= 8 ? suggestions : []
+}
+
 function AssistantTurn({ content, streaming = false }: { content: string; streaming?: boolean }) {
   return (
     <article className="flex items-start gap-3" data-component-id="story-setup-assistant-turn">
@@ -90,8 +133,8 @@ function StorySetupRail({
   const covered = checklist.filter(item => item.status === 'covered').length
   const explored = checklist.filter(item => item.status !== 'missing').length
   const checklistByKey = new Map(checklist.map(item => [item.key, item]))
-  const openingExplored = checklist.some(item => item.key === 'opening' && item.status !== 'missing')
-  const readyToWrite = openingExplored || covered >= 4
+  const openingCovered = checklist.some(item => item.key === 'opening' && item.status === 'covered')
+  const readyToWrite = openingCovered && checklist.length > 0 && checklist.every(item => item.status !== 'missing')
 
   return (
     <WorkspaceRail className={cn('gap-7 overflow-y-auto px-5 py-6', className)} data-component-id="story-setup-progress">
@@ -196,9 +239,15 @@ export function StoryWizard({ controller, onClose }: StoryWizardProps) {
 
   const userTurnCount = messages.filter(message => message.role === 'user').length
   const exploredCount = checklist.filter(item => item.status !== 'missing').length
-  const openingExplored = checklist.some(item => item.key === 'opening' && item.status !== 'missing')
-  const coveredCount = checklist.filter(item => item.status === 'covered').length
-  const readyToWrite = openingExplored || coveredCount >= 4
+  const openingCovered = checklist.some(item => item.key === 'opening' && item.status === 'covered')
+  const readyToWrite = openingCovered && checklist.length > 0 && checklist.every(item => item.status !== 'missing')
+
+  const latestAssistantMessage = messages.length > 0 && messages[messages.length - 1].role === 'assistant'
+    ? messages[messages.length - 1]
+    : null
+  const suggestions = !isStreaming && latestAssistantMessage
+    ? extractAssistantSuggestions(latestAssistantMessage.content)
+    : []
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: isStreaming ? 'auto' : 'smooth', block: 'end' })
@@ -272,7 +321,7 @@ export function StoryWizard({ controller, onClose }: StoryWizardProps) {
 
               {isStreaming && <AssistantTurn content={streamingText} streaming={Boolean(streamingText)} />}
 
-              {userTurnCount === 0 && !isStreaming && messages.some(message => message.role === 'assistant') && (
+              {userTurnCount === 0 && !isStreaming && suggestions.length === 0 && messages.some(message => message.role === 'assistant') && (
                 <div className="space-y-2.5 pl-9">
                   <MetaLabel asChild><p>You can start anywhere</p></MetaLabel>
                   <div className="flex flex-wrap gap-1.5">
@@ -286,6 +335,28 @@ export function StoryWizard({ controller, onClose }: StoryWizardProps) {
                         className="h-7 border-border/50 bg-transparent text-ui-caption font-normal text-foreground/75"
                       >
                         {point.label}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {suggestions.length > 0 && (
+                <div className="space-y-2.5 pl-9" data-component-id="story-setup-suggestions">
+                  <MetaLabel asChild><p>Suggestions</p></MetaLabel>
+                  <div className="flex flex-wrap gap-1.5">
+                    {suggestions.map(suggestion => (
+                      <Button
+                        key={suggestion}
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={!contextReady}
+                        onClick={() => send(suggestion)}
+                        className="h-7 border-border/50 bg-transparent text-ui-caption font-normal text-foreground/75 hover:border-primary/40 hover:bg-primary/5 hover:text-foreground"
+                        data-component-id="story-setup-suggestion-button"
+                      >
+                        {suggestion}
                       </Button>
                     ))}
                   </div>

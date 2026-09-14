@@ -4,7 +4,7 @@ import { renderToString } from 'react-dom/server'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { StoryWizard } from '@/components/wizard/StoryWizard'
+import { extractAssistantSuggestions, StoryWizard } from '@/components/wizard/StoryWizard'
 import type { StorySetupController } from '@/components/wizard/use-story-setup-controller'
 
 const controller: StorySetupController = {
@@ -124,6 +124,112 @@ describe('StoryWizard', () => {
     fireEvent.click(startButtons[0])
     expect(onClose).toHaveBeenCalledOnce()
     expect(screen.getAllByText('Foundation ready').length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not surface Foundation ready when voice is covered but opening is still missing or partial', () => {
+    const incompleteChecklist = [
+      { key: 'starting-point', status: 'covered' as const, note: 'Premise set' },
+      { key: 'premise', status: 'covered' as const, note: 'Satire' },
+      { key: 'characters', status: 'covered' as const, note: 'Arthur' },
+      { key: 'goal', status: 'covered' as const, note: 'Promotion' },
+      { key: 'setting', status: 'covered' as const, note: 'Beige' },
+      { key: 'voice', status: 'covered' as const, note: 'Deadpan' },
+      { key: 'opening', status: 'missing' as const, note: '' },
+    ]
+
+    const { rerender } = render(React.createElement(StoryWizard, {
+      controller: {
+        ...controller,
+        checklist: incompleteChecklist,
+      },
+      onClose: () => undefined,
+    }))
+
+    expect(screen.queryByRole('button', { name: 'Start writing' })).toBeNull()
+    expect(screen.queryByText('Foundation ready')).toBeNull()
+
+    // Even if opening is partial, foundation is not ready until opening is covered
+    const partialOpeningChecklist = incompleteChecklist.map(item =>
+      item.key === 'opening' ? { ...item, status: 'partial' as const, note: 'Thinking about first scene' } : item,
+    )
+    rerender(React.createElement(StoryWizard, {
+      controller: {
+        ...controller,
+        checklist: partialOpeningChecklist,
+      },
+      onClose: () => undefined,
+    }))
+
+    expect(screen.queryByRole('button', { name: 'Start writing' })).toBeNull()
+    expect(screen.queryByText('Foundation ready')).toBeNull()
+  })
+
+  describe('extractAssistantSuggestions', () => {
+    it('extracts bulleted and numbered bold options while stripping punctuation', () => {
+      const text = [
+        'Which dynamic feels more comedic?',
+        '*   **The Apathetic Wall:** The manager is bored.',
+        '*   **The Power Tripper:** The manager treats this as power.',
+        '*   **The Mirror:** The manager is also a completionist.',
+      ].join('\n')
+
+      expect(extractAssistantSuggestions(text)).toEqual([
+        'The Apathetic Wall',
+        'The Power Tripper',
+        'The Mirror',
+      ])
+
+      const numbered = [
+        '1. **Academic exams**: high stakes',
+        '2. **Surreal trials**: dream logic',
+      ].join('\n')
+
+      expect(extractAssistantSuggestions(numbered)).toEqual([
+        'Academic exams',
+        'Surreal trials',
+      ])
+    })
+
+    it('ignores category recaps and single-item lists', () => {
+      const recap = [
+        'Here is what we have:',
+        '* **Premise:** Office story',
+        '* **Characters:** Arthur',
+        '* **Tone:** Deadpan',
+      ].join('\n')
+      expect(extractAssistantSuggestions(recap)).toEqual([])
+
+      const single = '* **Only Option:** Lone option.'
+      expect(extractAssistantSuggestions(single)).toEqual([])
+    })
+  })
+
+  it('renders suggestion buttons for assistant options and sends clicked option', () => {
+    const send = vi.fn()
+    const content = [
+      'What kind of voice do you envision?',
+      '* **The Deadpan Observer:** Dry and satirical.',
+      '* **The Earnest Professional:** First-person and oblivious.',
+      '* **The HR File:** Memos and reports.',
+    ].join('\n')
+
+    render(React.createElement(StoryWizard, {
+      controller: {
+        ...controller,
+        messages: [
+          { role: 'user', content: 'Let us figure out the voice.' },
+          { role: 'assistant', content },
+        ],
+        send,
+      },
+      onClose: () => undefined,
+    }))
+
+    expect(screen.getByText('Suggestions')).toBeDefined()
+    const earnestBtn = screen.getByRole('button', { name: 'The Earnest Professional' })
+    expect(earnestBtn).toBeDefined()
+    fireEvent.click(earnestBtn)
+    expect(send).toHaveBeenCalledWith('The Earnest Professional')
   })
 })
 

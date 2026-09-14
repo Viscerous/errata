@@ -54,12 +54,32 @@ interface UseStorySetupControllerOptions {
   active: boolean
 }
 
-function normalizeChecklist(items: StorySetupChecklistItem[]): StorySetupChecklistItem[] {
+function normalizeChecklist(
+  items: StorySetupChecklistItem[],
+  previous?: StorySetupChecklistItem[],
+): StorySetupChecklistItem[] {
   const byKey = new Map(items.map(item => [item.key, item]))
-  return STORY_SETUP_CHECKLIST.map(item => byKey.get(item.key) ?? {
-    key: item.key,
-    status: 'missing',
-    note: '',
+  const prevByKey = new Map(previous?.map(item => [item.key, item]))
+  return STORY_SETUP_CHECKLIST.map(definition => {
+    const incoming = byKey.get(definition.key)
+    const prev = prevByKey.get(definition.key)
+    if (!incoming) {
+      return prev ?? {
+        key: definition.key,
+        status: 'missing',
+        note: '',
+      }
+    }
+    // Ratchet covered status so follow-up or refinement questions do not
+    // cause covered concerns to flicker back to partial.
+    const status = prev?.status === 'covered' && incoming.status === 'partial'
+      ? 'covered'
+      : incoming.status
+    return {
+      key: definition.key,
+      status,
+      note: incoming.note || prev?.note || '',
+    }
   })
 }
 
@@ -148,7 +168,7 @@ export function useStorySetupController({
             checklist?: StorySetupChecklistItem[]
             fragments?: StorySetupDraftFragment[]
           }
-          if (Array.isArray(snapshot.checklist)) setChecklist(normalizeChecklist(snapshot.checklist))
+          if (Array.isArray(snapshot.checklist)) setChecklist(normalizeChecklist(snapshot.checklist, checklistRef.current))
           if (Array.isArray(snapshot.fragments)) setDraftFragments(snapshot.fragments)
         } else if (value.type === 'tool-result' && value.toolName === 'updateStorySetup') {
           receivedSnapshot = true
@@ -157,7 +177,7 @@ export function useStorySetupController({
             checklist?: StorySetupChecklistItem[]
             fragments?: StorySetupDraftFragment[]
           }
-          if (Array.isArray(saved.checklist)) setChecklist(normalizeChecklist(saved.checklist))
+          if (Array.isArray(saved.checklist)) setChecklist(normalizeChecklist(saved.checklist, checklistRef.current))
           if (Array.isArray(saved.fragments)) setDraftFragments(saved.fragments)
           if (saved.saved !== false) {
             await Promise.all([

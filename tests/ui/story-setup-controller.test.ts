@@ -200,4 +200,70 @@ describe('useStorySetupController', () => {
     expect(result.current.error).toBeNull()
     expect(result.current.messages.at(-1)?.content).toBe('Where would you like to begin?')
   })
+
+  it('preserves covered checklist items when incoming turns mark them partial during refinement', async () => {
+    chat.mockResolvedValueOnce(new ReadableStream({
+      start(controller) {
+        controller.enqueue({
+          type: 'tool-result',
+          id: 'turn-1',
+          toolName: 'updateStorySetup',
+          result: {
+            saved: true,
+            checklist: [
+              { key: 'starting-point', status: 'covered', note: 'Office premise' },
+              { key: 'characters', status: 'covered', note: 'Arthur and Manager' },
+            ],
+            fragments: [],
+          },
+        })
+        controller.enqueue({ type: 'text', text: 'Tell me about the manager.' })
+        controller.close()
+      },
+    }))
+
+    const { result } = renderHook(
+      () => useStorySetupController({
+        storyId: 'story-test',
+        sessionScope: 'main',
+        contentRevision: 'revision-1',
+        active: true,
+      }),
+      { wrapper: makeWrapper() },
+    )
+
+    await waitFor(() => expect(result.current.contextReady).toBe(true))
+    const charactersItem = result.current.checklist.find(i => i.key === 'characters')
+    expect(charactersItem?.status).toBe('covered')
+
+    chat.mockResolvedValueOnce(new ReadableStream({
+      start(controller) {
+        controller.enqueue({
+          type: 'tool-result',
+          id: 'turn-2',
+          toolName: 'updateStorySetup',
+          result: {
+            saved: true,
+            checklist: [
+              { key: 'starting-point', status: 'covered', note: 'Office premise' },
+              // Incoming turn regressed characters to partial while asking a follow-up
+              { key: 'characters', status: 'partial', note: 'Exploring manager style' },
+            ],
+            fragments: [],
+          },
+        })
+        controller.enqueue({ type: 'text', text: 'Which manager style do you prefer?' })
+        controller.close()
+      },
+    }))
+
+    act(() => result.current.send('The manager is lazy.'))
+    await waitFor(() => expect(result.current.messages.at(-1)?.content).toBe('Which manager style do you prefer?'))
+
+    // The covered status was ratcheted and did not regress to partial
+    const updatedItem = result.current.checklist.find(i => i.key === 'characters')
+    expect(updatedItem?.status).toBe('covered')
+    expect(updatedItem?.note).toBe('Exploring manager style')
+  })
 })
+
