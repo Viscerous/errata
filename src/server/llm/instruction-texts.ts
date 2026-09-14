@@ -11,9 +11,11 @@ export const GENERATION_SYSTEM_PROMPT = [
 ].join('\n')
 
 export const PLAY_CONTINUATION_SYSTEM_PROMPT = [
-  'The text under ## Protagonist Move is the protagonist\'s next action or dialogue.',
-  'Render it in prose, keeping quoted dialogue as written.',
-  'End on the world\'s response, leaving the protagonist\'s next move to the user.',
+  'The input under ## Protagonist Move is the protagonist\'s intended action or dialogue.',
+  'Render the protagonist performing this move, speaking any quoted dialogue as written.',
+  'The protagonist acts or speaks once from this input; the remainder of the passage belongs to the world\'s response.',
+  'Terminate on an external beat—another character\'s reaction, spoken reply, or a shift in the scene.',
+  'Do not invent subsequent lines, decisions, or reflections for the protagonist, and never end with choices, menus, or prompt questions.',
 ].join('\n')
 
 export const WRITER_BRIEF_SYSTEM_PROMPT = [

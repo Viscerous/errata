@@ -925,8 +925,7 @@ describe('context blocks', () => {
       expect(block.content).toBe(`## Protagonist Move\n\n${turn}`)
       expect(block.content).not.toContain('## Author Direction')
       expect(contract.role).toBe('system')
-      expect(contract.content).toContain('## Protagonist Move')
-      expect(contract.content).toContain("End on the world's response")
+      expect(contract.content).toContain('Terminate on an external beat')
     })
 
     it('assigns correct roles to blocks', async () => {

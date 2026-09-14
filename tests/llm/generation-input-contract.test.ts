@@ -44,8 +44,8 @@ describe('generation input prompt contract', () => {
     expect(blocks.find(block => block.id === 'author-input')?.content).toBe(`## Protagonist Move\n\n${AUTHOR_INPUT}`)
     expect(blocks.find(block => block.id === 'play-output-contract')?.name).toBe('Play Output Contract')
     const contract = blocks.find(block => block.id === 'play-output-contract')?.content ?? ''
-    expect(contract).toContain('keeping quoted dialogue as written')
-    expect(contract).toContain("leaving the protagonist's next move to the user")
+    expect(contract).toContain('speaking any quoted dialogue as written')
+    expect(contract).toContain('Terminate on an external beat')
     expect(auditGenerationInputSurface(blocks, AUTHOR_INPUT)).toMatchObject({
       authorInputOccurrences: 1,
       playOutputContractBlocks: 1,
