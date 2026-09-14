@@ -180,6 +180,7 @@ describe('StoryWizard', () => {
       ])
 
       const numbered = [
+        'Which kind of tests should we focus on?',
         '1. **Academic exams**: high stakes',
         '2. **Surreal trials**: dream logic',
       ].join('\n')
@@ -201,6 +202,36 @@ describe('StoryWizard', () => {
 
       const single = '* **Only Option:** Lone option.'
       expect(extractAssistantSuggestions(single)).toEqual([])
+    })
+
+    it('ignores sequential steps, exploratory questions, and non-choice lists', () => {
+      const sequence = [
+        'Here is how the opening scene could progress:',
+        '1. **First:** Arthur enters the office.',
+        '2. **Next:** He discovers the missing stamp.',
+        '3. **Finally:** Henderson confronts him.',
+      ].join('\n')
+      expect(extractAssistantSuggestions(sequence)).toEqual([])
+
+      const steps = [
+        '1. **Step 1:** Establish the floor plan.',
+        '2. **Step 2:** Decide the company hierarchy.',
+      ].join('\n')
+      expect(extractAssistantSuggestions(steps)).toEqual([])
+
+      const questions = [
+        'Consider these questions as we explore the setting:',
+        '* **Where does Arthur hide his files?**',
+        '* **Why does the manager refuse to speak?**',
+      ].join('\n')
+      expect(extractAssistantSuggestions(questions)).toEqual([])
+
+      const unpromptedInfo = [
+        'I have noted these elements of the office:',
+        '* **The Fluorescent Lights:** Flickering at 60Hz.',
+        '* **The Gray Partition:** Separating Arthur from the window.',
+      ].join('\n')
+      expect(extractAssistantSuggestions(unpromptedInfo)).toEqual([])
     })
   })
 

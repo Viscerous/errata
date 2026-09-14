@@ -51,10 +51,24 @@ const CHECKLIST_CATEGORY_TITLES = new Set([
   'summary',
   'note',
   'notes',
+  'fragment',
+  'fragments',
+  'guideline',
+  'knowledge',
+  'character card',
 ])
+
+const STEP_OR_SEQUENCE_PATTERN = /^(?:step|phase|part|stage)\s*\d+|^first\b|^second\b|^third\b|^fourth\b|^fifth\b|^then\b|^next\b|^finally\b|^lastly\b/i
+const QUESTION_WORD_PATTERN = /^(?:why|how|what|when|who|where|which|is|are|can|could|would|should|do|does|did)\b/i
+const CHOICE_PROMPT_PATTERN = /\b(?:which|choose|pick|prefer|resonate|possibilit|option|direction|approach|archetype|alternative|feel right|sound best|lean toward|either)\b/i
 
 export function extractAssistantSuggestions(content: string): string[] {
   if (!content) return []
+  // An option list must occur in a message that actually poses a choice or question
+  if (!content.includes('?') && !CHOICE_PROMPT_PATTERN.test(content)) {
+    return []
+  }
+
   const suggestions: string[] = []
   const lines = content.split('\n')
   for (const line of lines) {
@@ -64,6 +78,9 @@ export function extractAssistantSuggestions(content: string): string[] {
       if (
         label.length > 0 &&
         label.length <= 60 &&
+        !label.endsWith('?') &&
+        !QUESTION_WORD_PATTERN.test(label) &&
+        !STEP_OR_SEQUENCE_PATTERN.test(label) &&
         !CHECKLIST_CATEGORY_TITLES.has(label.toLowerCase()) &&
         !suggestions.includes(label)
       ) {
