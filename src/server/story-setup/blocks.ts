@@ -50,7 +50,8 @@ Core Principles:
 2. Elaborate choices in conversational prose:
    - When presenting directions or options to the writer, flesh them out thoroughly in your reply. Ask one focused question at a time.
    - Propose 2 to 4 distinct, imaginative options in vivid prose, explaining their thematic flavor, tension, and narrative potential so the writer has rich concepts to react to.
-   - Always accompany these choices with corresponding options in updateStorySetup (using short, human-readable button labels like "Corporate Panopticon", "Failing Archive", or "Underground Rebel", never machine codes) so the writer can select one with a single click or type their own hybrid.
+   - Supply these choices as button labels via the tool call: pass them into the 'options' array argument of 'updateStorySetup' (using short, human-readable labels like "Corporate Panopticon", "Failing Archive", or "Underground Rebel", never machine codes).
+   - CRITICAL FORMATTING: Never write "updateStorySetup", function names, JSON parameters, or raw "options:" lists in your conversational text. All button options belong exclusively in the 'options' tool parameter of 'updateStorySetup', while your conversational message remains pure, immersive dialogue with the writer.
 
 3. Track the seven foundation concerns:
    - Track: starting point; premise or emotional center; central characters; goal, opposition, and stakes; setting and essential world rules; viewpoint, tense, voice, and tone; and what the opening passage should accomplish.
@@ -61,12 +62,12 @@ Core Principles:
 4. Mindful, high-fidelity foundation fragments:
    - Maintain substantive, vivid fragments (guidelines, characters, and knowledge).
    - Descriptions: Always author specific, evocative descriptions (under 250 characters) faithful to the fragment's concrete details. Never use generic placeholder descriptions like "Core protagonist description" or "Setting details".
-   - Content: Craft rich, detailed fragment content bodies that provide strong creative traction for future manuscript generation.
+   - Content: Craft rich, detailed fragment content bodies that provide strong creative traction for future story generation.
    - Active updates: As new decisions, traits, names, or rules emerge, actively update existing fragments (name, description, and content) to reflect the growing canon rather than leaving them in an incomplete state.
 
 5. Transition to writing:
    - Story setup establishes foundation fragments; it does not write story scenes or opening prose. Never generate narrative scenes or roleplay here.
-   - When the seven concerns are established or the writer is ready to write, summarize the opening direction, confirm the foundation is saved, and invite them to begin writing in the manuscript editor. If the writer asks you to write the opening here, clarify that the foundation is ready and prompt them to generate or write the opening passage in the manuscript.`
+   - When the seven concerns are established or the writer is ready to write, summarize the opening direction, confirm the foundation is saved, and invite them to start writing. If the writer asks you to write the opening here, clarify that the foundation is ready and prompt them to generate or write the opening scene in the story.`
 
 export function createStorySetupBlocks(ctx: AgentBlockContext): ContextBlock[] {
   const existingStory = ctx.story.name !== 'New Story' || Boolean(ctx.story.description.trim())
@@ -85,7 +86,7 @@ export function createStorySetupBlocks(ctx: AgentBlockContext): ContextBlock[] {
     : ''
 
   const toolPolicy = ctx.storySetupReadOnly
-    ? '\n\nThis is a read-only assessment. Before replying, call updateStorySetup once with the seven checklist entries in order (starting-point, premise, characters, goal, setting, voice, opening) and no story or fragment changes.'
+    ? '\n\nThis is a read-only assessment. Before replying, call updateStorySetup once with the seven checklist entries in order (starting-point, premise, characters, goal, setting, voice, opening), no story or fragment changes, and optional interactive options for any directions proposed to the writer.'
     : '\n\nBefore each reply, call updateStorySetup once with the complete checklist in order (keys: starting-point, premise, characters, goal, setting, voice, opening; statuses: missing, partial, covered), current setup-fragment snapshot, and optional interactive options. Preserve existing fragment keys, add supported material promptly, and retain uncertainty rather than inventing decisions. Include the working title and description once they are useful.'
   const materialPolicy = '\n\nTreat the writer-owned context below as read-only evidence for checklist coverage. Do not copy it into the setup-fragment snapshot.'
   const blocks: ContextBlock[] = [{

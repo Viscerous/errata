@@ -16,7 +16,7 @@ export function createStorySetupTools(dataDir: string, storyId: string, mode: 'a
   if (mode === 'assess') {
     return {
       updateStorySetup: tool({
-        description: 'Report the seven checklist items from the existing story material without changing the story.',
+        description: 'Report the seven checklist items from the existing story material without changing the story, and provide 2 to 4 interactive options in the options argument for any directions or next steps you propose to the writer.',
         inputSchema: StorySetupAssessmentSchema,
         execute: async ({ checklist, options }) => {
           try {
