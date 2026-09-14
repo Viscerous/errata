@@ -213,7 +213,7 @@ describe('StoryWizard', () => {
       onClose: () => undefined,
     }))
 
-    expect(screen.getByText(/This story already has existing fragments/i)).toBeDefined()
+    expect(screen.getByText(/This story already has established characters, notes, and world details/i)).toBeDefined()
     const assessBtn = screen.getByRole('button', { name: 'Assess existing foundation' })
     expect(assessBtn).toBeDefined()
     fireEvent.click(assessBtn)

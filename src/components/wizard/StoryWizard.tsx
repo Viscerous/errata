@@ -201,13 +201,19 @@ export function StoryWizard({ controller, onClose, onStartWriting }: StoryWizard
   const hasExistingMaterial = controller.hasExistingMaterial
     ?? (draftFragments.length > 0 || checklist.some(item => item.status !== 'missing'))
   const workingTitle = controller.storyTitle && controller.storyTitle !== 'New Story' ? controller.storyTitle : undefined
-  const hasWorkingStory = Boolean(workingTitle || controller.storyDescription?.trim())
+  const storyDescription = controller.storyDescription?.trim()
+  const cleanDescription = storyDescription?.replace(/[.\s]+$/, '')
+  const hasWorkingStory = Boolean(workingTitle || storyDescription)
 
   const welcomeMessage = hasExistingMaterial
-    ? "Welcome to Story Setup. This story already has existing fragments. You can start chatting directly below about what you'd like to develop, or ask me to assess your story against the foundation checklist."
+    ? "Welcome to Story Setup. This story already has established characters, notes, and world details in place. You can tell me what you'd like to work on next, or we can review the foundation together to see what's settled and what still needs shaping."
     : hasWorkingStory
-      ? `Welcome to Story Setup for "${controller.storyTitle ?? 'your story'}".${controller.storyDescription ? ` (${controller.storyDescription})` : ''} I can extrapolate initial directions and character concepts from what you have so far, or you can tell me where you'd like to begin.`
-      : "Welcome to Story Setup. What kind of story would you like to tell? Share whatever you have in mind—a premise, a character, a world detail, or a scene—and we'll build the foundation together."
+      ? workingTitle && cleanDescription
+        ? `Welcome to Story Setup for "${workingTitle}". Starting from your premise—"${cleanDescription}"—we can explore early directions and characters together, or you can tell me where you'd like to begin.`
+        : workingTitle
+          ? `Welcome to Story Setup for "${workingTitle}". We can explore early directions and characters sparked by your title, or you can tell me where you'd like to begin.`
+          : `Welcome to Story Setup. Starting from your premise—"${cleanDescription}"—we can explore early directions and characters together, or you can tell me where you'd like to begin.`
+      : "Welcome to Story Setup. What kind of story would you like to tell? Share whatever is in your head—a premise, a character, a mood, or a single scene—and we'll shape the foundation together."
 
   // Conscious model options from the tool call
   const activeOptions: StorySetupOption[] = !isStreaming ? options : []
@@ -314,7 +320,11 @@ export function StoryWizard({ controller, onClose, onStartWriting }: StoryWizard
                         className="h-7 border-border/50 bg-transparent text-ui-caption font-normal text-foreground/80 hover:border-primary/40 hover:bg-primary/5 hover:text-foreground"
                         data-component-id="story-setup-explore-button"
                       >
-                        Explore ideas for &ldquo;{controller.storyTitle}&rdquo;
+                        {workingTitle ? (
+                          <>Explore ideas for &ldquo;{workingTitle}&rdquo;</>
+                        ) : (
+                          <>Explore ideas from premise</>
+                        )}
                       </Button>
                     ) : null}
                   </div>

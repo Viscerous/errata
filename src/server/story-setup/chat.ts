@@ -98,7 +98,7 @@ const runStorySetupChat = createStreamingRunner<StorySetupChatOptions>({
         }] : [{
           role: 'user' as const,
           content: hasWorkingStory
-            ? `Begin the story setup conversation by actively extrapolating from the working title "${story.name}"${story.description ? ` and description "${story.description}"` : ''}. Propose 2 to 3 vivid narrative directions or character concepts implied by this premise in rich conversational prose, and offer concrete choices in options for how to develop the foundation.`
+            ? `Begin the story setup conversation by actively building on the working title "${story.name}"${story.description ? ` and description "${story.description}"` : ''}. Propose 2 to 3 vivid narrative directions or character concepts sparked by this premise in rich conversational prose, and offer concrete choices in options for how to develop the foundation.`
             : 'Begin the story setup conversation. Propose a few compelling starting sparks across different genres or styles with concrete choices in options, and invite the writer to pick one or share their own idea.',
         }]
     const assessment = mode === 'assess' && opts.messages.length > 0
