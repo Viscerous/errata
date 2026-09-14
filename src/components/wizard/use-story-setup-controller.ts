@@ -12,7 +12,6 @@ import {
 import { invalidateStoryContent } from '@/lib/branch-cache'
 import {
   readStorySetupSession,
-  storySetupSessionNeedsRefresh,
   writeStorySetupSession,
 } from './story-setup-session'
 
@@ -45,6 +44,7 @@ export interface StorySetupController {
   sessionLoaded: boolean
   contextReady: boolean
   send: (content: string) => void
+  assess: () => void
   stop: () => void
   retry: () => void
 }
@@ -207,21 +207,21 @@ export function useStorySetupController({
       if (!receivedSnapshot) {
         setChecklist(previousChecklist)
         setDraftFragments(previousDraftFragments)
+        setContextReady(false)
         throw new Error(latestToolError
           ? `Story setup could not validate its update: ${latestToolError}`
           : 'Story setup ended before it could validate the checklist. Please retry.')
       }
       if (!accumulated.trim()) {
+        setContextReady(false)
         throw new Error('Story setup updated the checklist but ended before asking its next question. Please retry.')
       }
       completed = true
       if (accumulated.trim()) {
         setMessages([...history, { role: 'assistant', content: accumulated.trim() }])
       }
-      if (mode === 'assess') {
-        setContextReady(true)
-        setAcceptedRevision(revisionRef.current)
-      }
+      setContextReady(true)
+      setAcceptedRevision(revisionRef.current)
     } catch (caught) {
       if (lifecycle !== lifecycleRef.current) return
       setPaused(true)
@@ -247,7 +247,7 @@ export function useStorySetupController({
     loadedIdentityRef.current = identity
     setSessionLoaded(false)
     setLoadedIdentity(null)
-    setContextReady(false)
+    setContextReady(true)
     setAcceptedRevision(undefined)
     setPaused(false)
     setError(null)
@@ -260,9 +260,7 @@ export function useStorySetupController({
       setChecklist(normalizeChecklist(saved.checklist))
       setDraftFragments(saved.draftFragments)
       setOptions(saved.options ?? [])
-      const needsRefresh = storySetupSessionNeedsRefresh(saved, contentRevision)
-      setContextReady(!needsRefresh)
-      setAcceptedRevision(needsRefresh ? undefined : contentRevision)
+      setAcceptedRevision(saved.contentRevision ?? contentRevision)
     } else {
       setMessages([])
       setChecklist(INITIAL_CHECKLIST)
@@ -282,18 +280,13 @@ export function useStorySetupController({
     loadedIdentityRef.current = null
   }, [identity])
 
-  // Start or resume one turn when the surface becomes active. There is no
-  // messages-dependent cleanup, so sending a message cannot abort its own run.
+  // Resume one turn when the surface becomes active only if a user message is pending.
   useEffect(() => {
     if (!active || !sessionLoaded || loadedIdentity !== identity || !contentRevision || isStreaming || paused || abortRef.current) return
-    if (!acceptedRevision || acceptedRevision !== contentRevision) {
-      void requestAssistant(messages, 'assess')
-      return
-    }
     if (messages.at(-1)?.role === 'user') {
       void requestAssistant(messages, 'continue')
     }
-  }, [acceptedRevision, active, contentRevision, identity, isStreaming, loadedIdentity, messages, paused, requestAssistant, sessionLoaded])
+  }, [active, contentRevision, identity, isStreaming, loadedIdentity, messages, paused, requestAssistant, sessionLoaded])
 
   useEffect(() => {
     if (!sessionLoaded || loadedIdentity !== identity || !contextReady || !acceptedRevision) return
@@ -315,6 +308,12 @@ export function useStorySetupController({
     setInput('')
     void requestAssistant(history, 'continue')
   }, [contextReady, isStreaming, messages, requestAssistant])
+
+  const assess = useCallback(() => {
+    if (isStreaming || abortRef.current) return
+    setOptions([])
+    void requestAssistant(messages, 'assess')
+  }, [isStreaming, messages, requestAssistant])
 
   const stop = useCallback(() => {
     if (!abortRef.current) return
@@ -341,6 +340,7 @@ export function useStorySetupController({
     sessionLoaded,
     contextReady,
     send,
+    assess,
     stop,
     retry,
   }

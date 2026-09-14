@@ -47,7 +47,7 @@ export function createStorySetupTools(dataDir: string, storyId: string, mode: 'a
 
   return {
     updateStorySetup: tool({
-      description: 'Save the working story details and complete setup-fragment snapshot, and replace the visible checklist before asking the writer the next question.',
+      description: 'Save the working story details and complete setup-fragment snapshot, and replace the visible checklist before asking the writer the next question. Author specific, informative descriptions (<250 chars) without placeholders, and actively update existing fragments as new details are revealed.',
       inputSchema: StorySetupSnapshotSchema,
       execute: async ({ story, checklist, fragments, options }) => {
         try {

@@ -31,73 +31,6 @@ interface StoryWizardProps {
   onStartWriting?: (handoff?: StorySetupHandoff) => void
 }
 
-const STARTING_POINTS = [
-  { label: 'A premise', message: 'I have a premise, but it is still rough.' },
-  { label: 'A character', message: 'I want to begin with a character.' },
-  { label: 'A scene', message: 'I have a scene I can picture.' },
-  { label: 'Only a mood', message: 'I only have a mood or feeling so far.' },
-] as const
-
-const CHECKLIST_CATEGORY_TITLES = new Set([
-  'starting point',
-  'premise',
-  'what it is about',
-  'characters',
-  'central characters',
-  'protagonist',
-  'goal',
-  'goal and stakes',
-  'stakes',
-  'setting',
-  'world rules',
-  'voice',
-  'voice and tone',
-  'tone',
-  'opening',
-  'opening direction',
-  'summary',
-  'note',
-  'notes',
-  'fragment',
-  'fragments',
-  'guideline',
-  'knowledge',
-  'character card',
-])
-
-const STEP_OR_SEQUENCE_PATTERN = /^(?:step|phase|part|stage)\s*\d+|^first\b|^second\b|^third\b|^fourth\b|^fifth\b|^then\b|^next\b|^finally\b|^lastly\b/i
-const QUESTION_WORD_PATTERN = /^(?:why|how|what|when|who|where|which|is|are|can|could|would|should|do|does|did)\b/i
-const CHOICE_PROMPT_PATTERN = /\b(?:which|choose|pick|prefer|resonate|possibilit|option|direction|approach|archetype|alternative|feel right|sound best|lean toward|either)\b/i
-
-export function extractAssistantSuggestions(content: string): string[] {
-  if (!content) return []
-  // An option list must occur in a message that actually poses a choice or question
-  if (!content.includes('?') && !CHOICE_PROMPT_PATTERN.test(content)) {
-    return []
-  }
-
-  const suggestions: string[] = []
-  const lines = content.split('\n')
-  for (const line of lines) {
-    const match = line.match(/^\s*(?:[*•-]|(?:\d+[.)]))\s+\*\*([^*]+)\*\*/)
-    if (match) {
-      const label = match[1].replace(/[:\s–—-]+$/, '').trim()
-      if (
-        label.length > 0 &&
-        label.length <= 60 &&
-        !label.endsWith('?') &&
-        !QUESTION_WORD_PATTERN.test(label) &&
-        !STEP_OR_SEQUENCE_PATTERN.test(label) &&
-        !CHECKLIST_CATEGORY_TITLES.has(label.toLowerCase()) &&
-        !suggestions.includes(label)
-      ) {
-        suggestions.push(label)
-      }
-    }
-  }
-  return suggestions.length >= 2 && suggestions.length <= 8 ? suggestions : []
-}
-
 function AssistantTurn({ content, streaming = false }: { content: string; streaming?: boolean }) {
   return (
     <article className="flex items-start gap-3" data-component-id="story-setup-assistant-turn">
@@ -145,14 +78,12 @@ function StorySetupRail({
   updating,
   className,
   idPrefix,
-  onStartWriting,
 }: {
   checklist: StorySetupChecklistItem[]
   draftFragments: StorySetupDraftFragment[]
   updating: boolean
   className?: string
   idPrefix: string
-  onStartWriting?: (handoff?: StorySetupHandoff) => void
 }) {
   const covered = checklist.filter(item => item.status === 'covered').length
   const explored = checklist.filter(item => item.status !== 'missing').length
@@ -160,7 +91,6 @@ function StorySetupRail({
   const openingItem = checklist.find(item => item.key === 'opening')
   const openingCovered = openingItem?.status === 'covered'
   const readyToWrite = openingCovered && checklist.length > 0 && checklist.every(item => item.status !== 'missing')
-  const openingSummary = openingItem?.note || 'Write the opening passage according to the story foundation guidelines.'
 
   return (
     <WorkspaceRail className={cn('gap-7 overflow-y-auto px-5 py-6', className)} data-component-id="story-setup-progress">
@@ -192,34 +122,12 @@ function StorySetupRail({
             )
           })}
         </ul>
-        {readyToWrite && onStartWriting && (
+        {readyToWrite && (
           <div className="mt-4 rounded-lg border border-primary/20 bg-primary/5 p-3 text-ui-caption" data-component-id={`${idPrefix}-foundation-ready`}>
             <p className="font-medium text-foreground">Foundation ready</p>
             <p className="mt-1 text-ui-label leading-relaxed text-muted-foreground">
               {openingItem?.note ? `Opening direction: ${openingItem.note}` : 'Your story outline and opening direction are set.'}
             </p>
-            <div className="mt-3 flex flex-col gap-1.5">
-              <Button
-                type="button"
-                size="sm"
-                onClick={() => onStartWriting({ mode: 'generate', prompt: openingSummary })}
-                className="w-full gap-1.5 text-ui-caption font-medium"
-                data-component-id={`${idPrefix}-generate-opening-button`}
-              >
-                <PenLine className="size-3.5" aria-hidden />
-                Generate opening scene
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => onStartWriting({ mode: 'write', prompt: openingSummary })}
-                className="w-full gap-1.5 text-ui-caption font-normal border-border/50 text-foreground/80 hover:text-foreground"
-                data-component-id={`${idPrefix}-start-writing-button`}
-              >
-                Write in manuscript
-              </Button>
-            </div>
           </div>
         )}
       </section>
@@ -276,7 +184,6 @@ export function StoryWizard({ controller, onClose, onStartWriting }: StoryWizard
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const endRef = useRef<HTMLDivElement | null>(null)
 
-  const userTurnCount = messages.filter(message => message.role === 'user').length
   const exploredCount = checklist.filter(item => item.status !== 'missing').length
   const openingItem = checklist.find(item => item.key === 'opening')
   const openingCovered = openingItem?.status === 'covered'
@@ -291,18 +198,10 @@ export function StoryWizard({ controller, onClose, onStartWriting }: StoryWizard
     }
   }
 
-  const latestAssistantMessage = messages.length > 0 && messages[messages.length - 1].role === 'assistant'
-    ? messages[messages.length - 1]
-    : null
+  const hasExistingMaterial = draftFragments.length > 0 || checklist.some(item => item.status !== 'missing')
 
-  // Conscious model options from the tool call take precedence; fallback to guarded markdown extraction
-  const activeOptions: StorySetupOption[] = !isStreaming
-    ? options.length > 0
-      ? options
-      : latestAssistantMessage
-        ? extractAssistantSuggestions(latestAssistantMessage.content).map(label => ({ label }))
-        : []
-    : []
+  // Conscious model options from the tool call
+  const activeOptions: StorySetupOption[] = !isStreaming ? options : []
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: isStreaming ? 'auto' : 'smooth', block: 'end' })
@@ -335,16 +234,27 @@ export function StoryWizard({ controller, onClose, onStartWriting }: StoryWizard
         </div>
         <WorkspaceToolbar>
           {readyToWrite && (
-            <Button
-              variant="default"
-              size="sm"
-              onClick={() => handleStartWriting({ mode: 'generate', prompt: openingSummary })}
-              className="gap-1.5 text-ui-caption font-medium"
-              data-component-id="story-setup-start-writing"
-            >
-              <PenLine className="size-3.5" aria-hidden />
-              Start writing
-            </Button>
+            <>
+              <Button
+                variant="default"
+                size="sm"
+                onClick={() => handleStartWriting({ mode: 'generate', prompt: openingSummary })}
+                className="gap-1.5 text-ui-caption font-medium"
+                data-component-id="story-setup-generate-opening"
+              >
+                <PenLine className="size-3.5" aria-hidden />
+                Generate opening scene
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleStartWriting({ mode: 'write', prompt: openingSummary })}
+                className="gap-1.5 text-ui-caption font-normal border-border/50 text-foreground/80 hover:text-foreground"
+                data-component-id="story-setup-start-writing"
+              >
+                Start writing
+              </Button>
+            </>
           )}
           <Button variant="ghost" size="sm" onClick={onClose} className="gap-1.5 text-ui-caption text-muted-foreground hover:text-foreground">
             <ArrowLeft className="size-3.5" aria-hidden />
@@ -363,7 +273,7 @@ export function StoryWizard({ controller, onClose, onStartWriting }: StoryWizard
                 <ChevronDown className="size-3.5" aria-hidden />
               </span>
             </summary>
-            <StorySetupRail idPrefix="mobile" checklist={checklist} draftFragments={draftFragments} updating={isStreaming} onStartWriting={handleStartWriting} className="max-h-[45vh] border-l-0 border-t border-border/30" />
+            <StorySetupRail idPrefix="mobile" checklist={checklist} draftFragments={draftFragments} updating={isStreaming} className="max-h-[45vh] border-l-0 border-t border-border/30" />
           </details>
 
           <div className="min-h-0 flex-1 overflow-y-auto" data-component-id="story-setup-transcript">
@@ -376,30 +286,39 @@ export function StoryWizard({ controller, onClose, onStartWriting }: StoryWizard
 
               {isStreaming && <AssistantTurn content={streamingText} streaming={Boolean(streamingText)} />}
 
-              {userTurnCount === 0 && !isStreaming && activeOptions.length === 0 && messages.some(message => message.role === 'assistant') && (
-                <div className="space-y-2.5 pl-9">
-                  <MetaLabel asChild><p>You can start anywhere</p></MetaLabel>
-                  <div className="flex flex-wrap gap-1.5">
-                    {STARTING_POINTS.map(point => (
-                      <Button
-                        key={point.label}
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => send(point.message)}
-                        className="h-7 border-border/50 bg-transparent text-ui-caption font-normal text-foreground/75"
-                      >
-                        {point.label}
-                      </Button>
-                    ))}
-                  </div>
-                </div>
+              {messages.length === 0 && !isStreaming && (
+                <>
+                  <AssistantTurn
+                    content={
+                      hasExistingMaterial
+                        ? "Welcome to Story Setup. This story already has existing fragments. You can start chatting directly below about what you'd like to develop, or ask me to assess your story against the foundation checklist."
+                        : "Welcome to Story Setup. What kind of story would you like to tell? Share whatever you have in mind—a premise, a character, a world detail, or a scene—and we'll build the foundation together."
+                    }
+                  />
+                  {hasExistingMaterial && (
+                    <div className="space-y-2.5 pl-9">
+                      <div className="flex flex-wrap gap-1.5">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={!contextReady}
+                          onClick={controller.assess}
+                          className="h-7 border-border/50 bg-transparent text-ui-caption font-normal text-foreground/80 hover:border-primary/40 hover:bg-primary/5 hover:text-foreground"
+                          data-component-id="story-setup-assess-button"
+                        >
+                          Assess existing foundation
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </>
               )}
 
               {activeOptions.length > 0 && (
                 <div className="space-y-2.5 pl-9" data-component-id="story-setup-suggestions">
                   <MetaLabel asChild><p>Suggestions</p></MetaLabel>
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex flex-wrap gap-1.5">
                     {activeOptions.map(option => (
                       <Button
                         key={option.label}
@@ -407,19 +326,11 @@ export function StoryWizard({ controller, onClose, onStartWriting }: StoryWizard
                         variant="outline"
                         size="sm"
                         disabled={!contextReady}
-                        onClick={() => send(option.value ?? option.label)}
-                        className={cn(
-                          'h-auto py-1.5 px-3 border-border/50 bg-transparent text-left text-ui-caption font-normal text-foreground/80 hover:border-primary/40 hover:bg-primary/5 hover:text-foreground',
-                          option.description && 'flex-col items-start gap-0.5 min-w-[140px]',
-                        )}
+                        onClick={() => send(option.label)}
+                        className="h-7 border-border/50 bg-transparent text-ui-caption font-normal text-foreground/80 hover:border-primary/40 hover:bg-primary/5 hover:text-foreground"
                         data-component-id="story-setup-suggestion-button"
                       >
-                        <span className="font-medium text-foreground">{option.label}</span>
-                        {option.description && (
-                          <span className="text-ui-label text-muted-foreground line-clamp-2 leading-relaxed">
-                            {option.description}
-                          </span>
-                        )}
+                        {option.label}
                       </Button>
                     ))}
                   </div>
@@ -472,7 +383,7 @@ export function StoryWizard({ controller, onClose, onStartWriting }: StoryWizard
             </div>
           </div>
         </div>
-        <StorySetupRail idPrefix="desktop" checklist={checklist} draftFragments={draftFragments} updating={isStreaming} onStartWriting={handleStartWriting} className="hidden w-72 xl:flex" />
+        <StorySetupRail idPrefix="desktop" checklist={checklist} draftFragments={draftFragments} updating={isStreaming} className="hidden w-72 xl:flex" />
       </main>
     </div>
   )

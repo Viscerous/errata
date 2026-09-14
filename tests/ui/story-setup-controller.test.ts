@@ -64,6 +64,8 @@ describe('useStorySetupController', () => {
       { initialProps: { active: true }, wrapper: makeWrapper() },
     )
 
+    act(() => result.current.assess())
+
     await waitFor(() => expect(chat).toHaveBeenCalledTimes(1))
     expect(result.current.isStreaming).toBe(true)
 
@@ -98,8 +100,9 @@ describe('useStorySetupController', () => {
       { wrapper: makeWrapper() },
     )
 
+    act(() => result.current.assess())
+
     await waitFor(() => expect(result.current.error).toContain('Invalid checklist'))
-    expect(result.current.contextReady).toBe(false)
     expect(result.current.isStreaming).toBe(false)
     expect(window.localStorage.length).toBe(0)
   })
@@ -132,10 +135,11 @@ describe('useStorySetupController', () => {
       { wrapper: makeWrapper() },
     )
 
-    await waitFor(() => expect(result.current.contextReady).toBe(true))
+    act(() => result.current.assess())
+
+    await waitFor(() => expect(result.current.messages.at(-1)?.content).toBe('What remains unresolved?'))
     expect(result.current.error).toBeNull()
     expect(result.current.checklist[0]).toEqual(checklist[0])
-    expect(result.current.messages.at(-1)?.content).toBe('What remains unresolved?')
   })
 
   it('requires a conversational response after a valid snapshot', async () => {
@@ -162,8 +166,9 @@ describe('useStorySetupController', () => {
       { wrapper: makeWrapper() },
     )
 
+    act(() => result.current.assess())
+
     await waitFor(() => expect(result.current.error).toContain('before asking its next question'))
-    expect(result.current.contextReady).toBe(false)
   })
 
   it('explains an offline model connection and recovers when retried', async () => {
@@ -191,14 +196,14 @@ describe('useStorySetupController', () => {
       { wrapper: makeWrapper() },
     )
 
+    act(() => result.current.assess())
+
     await waitFor(() => expect(result.current.error).toContain('Start or reconnect its backend'))
-    expect(result.current.contextReady).toBe(false)
     expect(chat).toHaveBeenCalledTimes(1)
 
     act(() => result.current.retry())
-    await waitFor(() => expect(result.current.contextReady).toBe(true))
+    await waitFor(() => expect(result.current.messages.at(-1)?.content).toBe('Where would you like to begin?'))
     expect(result.current.error).toBeNull()
-    expect(result.current.messages.at(-1)?.content).toBe('Where would you like to begin?')
   })
 
   it('preserves covered checklist items when incoming turns mark them partial during refinement', async () => {
@@ -232,7 +237,9 @@ describe('useStorySetupController', () => {
       { wrapper: makeWrapper() },
     )
 
-    await waitFor(() => expect(result.current.contextReady).toBe(true))
+    act(() => result.current.assess())
+
+    await waitFor(() => expect(result.current.messages.at(-1)?.content).toBe('Tell me about the manager.'))
     const charactersItem = result.current.checklist.find(i => i.key === 'characters')
     expect(charactersItem?.status).toBe('covered')
 
@@ -300,7 +307,9 @@ describe('useStorySetupController', () => {
       { wrapper: makeWrapper() },
     )
 
-    await waitFor(() => expect(result.current.contextReady).toBe(true))
+    act(() => result.current.assess())
+
+    await waitFor(() => expect(result.current.options.length).toBe(2))
     expect(result.current.options).toEqual([
       { label: 'The Deadpan Tone', description: 'Dry and satirical' },
       { label: 'The Surreal Absurdism', value: 'Surreal corporate dream logic' },

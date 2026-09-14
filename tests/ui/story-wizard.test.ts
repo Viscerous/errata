@@ -4,7 +4,7 @@ import { renderToString } from 'react-dom/server'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { extractAssistantSuggestions, StoryWizard } from '@/components/wizard/StoryWizard'
+import { StoryWizard } from '@/components/wizard/StoryWizard'
 import type { StorySetupController } from '@/components/wizard/use-story-setup-controller'
 import type { StorySetupChecklistItem } from '@/lib/api'
 
@@ -21,6 +21,7 @@ const controller: StorySetupController = {
   sessionLoaded: true,
   contextReady: true,
   send: () => undefined,
+  assess: () => undefined,
   stop: () => undefined,
   retry: () => undefined,
 }
@@ -166,110 +167,52 @@ describe('StoryWizard', () => {
     expect(screen.queryByText('Foundation ready')).toBeNull()
   })
 
-  describe('extractAssistantSuggestions', () => {
-    it('extracts bulleted and numbered bold options while stripping punctuation', () => {
-      const text = [
-        'Which dynamic feels more comedic?',
-        '*   **The Apathetic Wall:** The manager is bored.',
-        '*   **The Power Tripper:** The manager treats this as power.',
-        '*   **The Mirror:** The manager is also a completionist.',
-      ].join('\n')
-
-      expect(extractAssistantSuggestions(text)).toEqual([
-        'The Apathetic Wall',
-        'The Power Tripper',
-        'The Mirror',
-      ])
-
-      const numbered = [
-        'Which kind of tests should we focus on?',
-        '1. **Academic exams**: high stakes',
-        '2. **Surreal trials**: dream logic',
-      ].join('\n')
-
-      expect(extractAssistantSuggestions(numbered)).toEqual([
-        'Academic exams',
-        'Surreal trials',
-      ])
-    })
-
-    it('ignores category recaps and single-item lists', () => {
-      const recap = [
-        'Here is what we have:',
-        '* **Premise:** Office story',
-        '* **Characters:** Arthur',
-        '* **Tone:** Deadpan',
-      ].join('\n')
-      expect(extractAssistantSuggestions(recap)).toEqual([])
-
-      const single = '* **Only Option:** Lone option.'
-      expect(extractAssistantSuggestions(single)).toEqual([])
-    })
-
-    it('ignores sequential steps, exploratory questions, and non-choice lists', () => {
-      const sequence = [
-        'Here is how the opening scene could progress:',
-        '1. **First:** Arthur enters the office.',
-        '2. **Next:** He discovers the missing stamp.',
-        '3. **Finally:** Henderson confronts him.',
-      ].join('\n')
-      expect(extractAssistantSuggestions(sequence)).toEqual([])
-
-      const steps = [
-        '1. **Step 1:** Establish the floor plan.',
-        '2. **Step 2:** Decide the company hierarchy.',
-      ].join('\n')
-      expect(extractAssistantSuggestions(steps)).toEqual([])
-
-      const questions = [
-        'Consider these questions as we explore the setting:',
-        '* **Where does Arthur hide his files?**',
-        '* **Why does the manager refuse to speak?**',
-      ].join('\n')
-      expect(extractAssistantSuggestions(questions)).toEqual([])
-
-      const unpromptedInfo = [
-        'I have noted these elements of the office:',
-        '* **The Fluorescent Lights:** Flickering at 60Hz.',
-        '* **The Gray Partition:** Separating Arthur from the window.',
-      ].join('\n')
-      expect(extractAssistantSuggestions(unpromptedInfo)).toEqual([])
-    })
-  })
-
-  it('renders suggestion buttons for assistant options and sends clicked option', () => {
-    const send = vi.fn()
-    const content = [
-      'What kind of voice do you envision?',
-      '* **The Deadpan Observer:** Dry and satirical.',
-      '* **The Earnest Professional:** First-person and oblivious.',
-      '* **The HR File:** Memos and reports.',
-    ].join('\n')
-
+  it('renders welcoming greeting on empty story without starting points', () => {
     render(React.createElement(StoryWizard, {
       controller: {
         ...controller,
-        messages: [
-          { role: 'user', content: 'Let us figure out the voice.' },
-          { role: 'assistant', content },
-        ],
-        send,
+        messages: [],
       },
       onClose: () => undefined,
     }))
 
-    expect(screen.getByText('Suggestions')).toBeDefined()
-    const earnestBtn = screen.getByRole('button', { name: 'The Earnest Professional' })
-    expect(earnestBtn).toBeDefined()
-    fireEvent.click(earnestBtn)
-    expect(send).toHaveBeenCalledWith('The Earnest Professional')
+    expect(screen.getByText(/What kind of story would you like to tell/i)).toBeDefined()
+    expect(screen.queryByText('A premise')).toBeNull()
+    expect(screen.queryByText('A character')).toBeNull()
+    expect(screen.queryByText('A scene or moment')).toBeNull()
   })
 
-  it('renders structured controller options with descriptions and dispatches selection on click', () => {
+  it('offers explicit assessment button when opening a story with existing fragments', () => {
+    const assess = vi.fn()
+    render(React.createElement(StoryWizard, {
+      controller: {
+        ...controller,
+        messages: [],
+        draftFragments: [{
+          id: 'ch-hero',
+          key: 'characters-hero',
+          type: 'character',
+          name: 'Arthur',
+          description: 'Protagonist',
+          content: 'An ordinary clerk.',
+        }],
+        assess,
+      },
+      onClose: () => undefined,
+    }))
+
+    expect(screen.getByText(/This story already has existing fragments/i)).toBeDefined()
+    const assessBtn = screen.getByRole('button', { name: 'Assess existing foundation' })
+    expect(assessBtn).toBeDefined()
+    fireEvent.click(assessBtn)
+    expect(assess).toHaveBeenCalledOnce()
+  })
+
+  it('renders structured controller options as compact outline pill buttons and dispatches label on click', () => {
     const send = vi.fn()
     const structuredOptions = [
-      { label: 'The Deadpan Tone', description: 'Third-person limited, dry British humor', value: 'Deadpan tone with dry wit' },
-      { label: 'The Satirical Voice', description: 'Institutional absurdity and memos' },
+      { label: 'The Deadpan Tone' },
+      { label: 'The Satirical Voice' },
     ]
 
     render(React.createElement(StoryWizard, {
@@ -282,46 +225,17 @@ describe('StoryWizard', () => {
     }))
 
     expect(screen.getByText('Suggestions')).toBeDefined()
-    expect(screen.getByText('The Deadpan Tone')).toBeDefined()
-    expect(screen.getByText('Third-person limited, dry British humor')).toBeDefined()
-    expect(screen.getByText('The Satirical Voice')).toBeDefined()
-    expect(screen.getByText('Institutional absurdity and memos')).toBeDefined()
+    const deadpanBtn = screen.getByRole('button', { name: 'The Deadpan Tone' })
+    const satiricalBtn = screen.getByRole('button', { name: 'The Satirical Voice' })
+    expect(deadpanBtn).toBeDefined()
+    expect(satiricalBtn).toBeDefined()
 
-    // Clicking an option with a value sends that value
-    fireEvent.click(screen.getByRole('button', { name: /The Deadpan Tone/ }))
-    expect(send).toHaveBeenCalledWith('Deadpan tone with dry wit')
+    // Clicking an option sends its label
+    fireEvent.click(deadpanBtn)
+    expect(send).toHaveBeenCalledWith('The Deadpan Tone')
 
-    // Clicking an option without a value sends the label
-    fireEvent.click(screen.getByRole('button', { name: /The Satirical Voice/ }))
+    fireEvent.click(satiricalBtn)
     expect(send).toHaveBeenCalledWith('The Satirical Voice')
-  })
-
-  it('prefers structured controller options over regex-scraped assistant suggestions', () => {
-    const send = vi.fn()
-    const content = [
-      'Here are markdown suggestions:',
-      '* **Markdown One:** Old regex option.',
-      '* **Markdown Two:** Another old regex option.',
-    ].join('\n')
-
-    render(React.createElement(StoryWizard, {
-      controller: {
-        ...controller,
-        messages: [
-          { role: 'assistant', content },
-        ],
-        options: [
-          { label: 'Structured One', description: 'Explicit model choice' },
-        ],
-        send,
-      },
-      onClose: () => undefined,
-    }))
-
-    expect(screen.getByText('Structured One')).toBeDefined()
-    expect(screen.getByText('Explicit model choice')).toBeDefined()
-    expect(screen.queryByText('Markdown One')).toBeNull()
-    expect(screen.queryByText('Markdown Two')).toBeNull()
   })
 
   it('provides dual handoff actions when foundation is ready and invokes onStartWriting', () => {
@@ -346,21 +260,21 @@ describe('StoryWizard', () => {
       onClose,
     }))
 
-    // Check that both action buttons are rendered
-    const generateBtns = screen.getAllByRole('button', { name: 'Generate opening scene' })
-    const writeBtns = screen.getAllByRole('button', { name: 'Write in manuscript' })
-    expect(generateBtns.length).toBeGreaterThanOrEqual(1)
-    expect(writeBtns.length).toBeGreaterThanOrEqual(1)
+    // Check that both action buttons are rendered in top bar (not duplicated in outline)
+    const generateBtn = screen.getByRole('button', { name: 'Generate opening scene' })
+    const writeBtn = screen.getByRole('button', { name: 'Start writing' })
+    expect(generateBtn).toBeDefined()
+    expect(writeBtn).toBeDefined()
 
     // Clicking generate passes mode: 'generate' and the opening summary
-    fireEvent.click(generateBtns[0])
+    fireEvent.click(generateBtn)
     expect(onStartWriting).toHaveBeenCalledWith({
       mode: 'generate',
       prompt: 'Arthur sits down at his beige desk.',
     })
 
     // Clicking write passes mode: 'write' and the opening summary
-    fireEvent.click(writeBtns[0])
+    fireEvent.click(writeBtn)
     expect(onStartWriting).toHaveBeenCalledWith({
       mode: 'write',
       prompt: 'Arthur sits down at his beige desk.',

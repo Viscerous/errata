@@ -778,6 +778,13 @@ export function ProseChainView({
   useEffect(() => {
     if (!pendingGeneration || !hasSavedPendingGeneration) return
 
+    if (pendingGeneration.fragmentCountBefore === 0) {
+      generationViewportAnchorRef.current = null
+      generationAnchorTopRef.current = null
+      setPendingGeneration(null)
+      return
+    }
+
     const viewport = getViewport()
     if (!viewport) return
 
@@ -1077,7 +1084,7 @@ export function ProseChainView({
                   )
                 })}
               </div>
-            ) : !showPendingGeneration ? (
+            ) : !showPendingGeneration && orderedProseFragments.length === 0 && !hasPersistedPendingGeneration ? (
               <EmptyState
                 variant="panel"
                 title={openingGuideline ? "Foundation ready." : "The page awaits."}
