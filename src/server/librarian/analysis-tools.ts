@@ -152,7 +152,7 @@ const sceneSchema = z.object({
   elapsed: NarrativeDurationInputSchema.optional()
     .describe('Elapsed story time for advance; never infer it from passage length.'),
   evidenceSegments: proseCitationSchema
-    .describe('Sentence numbers establishing the scene, place, or time change.'),
+    .describe('Sentence numbers establishing any place, time, or transition change.'),
 }).default({ transition: 'uncertain', evidenceSegments: [] })
 
 type SceneInput = z.infer<typeof sceneSchema>
@@ -249,7 +249,7 @@ function stateOperationSchemaFor(registry: ContinuityRegistry) {
     subject: z.object({
       label: z.string().trim().min(1).max(160),
       fragmentId: FragmentIdSchema.optional(),
-    }).optional().describe('Subject and optional record ID for a new set.'),
+    }).optional().describe('Subject (label and optional ID); required when set creates a new identity.'),
     facet: z.string().trim().min(1).max(100).optional()
       .describe('One stable question for a new set, such as location, attire, or injury; avoid catch-all status.'),
     slot: z.string().trim().min(1).max(100).optional()
@@ -268,7 +268,8 @@ function stateOperationSchemaFor(registry: ContinuityRegistry) {
 function threadOperationSchemaFor(registry: ContinuityRegistry) {
   return z.object({
     ...continuityKeyFields(registry.thread, 'unresolved question', 'who_betrayed_the_house', 'open'),
-    action: z.enum(['open', 'advance', 'resolve', 'abandon']),
+    action: z.enum(['open', 'advance', 'resolve', 'abandon'])
+      .describe('open introduces a question; others require an existing open key.'),
     label: z.string().trim().max(240).optional()
       .describe('Optional plain-language question; defaults to the key.'),
     note: z.string().trim().max(300).optional(),
@@ -283,7 +284,7 @@ function threadOperationSchemaFor(registry: ContinuityRegistry) {
 
 function knowledgeOperationSchemaFor(registry: ContinuityRegistry) {
   return z.object({
-    characterId: FragmentIdSchema,
+    characterId: FragmentIdSchema.describe('Existing character ID from story context.'),
     ...continuityKeyFields(registry.knowledge, 'fact identity', 'queen_identity', 'learn'),
     action: z.enum(['learn', 'correct', 'forget']),
     fact: z.string().trim().max(400).optional()
@@ -307,7 +308,7 @@ export function buildReportAnalysisInputSchema(
     mentions: z.array(mentionInputSchema).default([])
       .describe('Distinct listed-fragment mentions using exact prose text, never bare pronouns.'),
     candidateFragmentIds: z.array(FragmentIdSchema).default([])
-      .describe('Existing record IDs whose full text is necessary to settle a specific material finding. Leave empty for speculative review or routine maintenance.'),
+      .describe('Existing record IDs whose full text with numbered sentences is needed to inspect potential contradictions or propose record corrections. Mentions are resolved automatically.'),
     contradictions: z.array(z.object({
       description: z.string().describe('What the contradiction is'),
       recordCorrectionReason: z.string().trim().min(1).max(500).optional()
@@ -541,7 +542,10 @@ function normalizeContinuityProjection(
     const resolved = citedEvidence(segments, scene.evidenceSegments ?? [])
     const problem = citationProblem(resolved)
     if (problem && requiresSceneEvidence) {
-      skipped.push({ kind: 'scene', key: scene.transition, reason: problem })
+      const sceneKey = scene.transition !== 'continue' && scene.transition !== 'uncertain'
+        ? scene.transition
+        : (scene.location?.key ?? scene.time?.label ?? 'frame')
+      skipped.push({ kind: 'scene', key: sceneKey, reason: problem })
       scene = { transition: 'uncertain', evidenceSegments: [] }
     } else if (problem) {
       // A `continue` needs no citation. If the model nevertheless supplied an
@@ -930,6 +934,7 @@ export function createAnalysisTools(
     ? opts.numberedFragmentIds
     : new Set(opts?.numberedFragmentIds ?? [])
   let hasReported = false
+  const unnumberedProposalAttemptIds = new Set<string>()
   // Normalized once here; every lookup below reads the same shape and numbering.
   const continuityRegistry = completeRegistry(opts?.continuityKeys ?? {})
   const emitProgress = (stage: LibrarianAnalysisProgressStage) => {
@@ -1063,8 +1068,9 @@ export function createAnalysisTools(
         // themselves, justify another Analyze request. Candidate IDs are the
         // model explicitly asking to inspect durable assertions, so only a
         // newly delivered candidate keeps the inspection stage open.
-        const candidateIds = new Set(candidateFragmentIds)
+        const candidateIds = new Set([...candidateFragmentIds, ...unnumberedProposalAttemptIds])
         const inspectionRequired = resolvedFragments.some((fragment) => candidateIds.has(fragment.id))
+        unnumberedProposalAttemptIds.clear()
 
         const skippedContradictions: Array<Skipped<{ description: string }>> = []
         const groundedContradictions: AnalysisCollector['contradictions'] = []
@@ -1292,10 +1298,11 @@ export function createAnalysisTools(
             continue
           }
           if (!numberedFragmentIds.has(correction.fragmentId)) {
+            unnumberedProposalAttemptIds.add(correction.fragmentId)
             unresolved.push({
               operationId: '',
               action: 'replace_text',
-              reason: `${correction.fragmentId} has not been shown with numbered sentences.`,
+              reason: `${correction.fragmentId} has not been shown with numbered sentences. Include it in candidateFragmentIds or report mentions to inspect its numbered sentences.`,
             })
             continue
           }

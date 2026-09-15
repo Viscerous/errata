@@ -8,10 +8,26 @@ export function useLiveAnalysisProgress(storyId: string, active: boolean) {
   const [progress, setProgress] = useState<LibrarianAnalysisProgress | null>(null)
 
   useEffect(() => {
-    if (!active) return
+    if (!active) {
+      // When analysis transitions from active to idle, flush query invalidations
+      // and keep the final progress snapshot until the query cache has refreshed,
+      // avoiding the highlight flicker where mentions drop before fragments load.
+      let unmounted = false
+      void Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['librarian-analyses', storyId] }),
+        queryClient.invalidateQueries({ queryKey: ['librarian-analysis-index', storyId] }),
+        queryClient.invalidateQueries({ queryKey: ['librarian-status', storyId] }),
+        queryClient.invalidateQueries({ queryKey: ['fragments', storyId] }),
+      ]).then(() => {
+        if (!unmounted) setProgress(null)
+      })
+      return () => {
+        unmounted = true
+      }
+    }
+
     let cancelled = false
     let reader: ReadableStreamDefaultReader<ChatEvent> | null = null
-    setProgress(null)
 
     async function follow() {
       let stream: ReadableStream<ChatEvent> | null = null
@@ -49,7 +65,6 @@ export function useLiveAnalysisProgress(storyId: string, active: boolean) {
     void follow()
     return () => {
       cancelled = true
-      setProgress(null)
       void reader?.cancel()
     }
   }, [active, queryClient, storyId])

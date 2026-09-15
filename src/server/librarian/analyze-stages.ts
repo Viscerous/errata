@@ -63,7 +63,14 @@ export function isAnalyzeWorkflowComplete(
 
   if (availableTools.includes(ANALYZE_REPORT_TOOL)) {
     const report = lastResult(results, ANALYZE_REPORT_TOOL)
-    if (!report || !outputOk(report.output) || hasResolvedFragments(report.output)) return false
+    if (!report || !outputOk(report.output)) return false
+    if (hasResolvedFragments(report.output)) {
+      const reportIndex = results.lastIndexOf(report)
+      const hasFollowupProposal = results.slice(reportIndex + 1).some((r) => (
+        r.toolName === 'proposeRecordCorrections' || r.toolName === 'proposeNewRecords'
+      ))
+      if (!hasFollowupProposal) return false
+    }
   }
 
   return true

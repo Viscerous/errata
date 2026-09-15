@@ -536,10 +536,10 @@ export function InlineGenerationInput({
         <ComposerToolbar>
           {/* Left: Model selector + Follow toggle (hidden in compose mode) */}
           <div className="flex items-center gap-2">
-            {(mode === 'play' || mode === 'direct') && (
+            {(mode === 'play' || mode === 'direct' || mode === 'guided') && (
               <ContextPreviewDialog
                 storyId={storyId}
-                input={input}
+                input={mode === 'guided' ? (story?.settings.guidedContinuePrompt || GUIDED_CONTINUE_PROMPT) : input}
                 inputMode={effectiveInputMode}
                 disabled={isGenerating}
               />

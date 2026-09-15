@@ -96,13 +96,13 @@ export function buildAnalyzeSystemPrompt(opts?: {
   const guidance: string[] = []
 
   if (canReport) {
-    guidance.push('Before calling **reportAnalysis**, include a record ID in candidateFragmentIds only when a specific material finding cannot be settled from the supplied context without that record\'s full text. Do not request records merely to check whether maintenance might be useful. If the result supplies additional record bodies, revise only findings those records change.')
+    guidance.push('Call **reportAnalysis** with the complete narrative observation (summary, scene, deltas, mentions, and three next-passage directions). Include a record ID in candidateFragmentIds when its full text with numbered sentences is needed to inspect potential contradictions or propose record corrections.')
   } else {
     guidance.push('Review the new prose against the supplied context without inventing a replacement reporting tool.')
   }
 
   if (canReport && canMaintainRecords) {
-    guidance.push('Before the first **reportAnalysis**, make any optional record-maintenance proposals supported by records already shown. If candidate record bodies were requested, inspect them and make any resulting proposals; call **reportAnalysis** again only when those records change its findings or directions, otherwise stop.')
+    guidance.push('If candidate records were requested or newly resolved, inspect their numbered sentences and make any optional record-maintenance proposals in the follow-up step. Call **reportAnalysis** again only when those records change previous findings or directions, otherwise complete.')
   }
   if (canSuggestDirections) {
     guidance.push('When ready to report, include three distinct next-passage directions in the first **reportAnalysis** call. If newly supplied records change the findings, include revised directions in the replacement report.')

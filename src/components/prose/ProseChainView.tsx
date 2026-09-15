@@ -323,6 +323,7 @@ export function ProseChainView({
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['librarian-analysis-index', storyId] })
       queryClient.invalidateQueries({ queryKey: ['librarian-status', storyId] })
+      queryClient.invalidateQueries({ queryKey: ['fragments', storyId] })
     },
   })
 

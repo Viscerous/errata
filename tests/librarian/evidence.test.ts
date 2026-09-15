@@ -25,6 +25,16 @@ describe('Librarian evidence matching', () => {
     expect(evidenceAppearsInText(source, 'Alice crossed the crowded north hall ...')).toBe(true)
   })
 
+  it('accepts verbatim excerpts containing in-dialogue ellipses or stammers', () => {
+    const source = 'The Ambassador stammered, “I... I only wish to ensure transparency between our houses.”'
+
+    expect(evidenceAppearsInText(source, '“I... I only wish to ensure transparency between our houses.”')).toBe(true)
+    expect(evidenceAppearsInText(
+      `Alice arrived. ${source}`,
+      'Alice arrived ... “I... I only wish to ensure transparency between our houses.”',
+    )).toBe(true)
+  })
+
   it('rejects paraphrases, reversed spans, and keyword-sized ellipsis anchors', () => {
     const source = 'Alice crossed the crowded north hall and took the iron key.'
 

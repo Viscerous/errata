@@ -94,6 +94,17 @@ describe('librarian analyze tool stages', () => {
     expect(isAnalyzeWorkflowComplete(tools, closed)).toBe(true)
   })
 
+  it('completes deterministically after a proposal follows an inspected report', () => {
+    const steps = [
+      step({
+        toolName: 'reportAnalysis',
+        output: { ok: true, inspectionRequired: true, resolvedFragments: [{ id: 'ch-1' }] },
+      }),
+      step({ toolName: 'proposeRecordCorrections', output: { ok: true, proposalCount: 1 } }),
+    ]
+    expect(isAnalyzeWorkflowComplete(tools, steps)).toBe(true)
+  })
+
   it('uses the un-staged surface when the report tool is disabled', () => {
     const available = ['readFragments']
     expect(selectAnalyzeToolStage(available, [])).toEqual({
