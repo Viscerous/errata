@@ -214,11 +214,11 @@ export function FragmentTextField({
       </div>
       <div className="mt-2">
         {view === 'preview' ? (
-          <div className="min-h-[40vh] overflow-x-auto rounded-md border border-input bg-transparent px-3 py-3 text-sm leading-relaxed" data-component-id="fragment-markdown-preview">
+          <div className="min-h-[40vh] overflow-x-auto rounded-md border border-input bg-transparent px-3 py-2 shadow-xs text-sm leading-relaxed" data-component-id="fragment-markdown-preview">
             {content.trim() ? <StreamMarkdown content={content} /> : <span className="text-muted-foreground">Nothing to preview yet.</span>}
           </div>
         ) : segments ? (
-          <div className="min-h-[200px] overflow-hidden rounded-md border border-input focus-within:ring-1 focus-within:ring-ring">
+          <div className="min-h-[40vh] overflow-hidden rounded-md border border-input shadow-xs focus-within:ring-1 focus-within:ring-ring">
             {segments.map((segment, index) => segment.type === 'editable' ? (
               <textarea
                 key={`segment-${index}`}
@@ -231,13 +231,13 @@ export function FragmentTextField({
                 onSelect={(event) => recordSelection(event.currentTarget)}
                 disabled={!editable}
                 rows={Math.max(1, segment.text.split('\n').length)}
-                className="block w-full resize-none border-none bg-transparent px-3 py-1.5 font-mono text-sm leading-relaxed outline-none focus:ring-0 focus-visible:ring-0"
+                className="block w-full resize-none border-none bg-transparent px-3 py-1.5 text-sm leading-relaxed outline-none focus:ring-0 focus-visible:ring-0"
               />
             ) : (
               <div key={segment.id} className="group relative bg-sky-500/[0.06] dark:bg-sky-400/[0.06]">
                 <div className="absolute inset-y-0 left-0 w-0.5 bg-sky-500/40" />
                 <div className="flex items-start gap-2 py-1.5 pl-3 pr-2">
-                  <pre className="min-w-0 flex-1 whitespace-pre-wrap font-mono text-sm leading-relaxed text-foreground/80">{segment.text}</pre>
+                  <pre className="min-w-0 flex-1 whitespace-pre-wrap font-sans text-sm leading-relaxed text-foreground/80">{segment.text}</pre>
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <button
@@ -262,13 +262,13 @@ export function FragmentTextField({
             onChange={(event) => onChange(event.target.value)}
             onSelect={(event) => recordSelection(event.currentTarget)}
             disabled={!editable}
-            className="min-h-[40vh] resize-none bg-transparent font-mono text-sm leading-relaxed"
+            className="min-h-[40vh] resize-none bg-transparent text-sm leading-relaxed"
             required
           />
         )}
       </div>
 
-      <div className="mt-1.5 flex items-center justify-between">
+      <div className="mt-1.5 flex min-h-6 items-center justify-between">
         {view === 'write' && canFreeze ? (
           <button
             type="button"

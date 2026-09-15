@@ -631,7 +631,7 @@ export function FragmentEditor({
         </div>
       )}
 
-      <form onSubmit={handleSubmit} className="flex flex-col flex-1 overflow-auto">
+      <form onSubmit={handleSubmit} className="flex flex-col flex-1 overflow-y-auto [scrollbar-gutter:stable]">
         <div className="space-y-4 px-4 py-4 sm:px-6 sm:py-5">
           <div>
             <Eyebrow asChild><label>Name</label></Eyebrow>
