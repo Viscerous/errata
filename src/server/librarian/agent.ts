@@ -165,7 +165,7 @@ async function runLibrarianInner(
     candidateFragmentIds,
     candidateFragments,
     contradictions: collector.contradictions,
-    timelineEvents: timelineEventsFor(collector.events, collector.continuityProjection.scene),
+    timelineEvents: timelineEventsFor(collector.events, collector.continuityProjection.scene, collector.summaryUpdate),
     fragmentChangeProposals: collector.fragmentChangeProposals.map((proposal) => ({
       ...proposal,
       sourceFragmentId: fragmentId,

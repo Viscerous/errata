@@ -467,8 +467,8 @@ describe('reportAnalysis resilience and forgiving boundaries', () => {
       },
     })
     expect(parsed.scene?.time?.label).toBe('03:14 at night')
-    expect(parsed.scene?.time?.earliest).toBeUndefined()
-    expect(parsed.scene?.time?.latest).toBeUndefined()
+    expect((parsed.scene?.time as Record<string, unknown> | undefined)?.earliest).toBeUndefined()
+    expect((parsed.scene?.time as Record<string, unknown> | undefined)?.latest).toBeUndefined()
   })
 
   it('normalizes action aliases on state operations', () => {
@@ -553,8 +553,12 @@ describe('reportAnalysis resilience and forgiving boundaries', () => {
     expect(result.skippedMentions[0].fragmentId).toBe('ch-9999')
 
     expect(collector.continuityProjection.stateOperations).toHaveLength(1)
-    expect(collector.continuityProjection.stateOperations[0].subject.fragmentId).toBeUndefined()
-    expect(collector.continuityProjection.stateOperations[0].subject.label).toBe('Alice')
+    const firstOp = collector.continuityProjection.stateOperations[0]
+    expect(firstOp.action).toBe('set')
+    if (firstOp.action === 'set') {
+      expect(firstOp.subject.fragmentId).toBeUndefined()
+      expect(firstOp.subject.label).toBe('Alice')
+    }
 
     expect(collector.continuityProjection.threadOperations).toHaveLength(1)
     expect(collector.continuityProjection.threadOperations[0].relatedFragmentIds).toEqual(['ch-0001'])
@@ -563,5 +567,73 @@ describe('reportAnalysis resilience and forgiving boundaries', () => {
       expect.objectContaining({ kind: 'knowledge', key: 'ch-9999' }),
       expect.objectContaining({ kind: 'knowledge', key: 'loc-0001' }),
     ]))
+  })
+
+  it('normalizes character and entity live states and falls back to summary for timeline events', async () => {
+    const collector = createEmptyCollector()
+    const tools = createAnalysisTools(collector)
+    const executionContext = { messages: [] }
+
+    const result = await tools.reportAnalysis.execute({
+      summary: 'Alice examined the old tower gates while the wind howled outside.',
+      characters: [
+        {
+          name: 'Alice',
+          characterId: 'ch-0001',
+          immediate: 'Catching breath; dust clinging to boots',
+          state: {
+            attire: 'tattered travel cloak',
+            injury: 'none',
+            gear: 'holding brass lantern',
+          },
+          knowledge: ['The tower gate was unlatched from within'],
+          secrets: ['Carrying the brass key'],
+        },
+      ],
+      entities: [
+        {
+          name: 'Old Tower',
+          category: 'location',
+          immediate: 'Cold draft whistling through the iron bars',
+          state: {
+            gate: 'unlatched',
+          },
+          notes: ['Pre-war construction'],
+        },
+      ],
+    }, executionContext)
+
+    expect(result.ok).toBe(true)
+    expect(collector.summaryUpdate).toContain('old tower gates')
+    expect(collector.continuityProjection.characterStates).toBeDefined()
+    expect(collector.continuityProjection.characterStates?.['ch-0001']).toEqual({
+      characterId: 'ch-0001',
+      name: 'Alice',
+      immediate: 'Catching breath; dust clinging to boots',
+      state: {
+        attire: 'tattered travel cloak',
+        injury: '',
+        gear: 'holding brass lantern',
+      },
+      knowledge: ['The tower gate was unlatched from within'],
+      secrets: ['Carrying the brass key'],
+    })
+
+    expect(collector.continuityProjection.entityStates).toBeDefined()
+    expect(collector.continuityProjection.entityStates?.['old_tower']).toEqual({
+      name: 'Old Tower',
+      category: 'location',
+      immediate: 'Cold draft whistling through the iron bars',
+      state: {
+        gate: 'unlatched',
+      },
+      notes: ['Pre-war construction'],
+    })
+
+    // Timeline events fallback when events is empty
+    const timeline = timelineEventsFor([], collector.continuityProjection.scene, collector.summaryUpdate)
+    expect(timeline).toHaveLength(1)
+    expect(timeline[0].event).toBe(collector.summaryUpdate)
+    expect(timeline[0].position).toBe('after')
   })
 })

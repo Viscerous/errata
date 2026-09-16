@@ -230,15 +230,67 @@ export const KnowledgeOperationSchema = z.strictObject({
 
 export type KnowledgeOperation = z.infer<typeof KnowledgeOperationSchema>
 
+export const CharacterLiveStateSchema = z.strictObject({
+  characterId: FragmentIdSchema.optional(),
+  name: z.string().trim().min(1).max(160),
+  /** Immediate kinetic/tactile beat (overwritten each scene). E.g. "tense posture; catching breath after sprint" */
+  immediate: z.string().trim().max(300).optional(),
+  /** Persistent dynamic keys (survives until explicitly modified or cleared). E.g. attire, injuries, gear, wings */
+  state: z.record(z.string().trim().min(1).max(100), z.string().trim().max(500)).optional(),
+  /** Facts learned, witnessed, or deduced in this scene */
+  knowledge: z.array(z.string().trim().max(500)).optional(),
+  /** Secrets withheld, active deceptions, or unrevealed goals */
+  secrets: z.array(z.string().trim().max(500)).optional(),
+})
+
+export type CharacterLiveState = z.infer<typeof CharacterLiveStateSchema>
+
+export const EntityLiveStateSchema = z.strictObject({
+  entityId: FragmentIdSchema.optional(),
+  name: z.string().trim().min(1).max(160),
+  category: z.enum(['location', 'artefact', 'faction', 'other']).optional(),
+  immediate: z.string().trim().max(300).optional(),
+  state: z.record(z.string().trim().min(1).max(100), z.string().trim().max(500)).optional(),
+  notes: z.array(z.string().trim().max(500)).optional(),
+})
+
+export type EntityLiveState = z.infer<typeof EntityLiveStateSchema>
+
+export const CharacterLiveStateInputSchema = z.object({
+  id: z.string().trim().optional(),
+  characterId: z.string().trim().optional(),
+  name: z.string().trim().min(1).max(160),
+  immediate: z.string().trim().max(300).optional(),
+  state: z.record(z.string().trim().min(1).max(100), z.string().trim().max(500).nullable().optional()).optional(),
+  knowledge: z.array(z.string().trim().max(500)).optional(),
+  secrets: z.array(z.string().trim().max(500)).optional(),
+})
+
+export type CharacterLiveStateInput = z.infer<typeof CharacterLiveStateInputSchema>
+
+export const EntityLiveStateInputSchema = z.object({
+  id: z.string().trim().optional(),
+  entityId: z.string().trim().optional(),
+  name: z.string().trim().min(1).max(160),
+  category: z.enum(['location', 'artefact', 'faction', 'other']).optional(),
+  immediate: z.string().trim().max(300).optional(),
+  state: z.record(z.string().trim().min(1).max(100), z.string().trim().max(500).nullable().optional()).optional(),
+  notes: z.array(z.string().trim().max(500)).optional(),
+})
+
+export type EntityLiveStateInput = z.infer<typeof EntityLiveStateInputSchema>
+
 export const ContinuityProjectionSchema = z.strictObject({
   version: z.literal(2),
   scene: SceneUpdateSchema,
   // Producer and prompt budgets are policy, not persisted truth invariants.
-  stateOperations: z.array(StateOperationSchema),
-  threadOperations: z.array(ThreadOperationSchema),
+  stateOperations: z.array(StateOperationSchema).default([]),
+  threadOperations: z.array(ThreadOperationSchema).default([]),
   /** Sparse prominence updates; omission retains the prior value. */
-  threadFocus: z.array(ThreadFocusSchema),
-  knowledgeOperations: z.array(KnowledgeOperationSchema),
+  threadFocus: z.array(ThreadFocusSchema).default([]),
+  knowledgeOperations: z.array(KnowledgeOperationSchema).default([]),
+  characterStates: z.record(z.string(), CharacterLiveStateSchema).optional(),
+  entityStates: z.record(z.string(), EntityLiveStateSchema).optional(),
 })
 
 export type ContinuityProjection = z.infer<typeof ContinuityProjectionSchema>

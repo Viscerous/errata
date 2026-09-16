@@ -26,6 +26,7 @@ const MAX_KNOWLEDGE_PER_CHARACTER = 16
  */
 const MAX_LIVE_THREADS = 24
 const MAX_CACHE_ENTRIES = 32
+const CLEARED_STATE_VALUES = new Set(['none', 'cleared', 'removed', 'healed', 'empty', 'normal', 'default', 'null', 'undefined'])
 
 interface ProjectionSource {
   sourceFragmentId: string
@@ -65,6 +66,24 @@ export interface CharacterKnowledgeEntry extends ProjectionSource {
   acquisition: 'witnessed' | 'told' | 'inferred' | 'other'
 }
 
+export interface FoldedCharacterLiveState extends ProjectionSource {
+  characterId?: string
+  name: string
+  immediate?: string
+  state: Record<string, string>
+  knowledge: string[]
+  secrets: string[]
+}
+
+export interface FoldedEntityLiveState extends ProjectionSource {
+  entityId?: string
+  name: string
+  category?: 'location' | 'artefact' | 'faction' | 'other'
+  immediate?: string
+  state: Record<string, string>
+  notes: string[]
+}
+
 /**
  * The complete branch-local result of folding source-current projections.
  * This is program memory, not prompt memory, so it has no prompt-budget caps.
@@ -73,6 +92,8 @@ export interface ContinuityLedger {
   currentState: CurrentStateEntry[]
   liveThreads: LiveThreadEntry[]
   characterKnowledge: CharacterKnowledgeEntry[]
+  characterStates?: FoldedCharacterLiveState[]
+  entityStates?: FoldedEntityLiveState[]
   currentScene?: SceneFrame
   staleProjectionCount: number
 }
@@ -82,6 +103,8 @@ export interface ContinuityView {
   currentState: CurrentStateEntry[]
   liveThreads: LiveThreadEntry[]
   characterKnowledge: CharacterKnowledgeEntry[]
+  characterStates?: FoldedCharacterLiveState[]
+  entityStates?: FoldedEntityLiveState[]
   currentScene?: SceneFrame
   staleProjectionCount: number
 }
@@ -230,6 +253,8 @@ export async function buildContinuityLedger(params: {
   const suspended: SceneCursor[] = []
   const liveThreads = new Map<string, LiveThreadEntry>()
   const characterKnowledge = new Map<string, CharacterKnowledgeEntry>()
+  const liveCharacters = new Map<string, FoldedCharacterLiveState>()
+  const liveEntities = new Map<string, FoldedEntityLiveState>()
   const threadVisibility = new Map<string, LiveThreadEntry['visibility']>()
   let staleProjectionCount = 0
 
@@ -254,6 +279,12 @@ export async function buildContinuityLedger(params: {
     if (transition === 'cut') {
       for (const [key, entry] of cursor.state) {
         if (entry.scope === 'scene') cursor.state.delete(key)
+      }
+      for (const [_, char] of liveCharacters) {
+        char.immediate = undefined
+      }
+      for (const [_, ent] of liveEntities) {
+        ent.immediate = undefined
       }
     }
     const impliedLine = transition === 'enter-flashback'
@@ -375,21 +406,93 @@ export async function buildContinuityLedger(params: {
         })
       }
     }
+
+    if (projection.characterStates) {
+      for (const [key, update] of Object.entries(projection.characterStates)) {
+        const charKey = normalizeContinuityKey(key)
+        const existing = liveCharacters.get(charKey)
+        const state = existing ? { ...existing.state } : {}
+        if (update.state) {
+          for (const [sKey, sVal] of Object.entries(update.state)) {
+            const normalizedStateKey = sKey.trim()
+            if (!sVal || CLEARED_STATE_VALUES.has(sVal.toLowerCase())) {
+              delete state[normalizedStateKey]
+            } else {
+              state[normalizedStateKey] = sVal
+            }
+          }
+        }
+        const knowledge = [
+          ...(existing?.knowledge ?? []),
+          ...(update.knowledge ?? []),
+        ]
+        const secrets = [
+          ...(existing?.secrets ?? []),
+          ...(update.secrets ?? []),
+        ]
+        liveCharacters.set(charKey, {
+          ...source,
+          characterId: update.characterId ?? existing?.characterId,
+          name: update.name || existing?.name || key,
+          immediate: update.immediate ?? existing?.immediate,
+          state,
+          knowledge: [...new Set(knowledge)],
+          secrets: [...new Set(secrets)],
+        })
+      }
+    }
+
+    if (projection.entityStates) {
+      for (const [key, update] of Object.entries(projection.entityStates)) {
+        const entityKey = normalizeContinuityKey(key)
+        const existing = liveEntities.get(entityKey)
+        const state = existing ? { ...existing.state } : {}
+        if (update.state) {
+          for (const [sKey, sVal] of Object.entries(update.state)) {
+            const normalizedStateKey = sKey.trim()
+            if (!sVal || CLEARED_STATE_VALUES.has(sVal.toLowerCase())) {
+              delete state[normalizedStateKey]
+            } else {
+              state[normalizedStateKey] = sVal
+            }
+          }
+        }
+        const notes = [
+          ...(existing?.notes ?? []),
+          ...(update.notes ?? []),
+        ]
+        liveEntities.set(entityKey, {
+          ...source,
+          entityId: update.entityId ?? existing?.entityId,
+          name: update.name || existing?.name || key,
+          category: update.category ?? existing?.category,
+          immediate: update.immediate ?? existing?.immediate,
+          state,
+          notes: [...new Set(notes)],
+        })
+      }
+    }
   }
 
   const allThreads: LiveThreadEntry[] = [...liveThreads.values()].map((thread) => ({
     ...thread,
     visibility: threadVisibility.get(thread.threadKey) ?? ('dormant' as const),
   }))
+  const allCharacters = [...liveCharacters.values()]
+  const allEntities = [...liveEntities.values()]
   const ledger: ContinuityLedger | undefined = (
     cursor.state.size > 0
     || allThreads.length > 0
     || characterKnowledge.size > 0
+    || allCharacters.length > 0
+    || allEntities.length > 0
     || hasSceneSignal(cursor.frame)
   ) ? {
       currentState: [...cursor.state.values()],
       liveThreads: allThreads,
       characterKnowledge: [...characterKnowledge.values()],
+      ...(allCharacters.length > 0 ? { characterStates: allCharacters } : {}),
+      ...(allEntities.length > 0 ? { entityStates: allEntities } : {}),
       currentScene: cursor.frame,
       staleProjectionCount,
     } : undefined
@@ -434,6 +537,8 @@ export function projectContinuityView(
     currentState,
     liveThreads,
     characterKnowledge,
+    ...(ledger.characterStates ? { characterStates: ledger.characterStates } : {}),
+    ...(ledger.entityStates ? { entityStates: ledger.entityStates } : {}),
     currentScene: ledger.currentScene,
     staleProjectionCount: ledger.staleProjectionCount,
   }
@@ -714,6 +819,55 @@ function renderAuthorialContinuity(
     ].filter((line): line is string => Boolean(line)).join('\n\n'))
   }
 
+  if (view.characterStates && view.characterStates.length > 0) {
+    const lines: string[] = ['### Active character live states']
+    for (const char of view.characterStates) {
+      const details: string[] = []
+      if (char.immediate) {
+        details.push(`  - Immediate: ${char.immediate}`)
+      }
+      const statePairs = Object.entries(char.state).filter(([_, v]) => Boolean(v))
+      if (statePairs.length > 0) {
+        details.push(`  - State: ${statePairs.map(([k, v]) => `${k}: ${v}`).join(' | ')}`)
+      }
+      if (char.knowledge.length > 0) {
+        details.push(`  - Knowledge: ${char.knowledge.join('; ')}`)
+      }
+      if (char.secrets.length > 0) {
+        details.push(`  - Secrets: ${char.secrets.join('; ')}`)
+      }
+      if (details.length > 0) {
+        lines.push(`- **${char.name}**${char.characterId ? ` (\`${char.characterId}\`)` : ''}\n${details.join('\n')}`)
+      }
+    }
+    if (lines.length > 1) {
+      parts.push(lines.join('\n'))
+    }
+  }
+
+  if (view.entityStates && view.entityStates.length > 0) {
+    const lines: string[] = ['### Active entity live states']
+    for (const ent of view.entityStates) {
+      const details: string[] = []
+      if (ent.immediate) {
+        details.push(`  - Immediate: ${ent.immediate}`)
+      }
+      const statePairs = Object.entries(ent.state).filter(([_, v]) => Boolean(v))
+      if (statePairs.length > 0) {
+        details.push(`  - State: ${statePairs.map(([k, v]) => `${k}: ${v}`).join(' | ')}`)
+      }
+      if (ent.notes.length > 0) {
+        details.push(`  - Notes: ${ent.notes.join('; ')}`)
+      }
+      if (details.length > 0) {
+        lines.push(`- **${ent.name}**${ent.entityId ? ` (\`${ent.entityId}\`)` : ''}${ent.category ? ` [${ent.category}]` : ''}\n${details.join('\n')}`)
+      }
+    }
+    if (lines.length > 1) {
+      parts.push(lines.join('\n'))
+    }
+  }
+
   return parts.join('\n\n')
 }
 
@@ -728,13 +882,33 @@ function renderAuthorialContinuity(
  */
 function renderSelfAwareness(view: ContinuityView | undefined, characterId: string): string {
   const known = view?.characterKnowledge.filter((entry) => entry.characterId === characterId) ?? []
-  return [
+  const charState = view?.characterStates?.find((c) => c.characterId === characterId)
+  const lines = [
     '## What You Know',
     'Your character sheet and the list below are your memory. Do not infer knowledge from authorial story material or from what other characters know: if something does not appear here, you have not learned it.',
-    ...(known.length > 0
-      ? known.map((entry) => `- ${entry.fact} (${entry.acquisition})`)
-      : ['- (nothing beyond your character sheet and the present conversation)']),
-  ].join('\n')
+  ]
+  if (charState) {
+    if (charState.immediate) {
+      lines.push(`- Immediate: ${charState.immediate}`)
+    }
+    const statePairs = Object.entries(charState.state).filter(([_, v]) => Boolean(v))
+    if (statePairs.length > 0) {
+      lines.push(`- Physical state: ${statePairs.map(([k, v]) => `${k}: ${v}`).join(' | ')}`)
+    }
+    if (charState.secrets.length > 0) {
+      lines.push(...charState.secrets.map((s) => `- Private: ${s}`))
+    }
+    if (charState.knowledge.length > 0) {
+      lines.push(...charState.knowledge.map((k) => `- ${k}`))
+    }
+  }
+  if (known.length > 0) {
+    lines.push(...known.map((entry) => `- ${entry.fact} (${entry.acquisition})`))
+  }
+  if (!charState && known.length === 0) {
+    lines.push('- (nothing beyond your character sheet and the present conversation)')
+  }
+  return lines.join('\n')
 }
 
 /**

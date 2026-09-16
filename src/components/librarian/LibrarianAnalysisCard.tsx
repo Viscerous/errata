@@ -248,6 +248,36 @@ function ContinuityNotes({ projection, stale, charName }: {
         {projection.scene.location ? ` — ${projection.scene.location.label}` : ''}
         {projection.scene.time ? ` — ${projection.scene.time.label}` : ''}
       </InlineField>
+      {projection.characterStates && Object.keys(projection.characterStates).length > 0 && (
+        <div>
+          <SubLabel>Character states</SubLabel>
+          <AnalysisList items={Object.entries(projection.characterStates).map(([charId, liveState]) => {
+            const parts: string[] = []
+            if (liveState.immediate) parts.push(`Immediate: ${liveState.immediate}`)
+            const stateEntries = Object.entries(liveState.state || {})
+            if (stateEntries.length > 0) parts.push(stateEntries.map(([k, v]) => `${k}: ${v}`).join(', '))
+            if (liveState.knowledge && liveState.knowledge.length > 0) parts.push(`Aware: ${liveState.knowledge.join('; ')}`)
+            if (liveState.secrets && liveState.secrets.length > 0) parts.push(`Secrets: ${liveState.secrets.join('; ')}`)
+            return {
+              key: `char-state-${charId}`,
+              content: `${charName(charId)}: ${parts.join(' — ') || 'active'}`,
+            }
+          })} />
+        </div>
+      )}
+      {projection.entityStates && Object.keys(projection.entityStates).length > 0 && (
+        <div>
+          <SubLabel>Entity states</SubLabel>
+          <AnalysisList items={Object.entries(projection.entityStates).map(([entityName, entity]) => {
+            const stateEntries = Object.entries(entity.state || {})
+            const stateText = stateEntries.map(([k, v]) => `${k}: ${v}`).join(', ')
+            return {
+              key: `entity-state-${entityName}`,
+              content: `${entity.name || entityName}: ${stateText || 'active'}`,
+            }
+          })} />
+        </div>
+      )}
       {projection.stateOperations.length > 0 && (
         <div><SubLabel>Current state</SubLabel><AnalysisList items={projection.stateOperations.map((operation, index) => ({
           key: `state-${index}`,

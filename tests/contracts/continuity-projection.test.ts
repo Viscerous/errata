@@ -53,4 +53,41 @@ describe('continuity projection contract', () => {
       },
     }).success).toBe(false)
   })
+
+  it('accepts characterStates and entityStates in canonical projections', () => {
+    const projection: ContinuityProjection = {
+      version: 2,
+      scene: { transition: 'continue', line: 'present' },
+      stateOperations: [],
+      threadOperations: [],
+      threadFocus: [],
+      knowledgeOperations: [],
+      characterStates: {
+        'ch-0001': {
+          characterId: 'ch-0001',
+          name: 'Alice',
+          immediate: 'Catching breath; dust clinging to boots',
+          state: {
+            attire: 'travel cloak',
+            injury: 'sprained ankle',
+            gear: 'lantern in hand',
+          },
+          knowledge: ['saw the courtyard gate unlatched'],
+          secrets: ['carrying the map in a secret pocket'],
+        },
+      },
+      entityStates: {
+        'loc-0001': {
+          name: 'North Gate',
+          category: 'location',
+          immediate: 'Cold draft whistling through the iron bars',
+          state: {
+            lock: 'broken',
+          },
+          notes: ['stone construction'],
+        },
+      },
+    }
+    expect(ContinuityProjectionSchema.safeParse(projection).success).toBe(true)
+  })
 })

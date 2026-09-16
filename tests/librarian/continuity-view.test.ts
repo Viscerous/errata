@@ -1024,4 +1024,172 @@ describe('renderContinuity', () => {
       expect(renderContinuity({ continuityView: view }, 'character-chat.chat')).toBeNull()
     })
   })
+
+  describe('character and entity live states folding', () => {
+    let dataDir: string
+    let cleanup: () => Promise<void>
+
+    beforeEach(async () => {
+      const tmp = await createTempDir()
+      dataDir = tmp.path
+      cleanup = tmp.cleanup
+    })
+
+    afterEach(async () => {
+      await cleanup()
+    })
+
+    it('folds dynamic character states, clears healed injuries, and preserves persistent keys across passages', async () => {
+      const story = makeStory()
+      await createStory(dataDir, story)
+
+      // Passage 1: Alice arrives wounded in travel cloak
+      const pr1 = 'pr-0001'
+      const frag1 = makeFragment({ id: pr1, type: 'prose', order: 1, content: 'Alice stumbled into the shelter.' })
+      await createFragment(dataDir, story.id, frag1)
+      const an1 = analysis(pr1, 1)
+      an1.sourceRevision = analysisSourceRevision(frag1)
+      an1.continuityProjection = {
+        version: 2,
+        scene: { transition: 'advance', line: 'present' },
+        stateOperations: [],
+        threadOperations: [],
+        threadFocus: [],
+        knowledgeOperations: [],
+        characterStates: {
+          'ch-0001': {
+            characterId: 'ch-0001',
+            name: 'Alice',
+            immediate: 'Catching breath against the doorframe',
+            state: {
+              attire: 'travel cloak',
+              injury: 'sprained ankle',
+            },
+            knowledge: ['Gate was left unlatched'],
+            secrets: ['Carrying the map'],
+          },
+        },
+      }
+      await saveAnalysis(dataDir, story.id, an1)
+
+      // Passage 2: Alice rests, injury healed/cleared, attire persists
+      const pr2 = 'pr-0002'
+      const frag2 = makeFragment({ id: pr2, type: 'prose', order: 2, content: 'Alice warmed her hands by the fire.' })
+      await createFragment(dataDir, story.id, frag2)
+      const an2 = analysis(pr2, 2)
+      an2.sourceRevision = analysisSourceRevision(frag2)
+      an2.continuityProjection = {
+        version: 2,
+        scene: { transition: 'advance', line: 'present' },
+        stateOperations: [],
+        threadOperations: [],
+        threadFocus: [],
+        knowledgeOperations: [],
+        characterStates: {
+          'ch-0001': {
+            characterId: 'ch-0001',
+            name: 'Alice',
+            immediate: 'Sitting beside the hearth',
+            state: {
+              injury: '',
+              gear: 'iron dagger',
+            },
+            knowledge: ['Guards were absent'],
+          },
+        },
+      }
+      await saveAnalysis(dataDir, story.id, an2)
+
+      const ledger = await buildContinuityLedger({
+        dataDir,
+        storyId: story.id,
+        activeProseFragments: [frag1, frag2],
+      })
+
+      expect(ledger).toBeDefined()
+      expect(ledger?.characterStates).toHaveLength(1)
+      const alice = ledger?.characterStates?.[0]
+      expect(alice?.name).toBe('Alice')
+      expect(alice?.immediate).toBe('Sitting beside the hearth')
+      expect(alice?.state).toEqual({
+        attire: 'travel cloak',
+        gear: 'iron dagger',
+      })
+      expect(alice?.knowledge).toEqual(['Gate was left unlatched', 'Guards were absent'])
+      expect(alice?.secrets).toEqual(['Carrying the map'])
+
+      const view = projectContinuityView(ledger)
+      expect(view?.characterStates).toHaveLength(1)
+
+      const authorial = renderContinuity({ continuityView: view }, 'generation.writer')!
+      expect(authorial).toContain('### Active character live states')
+      expect(authorial).toContain('Sitting beside the hearth')
+      expect(authorial).toContain('travel cloak')
+      expect(authorial).toContain('iron dagger')
+      expect(authorial).not.toContain('sprained ankle')
+
+      // Character chat view gets personal state and secrets
+      const chat = renderContinuity({ continuityView: view, character: { id: 'ch-0001' } }, 'character-chat.chat')!
+      expect(chat).toContain('Sitting beside the hearth')
+      expect(chat).toContain('travel cloak')
+      expect(chat).toContain('Carrying the map')
+    })
+
+    it('clears immediate posture across a cut transition while preserving persistent state', async () => {
+      const story = makeStory()
+      await createStory(dataDir, story)
+
+      const pr1 = 'pr-0001'
+      const frag1 = makeFragment({ id: pr1, type: 'prose', order: 1, content: 'Alice paused outside the gate.' })
+      await createFragment(dataDir, story.id, frag1)
+      const an1 = analysis(pr1, 1)
+      an1.sourceRevision = analysisSourceRevision(frag1)
+      an1.continuityProjection = {
+        version: 2,
+        scene: { transition: 'advance', line: 'present' },
+        stateOperations: [],
+        threadOperations: [],
+        threadFocus: [],
+        knowledgeOperations: [],
+        characterStates: {
+          'ch-0001': {
+            characterId: 'ch-0001',
+            name: 'Alice',
+            immediate: 'Kneeling in the wet mud',
+            state: {
+              attire: 'travel cloak',
+            },
+          },
+        },
+      }
+      await saveAnalysis(dataDir, story.id, an1)
+
+      // Cut to a different place without Alice active in the scene
+      const pr2 = 'pr-0002'
+      const frag2 = makeFragment({ id: pr2, type: 'prose', order: 2, content: 'Hours later, bells rang across the city.' })
+      await createFragment(dataDir, story.id, frag2)
+      const an2 = analysis(pr2, 2)
+      an2.sourceRevision = analysisSourceRevision(frag2)
+      an2.continuityProjection = {
+        version: 2,
+        scene: { transition: 'cut', line: 'present' },
+        stateOperations: [],
+        threadOperations: [],
+        threadFocus: [],
+        knowledgeOperations: [],
+      }
+      await saveAnalysis(dataDir, story.id, an2)
+
+      const ledger = await buildContinuityLedger({
+        dataDir,
+        storyId: story.id,
+        activeProseFragments: [frag1, frag2],
+      })
+
+      const alice = ledger?.characterStates?.[0]
+      expect(alice?.name).toBe('Alice')
+      expect(alice?.immediate).toBeUndefined()
+      expect(alice?.state).toEqual({ attire: 'travel cloak' })
+    })
+  })
 })

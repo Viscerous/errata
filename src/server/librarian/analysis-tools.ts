@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { tool, type ToolSet } from 'ai'
 import { z } from 'zod/v4'
 import { suggestionDirectionSchema, type SuggestionDirection } from '../directions/schema'
-import { getFragment } from '../fragments/storage'
+import { getFragment, listFragments } from '../fragments/storage'
 import { FragmentIdSchema, type Fragment } from '@/contracts/story'
 import { numberSentences, resolveSegments, segmentText, type TextSegment } from '../llm/segments'
 import type {
@@ -13,12 +13,18 @@ import type {
   LibrarianMention,
 } from './storage'
 import {
+  CharacterLiveStateInputSchema,
+  EntityLiveStateInputSchema,
   NarrativeDurationInputSchema,
   NarrativeTimeInputSchema,
   SceneLocationInputSchema,
+  type CharacterLiveState,
+  type CharacterLiveStateInput,
   type CitedEvidence,
   type ContinuityProjection,
   type ContinuityRegistry,
+  type EntityLiveState,
+  type EntityLiveStateInput,
   type KnowledgeOperation,
   type RegistryEntry,
   type StateOperation,
@@ -116,9 +122,16 @@ const READ_TOOLS_ALREADY_IN_ANALYZE_CONTEXT = ['readProseChain', 'readStorySumma
 export function timelineEventsFor(
   events: string[],
   scene: ContinuityProjection['scene'],
+  summary?: string,
 ): LibrarianAnalysis['timelineEvents'] {
   const position = scene.line === 'flashback' ? 'before' : 'after'
-  return events.map((event) => ({ event, position }))
+  if (events && events.length > 0) {
+    return events.map((event) => ({ event, position }))
+  }
+  if (summary && summary.trim().length > 0) {
+    return [{ event: summary.trim(), position }]
+  }
+  return []
 }
 
 const stringArray = z.array(z.string()).default([])
@@ -319,7 +332,11 @@ export function buildReportAnalysisInputSchema(
     // for the structure required to interpret it.
     summary: z.string().default('').describe('Concise retrospective summary of the new prose as past history.'),
     events: stringArray
-      .describe('A few short timeline events; scene metadata supplies when.'),
+      .describe('Optional short timeline events (or leave empty; summary conveys passage events).'),
+    characters: z.array(CharacterLiveStateInputSchema).default([])
+      .describe('Active characters in this scene: physical state, immediate posture, and epistemic updates.'),
+    entities: z.array(EntityLiveStateInputSchema).default([])
+      .describe('Optional non-character entity updates (locations, artefacts, factions) with dynamic state keys.'),
     mentions: z.array(mentionInputSchema).default([])
       .describe('Distinct listed-fragment mentions using exact prose text, never bare pronouns.'),
     candidateFragmentIds: z.array(z.string().trim()).default([])
@@ -538,11 +555,15 @@ function liveIdentitySet(entries: RegistryEntry[]): Set<string> {
   return new Set(entries.map((entry) => scopedContinuityIdentity(entry.key, entry.scope)))
 }
 
+const CLEARED_STATE_VALUES = new Set(['none', 'cleared', 'removed', 'healed', 'empty', 'normal', 'default', 'null', 'undefined'])
+
 type NormalizedContinuityInput = {
   scene: NonNullable<ReportAnalysisInput['scene']>
   stateOperations: NonNullable<ReportAnalysisInput['stateOperations']>
   threadOperations: NonNullable<ReportAnalysisInput['threadOperations']>
   knowledgeOperations: NonNullable<ReportAnalysisInput['knowledgeOperations']>
+  characters?: CharacterLiveStateInput[]
+  entities?: EntityLiveStateInput[]
 }
 
 function normalizeContinuityProjection(
@@ -761,6 +782,107 @@ function normalizeContinuityProjection(
     })
   }
 
+  const characterStates: Record<string, CharacterLiveState> = {}
+  for (const c of input.characters ?? []) {
+    const name = c.name.trim()
+    if (!name) continue
+
+    let resolvedId = c.characterId?.trim() || c.id?.trim()
+    if (resolvedId && options?.checkedFragments) {
+      const match = options.checkedFragments.get(resolvedId)
+      if (!match || match.type !== 'character') {
+        resolvedId = undefined
+      }
+    }
+    if (!resolvedId && options?.checkedFragments) {
+      for (const [fid, fragment] of options.checkedFragments) {
+        if (fragment.type === 'character' && fragment.name.trim().toLowerCase() === name.toLowerCase()) {
+          resolvedId = fid
+          break
+        }
+      }
+    }
+
+    const stateRecord: Record<string, string> = {}
+    if (c.state) {
+      for (const [k, v] of Object.entries(c.state)) {
+        const key = k.trim()
+        if (!key) continue
+        if (v === null || v === undefined) {
+          stateRecord[key] = ''
+        } else {
+          const val = v.trim()
+          stateRecord[key] = CLEARED_STATE_VALUES.has(val.toLowerCase()) ? '' : val
+        }
+      }
+    }
+
+    const knowledge = (c.knowledge ?? [])
+      .map((k) => k.trim())
+      .filter((k) => k.length > 0)
+    const secrets = (c.secrets ?? [])
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0)
+
+    const stateKey = resolvedId ?? derivedContinuityKey(name)
+    characterStates[stateKey] = {
+      ...(resolvedId ? { characterId: resolvedId } : {}),
+      name,
+      ...(c.immediate?.trim() ? { immediate: c.immediate.trim() } : {}),
+      ...(Object.keys(stateRecord).length > 0 ? { state: stateRecord } : {}),
+      ...(knowledge.length > 0 ? { knowledge: [...new Set(knowledge)] } : {}),
+      ...(secrets.length > 0 ? { secrets: [...new Set(secrets)] } : {}),
+    }
+  }
+
+  const entityStates: Record<string, EntityLiveState> = {}
+  for (const e of input.entities ?? []) {
+    const name = e.name.trim()
+    if (!name) continue
+
+    let resolvedId = e.entityId?.trim() || e.id?.trim()
+    if (resolvedId && options?.checkedFragments) {
+      const match = options.checkedFragments.get(resolvedId)
+      if (!match) resolvedId = undefined
+    }
+    if (!resolvedId && options?.checkedFragments) {
+      for (const [fid, fragment] of options.checkedFragments) {
+        if (fragment.name.trim().toLowerCase() === name.toLowerCase()) {
+          resolvedId = fid
+          break
+        }
+      }
+    }
+
+    const stateRecord: Record<string, string> = {}
+    if (e.state) {
+      for (const [k, v] of Object.entries(e.state)) {
+        const key = k.trim()
+        if (!key) continue
+        if (v === null || v === undefined) {
+          stateRecord[key] = ''
+        } else {
+          const val = v.trim()
+          stateRecord[key] = CLEARED_STATE_VALUES.has(val.toLowerCase()) ? '' : val
+        }
+      }
+    }
+
+    const notes = (e.notes ?? [])
+      .map((n) => n.trim())
+      .filter((n) => n.length > 0)
+
+    const stateKey = resolvedId ?? derivedContinuityKey(name)
+    entityStates[stateKey] = {
+      ...(resolvedId ? { entityId: resolvedId } : {}),
+      name,
+      ...(e.category ? { category: e.category } : {}),
+      ...(e.immediate?.trim() ? { immediate: e.immediate.trim() } : {}),
+      ...(Object.keys(stateRecord).length > 0 ? { state: stateRecord } : {}),
+      ...(notes.length > 0 ? { notes: [...new Set(notes)] } : {}),
+    }
+  }
+
   const storedScene = (scene.evidenceSegments?.length ?? 0) > 0
     ? scene
     : {
@@ -778,6 +900,8 @@ function normalizeContinuityProjection(
       threadOperations,
       threadFocus,
       knowledgeOperations,
+      ...(Object.keys(characterStates).length > 0 ? { characterStates } : {}),
+      ...(Object.keys(entityStates).length > 0 ? { entityStates } : {}),
     },
     skipped,
   }
@@ -1008,7 +1132,7 @@ export function createAnalysisTools(
         ...proposal,
         sourceFragmentId: opts.proseFragmentId,
       })),
-      timelineEvents: timelineEventsFor(collector.events, collector.continuityProjection.scene),
+      timelineEvents: timelineEventsFor(collector.events, collector.continuityProjection.scene, collector.summaryUpdate),
       directions: collector.directions,
     }))
   }
@@ -1023,6 +1147,8 @@ export function createAnalysisTools(
         const {
           summary,
           events = [],
+          characters = [],
+          entities = [],
           mentions = [],
           candidateFragmentIds = [],
           contradictions = [],
@@ -1047,24 +1173,33 @@ export function createAnalysisTools(
 
         const checkedFragments = new Map<string, Fragment>()
         if (opts) {
-          const uniqueIds = [...new Set<string>([
-            ...mentions.map((m) => m.fragmentId),
-            ...candidateFragmentIds,
-            ...contradictions.flatMap((c) => [
-              ...(c.fragmentIds ?? []),
-              ...(c.conflictingEvidence ?? []).map((evidence) => evidence.fragmentId),
-            ]),
-            ...(scene.location?.fragmentId ? [scene.location.fragmentId] : []),
-            ...stateOperations.flatMap((op) => op.subject?.fragmentId ? [op.subject.fragmentId] : []),
-            ...threadOperations.flatMap((operation) => operation.relatedFragmentIds),
-            ...knowledgeOperations.map((operation) => operation.characterId),
-          ].filter((id): id is string => typeof id === 'string' && id.trim().length > 0))]
+          try {
+            const allStoryFragments = await listFragments(opts.dataDir, opts.storyId)
+            for (const f of allStoryFragments) {
+              checkedFragments.set(f.id, f)
+            }
+          } catch {
+            const uniqueIds = [...new Set<string>([
+              ...mentions.map((m) => m.fragmentId),
+              ...candidateFragmentIds,
+              ...contradictions.flatMap((c) => [
+                ...(c.fragmentIds ?? []),
+                ...(c.conflictingEvidence ?? []).map((evidence) => evidence.fragmentId),
+              ]),
+              ...(scene.location?.fragmentId ? [scene.location.fragmentId] : []),
+              ...stateOperations.flatMap((op) => op.subject?.fragmentId ? [op.subject.fragmentId] : []),
+              ...threadOperations.flatMap((operation) => operation.relatedFragmentIds),
+              ...knowledgeOperations.map((operation) => operation.characterId),
+              ...characters.flatMap((c) => [c.id, c.characterId]).filter((id): id is string => Boolean(id)),
+              ...entities.flatMap((e) => [e.id, e.entityId]).filter((id): id is string => Boolean(id)),
+            ].filter((id): id is string => typeof id === 'string' && id.trim().length > 0))]
 
-          const checks = await Promise.all(
-            uniqueIds.map(async (fid) => ({ fid, fragment: await getFragment(opts.dataDir, opts.storyId, fid) })),
-          )
-          for (const check of checks) {
-            if (check.fragment) checkedFragments.set(check.fid, check.fragment)
+            const checks = await Promise.all(
+              uniqueIds.map(async (fid) => ({ fid, fragment: await getFragment(opts.dataDir, opts.storyId, fid) })),
+            )
+            for (const check of checks) {
+              if (check.fragment) checkedFragments.set(check.fid, check.fragment)
+            }
           }
         }
 
@@ -1076,6 +1211,8 @@ export function createAnalysisTools(
           stateOperations,
           threadOperations,
           knowledgeOperations,
+          characters,
+          entities,
         }, proseSegments, continuityRegistry, {
           checkedFragments: opts ? checkedFragments : undefined,
         })
