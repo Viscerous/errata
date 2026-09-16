@@ -88,6 +88,7 @@ describe('Context previews preserve agent access boundaries', () => {
     })
     expect(JSON.parse(preview.tools[0].schema).properties).toEqual({
       checklist: expect.any(Object),
+      options: expect.any(Object),
     })
     expect(preview.toolCharacters).toBe(preview.tools[0].characters)
   })

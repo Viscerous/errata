@@ -32,7 +32,6 @@ import {
   type FragmentChangeOperation,
   type OperationValidation,
   operationEchoFields,
-  unknownFragmentIdsMessage,
   validateOperations,
 } from '../fragments/change-operations'
 
@@ -48,7 +47,7 @@ export function anchorMentionText(text: string, proseLower: string): string | nu
 }
 
 export const mentionInputSchema = z.object({
-  fragmentId: FragmentIdSchema.describe('The ID of the mentioned fragment'),
+  fragmentId: FragmentIdSchema.describe('The ID of the mentioned catalog fragment from the catalog (e.g. "kn-bakagu", "ch-buguzi")'),
   text: mentionTextSchema,
 })
 
@@ -139,9 +138,15 @@ const proseCitationSchema = z.array(z.number().int().positive()).default([])
 // persisted schema; exposing that strict schema to the model would add ceremony
 // without adding information.
 const sceneSchema = z.object({
-  transition: z.enum([
+  transition: z.preprocess((val) => {
+    if (val === 'shift') return 'advance'
+    if (val === 'same' || val === 'same-scene') return 'continue'
+    if (val === 'flashback') return 'enter-flashback'
+    if (val === 'flash-forward') return 'enter-flash-forward'
+    return val
+  }, z.enum([
     'continue', 'advance', 'cut', 'enter-flashback', 'enter-flash-forward', 'return', 'uncertain',
-  ]).default('uncertain')
+  ])).default('uncertain')
     .describe('Scene relation: cut starts a new scene on the same line; enter opens a time overlay; return resumes it.'),
   line: z.enum(['present', 'flashback', 'flash-forward', 'uncertain']).optional()
     .describe('Resulting narrative line when established or changed; otherwise omit.'),
@@ -245,20 +250,24 @@ function continuityKeyFields(
 function stateOperationSchemaFor(registry: ContinuityRegistry) {
   return z.object({
     ...continuityKeyFields(registry.state, 'state identity', 'captivity_status', 'set'),
-    action: z.enum(['set', 'clear']),
+    action: z.preprocess((val) => {
+      if (val === 'advance' || val === 'update' || val === 'modify' || val === 'change') return 'set'
+      if (val === 'remove' || val === 'reset' || val === 'delete' || val === 'unset') return 'clear'
+      return val
+    }, z.enum(['set', 'clear'])).describe('Use "set" to establish or update a physical/situational condition (attire, injury, posture, location), or "clear" to end one. (To advance narrative threads, use threadOperations.)'),
     subject: z.object({
       label: z.string().trim().min(1).max(160),
-      fragmentId: FragmentIdSchema.optional(),
+      fragmentId: z.string().trim().optional(),
     }).optional().describe('Subject (label and optional ID); required when set creates a new identity.'),
     facet: z.string().trim().min(1).max(100).optional()
-      .describe('One stable question for a new set, such as location, attire, or injury; avoid catch-all status.'),
+      .describe('One stable question, such as location, attire, or injury; avoid catch-all status.'),
     slot: z.string().trim().min(1).max(100).optional()
       .describe('Optional sub-key when a facet can hold simultaneous values, such as left_wrist injury.'),
     value: z.string().trim().max(300).optional(),
     certainty: z.enum(['explicit', 'implied']).default('explicit')
-      .describe('Whether the prose states this directly or by necessary implication.'),
+      .describe('Directly stated or implied.'),
     scope: z.enum(['scene', 'cross-scene']).default('scene')
-      .describe('Use cross-scene only when the condition must survive a scene cut.'),
+      .describe('Scene or cross-scene (survives cuts).'),
     until: NarrativeTimeInputSchema.optional()
       .describe('Optional story-time expiry for a cross-scene condition.'),
     evidenceSegments: proseCitationSchema,
@@ -269,27 +278,33 @@ function threadOperationSchemaFor(registry: ContinuityRegistry) {
   return z.object({
     ...continuityKeyFields(registry.thread, 'unresolved question', 'who_betrayed_the_house', 'open'),
     action: z.enum(['open', 'advance', 'resolve', 'abandon'])
-      .describe('open introduces a question; others require an existing open key.'),
+      .describe('open introduces a question; advance updates/continues it; resolve or abandon ends it.'),
     label: z.string().trim().max(240).optional()
       .describe('Optional plain-language question; defaults to the key.'),
     note: z.string().trim().max(300).optional(),
-    relatedFragmentIds: z.array(FragmentIdSchema).max(40).default([]),
+    relatedFragmentIds: z.array(z.string().trim()).max(40).default([]),
     // A thread this passage acted on is in view by the acting; carrying that
     // here removes the whole reason to restate the operation in threadFocus.
     visibility: z.enum(['foreground', 'background']).optional()
-      .describe('Prominence after the passage; open and advance default to foreground.'),
+      .describe('Prominence: foreground or background.'),
     evidenceSegments: proseCitationSchema,
   })
 }
 
 function knowledgeOperationSchemaFor(registry: ContinuityRegistry) {
   return z.object({
-    characterId: FragmentIdSchema.describe('Existing character ID from story context.'),
+    characterId: z.string().trim().describe('Existing character ID from story context (e.g. "ch-buguzi").'),
     ...continuityKeyFields(registry.knowledge, 'fact identity', 'queen_identity', 'learn'),
     action: z.enum(['learn', 'correct', 'forget']),
     fact: z.string().trim().max(400).optional()
-      .describe('Durable character-specific learning. Preserve source, inference, and temporal limits; do not turn expressions into general willingness.'),
-    acquisition: z.enum(['witnessed', 'told', 'inferred', 'other']).default('other'),
+      .describe('Durable character-specific learning; preserve source, inference, and temporal limits.'),
+    acquisition: z.preprocess((val) => {
+      if (val === 'observed' || val === 'witnessed' || val === 'seen' || val === 'experienced') return 'witnessed'
+      if (val === 'told' || val === 'heard' || val === 'informed') return 'told'
+      if (val === 'inferred' || val === 'deduced' || val === 'realized' || val === 'concluded') return 'inferred'
+      return val
+    }, z.enum(['witnessed', 'told', 'inferred', 'other'])).default('other')
+      .describe('How the fact was acquired: witnessed, told, inferred, other.'),
     evidenceSegments: proseCitationSchema,
   })
 }
@@ -302,34 +317,34 @@ export function buildReportAnalysisInputSchema(
   const report = z.object({
     // Model-authored report text is stored as supplied; this schema only asks
     // for the structure required to interpret it.
-    summary: z.string().trim().min(1).describe('Concise retrospective summary of the new prose as past history.'),
+    summary: z.string().default('').describe('Concise retrospective summary of the new prose as past history.'),
     events: stringArray
       .describe('A few short timeline events; scene metadata supplies when.'),
     mentions: z.array(mentionInputSchema).default([])
       .describe('Distinct listed-fragment mentions using exact prose text, never bare pronouns.'),
-    candidateFragmentIds: z.array(FragmentIdSchema).default([])
-      .describe('Existing record IDs whose full text with numbered sentences is needed to inspect potential contradictions or propose record corrections. Mentions are resolved automatically.'),
+    candidateFragmentIds: z.array(z.string().trim()).default([])
+      .describe('Existing record IDs whose full text is needed to resolve contradictions or propose record corrections. Leave empty [] when there are no contradictions.'),
     contradictions: z.array(z.object({
       description: z.string().describe('What the contradiction is'),
       recordCorrectionReason: z.string().trim().min(1).max(500).optional()
         .describe('Why evidence proves the reusable record is wrong; omit for prose errors or unresolved conflicts.'),
-      fragmentIds: z.array(FragmentIdSchema).default([])
+      fragmentIds: z.array(z.string().trim()).default([])
         .describe('Reusable record IDs involved; grounded findings also need conflictingEvidence.'),
       sourceSegments: proseCitationSchema
         .describe('Sentence numbers in the new prose carrying the conflicting assertion.'),
       conflictingEvidence: z.array(z.object({
-        fragmentId: FragmentIdSchema,
+        fragmentId: z.string().trim(),
         segments: z.array(z.number().int().positive()).default([])
           .describe('Record sentence numbers carrying the incompatible claim.'),
       })).default([])
         .describe('Conflicting reusable records cited by sentence; ordinary state changes are not contradictions.'),
     })).default([]),
     scene: sceneSchema
-      .describe('Changed scene fields; transition uncertain withdraws the claim.'),
+      .describe('Changed scene frame fields; transition uncertain withdraws the claim.'),
     stateOperations: z.array(stateOperationSchemaFor(registry)).default([])
-      .describe('Persistent conditions: set replaces, clear ends; use scene scope unless it must survive a cut.'),
+      .describe('Persistent state conditions: set replaces, clear ends; use scene scope unless it must survive a cut.'),
     threadOperations: z.array(threadOperationSchemaFor(registry)).default([])
-      .describe('Lifecycle changes for unresolved questions; never repurpose keys.'),
+      .describe('Lifecycle changes for unresolved narrative questions; never repurpose keys.'),
     knowledgeOperations: z.array(knowledgeOperationSchemaFor(registry)).default([])
       .describe('Durable character-specific learning with attributed and temporal limits.'),
   })
@@ -365,7 +380,7 @@ function citedEvidence(
   // verdict into the projection, leaving stored operations with an `invalid: []`
   // that no type declares and nothing reads.
   return {
-    evidence: { evidenceSegments: resolved.indexes, evidenceText: resolved.text },
+    evidence: { evidenceSegments: resolved.indexes.slice(0, 32), evidenceText: resolved.text },
     invalid: resolved.invalid,
   }
 }
@@ -534,6 +549,7 @@ function normalizeContinuityProjection(
   input: NormalizedContinuityInput,
   segments: TextSegment[],
   registry: ContinuityRegistry = EMPTY_REGISTRY,
+  options?: { checkedFragments?: Map<string, Fragment> },
 ): { projection: ContinuityProjection; skipped: Array<Skipped<{ kind: string; key: string }>> } {
   const skipped: Array<Skipped<{ kind: string; key: string }>> = []
   let scene = input.scene
@@ -558,6 +574,20 @@ function normalizeContinuityProjection(
   }
   if (scene.transition === 'enter-flashback') scene = { ...scene, line: 'flashback' }
   if (scene.transition === 'enter-flash-forward') scene = { ...scene, line: 'flash-forward' }
+
+  if (scene.location?.fragmentId) {
+    const isValid = (!options?.checkedFragments || options.checkedFragments.has(scene.location.fragmentId))
+      && FragmentIdSchema.safeParse(scene.location.fragmentId).success
+    if (!isValid) {
+      scene = {
+        ...scene,
+        location: {
+          key: scene.location.key,
+          label: scene.location.label,
+        },
+      }
+    }
+  }
 
   const liveState = liveIdentitySet(registry.state)
   const stateOperations: StateOperation[] = []
@@ -590,11 +620,16 @@ function normalizeContinuityProjection(
       continue
     }
     const registeredDefinition = registeredStateDefinition(registry.state, operation, stateKey)
+    const validSubjectFragmentId = operation.subject?.fragmentId
+      && (!options?.checkedFragments || options.checkedFragments.has(operation.subject.fragmentId))
+      && FragmentIdSchema.safeParse(operation.subject.fragmentId).success
+      ? operation.subject.fragmentId
+      : undefined
     const declaredSubject = operation.subject
       ? {
           key: derivedContinuityKey(operation.subject.label),
           label: operation.subject.label,
-          ...(operation.subject.fragmentId ? { fragmentId: operation.subject.fragmentId } : {}),
+          ...(validSubjectFragmentId ? { fragmentId: validSubjectFragmentId } : {}),
         }
       : undefined
     const subject = registeredDefinition?.subject ?? declaredSubject
@@ -651,12 +686,15 @@ function normalizeContinuityProjection(
       skipped.push({ kind: 'thread', key: threadKey, reason: problem })
       continue
     }
+    const validRelatedFragmentIds = uniqueStrings(operation.relatedFragmentIds).filter(
+      (id) => !options?.checkedFragments || options.checkedFragments.has(id),
+    )
     threadOperations.push({
       threadKey,
       action: operation.action,
       ...(operation.label?.trim() ? { label: operation.label } : {}),
       ...(operation.note?.trim() ? { note: operation.note } : {}),
-      relatedFragmentIds: uniqueStrings(operation.relatedFragmentIds),
+      relatedFragmentIds: validRelatedFragmentIds,
       ...resolved.evidence,
     })
     // Acting on a thread puts it in view; a resolved or abandoned one is gone
@@ -669,6 +707,25 @@ function normalizeContinuityProjection(
   const liveKnowledge = liveIdentitySet(registry.knowledge)
   const knowledgeOperations: KnowledgeOperation[] = []
   for (const operation of input.knowledgeOperations) {
+    if (options?.checkedFragments) {
+      const charFragment = options.checkedFragments.get(operation.characterId)
+      if (!charFragment) {
+        skipped.push({
+          kind: 'knowledge',
+          key: operation.characterId,
+          reason: `Character fragment "${operation.characterId}" does not exist in the story catalog.`,
+        })
+        continue
+      }
+      if (charFragment.type !== 'character') {
+        skipped.push({
+          kind: 'knowledge',
+          key: operation.characterId,
+          reason: `Fragment "${operation.characterId}" is a ${charFragment.type}, not a character. Knowledge operations must target character records.`,
+        })
+        continue
+      }
+    }
     const allowDerived = operation.action === 'learn'
     const identity = resolveIdentity(operation, operation.fact, {
       lane: 'knowledge',
@@ -981,35 +1038,33 @@ export function createAnalysisTools(
           ? await getFragment(opts.dataDir, opts.storyId, opts.proseFragmentId)
           : null
 
+        if (!summary || summary.trim().length === 0) {
+          return {
+            ok: false,
+            note: 'Empty summary: please provide a concise retrospective summary of what happened in the prose.',
+          }
+        }
+
         const checkedFragments = new Map<string, Fragment>()
         if (opts) {
           const uniqueIds = [...new Set<string>([
-            ...mentions.map(m => m.fragmentId),
+            ...mentions.map((m) => m.fragmentId),
             ...candidateFragmentIds,
-            ...contradictions.flatMap(c => [
+            ...contradictions.flatMap((c) => [
               ...(c.fragmentIds ?? []),
               ...(c.conflictingEvidence ?? []).map((evidence) => evidence.fragmentId),
             ]),
+            ...(scene.location?.fragmentId ? [scene.location.fragmentId] : []),
+            ...stateOperations.flatMap((op) => op.subject?.fragmentId ? [op.subject.fragmentId] : []),
             ...threadOperations.flatMap((operation) => operation.relatedFragmentIds),
             ...knowledgeOperations.map((operation) => operation.characterId),
-          ].filter((id): id is string => typeof id === 'string'))]
+          ].filter((id): id is string => typeof id === 'string' && id.trim().length > 0))]
 
           const checks = await Promise.all(
             uniqueIds.map(async (fid) => ({ fid, fragment: await getFragment(opts.dataDir, opts.storyId, fid) })),
           )
           for (const check of checks) {
             if (check.fragment) checkedFragments.set(check.fid, check.fragment)
-          }
-          const invalidIds = checks.filter((check) => !check.fragment).map((check) => check.fid)
-          if (invalidIds.length > 0) {
-            throw new Error(unknownFragmentIdsMessage(invalidIds))
-          }
-          const characterIds = new Set(knowledgeOperations.map((operation) => operation.characterId))
-          const invalidCharacterIds = checks
-            .filter((check) => characterIds.has(check.fid) && check.fragment?.type !== 'character')
-            .map((check) => check.fid)
-          if (invalidCharacterIds.length > 0) {
-            throw new Error(`Expected character fragment IDs for knowledge operations: ${invalidCharacterIds.join(', ')}`)
           }
         }
 
@@ -1021,7 +1076,9 @@ export function createAnalysisTools(
           stateOperations,
           threadOperations,
           knowledgeOperations,
-        }, proseSegments, continuityRegistry)
+        }, proseSegments, continuityRegistry, {
+          checkedFragments: opts ? checkedFragments : undefined,
+        })
         collector.continuityProjection = normalizedProjection.projection
 
         collector.events = events
@@ -1030,28 +1087,41 @@ export function createAnalysisTools(
 
         // A highlight can only bind text that actually occurs in the passage.
         const skippedMentions: Array<Skipped<{ fragmentId: string; text: string }>> = []
-        let anchoredMentions = mentions
-        if (opts?.proseFragmentId) {
-          const proseLower = sourceProse?.content.toLowerCase()
+        let anchoredMentions: typeof mentions = []
+        const proseLower = (opts?.proseFragmentId && sourceProse?.content)
+          ? sourceProse.content.toLowerCase()
+          : null
+
+        for (const m of mentions) {
+          if (opts && !checkedFragments.has(m.fragmentId)) {
+            skippedMentions.push({
+              fragmentId: m.fragmentId,
+              text: m.text,
+              reason: `Unknown fragment ID "${m.fragmentId}". Mentions must cite existing catalog records.`,
+            })
+            continue
+          }
           if (proseLower) {
-            anchoredMentions = []
-            for (const m of mentions) {
-              const anchored = anchorMentionText(m.text, proseLower)
-              if (anchored == null) {
-                skippedMentions.push({
-                  fragmentId: m.fragmentId,
-                  text: m.text,
-                  reason: 'Not verbatim in the passage, so it cannot be highlighted.',
-                })
-              } else {
-                anchoredMentions.push({ ...m, text: anchored })
-              }
+            const anchored = anchorMentionText(m.text, proseLower)
+            if (anchored == null) {
+              skippedMentions.push({
+                fragmentId: m.fragmentId,
+                text: m.text,
+                reason: 'Not verbatim in the passage, so it cannot be highlighted.',
+              })
+              continue
             }
+            anchoredMentions.push({ ...m, text: anchored })
+          } else {
+            anchoredMentions.push(m)
           }
         }
 
         collector.mentions = anchoredMentions
-        collector.candidateFragmentIds = [...new Set(candidateFragmentIds)]
+        const validCandidateFragmentIds = opts
+          ? candidateFragmentIds.filter((id) => checkedFragments.has(id))
+          : candidateFragmentIds
+        collector.candidateFragmentIds = [...new Set(validCandidateFragmentIds)]
 
         // Mentions become resolved context for the next writer turn; durable
         // candidates additionally constrain continuity and record maintenance.
@@ -1061,14 +1131,14 @@ export function createAnalysisTools(
         // trips.
         const resolvedFragments = deliverResolvedFragments(
           checkedFragments,
-          [...anchoredMentions.map((mention) => mention.fragmentId), ...candidateFragmentIds],
+          [...anchoredMentions.map((mention) => mention.fragmentId), ...validCandidateFragmentIds],
           numberedFragmentIds,
         )
         // Mention bodies improve the next writer context but do not, by
         // themselves, justify another Analyze request. Candidate IDs are the
         // model explicitly asking to inspect durable assertions, so only a
         // newly delivered candidate keeps the inspection stage open.
-        const candidateIds = new Set([...candidateFragmentIds, ...unnumberedProposalAttemptIds])
+        const candidateIds = new Set([...validCandidateFragmentIds, ...unnumberedProposalAttemptIds])
         const inspectionRequired = resolvedFragments.some((fragment) => candidateIds.has(fragment.id))
         unnumberedProposalAttemptIds.clear()
 
@@ -1162,7 +1232,7 @@ export function createAnalysisTools(
           ...(normalizedProjection.skipped.length > 0 ? { skippedContinuity: normalizedProjection.skipped } : {}),
           ...(skippedMentions.length > 0 ? {
             skippedMentions,
-            skippedMentionNote: 'These texts do not appear verbatim in the prose and were not stored as highlights.',
+            skippedMentionNote: 'These texts do not appear verbatim in the prose, or cite unknown records, and were not stored as highlights.',
           } : {}),
           ...(skippedContradictions.length > 0 ? {
             skippedContradictions,

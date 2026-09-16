@@ -165,7 +165,7 @@ describe('compileAgentContext', () => {
     const instructions = result.blocks.find((block) => block.id === 'instructions')!
 
     expect(Object.keys(result.tools)).toEqual(['reportAnalysis'])
-    expect(instructions.content).toContain('Before calling **reportAnalysis**')
+    expect(instructions.content).toContain('Call **reportAnalysis**')
     expect(instructions.content).not.toContain('optional record-maintenance proposals')
     expect(instructions.content).toContain('three distinct next-passage directions in the first **reportAnalysis** call')
   })

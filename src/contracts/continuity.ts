@@ -10,7 +10,7 @@ export const AnalysisSourceRevisionSchema = z.strictObject({
 export type AnalysisSourceRevision = z.infer<typeof AnalysisSourceRevisionSchema>
 
 const citedEvidenceShape = {
-  evidenceSegments: z.array(z.number().int().positive()).max(8),
+  evidenceSegments: z.array(z.number().int().positive()).max(32),
   evidenceText: z.string(),
 }
 
@@ -56,9 +56,11 @@ export type NarrativeTime = z.infer<typeof NarrativeTimeSchema>
 
 /** Forgiving producer boundary; persistence still validates the strict schema. */
 export const NarrativeTimeInputSchema = z.object({
-  ...narrativeTimeShape,
+  label: z.string().trim().min(1).max(200)
+    .describe('Descriptive story time (e.g. "early morning", "three days later", "at dusk").'),
   certainty: narrativeTimeShape.certainty.default('unknown'),
-}).superRefine(validateNarrativeTimeBounds)
+  calendar: z.string().trim().min(1).max(80).optional(),
+})
 
 const narrativeDurationShape = {
   label: z.string().trim().min(1).max(160),
@@ -99,7 +101,11 @@ export const SceneLocationSchema = z.strictObject(sceneLocationShape)
 export type SceneLocation = z.infer<typeof SceneLocationSchema>
 
 /** Forgiving producer boundary; persistence still validates the strict schema. */
-export const SceneLocationInputSchema = z.object(sceneLocationShape)
+export const SceneLocationInputSchema = z.object({
+  key: z.string().trim().min(1).max(100),
+  label: z.string().trim().min(1).max(160),
+  fragmentId: z.string().trim().optional(),
+})
 
 /**
  * Transition and resulting-frame data are separate: `cut` is an operation;

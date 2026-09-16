@@ -451,3 +451,117 @@ describe('continuity registry addressing', () => {
     })
   })
 })
+
+describe('reportAnalysis resilience and forgiving boundaries', () => {
+  it('forgives non-ISO time bounds and preserves descriptive label', () => {
+    const schema = buildReportAnalysisInputSchema({}, { includeDirections: false })
+    const parsed = schema.parse({
+      summary: 'Night fell over the harbor.',
+      scene: {
+        transition: 'continue',
+        time: {
+          label: '03:14 at night',
+          earliest: '03:14',
+          latest: 'unknown',
+        },
+      },
+    })
+    expect(parsed.scene?.time?.label).toBe('03:14 at night')
+    expect(parsed.scene?.time?.earliest).toBeUndefined()
+    expect(parsed.scene?.time?.latest).toBeUndefined()
+  })
+
+  it('normalizes action aliases on state operations', () => {
+    const schema = buildReportAnalysisInputSchema({}, { includeDirections: false })
+    const parsed = schema.parse({
+      summary: 'Alice advanced her position.',
+      stateOperations: [
+        {
+          action: 'advance',
+          subject: { label: 'Alice' },
+          facet: 'posture',
+          value: 'ready',
+          evidenceSegments: [1],
+        },
+      ],
+    })
+    expect(parsed.stateOperations?.[0].action).toBe('set')
+  })
+
+  it('skips unknown fragment mentions and non-character knowledge operations without throwing', async () => {
+    const prose = mockFragment({ id: 'pr-0001', type: 'prose', content: 'Alice walked to the harbor.' })
+    const character = mockFragment({ id: 'ch-0001', type: 'character', name: 'Alice', content: 'Alice is a guard.' })
+    const location = mockFragment({ id: 'loc-0001', type: 'location', name: 'Harbor', content: 'A windy dock.' })
+
+    vi.mocked(getFragment).mockImplementation(async (_dir, _story, id) => {
+      if (id === prose.id) return prose
+      if (id === character.id) return character
+      if (id === location.id) return location
+      return null
+    })
+
+    const collector = createEmptyCollector()
+    const tools = createAnalysisTools(collector, {
+      dataDir: '/tmp',
+      storyId: 'story-test',
+      proseFragmentId: prose.id,
+      continuityKeys: {},
+    })
+
+    const result = await tools.reportAnalysis.execute!({
+      summary: 'Alice arrived at the harbor.',
+      mentions: [
+        { fragmentId: 'ch-0001', text: 'Alice' },
+        { fragmentId: 'ch-9999', text: 'Ghost' },
+      ],
+      stateOperations: [
+        {
+          action: 'set',
+          subject: { label: 'Alice', fragmentId: 'ch-9999' },
+          facet: 'posture',
+          value: 'alert',
+          evidenceSegments: [1],
+        },
+      ],
+      threadOperations: [
+        {
+          action: 'open',
+          label: 'What lies in the mist?',
+          relatedFragmentIds: ['ch-0001', 'ch-9999'],
+          evidenceSegments: [1],
+        },
+      ],
+      knowledgeOperations: [
+        {
+          characterId: 'ch-9999',
+          action: 'learn',
+          fact: 'The gate is unlocked.',
+          evidenceSegments: [1],
+        },
+        {
+          characterId: 'loc-0001',
+          action: 'learn',
+          fact: 'The harbor is quiet.',
+          evidenceSegments: [1],
+        },
+      ],
+    }, executionContext)
+
+    expect(result.ok).toBe(true)
+    expect(result.mentionCount).toBe(1)
+    expect(result.skippedMentions).toHaveLength(1)
+    expect(result.skippedMentions[0].fragmentId).toBe('ch-9999')
+
+    expect(collector.continuityProjection.stateOperations).toHaveLength(1)
+    expect(collector.continuityProjection.stateOperations[0].subject.fragmentId).toBeUndefined()
+    expect(collector.continuityProjection.stateOperations[0].subject.label).toBe('Alice')
+
+    expect(collector.continuityProjection.threadOperations).toHaveLength(1)
+    expect(collector.continuityProjection.threadOperations[0].relatedFragmentIds).toEqual(['ch-0001'])
+
+    expect(result.skippedContinuity).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'knowledge', key: 'ch-9999' }),
+      expect.objectContaining({ kind: 'knowledge', key: 'loc-0001' }),
+    ]))
+  })
+})

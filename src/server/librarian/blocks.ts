@@ -96,23 +96,24 @@ export function buildAnalyzeSystemPrompt(opts?: {
   const guidance: string[] = []
 
   if (canReport) {
-    guidance.push('Call **reportAnalysis** with the complete narrative observation (summary, scene, deltas, mentions, and three next-passage directions). Include a record ID in candidateFragmentIds when its full text with numbered sentences is needed to inspect potential contradictions or propose record corrections.')
+    const directionPhrase = canSuggestDirections ? ', and three next-passage directions' : ''
+    guidance.push(`Call **reportAnalysis** with the complete narrative observation (summary, scene, deltas, and mentions${directionPhrase}). In mentions, list catalog fragments (e.g. 'kn-bakagu', 'ch-buguzi') whose exact name or title appears verbatim in the new prose; never use placeholder IDs like 'none' or continuity keys. If no catalog fragments are mentioned, leave mentions empty []. Include a record ID in candidateFragmentIds ONLY when you report a contradiction against that record and need its full numbered sentences to propose record corrections; leave candidateFragmentIds empty [] when there are no contradictions to correct. In stateOperations, use action 'set' to update physical/situational conditions (clothing, injury, posture, location) or 'clear' to end them; use threadOperations to advance unresolved questions or plot arcs.`)
   } else {
     guidance.push('Review the new prose against the supplied context without inventing a replacement reporting tool.')
   }
 
   if (canReport && canMaintainRecords) {
-    guidance.push('If candidate records were requested or newly resolved, inspect their numbered sentences and make any optional record-maintenance proposals in the follow-up step. Call **reportAnalysis** again only when those records change previous findings or directions, otherwise complete.')
+    guidance.push('If candidate records were requested for reported contradictions, inspect their numbered sentences and make any optional record-maintenance proposals in the follow-up step. The analysis ends once the proposal is submitted.')
   }
   if (canSuggestDirections) {
     guidance.push('When ready to report, include three distinct next-passage directions in the first **reportAnalysis** call. If newly supplied records change the findings, include revised directions in the replacement report.')
   }
 
   return `
-You are the Librarian. Analyze the new prose against the supplied story context and keep its durable records accurate.
+Analyze the new prose against the supplied story context and keep its durable records accurate.
 
 ${guidance.join('\n\n')}
-`
+`.trim()
 }
 
 export const ANALYZE_SYSTEM_PROMPT = buildAnalyzeSystemPrompt()

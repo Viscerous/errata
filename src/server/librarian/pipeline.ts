@@ -343,9 +343,13 @@ async function runOnlineAnalyzePass(
       emit,
       abortSignal,
       idleTimeoutMs,
-      prepareStep: ({ steps }) => ({
-        activeTools: selectAnalyzeToolStage(Object.keys(compiled.tools), steps).activeTools,
-      }),
+      prepareStep: ({ steps }) => {
+        const stage = selectAnalyzeToolStage(Object.keys(compiled.tools), steps)
+        return {
+          activeTools: stage.activeTools,
+          toolChoice: stage.stage === 'primary' ? 'required' : 'auto',
+        }
+      },
       stopWhen: ({ steps }) => isAnalyzeWorkflowComplete(Object.keys(compiled.tools), steps),
     })
     const { modelId: servedModelId, usage } = await resolveAndReportServedUsage(

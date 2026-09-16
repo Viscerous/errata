@@ -607,11 +607,9 @@ describe('Librarian Analyze Prompt', () => {
   it('keeps only role and cross-tool workflow in the system instruction', () => {
     const prompt = buildAnalyzeSystemPrompt()
     expect(prompt).toContain('Analyze the new prose against the supplied story context')
-    expect(prompt).toContain('Before calling **reportAnalysis**')
     expect(prompt).toContain('candidateFragmentIds')
-    expect(prompt).toContain('revise only findings those records change')
-    expect(prompt).toContain('record-maintenance proposals supported by records already shown')
-    expect(prompt).toContain('call **reportAnalysis** again only when')
+    expect(prompt).toContain('Call **reportAnalysis**')
+    expect(prompt).toContain('optional record-maintenance proposals')
     expect(prompt).toContain('three distinct next-passage directions in the first **reportAnalysis** call')
   })
 
@@ -627,7 +625,7 @@ describe('Librarian Analyze Prompt', () => {
     const noOptionalTools = buildAnalyzeSystemPrompt({
       disabledTools: ['proposeRecordCorrections', 'proposeNewRecords'],
     })
-    expect(noOptionalTools).toContain('Before calling **reportAnalysis**')
+    expect(noOptionalTools).toContain('candidateFragmentIds')
     expect(noOptionalTools).not.toContain('optional record-maintenance proposals')
     expect(noOptionalTools).not.toContain('Suggest next directions')
 

@@ -804,11 +804,11 @@ function renderContinuityRegistry(source: ContinuitySource, includeAllDetails: b
   )
   return [
     '## Continuity Registry Before This Passage',
-    'These are all identities that already exist in the branch-local ledger. Recent entries include their current value; older entries may be identity-only to keep this index compact. Point at one by its number to change it; only something genuinely new gets a fresh key. Opening or advancing a thread promotes it automatically. Resolve or abandon only with explicit source evidence.',
-    section('### Current state', registry.state),
-    section('### Live threads', registry.thread),
+    'These are tracked continuity identities in the branch-local ledger (NOT catalog fragment IDs). Point at an entry by its number to update it; only a genuinely new condition or thread gets a fresh key.',
+    section('### Current state (update via stateOperations: set/clear)', registry.state),
+    section('### Live threads (update via threadOperations: open/advance/resolve/abandon)', registry.thread, 'Opening or advancing a thread promotes it automatically. Resolve or abandon only with explicit source evidence.'),
     section(
-      '### Character knowledge',
+      '### Character knowledge (update via knowledgeOperations: learn/correct/forget)',
       registry.knowledge,
       'The character is the knower, not necessarily the person or thing described by the fact.',
     ),
