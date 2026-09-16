@@ -134,8 +134,6 @@ export function timelineEventsFor(
   return []
 }
 
-const stringArray = z.array(z.string()).default([])
-
 /**
  * Evidence is a citation, not a quotation. The passage is presented with
  * numbered sentences, so pointing at them is exact by construction and costs
@@ -216,127 +214,25 @@ const EMPTY_REGISTRY: ContinuityRegistry = { state: [], thread: [], knowledge: [
  * collapse, so the enum was buying compliance the fold delivers anyway.
  */
 const MAX_STEERED_REGISTRY_KEYS = 24
-
-/** Bound on any continuity key, whether the model spelled it or it was derived. */
-const MAX_CONTINUITY_KEY_CHARS = 100
 const MAX_DERIVED_KEY_CHARS = 64
 
-/**
- * The two ways to name a continuity identity: point at a numbered registry
- * entry, or spell the key. Every addressable field in the report shares this
- * shape so one idea is not two shapes within one schema.
- */
-function registryAddressFields(
-  entryDescription: string,
-  keyDescription: string,
-) {
-  const entrySchema = z.number().int().positive().nullish().describe(entryDescription)
-  const keySchema = z.string().trim().max(MAX_CONTINUITY_KEY_CHARS).nullish().describe(keyDescription)
-  return {
-    // Pointing beats spelling for the same reason it does with sentences: the
-    // number is verifiable, where a spelled key is readily invented and matches
-    // nothing.
-    entry: entrySchema,
-    key: keySchema,
-  }
-}
-
-function continuityKeyFields(
-  existing: RegistryEntry[] | undefined,
-  noun: string,
-  example: string,
-  creationAction: 'set' | 'open' | 'learn',
-) {
-  // Sorted so the description is byte-identical whenever the key set is
-  // unchanged. Registry order follows recency of update, which would otherwise
-  // rewrite the tool block on every analysis and cost the prompt cache.
-  const unique = [...new Set((existing ?? []).map((entry) => entry.key))].sort()
-  const reuse = unique.length > 0
-    ? ` Reuse when applicable: ${unique.slice(0, MAX_STEERED_REGISTRY_KEYS).join(', ')}.`
-    : ''
-  return registryAddressFields(
-    `Registry entry to update; omit when ${creationAction} creates one.`,
-    `Existing ${noun} key if no entry number is used.${reuse} Omit both to derive a new key; otherwise use snake_case without IDs (for example ${example}).`,
-  )
-}
-
-function stateOperationSchemaFor(registry: ContinuityRegistry) {
-  return z.object({
-    ...continuityKeyFields(registry.state, 'state identity', 'captivity_status', 'set'),
-    action: z.preprocess((val) => {
-      if (val === 'advance' || val === 'update' || val === 'modify' || val === 'change') return 'set'
-      if (val === 'remove' || val === 'reset' || val === 'delete' || val === 'unset') return 'clear'
-      return val
-    }, z.enum(['set', 'clear'])).describe('Use "set" to establish or update a physical/situational condition (attire, injury, posture, location), or "clear" to end one. (To advance narrative threads, use threadOperations.)'),
-    subject: z.object({
-      label: z.string().trim().min(1).max(160),
-      fragmentId: z.string().trim().optional(),
-    }).optional().describe('Subject (label and optional ID); required when set creates a new identity.'),
-    facet: z.string().trim().min(1).max(100).optional()
-      .describe('One stable question, such as location, attire, or injury; avoid catch-all status.'),
-    slot: z.string().trim().min(1).max(100).optional()
-      .describe('Optional sub-key when a facet can hold simultaneous values, such as left_wrist injury.'),
-    value: z.string().trim().max(300).optional(),
-    certainty: z.enum(['explicit', 'implied']).default('explicit')
-      .describe('Directly stated or implied.'),
-    scope: z.enum(['scene', 'cross-scene']).default('scene')
-      .describe('Scene or cross-scene (survives cuts).'),
-    until: NarrativeTimeInputSchema.optional()
-      .describe('Optional story-time expiry for a cross-scene condition.'),
-    evidenceSegments: proseCitationSchema,
-  })
-}
-
-function threadOperationSchemaFor(registry: ContinuityRegistry) {
-  return z.object({
-    ...continuityKeyFields(registry.thread, 'unresolved question', 'who_betrayed_the_house', 'open'),
-    action: z.enum(['open', 'advance', 'resolve', 'abandon'])
-      .describe('open introduces a question; advance updates/continues it; resolve or abandon ends it.'),
-    label: z.string().trim().max(240).optional()
-      .describe('Optional plain-language question; defaults to the key.'),
-    note: z.string().trim().max(300).optional(),
-    relatedFragmentIds: z.array(z.string().trim()).max(40).default([]),
-    // A thread this passage acted on is in view by the acting; carrying that
-    // here removes the whole reason to restate the operation in threadFocus.
-    visibility: z.enum(['foreground', 'background']).optional()
-      .describe('Prominence: foreground or background.'),
-    evidenceSegments: proseCitationSchema,
-  })
-}
-
-function knowledgeOperationSchemaFor(registry: ContinuityRegistry) {
-  return z.object({
-    characterId: z.string().trim().describe('Existing character ID from story context (e.g. "ch-buguzi").'),
-    ...continuityKeyFields(registry.knowledge, 'fact identity', 'queen_identity', 'learn'),
-    action: z.enum(['learn', 'correct', 'forget']),
-    fact: z.string().trim().max(400).optional()
-      .describe('Durable character-specific learning; preserve source, inference, and temporal limits.'),
-    acquisition: z.preprocess((val) => {
-      if (val === 'observed' || val === 'witnessed' || val === 'seen' || val === 'experienced') return 'witnessed'
-      if (val === 'told' || val === 'heard' || val === 'informed') return 'told'
-      if (val === 'inferred' || val === 'deduced' || val === 'realized' || val === 'concluded') return 'inferred'
-      return val
-    }, z.enum(['witnessed', 'told', 'inferred', 'other'])).default('other')
-      .describe('How the fact was acquired: witnessed, told, inferred, other.'),
-    evidenceSegments: proseCitationSchema,
-  })
-}
 
 export function buildReportAnalysisInputSchema(
-  input: ContinuityKeyRegistry = {},
+  _input: ContinuityKeyRegistry = {},
   options: { includeDirections?: boolean } = {},
 ) {
-  const registry = completeRegistry(input)
   const report = z.object({
     // Model-authored report text is stored as supplied; this schema only asks
     // for the structure required to interpret it.
     summary: z.string().default('').describe('Concise retrospective summary of the new prose as past history.'),
-    events: stringArray
-      .describe('Optional short timeline events (or leave empty; summary conveys passage events).'),
     characters: z.array(CharacterLiveStateInputSchema).default([])
       .describe('Active characters in this scene: physical state, immediate posture, and epistemic updates.'),
     entities: z.array(EntityLiveStateInputSchema).default([])
       .describe('Optional non-character entity updates (locations, artefacts, factions) with dynamic state keys.'),
+    threads: z.array(z.string()).default([])
+      .describe('Active narrative threads or open plot questions (e.g. "Who poisoned the king?").'),
+    scene: sceneSchema
+      .describe('Changed scene frame fields; transition uncertain withdraws the claim.'),
     mentions: z.array(mentionInputSchema).default([])
       .describe('Distinct listed-fragment mentions using exact prose text, never bare pronouns.'),
     candidateFragmentIds: z.array(z.string().trim()).default([])
@@ -356,14 +252,6 @@ export function buildReportAnalysisInputSchema(
       })).default([])
         .describe('Conflicting reusable records cited by sentence; ordinary state changes are not contradictions.'),
     })).default([]),
-    scene: sceneSchema
-      .describe('Changed scene frame fields; transition uncertain withdraws the claim.'),
-    stateOperations: z.array(stateOperationSchemaFor(registry)).default([])
-      .describe('Persistent state conditions: set replaces, clear ends; use scene scope unless it must survive a cut.'),
-    threadOperations: z.array(threadOperationSchemaFor(registry)).default([])
-      .describe('Lifecycle changes for unresolved narrative questions; never repurpose keys.'),
-    knowledgeOperations: z.array(knowledgeOperationSchemaFor(registry)).default([])
-      .describe('Durable character-specific learning with attributed and temporal limits.'),
   })
   return options.includeDirections === false
     ? report
@@ -559,11 +447,12 @@ const CLEARED_STATE_VALUES = new Set(['none', 'cleared', 'removed', 'healed', 'e
 
 type NormalizedContinuityInput = {
   scene: NonNullable<ReportAnalysisInput['scene']>
-  stateOperations: NonNullable<ReportAnalysisInput['stateOperations']>
-  threadOperations: NonNullable<ReportAnalysisInput['threadOperations']>
-  knowledgeOperations: NonNullable<ReportAnalysisInput['knowledgeOperations']>
+  threads?: string[]
   characters?: CharacterLiveStateInput[]
   entities?: EntityLiveStateInput[]
+  stateOperations?: any[]
+  threadOperations?: any[]
+  knowledgeOperations?: any[]
 }
 
 function normalizeContinuityProjection(
@@ -612,7 +501,7 @@ function normalizeContinuityProjection(
 
   const liveState = liveIdentitySet(registry.state)
   const stateOperations: StateOperation[] = []
-  for (const operation of input.stateOperations) {
+  for (const operation of input.stateOperations ?? []) {
     const allowDerived = operation.action === 'set'
     const derivedStateIdentity = operation.subject && operation.facet
       ? [derivedContinuityKey(operation.subject.label), operation.facet, operation.slot].filter(Boolean).join('_')
@@ -687,7 +576,23 @@ function normalizeContinuityProjection(
   // Assembled as the operations resolve, so the fold receives the prominence
   // delta without the model having to state each acted-on thread twice.
   const threadFocus: ThreadFocus[] = []
-  for (const { visibility, ...operation } of input.threadOperations) {
+
+  for (const t of input.threads ?? []) {
+    const label = typeof t === 'string' ? t.trim() : ''
+    if (!label) continue
+    const threadKey = derivedContinuityKey(label)
+    threadOperations.push({
+      action: 'open',
+      threadKey,
+      label,
+      relatedFragmentIds: [],
+      evidenceSegments: [],
+      evidenceText: '',
+    })
+    threadFocus.push({ threadKey, visibility: 'foreground' })
+  }
+
+  for (const { visibility, ...operation } of input.threadOperations ?? []) {
     const allowDerived = operation.action === 'open'
     const identity = resolveIdentity(operation, operation.label || operation.note, {
       lane: 'thread',
@@ -727,7 +632,7 @@ function normalizeContinuityProjection(
 
   const liveKnowledge = liveIdentitySet(registry.knowledge)
   const knowledgeOperations: KnowledgeOperation[] = []
-  for (const operation of input.knowledgeOperations) {
+  for (const operation of input.knowledgeOperations ?? []) {
     if (options?.checkedFragments) {
       const charFragment = options.checkedFragments.get(operation.characterId)
       if (!charFragment) {
@@ -1143,16 +1048,18 @@ export function createAnalysisTools(
       inputSchema: buildReportAnalysisInputSchema(opts?.continuityKeys ?? {}, {
         includeDirections: opts?.disableDirections !== true,
       }),
-      execute: async (input: ReportAnalysisInput) => {
+      execute: async (input: ReportAnalysisInput & Record<string, any>) => {
         const {
           summary,
-          events = [],
           characters = [],
           entities = [],
+          threads = [],
           mentions = [],
           candidateFragmentIds = [],
           contradictions = [],
           scene = { transition: 'uncertain', evidenceSegments: [] },
+          // Legacy programmatic fallbacks
+          events = [],
           stateOperations = [],
           threadOperations = [],
           knowledgeOperations = [],
@@ -1187,9 +1094,9 @@ export function createAnalysisTools(
                 ...(c.conflictingEvidence ?? []).map((evidence) => evidence.fragmentId),
               ]),
               ...(scene.location?.fragmentId ? [scene.location.fragmentId] : []),
-              ...stateOperations.flatMap((op) => op.subject?.fragmentId ? [op.subject.fragmentId] : []),
-              ...threadOperations.flatMap((operation) => operation.relatedFragmentIds),
-              ...knowledgeOperations.map((operation) => operation.characterId),
+              ...stateOperations.flatMap((op: any) => op.subject?.fragmentId ? [op.subject.fragmentId] : []),
+              ...threadOperations.flatMap((operation: any) => operation.relatedFragmentIds),
+              ...knowledgeOperations.map((operation: any) => operation.characterId),
               ...characters.flatMap((c) => [c.id, c.characterId]).filter((id): id is string => Boolean(id)),
               ...entities.flatMap((e) => [e.id, e.entityId]).filter((id): id is string => Boolean(id)),
             ].filter((id): id is string => typeof id === 'string' && id.trim().length > 0))]
@@ -1208,11 +1115,12 @@ export function createAnalysisTools(
         const proseSegments = segmentText(sourceProse?.content ?? '')
         const normalizedProjection = normalizeContinuityProjection({
           scene,
+          threads,
+          characters,
+          entities,
           stateOperations,
           threadOperations,
           knowledgeOperations,
-          characters,
-          entities,
         }, proseSegments, continuityRegistry, {
           checkedFragments: opts ? checkedFragments : undefined,
         })

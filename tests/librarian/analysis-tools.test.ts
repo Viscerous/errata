@@ -471,21 +471,23 @@ describe('reportAnalysis resilience and forgiving boundaries', () => {
     expect((parsed.scene?.time as Record<string, unknown> | undefined)?.latest).toBeUndefined()
   })
 
-  it('normalizes action aliases on state operations', () => {
+  it('parses streamlined report schema with characters, entities, and threads', () => {
     const schema = buildReportAnalysisInputSchema({}, { includeDirections: false })
     const parsed = schema.parse({
       summary: 'Alice advanced her position.',
-      stateOperations: [
+      threads: ['Who unlocked the gate?'],
+      characters: [
         {
-          action: 'advance',
-          subject: { label: 'Alice' },
-          facet: 'posture',
-          value: 'ready',
-          evidenceSegments: [1],
+          name: 'Alice',
+          immediate: 'Alert and scanning the perimeter',
+          state: { posture: 'ready' },
         },
       ],
     })
-    expect(parsed.stateOperations?.[0].action).toBe('set')
+    expect(parsed.threads).toEqual(['Who unlocked the gate?'])
+    expect(parsed.characters[0].name).toBe('Alice')
+    expect(parsed.characters[0].immediate).toBe('Alert and scanning the perimeter')
+    expect(parsed.characters[0].state).toEqual({ posture: 'ready' })
   })
 
   it('skips unknown fragment mentions and non-character knowledge operations without throwing', async () => {

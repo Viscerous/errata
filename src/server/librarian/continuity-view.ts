@@ -582,18 +582,14 @@ const POLICY_BY_READER: Record<ContinuityReader, ContinuityPolicy> = {
   // scene is precisely the failure mode for whoever writes the next passage.
   'generation.writer': { presentation: 'writing-constraints', characterScope: 'active-cast' },
   'generation.prewriter': { presentation: 'writing-constraints', characterScope: 'active-cast' },
-  // Latent material, every thread including dormant. A question the story raised
-  // and let go is the richest source of a next move for a reader that proposes
-  // moves and writes none of them.
+  // Latent material, every thread including dormant.
   'directions.suggest': { presentation: 'direction-candidates', characterScope: 'active-cast' },
-  // The keyed registry, because this reader writes the records back and has to
-  // address them by the keys they already carry.
-  'librarian.analyze': { presentation: 'registry', characterScope: 'passage-candidates' },
+  // Authorial fold (scene, characters, entities, open threads) so the analyzer
+  // observes narrative continuity naturally instead of parsing numbered registry tables.
+  'librarian.analyze': { presentation: 'direction-candidates', characterScope: 'active-cast' },
   // General Librarian chat reads the fold only on demand, but when asked it
   // needs the whole registry rather than a passage-local subset.
   'librarian.chat': { presentation: 'registry', characterScope: 'all' },
-  // Refinement sees the standing cast plus a character target and any characters
-  // the target references. It uses continuity as evidence, not prose direction.
   'librarian.refine': { presentation: 'editing-reference', characterScope: 'target-related-cast' },
   // Character optimization is explicitly about one sheet. Pinning and recency
   // must not decide whether that character's own knowledge reaches the editor.
@@ -965,7 +961,7 @@ export function continuityRegistry(
 }
 
 /** Full keyed registry for the Librarian, including dormant unresolved threads. */
-function renderContinuityRegistry(source: ContinuitySource, includeAllDetails: boolean): string {
+export function renderContinuityRegistry(source: ContinuitySource, includeAllDetails: boolean): string {
   const registry = continuityRegistry(source, { includeAllDetails })
   const section = (heading: string, entries: RegistryEntry[], guidance?: string): string | null => (
     entries.length === 0 ? null : [

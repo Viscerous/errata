@@ -97,7 +97,14 @@ export function buildAnalyzeSystemPrompt(opts?: {
 
   if (canReport) {
     const directionPhrase = canSuggestDirections ? ', and three next-passage directions' : ''
-    guidance.push(`Call **reportAnalysis** with the complete narrative observation (summary, scene, deltas, and mentions${directionPhrase}). In mentions, list catalog fragments (e.g. 'ch-0001') whose exact name or title appears verbatim in the new prose; never use placeholder IDs like 'none' or continuity keys. If no catalog fragments are mentioned, leave mentions empty []. Include a record ID in candidateFragmentIds ONLY when you report a contradiction against that record and need its full numbered sentences to propose record corrections; leave candidateFragmentIds empty [] when there are no contradictions to correct. In characters, report active characters with telegraphic live state: 'immediate' for the immediate physical or kinetic posture of this scene; dynamic 'state' keys (attire, injuries, gear, physical traits) that persist across scenes until changed or cleared (set to "" or "none" when healed/removed); 'knowledge' for new facts learned; and 'secrets' for withheld deceptions. In entities, report non-character entity state updates (locations, objects). Use threadOperations to advance unresolved narrative questions or plot arcs.`)
+    guidance.push(`Call **reportAnalysis** with the complete narrative observation (summary, scene, characters, entities, threads, mentions${directionPhrase}).
+- **summary**: concise retrospective summary of the new prose as past history.
+- **scene**: transition (advance, continue, cut) and any location or time change.
+- **characters**: active characters with telegraphic live state: 'immediate' for the physical/kinetic posture right now; dynamic 'state' keys (attire, injuries, gear, status) that persist across scenes until changed or cleared (set to "" or "none" when healed/removed); 'knowledge' for new facts learned; and 'secrets' for withheld deceptions.
+- **entities**: non-character entity state updates (locations, objects) with dynamic 'state' keys.
+- **threads**: list active unresolved narrative questions or plot threads.
+- **mentions**: list catalog fragments (e.g. 'ch-0001') whose exact name appears verbatim in the new prose; leave empty [] if none.
+- **candidateFragmentIds**: record IDs only when reporting contradictions to inspect; leave empty [] otherwise.`)
   } else {
     guidance.push('Review the new prose against the supplied context without inventing a replacement reporting tool.')
   }

@@ -7,6 +7,7 @@ import {
   continuityRegistry,
   projectContinuityView,
   renderContinuity,
+  renderContinuityRegistry,
 } from '@/server/librarian/continuity-view'
 import {
   createTempDir,
@@ -626,10 +627,10 @@ describe('continuity view', () => {
     expect(registry.state[0].detail).toBeUndefined()
     expect(registry.state[39]).toMatchObject({ index: 40, key: 'state_39', detail: 'Value 39' })
 
-    const analyze = renderContinuity(
+    const analyze = renderContinuityRegistry(
       { continuityLedger: ledger, continuityView: view },
-      'librarian.analyze',
-    )!
+      false,
+    )
     const writer = renderContinuity(
       { continuityLedger: ledger, continuityView: view },
       'generation.writer',
@@ -980,7 +981,7 @@ describe('renderContinuity', () => {
         stickyCharacters: [{ id: 'ch-0001' }],
         attentionCandidateIds: ['ch-0002'],
         characterCatalog: [{ id: 'ch-0002', name: 'Mara' }],
-      }, 'librarian.analyze')!
+      }, 'librarian.chat')!
       expect(rendered).toContain('who_sent_the_letter |')
       // Every lane reads `[n] key | label | detail`, so an operation can cite n.
       expect(rendered).toMatch(/\[\d+\] hero_lied \| .* \| known by Mara \(ch-0002\)/)

@@ -10,6 +10,11 @@ import { nitro } from 'nitro/vite'
 
 const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf-8'))
 
+const isScriptOrTest = Boolean(
+  process.env.VITEST
+  || process.argv.some((arg) => arg.includes('vite-node') || arg.includes('scripts'))
+)
+
 const config = defineConfig({
   define: {
     __BUILD_VERSION__: JSON.stringify(
@@ -46,7 +51,7 @@ const config = defineConfig({
     strictPort: true,
   },
   plugins: [
-    devtools(),
+    !isScriptOrTest && devtools(),
     nitro({
       runtimeConfig: { port: 7739 },
       rollupConfig: { external: [/^@sentry\//] },
