@@ -46,6 +46,8 @@ export type {
   LibrarianRunStatus,
   LibrarianRevertChangeProposalResponse,
   LibrarianStatusResponse,
+  LibrarianContinuityResponse,
+  UpdateCharacterLiveStateResponse,
   StoredLibrarianState,
 } from '@/contracts/librarian'
 export type {
@@ -62,7 +64,11 @@ export type {
 export type {
   AnalysisSourceRevision,
   CitedEvidence,
+  ContinuityLedger,
   ContinuityProjection,
+  ContinuityView,
+  FoldedCharacterLiveState,
+  FoldedEntityLiveState,
   KnowledgeOperation,
   NarrativeDuration,
   NarrativeTime,

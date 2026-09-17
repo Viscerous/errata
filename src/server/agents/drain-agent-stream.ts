@@ -145,13 +145,13 @@ export async function drainAgentStream(
 
       switch (p.type) {
         case 'text-delta': {
-          const text = (p.text ?? '') as string
+          const text = ((p.text ?? p.delta ?? '') as string)
           fullText += text
           event = { type: 'text', text }
           break
         }
         case 'reasoning-delta': {
-          const text = (p.text ?? '') as string
+          const text = ((p.delta ?? p.text ?? '') as string)
           fullReasoning += text
           event = { type: 'reasoning', text }
           break
@@ -178,8 +178,10 @@ export async function drainAgentStream(
           event = { type: 'tool-error', id: toolCallId, toolName, error }
           break
         }
-        case 'error':
-          throw new Error(readableStreamError(p.error))
+        case 'error': {
+          const errText = readableStreamError(p.error)
+          throw new Error(errText)
+        }
         // `finish-step` fires once per LLM step; `finish` fires once for the
         // whole generation. Count steps, capture the final reason.
         case 'finish-step': {

@@ -20,18 +20,22 @@ export type EditableField = z.infer<typeof editableFieldSchema>
 
 const operationIdSchema = z.string().min(1).max(80).optional()
 
-/** Model-authored content is stored exactly as supplied by the tool call. */
-export const llmRawTextSchema = z.string()
+/**
+ * Model-authored content is stored exactly as supplied by the tool call. The
+ * maxLength keeps the local-grammar (GBNF) form bounded: an unbounded string
+ * is an infinite repetition in the grammar, which weak models degenerate into.
+ */
+export const llmRawTextSchema = z.string().max(2000)
 
 export const llmInsertTextSchema = llmRawTextSchema.refine((value) => value.length >= 1, {
   message: 'String must contain at least 1 character.',
 })
 
-const exactAnchorTextSchema = z.string().refine((value) => value.trim().length >= 1, {
+const exactAnchorTextSchema = z.string().max(1000).refine((value) => value.trim().length >= 1, {
   message: 'oldText must contain the exact existing text to find and replace.',
 })
 
-export const llmTextSchema = z.string().trim().min(1)
+export const llmTextSchema = z.string().trim().min(1).max(1000)
 
 export const llmNameSchema = z.string().trim().min(1).max(100)
 
@@ -49,7 +53,7 @@ const fieldUpdatesSchema = z.object({
 export const createFragmentOperationSchema = z.object({
   operationId: operationIdSchema,
   action: z.literal('create_fragment'),
-  type: z.string().min(1).describe('Registered fragment type, such as character, guideline, knowledge, summary, or a story custom type.'),
+  type: z.string().min(1).max(64).describe('Registered fragment type, such as character, guideline, knowledge, summary, or a story custom type.'),
   name: llmNameSchema.describe(FRAGMENT_NAME_DESCRIPTION),
   description: llmDescriptionSchema.describe(FRAGMENT_DESCRIPTION_DESCRIPTION),
   content: llmInsertTextSchema.describe(FRAGMENT_CONTENT_DESCRIPTION),
@@ -59,7 +63,7 @@ export const createFragmentOperationSchema = z.object({
 export const replaceTextOperationSchema = z.object({
   operationId: operationIdSchema,
   action: z.literal('replace_text'),
-  fragmentId: z.string().min(1).describe('Target fragment ID.'),
+  fragmentId: z.string().min(1).max(64).describe('Target fragment ID.'),
   field: editableFieldSchema.describe('Editable field to change. Defaults to content.').default('content'),
   oldText: exactAnchorTextSchema.describe('Required exact existing text to find and replace. Copy it from the stored fragment text literally (whitespace included); do not escape newlines or quotes — anchors are matched byte-for-byte.'),
   newText: llmRawTextSchema.describe('Required complete replacement for oldText. The tool preserves surrounding text, so include only the text that should replace oldText. To insert detail inside a sentence or paragraph, use the revised sentence or paragraph. Use an empty string only to delete oldText.'),
@@ -71,7 +75,7 @@ export const replaceTextOperationSchema = z.object({
 export const appendParagraphOperationSchema = z.object({
   operationId: operationIdSchema,
   action: z.literal('append_paragraph'),
-  fragmentId: z.string().min(1).describe('Target fragment ID.'),
+  fragmentId: z.string().min(1).max(64).describe('Target fragment ID.'),
   field: editableFieldSchema.describe('Editable field to change. Defaults to content.').default('content'),
   text: llmTextSchema.describe('Required paragraph text to append. The tool adds paragraph spacing.'),
   reason: z.string().max(500).optional(),
@@ -80,8 +84,8 @@ export const appendParagraphOperationSchema = z.object({
 export const setFieldsOperationSchema = z.object({
   operationId: operationIdSchema,
   action: z.literal('set_fields'),
-  fragmentId: z.string().min(1).describe('Target fragment ID.'),
-  baseHash: z.string().min(8).optional().describe(BASE_HASH_DESCRIPTION),
+  fragmentId: z.string().min(1).max(64).describe('Target fragment ID.'),
+  baseHash: z.string().min(8).max(128).optional().describe(BASE_HASH_DESCRIPTION),
   fields: fieldUpdatesSchema.describe(SET_FIELDS_DESCRIPTION),
   reason: z.string().max(500).optional(),
 })
@@ -89,7 +93,7 @@ export const setFieldsOperationSchema = z.object({
 export const archiveFragmentOperationSchema = z.object({
   operationId: operationIdSchema,
   action: z.literal('archive_fragment'),
-  fragmentId: z.string().min(1),
+  fragmentId: z.string().min(1).max(64),
   reason: z.string().max(500).optional(),
 })
 
@@ -111,7 +115,7 @@ export const proposeFragmentChangesSchema = z.object({
 })
 
 export const operationsInputSchema = z.object({
-  proposalId: z.string().optional().describe('`proposalId` returned by a propose tool. Preferred over restating operations.'),
+  proposalId: z.string().max(64).optional().describe('`proposalId` returned by a propose tool. Preferred over restating operations.'),
   operations: z.array(fragmentChangeOperationSchema).min(1).max(MAX_BATCH_OPERATIONS).optional().describe('Inline operations, used only when no proposalId exists.'),
 }).refine(
   (value) => Boolean(value.proposalId) || Boolean(value.operations?.length),

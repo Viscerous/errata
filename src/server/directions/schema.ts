@@ -10,9 +10,9 @@ import { z } from 'zod/v4'
  * that needs more, like the prewriter's pacing, extends this.
  */
 export const suggestionDirectionSchema = z.object({
-  title: z.string().trim().min(1).describe('Short evocative title (3-6 words)'),
-  description: z.string().trim().min(1).describe('One or two sentences previewing what happens'),
-  instruction: z.string().trim().min(1).describe('Concrete writing prompt for the writer to follow this direction'),
+  title: z.string().trim().min(1).max(80).describe('Short evocative title (3-6 words)'),
+  description: z.string().trim().min(1).max(300).describe('One or two sentences previewing what happens'),
+  instruction: z.string().trim().min(1).max(500).describe('Concrete writing prompt for the writer to follow this direction'),
 })
 
 export type SuggestionDirection = z.infer<typeof suggestionDirectionSchema>

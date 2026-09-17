@@ -1,4 +1,9 @@
-import type { AnalysisSourceRevision, ContinuityProjection } from './continuity'
+import type {
+  AnalysisSourceRevision,
+  ContinuityLedger,
+  ContinuityProjection,
+  ContinuityView,
+} from './continuity'
 import type {
   AppliedChange,
   FragmentChangeOperation,
@@ -212,3 +217,22 @@ export interface LibrarianRevertChangeProposalResponse {
   archivedFragmentIds: string[]
   restoredFragmentIds: string[]
 }
+
+export interface LibrarianContinuityResponse {
+  ledger: ContinuityLedger | null
+  view: ContinuityView | null
+  latestAnalysisId: string | null
+}
+
+export interface UpdateCharacterLiveStateResponse {
+  ok: boolean
+  characterState: {
+    characterId: string
+    name: string
+    immediate?: string
+    state: Record<string, string>
+    knowledge: string[]
+    secrets: string[]
+  }
+}
+

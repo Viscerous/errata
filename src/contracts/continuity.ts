@@ -104,7 +104,7 @@ export type SceneLocation = z.infer<typeof SceneLocationSchema>
 export const SceneLocationInputSchema = z.object({
   key: z.string().trim().min(1).max(100),
   label: z.string().trim().min(1).max(160),
-  fragmentId: z.string().trim().optional(),
+  fragmentId: z.string().trim().max(64).optional(),
 })
 
 /**
@@ -256,26 +256,80 @@ export const EntityLiveStateSchema = z.strictObject({
 
 export type EntityLiveState = z.infer<typeof EntityLiveStateSchema>
 
+export const stateKeyValuePairSchema = z.object({
+  key: z.string().trim().min(1).max(100),
+  value: z.string().trim().max(500),
+})
+
+// Grammar-safe sparse state: GBNF (llama.cpp's default PEG generator) cannot
+// bound the key count of an object with free-form additionalProperties, so an
+// unbounded z.record leaves an open key loop in the tool grammar that weak
+// models degenerate into. A bounded array of key/value pairs expresses the
+// same dictionary while staying grammatically finite; the forgiving
+// preprocess still accepts plain records from non-grammar clients.
+export function forgivingDynamicState() {
+  return z.preprocess((val) => {
+    if (val === null || val === undefined) return []
+    if (Array.isArray(val)) return val
+    if (typeof val === 'object') {
+      return Object.entries(val as Record<string, unknown>)
+        .filter(([, v]) => v !== null && v !== undefined)
+        .map(([k, v]) => ({ key: String(k), value: String(v) }))
+    }
+    return []
+  }, z.array(stateKeyValuePairSchema).max(32))
+}
+
+export function forgivingStringArray(maxLen = 500, options?: { min?: number; max?: number }) {
+  let arr = z.array(z.string().trim().max(maxLen))
+  if (options?.min !== undefined) arr = arr.min(options.min)
+  if (options?.max !== undefined) arr = arr.max(options.max)
+  return z.preprocess((val) => {
+    if (val === null || val === undefined) return []
+    if (Array.isArray(val)) {
+      return val
+        .map((v) => (v === null || v === undefined ? '' : String(v)))
+        .filter((s) => s.trim().length > 0)
+    }
+    if (typeof val === 'string') {
+      const trimmed = val.trim()
+      if (!trimmed || trimmed.toLowerCase() === 'none' || trimmed.toLowerCase() === 'n/a') return []
+      return [trimmed]
+    }
+    return []
+  }, arr)
+}
+
 export const CharacterLiveStateInputSchema = z.object({
-  id: z.string().trim().optional(),
-  characterId: z.string().trim().optional(),
-  name: z.string().trim().min(1).max(160),
-  immediate: z.string().trim().max(300).optional(),
-  state: z.record(z.string().trim().min(1).max(100), z.string().trim().max(500).nullable().optional()).optional(),
-  knowledge: z.array(z.string().trim().max(500)).optional(),
-  secrets: z.array(z.string().trim().max(500)).optional(),
+  id: z.string().trim().max(64).optional(),
+  characterId: z.string().trim().max(64).optional(),
+  // Optional so a model that cites the catalog id need not restate the name;
+  // normalization resolves it from the delivered character record.
+  name: z.string().trim().min(1).max(160).optional(),
+  immediate: z.string().trim().max(300).optional()
+    .describe('Immediate kinetic/tactile beat right now (e.g. "tense posture; catching breath against the wall").'),
+  state: forgivingDynamicState().optional()
+    .describe('Sparse dynamic state as key/value pairs, e.g. [{"key":"weapon","value":"broken"}]. Note ONLY important physical or gear changes of note (e.g. broken weapon, acquired item, severe injury). Omit or leave empty [] if no changes occurred in this passage. Do not record mundane inventory.'),
+  knowledge: forgivingStringArray(500, { max: 12 }).default([]).optional()
+    .describe('New facts learned, witnessed, or deduced in this scene. Omit or leave empty [] if none.'),
+  secrets: forgivingStringArray(500, { max: 12 }).default([]).optional()
+    .describe('Active deceptions, hidden motives, or withheld truths. Omit or leave empty [] if none.'),
 })
 
 export type CharacterLiveStateInput = z.infer<typeof CharacterLiveStateInputSchema>
 
 export const EntityLiveStateInputSchema = z.object({
-  id: z.string().trim().optional(),
-  entityId: z.string().trim().optional(),
-  name: z.string().trim().min(1).max(160),
+  id: z.string().trim().max(64).optional(),
+  entityId: z.string().trim().max(64).optional(),
+  // Optional so a model that cites the catalog id need not restate the name;
+  // normalization resolves it from the delivered record.
+  name: z.string().trim().min(1).max(160).optional(),
   category: z.enum(['location', 'artefact', 'faction', 'other']).optional(),
-  immediate: z.string().trim().max(300).optional(),
-  state: z.record(z.string().trim().min(1).max(100), z.string().trim().max(500).nullable().optional()).optional(),
-  notes: z.array(z.string().trim().max(500)).optional(),
+  immediate: z.string().trim().max(300).optional()
+    .describe('Immediate kinetic or visual state in this scene.'),
+  state: forgivingDynamicState().optional()
+    .describe('Sparse dynamic state as key/value pairs for notable entity changes, e.g. [{"key":"condition","value":"damaged"}]. Omit or leave empty [] if no changes.'),
+  notes: forgivingStringArray(500, { max: 12 }).default([]).optional(),
 })
 
 export type EntityLiveStateInput = z.infer<typeof EntityLiveStateInputSchema>
@@ -294,3 +348,79 @@ export const ContinuityProjectionSchema = z.strictObject({
 })
 
 export type ContinuityProjection = z.infer<typeof ContinuityProjectionSchema>
+
+export interface ProjectionSource {
+  sourceFragmentId: string
+  analysisId: string
+  narrativePosition: number
+}
+
+export interface CurrentStateEntry extends ProjectionSource {
+  stateKey: string
+  subject: StateSubject
+  facet: string
+  slot?: string
+  value: string
+  certainty: 'explicit' | 'implied'
+  scope: StateScope
+  until?: NarrativeTime
+}
+
+export interface SceneFrame extends ProjectionSource {
+  line: 'present' | 'flashback' | 'flash-forward'
+  location?: SceneLocation
+  time?: NarrativeTime
+}
+
+export interface LiveThreadEntry extends ProjectionSource {
+  threadKey: string
+  label: string
+  note?: string
+  relatedFragmentIds: string[]
+  visibility: 'foreground' | 'background' | 'dormant'
+}
+
+export interface CharacterKnowledgeEntry extends ProjectionSource {
+  characterId: string
+  knowledgeKey: string
+  fact: string
+  acquisition: 'witnessed' | 'told' | 'inferred' | 'other'
+}
+
+export interface FoldedCharacterLiveState extends ProjectionSource {
+  characterId?: string
+  name: string
+  immediate?: string
+  state: Record<string, string>
+  knowledge: string[]
+  secrets: string[]
+}
+
+export interface FoldedEntityLiveState extends ProjectionSource {
+  entityId?: string
+  name: string
+  category?: 'location' | 'artefact' | 'faction' | 'other'
+  immediate?: string
+  state: Record<string, string>
+  notes: string[]
+}
+
+export interface ContinuityLedger {
+  currentState: CurrentStateEntry[]
+  liveThreads: LiveThreadEntry[]
+  characterKnowledge: CharacterKnowledgeEntry[]
+  characterStates?: FoldedCharacterLiveState[]
+  entityStates?: FoldedEntityLiveState[]
+  currentScene?: SceneFrame
+  staleProjectionCount: number
+}
+
+export interface ContinuityView {
+  currentState: CurrentStateEntry[]
+  liveThreads: LiveThreadEntry[]
+  characterKnowledge: CharacterKnowledgeEntry[]
+  characterStates?: FoldedCharacterLiveState[]
+  entityStates?: FoldedEntityLiveState[]
+  currentScene?: SceneFrame
+  staleProjectionCount: number
+}

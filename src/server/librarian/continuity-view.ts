@@ -1,4 +1,5 @@
 import type { Fragment } from '@/contracts/story'
+import { listFragments } from '../fragments/storage'
 import {
   getAnalysis,
   getAnalysisIndex,
@@ -8,13 +9,30 @@ import {
 import { proseContentHash } from './continuity-source'
 import { continuityKeyLabel, normalizeContinuityKey, scopedContinuityIdentity } from '@/lib/continuity-keys'
 import type {
+  CharacterKnowledgeEntry,
+  ContinuityLedger,
   ContinuityRegistry,
-  NarrativeTime,
+  ContinuityView,
+  CurrentStateEntry,
+  FoldedCharacterLiveState,
+  FoldedEntityLiveState,
+  LiveThreadEntry,
+  ProjectionSource,
   RegistryEntry,
-  SceneLocation,
-  StateScope,
-  StateSubject,
+  SceneFrame,
 } from '@/contracts/continuity'
+
+export type {
+  CharacterKnowledgeEntry,
+  ContinuityLedger,
+  ContinuityView,
+  CurrentStateEntry,
+  FoldedCharacterLiveState,
+  FoldedEntityLiveState,
+  LiveThreadEntry,
+  ProjectionSource,
+  SceneFrame,
+}
 
 const MAX_CURRENT_STATE = 24
 const MAX_KNOWLEDGE_PER_CHARACTER = 16
@@ -27,87 +45,6 @@ const MAX_KNOWLEDGE_PER_CHARACTER = 16
 const MAX_LIVE_THREADS = 24
 const MAX_CACHE_ENTRIES = 32
 const CLEARED_STATE_VALUES = new Set(['none', 'cleared', 'removed', 'healed', 'empty', 'normal', 'default', 'null', 'undefined'])
-
-interface ProjectionSource {
-  sourceFragmentId: string
-  analysisId: string
-  narrativePosition: number
-}
-
-export interface CurrentStateEntry extends ProjectionSource {
-  stateKey: string
-  subject: StateSubject
-  facet: string
-  slot?: string
-  value: string
-  certainty: 'explicit' | 'implied'
-  scope: StateScope
-  until?: NarrativeTime
-}
-
-export interface SceneFrame extends ProjectionSource {
-  line: 'present' | 'flashback' | 'flash-forward'
-  location?: SceneLocation
-  time?: NarrativeTime
-}
-
-export interface LiveThreadEntry extends ProjectionSource {
-  threadKey: string
-  label: string
-  note?: string
-  relatedFragmentIds: string[]
-  visibility: 'foreground' | 'background' | 'dormant'
-}
-
-export interface CharacterKnowledgeEntry extends ProjectionSource {
-  characterId: string
-  knowledgeKey: string
-  fact: string
-  acquisition: 'witnessed' | 'told' | 'inferred' | 'other'
-}
-
-export interface FoldedCharacterLiveState extends ProjectionSource {
-  characterId?: string
-  name: string
-  immediate?: string
-  state: Record<string, string>
-  knowledge: string[]
-  secrets: string[]
-}
-
-export interface FoldedEntityLiveState extends ProjectionSource {
-  entityId?: string
-  name: string
-  category?: 'location' | 'artefact' | 'faction' | 'other'
-  immediate?: string
-  state: Record<string, string>
-  notes: string[]
-}
-
-/**
- * The complete branch-local result of folding source-current projections.
- * This is program memory, not prompt memory, so it has no prompt-budget caps.
- */
-export interface ContinuityLedger {
-  currentState: CurrentStateEntry[]
-  liveThreads: LiveThreadEntry[]
-  characterKnowledge: CharacterKnowledgeEntry[]
-  characterStates?: FoldedCharacterLiveState[]
-  entityStates?: FoldedEntityLiveState[]
-  currentScene?: SceneFrame
-  staleProjectionCount: number
-}
-
-/** A reader-bounded projection of the complete branch-local ledger. */
-export interface ContinuityView {
-  currentState: CurrentStateEntry[]
-  liveThreads: LiveThreadEntry[]
-  characterKnowledge: CharacterKnowledgeEntry[]
-  characterStates?: FoldedCharacterLiveState[]
-  entityStates?: FoldedEntityLiveState[]
-  currentScene?: SceneFrame
-  staleProjectionCount: number
-}
 
 interface LoadedAnalysis {
   source: Fragment
@@ -180,6 +117,19 @@ function cacheSet(key: string, signature: string, ledger: ContinuityLedger | und
   }
 }
 
+export function invalidateContinuityCache(dataDir?: string, storyId?: string, analysisId?: string): void {
+  if (dataDir && storyId && analysisId) {
+    projectionCache.delete(`${dataDir}\u0000${storyId}\u0000${analysisId}`)
+  } else {
+    projectionCache.clear()
+  }
+  if (dataDir && storyId) {
+    ledgerCache.delete(`${dataDir}\u0000${storyId}`)
+  } else {
+    ledgerCache.clear()
+  }
+}
+
 function sourceOf(item: LoadedAnalysis): ProjectionSource {
   return {
     sourceFragmentId: item.source.id,
@@ -211,10 +161,16 @@ export async function buildContinuityLedger(params: {
   activeProseFragments: Fragment[]
   analysisIndex?: LibrarianAnalysisIndex | null
 }): Promise<ContinuityLedger | undefined> {
-  const index = 'analysisIndex' in params
+  const index = ('analysisIndex' in params
     ? params.analysisIndex
-    : await getAnalysisIndex(params.dataDir, params.storyId)
-  if (!index) return undefined
+    : await getAnalysisIndex(params.dataDir, params.storyId))
+    ?? {
+      version: 2 as const,
+      updatedAt: '',
+      latestByFragmentId: {},
+      latestProjectionByFragmentId: {},
+      failedByFragmentId: {},
+    }
 
   const fragmentHashes = new Map(
     params.activeProseFragments.map((fragment) => [fragment.id, proseContentHash(fragment)]),
@@ -478,6 +434,31 @@ export async function buildContinuityLedger(params: {
     ...thread,
     visibility: threadVisibility.get(thread.threadKey) ?? ('dormant' as const),
   }))
+  if (liveCharacters.size === 0) {
+    const characters = await listFragments(params.dataDir, params.storyId, 'character').catch(() => [])
+    for (const char of characters) {
+      const liveState = char.meta?.liveState as {
+        immediate?: string
+        state?: Record<string, string>
+        knowledge?: string[]
+        secrets?: string[]
+      } | undefined
+      if (liveState && (liveState.immediate || (liveState.state && Object.keys(liveState.state).length > 0) || (liveState.knowledge && liveState.knowledge.length > 0) || (liveState.secrets && liveState.secrets.length > 0))) {
+        liveCharacters.set(normalizeContinuityKey(char.name), {
+          sourceFragmentId: char.id,
+          analysisId: '',
+          narrativePosition: 0,
+          characterId: char.id,
+          name: char.name,
+          immediate: liveState.immediate,
+          state: liveState.state ?? {},
+          knowledge: liveState.knowledge ?? [],
+          secrets: liveState.secrets ?? [],
+        })
+      }
+    }
+  }
+
   const allCharacters = [...liveCharacters.values()]
   const allEntities = [...liveEntities.values()]
   const ledger: ContinuityLedger | undefined = (

@@ -29,6 +29,7 @@ import { FragmentArtwork, FragmentMetadata } from './FragmentIdentity'
 import { FragmentMediaField, FragmentTextField } from './FragmentContentFields'
 import { FragmentVersionHistory } from './FragmentVersionHistory'
 import { FragmentMetadataPanel } from './FragmentMetadataPanel'
+import { CharacterLiveStatePanel } from './CharacterLiveStatePanel'
 
 export interface FragmentPrefill {
   name: string
@@ -710,6 +711,12 @@ export function FragmentEditor({
                   onSwitch={(version) => revertVersionMutation.mutate(version)}
                   onDelete={(version) => deleteVersionMutation.mutate(version)}
                 />
+              </>
+            )}
+            {fragment.type === 'character' && (
+              <>
+                <div className="mx-6 h-px bg-border/30" />
+                <CharacterLiveStatePanel storyId={storyId} fragment={fragment} />
               </>
             )}
             <div className="mx-6 h-px bg-border/30" />

@@ -10,8 +10,12 @@ import {
   listLibrarianAnalyzeToolNames,
   mentionInputSchema,
   reportAnalysisInputSchema,
+  reportContinuityInputSchema,
+  reportDirectionsInputSchema,
+  reportObservationInputSchema,
   timelineEventsFor,
 } from '@/server/librarian/analysis-tools'
+import { z } from 'zod/v4'
 import { getFragment } from '@/server/fragments/storage'
 import type { Fragment } from '@/contracts/story'
 
@@ -476,18 +480,18 @@ describe('reportAnalysis resilience and forgiving boundaries', () => {
     const parsed = schema.parse({
       summary: 'Alice advanced her position.',
       threads: ['Who unlocked the gate?'],
-      characters: [
-        {
-          name: 'Alice',
-          immediate: 'Alert and scanning the perimeter',
-          state: { posture: 'ready' },
-        },
-      ],
-    })
-    expect(parsed.threads).toEqual(['Who unlocked the gate?'])
-    expect(parsed.characters[0].name).toBe('Alice')
-    expect(parsed.characters[0].immediate).toBe('Alert and scanning the perimeter')
-    expect(parsed.characters[0].state).toEqual({ posture: 'ready' })
+       characters: [
+         {
+           name: 'Alice',
+           immediate: 'Alert and scanning the perimeter',
+           state: [{ key: 'posture', value: 'ready' }],
+         },
+       ],
+     })
+     expect(parsed.threads).toEqual(['Who unlocked the gate?'])
+     expect(parsed.characters[0].name).toBe('Alice')
+     expect(parsed.characters[0].immediate).toBe('Alert and scanning the perimeter')
+     expect(parsed.characters[0].state).toEqual([{ key: 'posture', value: 'ready' }])
   })
 
   it('skips unknown fragment mentions and non-character knowledge operations without throwing', async () => {
@@ -583,11 +587,11 @@ describe('reportAnalysis resilience and forgiving boundaries', () => {
           name: 'Alice',
           characterId: 'ch-0001',
           immediate: 'Catching breath; dust clinging to boots',
-          state: {
-            attire: 'tattered travel cloak',
-            injury: 'none',
-            gear: 'holding brass lantern',
-          },
+           state: [
+             { key: 'attire', value: 'tattered travel cloak' },
+             { key: 'injury', value: 'none' },
+             { key: 'gear', value: 'holding brass lantern' },
+           ],
           knowledge: ['The tower gate was unlatched from within'],
           secrets: ['Carrying the brass key'],
         },
@@ -597,9 +601,9 @@ describe('reportAnalysis resilience and forgiving boundaries', () => {
           name: 'Old Tower',
           category: 'location',
           immediate: 'Cold draft whistling through the iron bars',
-          state: {
-            gate: 'unlatched',
-          },
+           state: [
+             { key: 'gate', value: 'unlatched' },
+           ],
           notes: ['Pre-war construction'],
         },
       ],
@@ -637,5 +641,346 @@ describe('reportAnalysis resilience and forgiving boundaries', () => {
     expect(timeline).toHaveLength(1)
     expect(timeline[0].event).toBe(collector.summaryUpdate)
     expect(timeline[0].position).toBe('after')
+  })
+})
+
+describe('3-beat staged pipeline tools', () => {
+  beforeEach(() => vi.mocked(getFragment).mockResolvedValue(null))
+
+  it('reportObservation delivers resolved fragments with numbered sentences and grounds contradictions', async () => {
+    const prose = mockFragment({
+      id: 'pr-0001',
+      type: 'prose',
+      content: 'The old knight carried a silver sword. He opened the north gate alone.',
+    })
+    const record = mockFragment({
+      id: 'ch-0001',
+      type: 'character',
+      name: 'Old Knight',
+      content: 'The old knight carries a rusty spear. He refuses to guard the gate.',
+    })
+    vi.mocked(getFragment).mockImplementation(async (_dir, _story, id) => {
+      if (id === 'pr-0001') return prose
+      if (id === 'ch-0001') return record
+      return null
+    })
+
+    const collector = createEmptyCollector()
+    const numberedFragmentIds = new Set<string>()
+    const tools = createAnalysisTools(collector, {
+      dataDir: '/tmp',
+      storyId: 'story-test',
+      proseFragmentId: 'pr-0001',
+      numberedFragmentIds,
+    })
+
+    const result = await tools.reportObservation.execute({
+      summary: 'The old knight carried his silver sword and opened the north gate alone.',
+      scene: { transition: 'advance', evidenceSegments: [2] },
+      mentions: [{ fragmentId: 'ch-0001', text: 'old knight' }],
+      candidateFragmentIds: ['ch-0001'],
+      contradictions: [
+        {
+          description: 'The knight has a silver sword, not a rusty spear.',
+          sourceSegments: [1],
+          conflictingEvidence: [{ fragmentId: 'ch-0001', segments: [1] }],
+        },
+        {
+          description: 'Invalid contradiction citing non-existent sentence.',
+          sourceSegments: [99],
+          conflictingEvidence: [{ fragmentId: 'ch-0001', segments: [1] }],
+        },
+      ],
+    }, executionContext)
+
+    expect(result.ok).toBe(true)
+    expect(result.mentionCount).toBe(1)
+    expect(result.contradictionCount).toBe(1)
+    expect(result.skippedContradictions).toHaveLength(1)
+    expect(result.skippedContradictions[0].reason).toContain('99')
+
+    expect(result.resolvedFragments).toHaveLength(1)
+    expect(result.resolvedFragments[0].id).toBe('ch-0001')
+    expect(result.resolvedFragments[0].content).toContain('[1] The old knight carries a rusty spear.')
+    expect(numberedFragmentIds.has('ch-0001')).toBe(true)
+
+    expect(collector.summaryUpdate).toBe('The old knight carried his silver sword and opened the north gate alone.')
+    expect(collector.contradictions).toHaveLength(1)
+    expect(collector.contradictions[0].description).toBe('The knight has a silver sword, not a rusty spear.')
+    expect(collector.contradictions[0].sourceSegments).toEqual([1])
+  })
+
+  it('reportContinuity processes live state and queues validated record corrections and new records', async () => {
+    const prose = mockFragment({
+      id: 'pr-0001',
+      type: 'prose',
+      content: 'The old knight carried a silver sword. He opened the north gate alone.',
+    })
+    const record = mockFragment({
+      id: 'ch-0001',
+      type: 'character',
+      name: 'Old Knight',
+      content: 'The old knight carries a rusty spear. He refuses to guard the gate.',
+    })
+    vi.mocked(getFragment).mockImplementation(async (_dir, _story, id) => {
+      if (id === 'pr-0001') return prose
+      if (id === 'ch-0001') return record
+      return null
+    })
+
+    const collector = createEmptyCollector()
+    const numberedFragmentIds = new Set<string>(['ch-0001'])
+    const tools = createAnalysisTools(collector, {
+      dataDir: '/tmp',
+      storyId: 'story-test',
+      proseFragmentId: 'pr-0001',
+      numberedFragmentIds,
+    })
+
+    const result = await tools.reportContinuity.execute({
+      characters: [
+        {
+          characterId: 'ch-0001',
+          name: 'Old Knight',
+          immediate: 'Standing at the threshold',
+           state: [
+             { key: 'attire', value: 'worn chainmail' },
+             { key: 'weapon', value: 'silver sword' },
+           ],
+          knowledge: ['The gate mechanism is undamaged'],
+        },
+      ],
+      entities: [],
+      threads: ['Why was the gate unlocked?'],
+      evidenceSegments: [1],
+      corrections: [
+        {
+          fragmentId: 'ch-0001',
+          field: 'content',
+          segment: 1,
+          newText: 'The old knight carries a silver sword.',
+          reason: 'Prose establishes the knight carries a silver sword.',
+        },
+      ],
+      newRecords: [
+        {
+          type: 'knowledge',
+          name: 'North Gate Lore',
+          content: 'The north gate has stood since the first dynasty.',
+        },
+      ],
+    }, executionContext)
+
+    expect(result.ok).toBe(true)
+    expect(result.characterCount).toBe(1)
+    expect(result.threadCount).toBe(1)
+    expect(result.proposalCount).toBe(2)
+
+    expect(collector.fragmentChangeProposals).toHaveLength(2)
+    const correctionProposal = collector.fragmentChangeProposals.find(p => p.proposalKind === 'correction')
+    expect(correctionProposal).toBeDefined()
+    expect(correctionProposal?.operations[0]).toEqual(expect.objectContaining({
+      action: 'replace_text',
+      fragmentId: 'ch-0001',
+      oldText: 'The old knight carries a rusty spear.',
+      newText: 'The old knight carries a silver sword.',
+    }))
+
+    const newRecordProposal = collector.fragmentChangeProposals.find(p => p.proposalKind === 'new-fragment')
+    expect(newRecordProposal).toBeDefined()
+    expect(newRecordProposal?.operations[0]).toEqual(expect.objectContaining({
+      action: 'create_fragment',
+      type: 'knowledge',
+      name: 'North Gate Lore',
+    }))
+  })
+
+  it('reportContinuity rejects corrections against records not shown numbered', async () => {
+    const prose = mockFragment({
+      id: 'pr-0001',
+      type: 'prose',
+      content: 'The old knight carried a silver sword.',
+    })
+    const unnumberedRecord = mockFragment({
+      id: 'ch-9999',
+      type: 'character',
+      name: 'Mystery Knight',
+      content: 'A mysterious knight.',
+    })
+    vi.mocked(getFragment).mockImplementation(async (_dir, _story, id) => {
+      if (id === 'pr-0001') return prose
+      if (id === 'ch-9999') return unnumberedRecord
+      return null
+    })
+
+    const collector = createEmptyCollector()
+    const numberedFragmentIds = new Set<string>() // ch-9999 is NOT in numberedFragmentIds
+    const tools = createAnalysisTools(collector, {
+      dataDir: '/tmp',
+      storyId: 'story-test',
+      proseFragmentId: 'pr-0001',
+      numberedFragmentIds,
+    })
+
+    const result = await tools.reportContinuity.execute({
+      characters: [],
+      evidenceSegments: [1],
+      corrections: [
+        {
+          fragmentId: 'ch-9999',
+          field: 'content',
+          segment: 1,
+          newText: 'An identified knight.',
+        },
+      ],
+    }, executionContext)
+
+    expect(result.ok).toBe(true)
+    expect(result.proposalCount).toBe(0)
+    expect(result.skippedProposals).toHaveLength(1)
+    expect(result.skippedProposals[0].reason).toContain('has not been shown with numbered sentences')
+  })
+
+  it('reportDirections stores creative narrative options', async () => {
+    const collector = createEmptyCollector()
+    const tools = createAnalysisTools(collector)
+
+    const result = await tools.reportDirections.execute({
+      directions: [
+        { title: 'Press On', description: 'Cross the open courtyard.', instruction: 'Describe the perilous crossing.' },
+        { title: 'Seek Cover', description: 'Duck into the guardhouse.', instruction: 'Investigate the abandoned post.' },
+        { title: 'Call Out', description: 'Signal to the watchtower.', instruction: 'Shout a challenge to the parapet.' },
+      ],
+    }, executionContext)
+
+    expect(result.ok).toBe(true)
+    expect(result.directionCount).toBe(3)
+    expect(collector.directions).toHaveLength(3)
+    expect(collector.directions[0].title).toBe('Press On')
+  })
+
+  describe('forgiving schema parsing & official Gemma template compliance', () => {
+    it('produces official JSON Schemas with 0 anyOf, 0 oneOf, and 0 type: null', () => {
+      const schemas = [
+        { name: 'reportObservation', schema: reportObservationInputSchema },
+        { name: 'reportContinuity', schema: reportContinuityInputSchema },
+        { name: 'reportDirections', schema: reportDirectionsInputSchema },
+      ]
+
+      for (const { name, schema } of schemas) {
+        const jsonSchemaObj = z.toJSONSchema(schema)
+        const jsonStr = JSON.stringify(jsonSchemaObj)
+        const anyOfMatches = jsonStr.match(/"anyOf"/g) ?? []
+        const oneOfMatches = jsonStr.match(/"oneOf"/g) ?? []
+        const nullTypeMatches = jsonStr.match(/"type":\s*"null"/g) ?? []
+
+        expect(anyOfMatches.length, `${name} has anyOf`).toBe(0)
+        expect(oneOfMatches.length, `${name} has oneOf`).toBe(0)
+        expect(nullTypeMatches.length, `${name} has type: "null"`).toBe(0)
+      }
+    })
+
+    it('coerces empty string or null state to empty array [] without crashing', () => {
+      const resultEmptyStr = reportContinuityInputSchema.safeParse({
+        characters: [
+          { name: 'Pieter van Reede', state: '' },
+          { name: 'Hiddema', state: null },
+        ],
+      })
+      expect(resultEmptyStr.success).toBe(true)
+      if (resultEmptyStr.success) {
+        expect(resultEmptyStr.data.characters[0].state).toEqual([])
+        expect(resultEmptyStr.data.characters[1].state).toEqual([])
+      }
+    })
+
+    it('coerces a plain state object with boolean or number values into key/value pairs', () => {
+      const result = reportContinuityInputSchema.safeParse({
+        characters: [
+          { name: 'Victoria', state: { repaired: true, count: 2, condition: 'alert' } },
+        ],
+      })
+      expect(result.success).toBe(true)
+      if (result.success) {
+        expect(result.data.characters[0].state).toEqual([
+          { key: 'repaired', value: 'true' },
+          { key: 'count', value: '2' },
+          { key: 'condition', value: 'alert' },
+        ])
+      }
+    })
+
+    it('coerces empty string or null arrays to empty arrays []', () => {
+      const result = reportContinuityInputSchema.safeParse({
+        characters: [
+          { name: 'Victoria', knowledge: '', secrets: null },
+        ],
+        entities: '',
+        threads: null,
+        evidenceSegments: '',
+        corrections: '',
+        newRecords: null,
+      })
+      expect(result.success).toBe(true)
+      if (result.success) {
+        expect(result.data.characters[0].knowledge).toEqual([])
+        expect(result.data.characters[0].secrets).toEqual([])
+        expect(result.data.entities).toEqual([])
+        expect(result.data.threads).toEqual([])
+        expect(result.data.evidenceSegments).toEqual([])
+        expect(result.data.corrections).toEqual([])
+        expect(result.data.newRecords).toEqual([])
+      }
+    })
+
+    it('coerces single string or number inputs into arrays', () => {
+      const result = reportContinuityInputSchema.safeParse({
+        characters: [
+          { name: 'Victoria', knowledge: 'Learned the truth' },
+        ],
+        threads: 'Who poisoned the king?',
+        evidenceSegments: 4,
+      })
+      expect(result.success).toBe(true)
+      if (result.success) {
+        expect(result.data.characters[0].knowledge).toEqual(['Learned the truth'])
+        expect(result.data.threads).toEqual(['Who poisoned the king?'])
+        expect(result.data.evidenceSegments).toEqual([4])
+      }
+    })
+
+    it('coerces candidateFragmentIds, mentions, and contradictions in reportObservation', () => {
+      const result = reportObservationInputSchema.safeParse({
+        summary: 'A speech was given.',
+        scene: { transition: 'advance' },
+        mentions: '',
+        candidateFragmentIds: 'ch-0001',
+        contradictions: '',
+      })
+      expect(result.success).toBe(true)
+      if (result.success) {
+        expect(result.data.mentions).toEqual([])
+        expect(result.data.candidateFragmentIds).toEqual(['ch-0001'])
+        expect(result.data.contradictions).toEqual([])
+      }
+    })
+
+    it('coerces string segment numbers in correctionProposalItemSchema', () => {
+      const result = reportContinuityInputSchema.safeParse({
+        characters: [],
+        evidenceSegments: [1],
+        corrections: [
+          {
+            fragmentId: 'ch-0001',
+            segment: '2',
+            newText: 'Updated content text.',
+          },
+        ],
+      })
+      expect(result.success).toBe(true)
+      if (result.success) {
+        expect(result.data.corrections?.[0].segment).toBe(2)
+      }
+    })
   })
 })

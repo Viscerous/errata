@@ -113,8 +113,8 @@ function withToolLogging<TInput, TResult>(
 }
 
 const proseReplaceSchema = z.object({
-  oldText: z.string().min(1).describe('Required exact text to find in active prose fragments.'),
-  newText: z.string().describe('Required replacement text. Use an empty string only to delete oldText.'),
+  oldText: z.string().min(1).max(1000).describe('Required exact text to find in active prose fragments.'),
+  newText: z.string().max(2000).describe('Required replacement text. Use an empty string only to delete oldText.'),
   replaceAll: z.boolean().default(true).describe('Replace all matches in each affected active prose fragment. Defaults to true for prose-wide search/replace.'),
   occurrence: z.number().int().positive().optional().describe('1-based occurrence for each affected fragment when `replaceAll` is false and `oldText` appears multiple times.'),
   reason: z.string().max(500).optional(),
@@ -230,7 +230,7 @@ export function createFragmentTools(
       ? `Read one or more fragments by ID. Returns full editable fields and \`baseHash\`, with \`content\` sentence-numbered as \`[n] sentence\` — the same numbering used to address a sentence for correction.${skipNumberedFragments ? ' Records already present in this context are reported under `alreadyAvailable` instead of being echoed again.' : ''}`
       : 'Read one or more fragments by ID. Returns full editable fields and `baseHash`. Use `baseHash` when applying `set_fields` whole-field rewrites.',
     inputSchema: z.object({
-      fragmentIds: z.array(z.string()).min(1).max(MAX_READ_FRAGMENTS).describe('Fragment IDs to read. Batch related reads in one call.'),
+      fragmentIds: z.array(z.string().max(64)).min(1).max(MAX_READ_FRAGMENTS).describe('Fragment IDs to read. Batch related reads in one call.'),
     }),
     execute: withToolLogging('readFragments', storyId, async ({ fragmentIds }: { fragmentIds: string[] }) => {
       const fragments = []
@@ -262,8 +262,8 @@ export function createFragmentTools(
       ? 'Search fragments by case-insensitive substring. Returns matching IDs, excerpts, and the `segment` number the match falls in; call `readFragments` before relying on details or addressing a sentence you have not seen numbered in full.'
       : 'Search fragments by case-insensitive substring. Returns matching IDs and excerpts; call `readFragments` before relying on details or editing.',
     inputSchema: z.object({
-      query: z.string().min(1).describe('Case-insensitive text to search for in name, description, or content.'),
-      types: z.array(z.string()).optional().describe('Optional fragment types to include. Omit to search all textual fragment types.'),
+      query: z.string().min(1).max(200).describe('Case-insensitive text to search for in name, description, or content.'),
+      types: z.array(z.string().max(64)).optional().describe('Optional fragment types to include. Omit to search all textual fragment types.'),
       fields: z.array(editableFieldSchema).optional().describe('Fields to search. Defaults to name, description, and content.'),
       includeArchived: z.boolean().default(false),
       limit: z.number().int().min(1).max(MAX_LIST_LIMIT).default(DEFAULT_LIST_LIMIT),
@@ -317,8 +317,8 @@ export function createFragmentTools(
   tools.listFragments = tool({
     description: 'List fragments with optional filters. Returns summaries only; use `readFragments` for full content before editing or citing details.',
     inputSchema: z.object({
-      type: z.string().optional().describe('Optional fragment type filter.'),
-      query: z.string().optional().describe('Optional case-insensitive filter over name and description.'),
+      type: z.string().max(64).optional().describe('Optional fragment type filter.'),
+      query: z.string().max(200).optional().describe('Optional case-insensitive filter over name and description.'),
       includeArchived: z.boolean().default(false),
       limit: z.number().int().min(1).max(MAX_LIST_LIMIT).default(DEFAULT_LIST_LIMIT),
     }),

@@ -67,13 +67,13 @@ describe('Context previews preserve agent access boundaries', () => {
     const preview = await (await api(`/stories/${storyId}/agent-blocks/librarian.analyze/preview`)).json()
 
     expect(preview.toolStages.map((stage: { id: string }) => stage.id))
-      .toEqual(['primary', 'inspection'])
-    const primary = preview.toolStages.find((stage: { id: string }) => stage.id === 'primary')
-    const inspection = preview.toolStages.find((stage: { id: string }) => stage.id === 'inspection')
-    expect(primary.toolNames).toContain('reportAnalysis')
-    expect(primary.toolNames).not.toContain('finishInspection')
-    expect(primary.estimatedTokens).toBeLessThan(inspection.estimatedTokens)
-    expect(inspection.conditional).toBe(true)
+      .toEqual(['observation', 'continuity', 'directions'])
+    const observation = preview.toolStages.find((stage: { id: string }) => stage.id === 'observation')
+    const continuity = preview.toolStages.find((stage: { id: string }) => stage.id === 'continuity')
+    const directions = preview.toolStages.find((stage: { id: string }) => stage.id === 'directions')
+    expect(observation.toolNames).toContain('reportObservation')
+    expect(continuity.toolNames).toContain('reportContinuity')
+    expect(directions.toolNames).toContain('reportDirections')
   })
 
   it('shows the exact read-only Story Setup tool surface', async () => {

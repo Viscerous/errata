@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { tool, type ToolSet } from 'ai'
+import { tool, jsonSchema, type ToolSet } from 'ai'
 import { z } from 'zod/v4'
 import { suggestionDirectionSchema, type SuggestionDirection } from '../directions/schema'
 import { getFragment, listFragments } from '../fragments/storage'
@@ -27,6 +27,7 @@ import {
   type EntityLiveStateInput,
   type KnowledgeOperation,
   type RegistryEntry,
+  type SceneUpdate,
   type StateOperation,
   type ThreadFocus,
   type ThreadOperation,
@@ -41,7 +42,7 @@ import {
   validateOperations,
 } from '../fragments/change-operations'
 
-const mentionTextSchema = z.string().trim().min(1).describe('The exact name, title, or key term as it appears in the prose, copied verbatim — no added quotes, no paraphrase')
+const mentionTextSchema = z.string().trim().min(1).max(120).describe('The exact name, title, or key term as it appears in the prose, copied verbatim — no added quotes, no paraphrase')
 
 /**
  * Anchor a reported mention to the prose it annotates: the highlight regex can
@@ -141,7 +142,53 @@ export function timelineEventsFor(
  * whole proposal calls whenever the model could not reproduce the span exactly;
  * there is nothing to mis-transcribe here.
  */
-const proseCitationSchema = z.array(z.number().int().positive()).default([])
+export function forgivingArray<T extends z.ZodTypeAny>(
+  elementSchema: T,
+  options?: { min?: number; max?: number },
+) {
+  let arr = z.array(elementSchema)
+  if (options?.min !== undefined) arr = arr.min(options.min)
+  if (options?.max !== undefined) arr = arr.max(options.max)
+
+  return z.preprocess((val) => {
+    if (val === null || val === undefined) return []
+    if (Array.isArray(val)) return val
+    if (typeof val === 'string') {
+      const trimmed = val.trim()
+      if (!trimmed || trimmed.toLowerCase() === 'none' || trimmed.toLowerCase() === 'n/a') return []
+      return [trimmed]
+    }
+    if (typeof val === 'object') return [val]
+    return []
+  }, arr)
+}
+
+export function forgivingNumberArray<T extends z.ZodType<number> = z.ZodNumber>(
+  elementSchema?: T,
+  options?: { min?: number; max?: number },
+) {
+  const schema = elementSchema ?? (z.number().int().positive() as unknown as T)
+  let arr = z.array(schema)
+  if (options?.min !== undefined) arr = arr.min(options.min)
+  if (options?.max !== undefined) arr = arr.max(options.max)
+
+  return z.preprocess((val) => {
+    if (val === null || val === undefined) return []
+    if (Array.isArray(val)) {
+      return val
+        .map((v) => (typeof v === 'number' ? v : typeof v === 'string' ? parseInt(v, 10) : NaN))
+        .filter((n) => Number.isInteger(n) && n > 0)
+    }
+    if (typeof val === 'number' && Number.isInteger(val) && val > 0) return [val]
+    if (typeof val === 'string') {
+      const parsed = parseInt(val, 10)
+      if (Number.isInteger(parsed) && parsed > 0) return [parsed]
+    }
+    return []
+  }, arr)
+}
+
+const proseCitationSchema = forgivingNumberArray(undefined, { max: 24 })
   .describe('New-prose sentence numbers.')
 
 // This is intentionally a forgiving, default-heavy LLM input schema. The
@@ -224,47 +271,143 @@ export function buildReportAnalysisInputSchema(
   const report = z.object({
     // Model-authored report text is stored as supplied; this schema only asks
     // for the structure required to interpret it.
-    summary: z.string().default('').describe('Concise retrospective summary of the new prose as past history.'),
-    characters: z.array(CharacterLiveStateInputSchema).default([])
+    summary: z.string().trim().min(1).max(1200).describe('Concise retrospective summary of the new prose as past history.'),
+    characters: forgivingArray(CharacterLiveStateInputSchema, { max: 12 }).default([])
       .describe('Active characters in this scene: physical state, immediate posture, and epistemic updates.'),
-    entities: z.array(EntityLiveStateInputSchema).default([])
+    entities: forgivingArray(EntityLiveStateInputSchema, { max: 12 }).default([])
       .describe('Optional non-character entity updates (locations, artefacts, factions) with dynamic state keys.'),
-    threads: z.array(z.string()).default([])
-      .describe('Active narrative threads or open plot questions (e.g. "Who poisoned the king?").'),
+     // Thread strings become stored ThreadOperation.label (max 240); keep the
+     // grammar bound at or below that so a full-length string still decodes.
+     threads: forgivingArray(z.string().trim().max(240), { max: 12 }).default([])
+       .describe('Active narrative threads or open plot questions (e.g. "Who poisoned the king?").'),
     scene: sceneSchema
       .describe('Changed scene frame fields; transition uncertain withdraws the claim.'),
-    mentions: z.array(mentionInputSchema).default([])
+    mentions: forgivingArray(mentionInputSchema, { max: 24 }).default([])
       .describe('Distinct listed-fragment mentions using exact prose text, never bare pronouns.'),
-    candidateFragmentIds: z.array(z.string().trim()).default([])
-      .describe('Existing record IDs whose full text is needed to resolve contradictions or propose record corrections. Leave empty [] when there are no contradictions.'),
-    contradictions: z.array(z.object({
-      description: z.string().describe('What the contradiction is'),
-      recordCorrectionReason: z.string().trim().min(1).max(500).optional()
-        .describe('Why evidence proves the reusable record is wrong; omit for prose errors or unresolved conflicts.'),
-      fragmentIds: z.array(z.string().trim()).default([])
-        .describe('Reusable record IDs involved; grounded findings also need conflictingEvidence.'),
-      sourceSegments: proseCitationSchema
-        .describe('Sentence numbers in the new prose carrying the conflicting assertion.'),
-      conflictingEvidence: z.array(z.object({
-        fragmentId: z.string().trim(),
-        segments: z.array(z.number().int().positive()).default([])
-          .describe('Record sentence numbers carrying the incompatible claim.'),
-      })).default([])
-        .describe('Conflicting reusable records cited by sentence; ordinary state changes are not contradictions.'),
-    })).default([]),
   })
+
   return options.includeDirections === false
     ? report
     : report.extend({
-        directions: z.array(suggestionDirectionSchema).min(1)
+        directions: forgivingArray(suggestionDirectionSchema, { min: 1, max: 4 })
           .describe('Story-specific options for the next passage; aim for three distinct directions.'),
       })
 }
+
+export const contradictionInputSchema = z.object({
+  description: z.string().max(500).describe('What the contradiction is'),
+  recordCorrectionReason: z.string().trim().min(1).max(500).optional()
+    .describe('Why evidence proves the reusable record is wrong; omit for prose errors or unresolved conflicts.'),
+  fragmentIds: forgivingArray(z.string().trim().max(64), { max: 6 }).default([])
+    .describe('Reusable record IDs involved; grounded findings also need conflictingEvidence.'),
+  sourceSegments: forgivingNumberArray(undefined, { max: 12 })
+    .describe('Sentence numbers in the new prose carrying the conflicting assertion.'),
+  conflictingEvidence: forgivingArray(z.object({
+    fragmentId: z.string().trim().max(64),
+    segments: forgivingNumberArray(undefined, { max: 24 })
+      .describe('Record sentence numbers carrying the incompatible claim.'),
+  }), { max: 6 }).default([])
+    .describe('Conflicting reusable records cited by sentence; ordinary state changes are not contradictions.'),
+})
+
+export type ContradictionInput = z.infer<typeof contradictionInputSchema>
+
+export const reportObservationInputSchema = z.object({
+  summary: z.string().trim().min(1).max(1200).describe('Concise retrospective summary of the new prose as past history.'),
+  scene: sceneSchema.describe('Changed scene frame fields; transition uncertain withdraws the claim.'),
+  mentions: forgivingArray(mentionInputSchema, { max: 24 }).default([])
+    .describe('Distinct listed-fragment mentions using exact prose text, never bare pronouns.'),
+  candidateFragmentIds: forgivingArray(z.string().trim().max(64), { max: 12 }).default([]).optional()
+    .describe('Optional candidate fragment IDs from catalog that may need attention. Omit or leave empty [] if none.'),
+  contradictions: forgivingArray(contradictionInputSchema, { max: 6 }).default([]).optional()
+    .describe('Optional contradictions with established records. Omit or leave empty [] if none.'),
+})
+
+export type ReportObservationInput = z.infer<typeof reportObservationInputSchema>
+
+export const proposalEvidenceSchema = forgivingNumberArray(z.number().int().positive(), { min: 1, max: 24 })
+  .describe('New-prose sentence numbers establishing the proposal.')
+
+export const correctionProposalItemSchema = z.object({
+  fragmentId: z.string().min(1).max(64).describe('Target fragment ID.'),
+  field: z.enum(['content', 'description']).default('content'),
+  segment: z.preprocess((val) => (typeof val === 'string' ? parseInt(val, 10) : val), z.number().int().positive())
+    .describe('The numbered sentence in that fragment to replace.'),
+  newText: z.string().trim().min(1).max(500)
+    .describe('Corrected replacement text for the numbered assertion.'),
+  reason: z.string().max(500).optional(),
+})
+
+export const newFragmentProposalItemSchema = createFragmentOperationSchema.omit({ action: true }).extend({
+  description: z.string().trim().max(250).default(''),
+})
+
+export const librarianRecordCorrectionsInputSchema = z.object({
+  title: z.string().max(100).optional()
+    .describe('Optional proposal title.'),
+  evidenceSegments: proposalEvidenceSchema
+    .describe('New-prose sentence numbers establishing these corrections.'),
+  rationale: z.string().trim().max(1200).optional()
+    .describe('Optional shared rationale.'),
+  corrections: forgivingArray(correctionProposalItemSchema, { min: 1, max: 6 })
+    .describe('Localized record corrections grounded by reportAnalysis; not prose errors or unresolved conflicts.'),
+})
+
+export const librarianNewRecordsInputSchema = z.object({
+  title: z.string().max(100).optional()
+    .describe('Optional proposal title.'),
+  evidenceSegments: proposalEvidenceSchema
+    .describe('New-prose sentence numbers establishing these records.'),
+  rationale: z.string().trim().max(1200).optional()
+    .describe('Optional shared rationale.'),
+  newFragments: forgivingArray(newFragmentProposalItemSchema, { min: 1, max: 4 })
+    .describe('New reusable named records established by this prose; not event logs, current conditions, or scene details.'),
+})
+
+export const reportContinuityInputSchema = z.object({
+  characters: forgivingArray(CharacterLiveStateInputSchema, { max: 12 }).default([])
+    .describe('Active characters in this scene: immediate posture, sparse state dictionary of important physical/gear changes, and epistemic updates. Do NOT list absent background cast.'),
+  entities: forgivingArray(EntityLiveStateInputSchema, { max: 12 }).default([]).optional()
+    .describe('Optional non-character entity updates (locations, artefacts, factions) with dynamic state keys. Omit or leave empty [] if none.'),
+  // See reportAnalysis: grammar bound stays at or below stored label max (240).
+  threads: forgivingArray(z.string().trim().max(240), { max: 12 }).default([]).optional()
+    .describe('Active narrative threads or open plot questions (e.g. "Who poisoned the king?"). Omit or leave empty [] if none.'),
+  evidenceSegments: forgivingNumberArray(undefined, { max: 24 }).optional()
+    .describe('New-prose sentence numbers establishing any permanent record corrections or new records. Omit or leave empty [] if no corrections.'),
+  corrections: forgivingArray(correctionProposalItemSchema, { max: 6 }).default([]).optional()
+    .describe('Optional permanent corrections to existing catalog records when canon truly changes; cite fragmentId and segment number from delivered records. Omit or leave empty [] if none.'),
+  newRecords: forgivingArray(newFragmentProposalItemSchema, { max: 4 }).default([]).optional()
+    .describe('Optional new reusable named records established by this prose (character, knowledge, etc.). Omit or leave empty [] if none.'),
+})
+
+export type ReportContinuityInput = z.infer<typeof reportContinuityInputSchema>
+
+export const reportDirectionsInputSchema = z.object({
+  directions: forgivingArray(suggestionDirectionSchema, { min: 1, max: 4 })
+    .describe('Three distinct narrative directions for the next passage, each with title, description, and instruction.'),
+})
+
+export type ReportDirectionsInput = z.infer<typeof reportDirectionsInputSchema>
 
 /** Registry-free shape for the context preview and the tool-name listing. */
 export const reportAnalysisInputSchema = buildReportAnalysisInputSchema()
 
 type ReportAnalysisInput = z.infer<ReturnType<typeof buildReportAnalysisInputSchema>>
+
+/**
+ * Preserve the strict JSON Schema generated by Zod v4 (including required keys
+ * and exact property bounds) so that local inference engines (like llama.cpp's
+ * PEG grammar generator) do not loosen required fields or permit arbitrary key loops.
+ */
+export function toExactJsonSchema<T extends z.ZodTypeAny>(schema: T) {
+  const exact = z.toJSONSchema(schema)
+  return jsonSchema(exact, {
+    validate: (value: unknown) => {
+      const result = schema.safeParse(value)
+      return result.success ? { success: true, value: result.data } : { success: false, error: result.error }
+    },
+  })
+}
 
 function uniqueStrings(values: string[]): string[] {
   return [...new Set(values)]
@@ -446,7 +589,7 @@ function liveIdentitySet(entries: RegistryEntry[]): Set<string> {
 const CLEARED_STATE_VALUES = new Set(['none', 'cleared', 'removed', 'healed', 'empty', 'normal', 'default', 'null', 'undefined'])
 
 type NormalizedContinuityInput = {
-  scene: NonNullable<ReportAnalysisInput['scene']>
+  scene?: SceneUpdate | NonNullable<ReportAnalysisInput['scene']>
   threads?: string[]
   characters?: CharacterLiveStateInput[]
   entities?: EntityLiveStateInput[]
@@ -462,7 +605,7 @@ function normalizeContinuityProjection(
   options?: { checkedFragments?: Map<string, Fragment> },
 ): { projection: ContinuityProjection; skipped: Array<Skipped<{ kind: string; key: string }>> } {
   const skipped: Array<Skipped<{ kind: string; key: string }>> = []
-  let scene = input.scene
+  let scene: SceneInput & Partial<CitedEvidence> = (input.scene as (SceneInput & Partial<CitedEvidence>)) ?? { transition: 'uncertain', evidenceSegments: [] }
   const requiresSceneEvidence = sceneNeedsEvidence(scene)
   if (requiresSceneEvidence || (scene.evidenceSegments?.length ?? 0) > 0) {
     const resolved = citedEvidence(segments, scene.evidenceSegments ?? [])
@@ -689,15 +832,25 @@ function normalizeContinuityProjection(
 
   const characterStates: Record<string, CharacterLiveState> = {}
   for (const c of input.characters ?? []) {
-    const name = c.name.trim()
-    if (!name) continue
-
+    const suppliedName = c.name?.trim() ?? ''
     let resolvedId = c.characterId?.trim() || c.id?.trim()
     if (resolvedId && options?.checkedFragments) {
       const match = options.checkedFragments.get(resolvedId)
       if (!match || match.type !== 'character') {
         resolvedId = undefined
       }
+    }
+    // `name` is optional at the boundary: a model that cites the catalog id
+    // need not restate the name the catalog already carries.
+    const name = suppliedName
+      || (resolvedId && options?.checkedFragments ? (options.checkedFragments.get(resolvedId)?.name ?? '').trim() : '')
+    if (!name) {
+      skipped.push({
+        kind: 'character',
+        key: resolvedId || suppliedName || 'unnamed',
+        reason: 'A character item needs a name, or a characterId/id that resolves to a delivered character.',
+      })
+      continue
     }
     if (!resolvedId && options?.checkedFragments) {
       for (const [fid, fragment] of options.checkedFragments) {
@@ -710,30 +863,28 @@ function normalizeContinuityProjection(
 
     const stateRecord: Record<string, string> = {}
     if (c.state) {
-      for (const [k, v] of Object.entries(c.state)) {
-        const key = k.trim()
+      for (const entry of c.state) {
+        const key = entry.key.trim()
         if (!key) continue
-        if (v === null || v === undefined) {
-          stateRecord[key] = ''
-        } else {
-          const val = v.trim()
-          stateRecord[key] = CLEARED_STATE_VALUES.has(val.toLowerCase()) ? '' : val
-        }
+        const val = entry.value.trim()
+        stateRecord[key] = CLEARED_STATE_VALUES.has(val.toLowerCase()) ? '' : val
       }
     }
 
+    const charImmediate = c.immediate?.trim() ?? ''
     const knowledge = (c.knowledge ?? [])
-      .map((k) => k.trim())
+      .map((k) => (typeof k === 'string' ? k.trim() : ''))
       .filter((k) => k.length > 0)
     const secrets = (c.secrets ?? [])
-      .map((s) => s.trim())
+      .map((s) => (typeof s === 'string' ? s.trim() : ''))
       .filter((s) => s.length > 0)
 
+    const validCharId = resolvedId && FragmentIdSchema.safeParse(resolvedId).success ? resolvedId : undefined
     const stateKey = resolvedId ?? derivedContinuityKey(name)
     characterStates[stateKey] = {
-      ...(resolvedId ? { characterId: resolvedId } : {}),
+      ...(validCharId ? { characterId: validCharId } : {}),
       name,
-      ...(c.immediate?.trim() ? { immediate: c.immediate.trim() } : {}),
+      ...(charImmediate ? { immediate: charImmediate } : {}),
       ...(Object.keys(stateRecord).length > 0 ? { state: stateRecord } : {}),
       ...(knowledge.length > 0 ? { knowledge: [...new Set(knowledge)] } : {}),
       ...(secrets.length > 0 ? { secrets: [...new Set(secrets)] } : {}),
@@ -742,13 +893,23 @@ function normalizeContinuityProjection(
 
   const entityStates: Record<string, EntityLiveState> = {}
   for (const e of input.entities ?? []) {
-    const name = e.name.trim()
-    if (!name) continue
-
+    const suppliedName = e.name?.trim() ?? ''
     let resolvedId = e.entityId?.trim() || e.id?.trim()
     if (resolvedId && options?.checkedFragments) {
       const match = options.checkedFragments.get(resolvedId)
       if (!match) resolvedId = undefined
+    }
+    // `name` is optional at the boundary: a model that cites the catalog id
+    // need not restate the name the catalog already carries.
+    const name = suppliedName
+      || (resolvedId && options?.checkedFragments ? (options.checkedFragments.get(resolvedId)?.name ?? '').trim() : '')
+    if (!name) {
+      skipped.push({
+        kind: 'entity',
+        key: resolvedId || suppliedName || 'unnamed',
+        reason: 'An entity item needs a name, or an entityId/id that resolves to a delivered record.',
+      })
+      continue
     }
     if (!resolvedId && options?.checkedFragments) {
       for (const [fid, fragment] of options.checkedFragments) {
@@ -761,42 +922,68 @@ function normalizeContinuityProjection(
 
     const stateRecord: Record<string, string> = {}
     if (e.state) {
-      for (const [k, v] of Object.entries(e.state)) {
-        const key = k.trim()
+      for (const entry of e.state) {
+        const key = entry.key.trim()
         if (!key) continue
-        if (v === null || v === undefined) {
-          stateRecord[key] = ''
-        } else {
-          const val = v.trim()
-          stateRecord[key] = CLEARED_STATE_VALUES.has(val.toLowerCase()) ? '' : val
-        }
+        const val = entry.value.trim()
+        stateRecord[key] = CLEARED_STATE_VALUES.has(val.toLowerCase()) ? '' : val
       }
     }
 
+    const entImmediate = e.immediate?.trim() ?? ''
     const notes = (e.notes ?? [])
-      .map((n) => n.trim())
+      .map((n) => (typeof n === 'string' ? n.trim() : ''))
       .filter((n) => n.length > 0)
 
+    const validEntId = resolvedId && FragmentIdSchema.safeParse(resolvedId).success ? resolvedId : undefined
     const stateKey = resolvedId ?? derivedContinuityKey(name)
     entityStates[stateKey] = {
-      ...(resolvedId ? { entityId: resolvedId } : {}),
+      ...(validEntId ? { entityId: validEntId } : {}),
       name,
       ...(e.category ? { category: e.category } : {}),
-      ...(e.immediate?.trim() ? { immediate: e.immediate.trim() } : {}),
+      ...(entImmediate ? { immediate: entImmediate } : {}),
       ...(Object.keys(stateRecord).length > 0 ? { state: stateRecord } : {}),
       ...(notes.length > 0 ? { notes: [...new Set(notes)] } : {}),
     }
   }
 
-  const storedScene = (scene.evidenceSegments?.length ?? 0) > 0
-    ? scene
-    : {
-        transition: scene.transition,
-        ...(scene.line ? { line: scene.line } : {}),
-        ...(scene.location ? { location: scene.location } : {}),
-        ...(scene.time ? { time: scene.time } : {}),
-        ...(scene.elapsed ? { elapsed: scene.elapsed } : {}),
+  const locKey = scene.location?.key?.trim() ?? ''
+  const locLabel = scene.location?.label?.trim() ?? ''
+  const sanitizedLocation = scene.location && (locKey || locLabel)
+    ? {
+        key: locKey || derivedContinuityKey(locLabel),
+        label: locLabel || locKey,
+        ...(scene.location.fragmentId ? { fragmentId: scene.location.fragmentId } : {}),
       }
+    : undefined
+
+  const sanitizedTime = scene.time
+    ? {
+        label: scene.time.label,
+        certainty: scene.time.certainty,
+        ...(scene.time.calendar ? { calendar: scene.time.calendar } : {}),
+      }
+    : undefined
+
+  const sanitizedElapsed = scene.elapsed
+    ? {
+        label: scene.elapsed.label,
+        ...(scene.elapsed.minimumSeconds != null ? { minimumSeconds: scene.elapsed.minimumSeconds } : {}),
+        ...(scene.elapsed.maximumSeconds != null ? { maximumSeconds: scene.elapsed.maximumSeconds } : {}),
+      }
+    : undefined
+
+  const storedScene: SceneUpdate = {
+    transition: scene.transition,
+    ...(scene.line ? { line: scene.line } : {}),
+    ...(sanitizedLocation ? { location: sanitizedLocation } : {}),
+    ...(sanitizedTime ? { time: sanitizedTime } : {}),
+    ...(sanitizedElapsed ? { elapsed: sanitizedElapsed } : {}),
+    ...((scene.evidenceSegments?.length ?? 0) > 0 ? {
+      evidenceSegments: scene.evidenceSegments,
+      ...(scene.evidenceText ? { evidenceText: scene.evidenceText } : {}),
+    } : {}),
+  }
   return {
     projection: {
       version: 2,
@@ -811,60 +998,6 @@ function normalizeContinuityProjection(
     skipped,
   }
 }
-
-const proposalEvidenceSchema = z.array(z.number().int().positive()).min(1)
-  .describe('New-prose sentence numbers establishing the proposal.')
-
-/**
- * A correction names the sentence it replaces rather than reproducing it.
- *
- * The old shape asked for `oldText`/`newText`/`occurrence` — string surgery
- * against a record the model had only read. Calls failed outright on `oldText
- * was not found`, and those that succeeded submitted a whole copied paragraph,
- * so the "smallest correction" rule had to be reconstructed server-side and
- * still let scene recaps through. Addressing a sentence makes the scope
- * structural — a paragraph recap is not expressible — and removes the
- * transcription step entirely.
- */
-const correctionProposalItemSchema = z.object({
-  fragmentId: z.string().min(1).describe('Target fragment ID.'),
-  field: z.enum(['content', 'description']).default('content'),
-  segment: z.number().int().positive()
-    .describe('The numbered sentence in that fragment to replace.'),
-  newText: z.string().trim().min(1)
-    .describe('Corrected replacement text for the numbered assertion.'),
-  reason: z.string().max(500).optional(),
-})
-
-const newFragmentProposalItemSchema = createFragmentOperationSchema.omit({ action: true })
-
-/**
- * The online Librarian has a deliberately narrower write contract than chat
- * editing. It may correct an assertion that accepted prose made inaccurate, or
- * propose one genuinely new reusable record. Routine events and state changes
- * already have first-class homes in reportAnalysis.
- */
-export const librarianRecordCorrectionsInputSchema = z.object({
-  title: z.string().optional()
-    .describe('Optional proposal title.'),
-  evidenceSegments: proposalEvidenceSchema
-    .describe('New-prose sentence numbers establishing these corrections.'),
-  rationale: z.string().trim().optional()
-    .describe('Optional shared rationale.'),
-  corrections: z.array(correctionProposalItemSchema).min(1)
-    .describe('Localized record corrections grounded by reportAnalysis; not prose errors or unresolved conflicts.'),
-})
-
-export const librarianNewRecordsInputSchema = z.object({
-  title: z.string().optional()
-    .describe('Optional proposal title.'),
-  evidenceSegments: proposalEvidenceSchema
-    .describe('New-prose sentence numbers establishing these records.'),
-  rationale: z.string().trim().optional()
-    .describe('Optional shared rationale.'),
-  newFragments: z.array(newFragmentProposalItemSchema).min(1)
-    .describe('New reusable named records established by this prose; not event logs, current conditions, or scene details.'),
-})
 
 type AnalysisProposalSkipped = Skipped<{
   operationId: string
@@ -1042,12 +1175,155 @@ export function createAnalysisTools(
     }))
   }
 
+  const customTypes = opts?.customFragmentTypes ?? []
+  const allowedTypes = ['character', 'knowledge', ...customTypes.map((t) => t.type)]
+
+  const resolveEvidence = async (cited: number[]) => {
+    if (!opts?.proseFragmentId) {
+      return { evidence: { evidenceSegments: cited, evidenceText: '' } }
+    }
+    const prose = await getFragment(opts.dataDir, opts.storyId, opts.proseFragmentId)
+    const resolved = citedEvidence(segmentText(prose?.content ?? ''), cited)
+    const problem = citationProblem(resolved)
+    if (problem) {
+      return {
+        error: {
+          ok: false,
+          proposalCount: collector.fragmentChangeProposals.length,
+          queuedOperationCount: 0,
+          invalid: 1,
+          evidenceMatched: false,
+          note: `${problem} Cite sentence numbers from the New Prose Fragment.`,
+        },
+      }
+    }
+    return { evidence: resolved.evidence }
+  }
+
+  /** A proposal call is one atomic, self-contained author-facing change. */
+  const queueValidatedProposal = async (params: {
+    toolName: 'proposeRecordCorrections' | 'proposeNewRecords' | 'reportContinuity'
+    proposalKind: 'correction' | 'new-fragment'
+    evidence: CitedEvidence
+    title?: string
+    rationale?: string
+    operations: FragmentChangeOperation[]
+    rejected?: AnalysisProposalSkipped[]
+  }) => {
+    const skipped: AnalysisProposalSkipped[] = [...(params.rejected ?? [])]
+    for (const operation of params.operations) {
+      if (operation.action === 'replace_text') {
+        const contractError = correctionContractError(operation)
+        if (contractError) {
+          skipped.push({ operationId: operation.operationId ?? '', action: operation.action, reason: contractError })
+        }
+      }
+    }
+
+    const validation = (skipped.length === 0 && opts)
+      ? await validateOperations(opts.dataDir, opts.storyId, params.operations, {
+        allowedCreateTypes: allowedTypes,
+        createTypeScopeDescription: 'librarian analysis proposals',
+      })
+      : { operations: [], results: [] as OperationValidation[] }
+    for (const result of validation.results) {
+      if (result.status !== 'valid') skipped.push(skippedOperation(result))
+    }
+
+    if (skipped.length > 0 || (opts && validation.operations.length !== params.operations.length)) {
+      return {
+        ok: false,
+        proposalCount: collector.fragmentChangeProposals.length,
+        queuedOperationCount: 0,
+        invalid: skipped.length,
+        evidenceMatched: true,
+        ...operationEchoFields(validation.results),
+        skipped,
+        note: 'The proposal was not queued because one or more operations were invalid.',
+      }
+    }
+
+    queueFragmentChangeProposal({
+      collector,
+      title: params.title,
+      rationale: params.rationale,
+      proposalKind: params.proposalKind,
+      evidenceSegments: params.evidence.evidenceSegments,
+      evidenceText: params.evidence.evidenceText,
+      eligibilityReason: params.rationale,
+      autoApplySafe: true,
+      operations: validation.operations,
+      validation: validation.results,
+    })
+    emitProgress('record-maintenance')
+    return {
+      ok: true,
+      proposalCount: collector.fragmentChangeProposals.length,
+      queuedOperationCount: validation.operations.length,
+      invalid: 0,
+      evidenceMatched: true,
+      autoApplySafe: true,
+      ...operationEchoFields(validation.results),
+    }
+  }
+
+  const resolveCorrectionOperations = async (corrections: Array<z.infer<typeof correctionProposalItemSchema>>) => {
+    const unresolved: AnalysisProposalSkipped[] = []
+    const operations: FragmentChangeOperation[] = []
+    for (const correction of corrections) {
+      const field = correction.field ?? 'content'
+      const target = opts ? await getFragment(opts.dataDir, opts.storyId, correction.fragmentId) : null
+      const current = target?.[field]
+      if (!target || typeof current !== 'string') {
+        unresolved.push({
+          operationId: '',
+          action: 'replace_text',
+          reason: `There is no reusable record ${correction.fragmentId}${field === 'content' ? '' : ` with a ${field} field`}.`,
+        })
+        continue
+      }
+      if (!numberedFragmentIds.has(correction.fragmentId)) {
+        unnumberedProposalAttemptIds.add(correction.fragmentId)
+        unresolved.push({
+          operationId: '',
+          action: 'replace_text',
+          reason: `${correction.fragmentId} has not been shown with numbered sentences. Include it in candidateFragmentIds or report mentions to inspect its numbered sentences.`,
+        })
+        continue
+      }
+      const segments = segmentText(current)
+      const segment = segments.find((candidate) => candidate.index === correction.segment)
+      if (!segment) {
+        unresolved.push({
+          operationId: '',
+          action: 'replace_text',
+          reason: `${correction.fragmentId}.${field} has ${segments.length} numbered sentences; ${correction.segment} is not one of them.`,
+        })
+        continue
+      }
+      const twins = segments.filter((candidate) => candidate.text === segment.text)
+      operations.push({
+        action: 'replace_text',
+        fragmentId: correction.fragmentId,
+        field,
+        oldText: segment.text,
+        newText: correction.newText,
+        replaceAll: false,
+        ...(twins.length > 1
+          ? { occurrence: twins.findIndex((candidate) => candidate.index === segment.index) + 1 }
+          : {}),
+        ...(correction.reason ? { reason: correction.reason } : {}),
+      })
+    }
+    return { operations, unresolved }
+  }
+
   if (opts?.includeReportTool !== false) {
     tools.reportAnalysis = tool({
       description: 'Report all prose findings in one self-contained batch. Evidence fields cite numbered sentences.',
-      inputSchema: buildReportAnalysisInputSchema(opts?.continuityKeys ?? {}, {
-        includeDirections: opts?.disableDirections !== true,
-      }),
+      inputSchema: toExactJsonSchema(buildReportAnalysisInputSchema(opts?.continuityKeys ?? {}, {
+        includeDirections: false,
+      })),
       execute: async (input: ReportAnalysisInput & Record<string, any>) => {
         const {
           summary,
@@ -1055,8 +1331,6 @@ export function createAnalysisTools(
           entities = [],
           threads = [],
           mentions = [],
-          candidateFragmentIds = [],
-          contradictions = [],
           scene = { transition: 'uncertain', evidenceSegments: [] },
           // Legacy programmatic fallbacks
           events = [],
@@ -1064,9 +1338,25 @@ export function createAnalysisTools(
           threadOperations = [],
           knowledgeOperations = [],
         } = input
-        const directions = 'directions' in input && Array.isArray(input.directions)
-          ? input.directions as SuggestionDirection[]
+        const candidateFragmentIds: string[] = Array.isArray(input.candidateFragmentIds)
+          ? input.candidateFragmentIds.filter((id: unknown): id is string => typeof id === 'string')
           : []
+        const contradictions: ContradictionInput[] = Array.isArray(input.contradictions)
+          ? (input.contradictions as ContradictionInput[])
+          : []
+        const rawDirections = 'directions' in input && Array.isArray(input.directions)
+          ? input.directions
+          : []
+        const directions: SuggestionDirection[] = rawDirections.map((d: any) => {
+          const title = (d.title || d.label || d.summary || 'Direction').trim()
+          const instruction = (d.instruction || d.prompt || d.description || '').trim()
+          const description = (d.description || d.summary || d.instruction || d.prompt || '').trim()
+          return {
+            title,
+            description,
+            instruction,
+          }
+        })
         const sourceProse = opts?.proseFragmentId
           ? await getFragment(opts.dataDir, opts.storyId, opts.proseFragmentId)
           : null
@@ -1087,16 +1377,16 @@ export function createAnalysisTools(
             }
           } catch {
             const uniqueIds = [...new Set<string>([
-              ...mentions.map((m) => m.fragmentId),
+              ...mentions.map((m) => m.fragmentId).filter(Boolean),
               ...candidateFragmentIds,
-              ...contradictions.flatMap((c) => [
+              ...contradictions.flatMap((c: any) => [
                 ...(c.fragmentIds ?? []),
-                ...(c.conflictingEvidence ?? []).map((evidence) => evidence.fragmentId),
+                ...(c.conflictingEvidence ?? []).map((evidence: any) => evidence.fragmentId),
               ]),
               ...(scene.location?.fragmentId ? [scene.location.fragmentId] : []),
-              ...stateOperations.flatMap((op: any) => op.subject?.fragmentId ? [op.subject.fragmentId] : []),
-              ...threadOperations.flatMap((operation: any) => operation.relatedFragmentIds),
-              ...knowledgeOperations.map((operation: any) => operation.characterId),
+              ...((stateOperations ?? []).flatMap((op: any) => op?.subject?.fragmentId ? [op.subject.fragmentId] : [])),
+              ...((threadOperations ?? []).flatMap((operation: any) => operation?.relatedFragmentIds ?? [])),
+              ...((knowledgeOperations ?? []).map((operation: any) => operation?.characterId)),
               ...characters.flatMap((c) => [c.id, c.characterId]).filter((id): id is string => Boolean(id)),
               ...entities.flatMap((e) => [e.id, e.entityId]).filter((id): id is string => Boolean(id)),
             ].filter((id): id is string => typeof id === 'string' && id.trim().length > 0))]
@@ -1118,47 +1408,54 @@ export function createAnalysisTools(
           threads,
           characters,
           entities,
-          stateOperations,
-          threadOperations,
-          knowledgeOperations,
+          stateOperations: stateOperations ?? undefined,
+          threadOperations: threadOperations ?? undefined,
+          knowledgeOperations: knowledgeOperations ?? undefined,
         }, proseSegments, continuityRegistry, {
           checkedFragments: opts ? checkedFragments : undefined,
         })
         collector.continuityProjection = normalizedProjection.projection
 
-        collector.events = events
+        const candidateEvents = input.events ?? events
+        const rawEvents: string[] = Array.isArray(candidateEvents)
+          ? candidateEvents
+          : (typeof candidateEvents === 'string' && candidateEvents.trim().length > 0 ? [candidateEvents.trim()] : [])
+        collector.events = rawEvents
         collector.summaryUpdate = summary
         collector.directions = directions
 
         // A highlight can only bind text that actually occurs in the passage.
         const skippedMentions: Array<Skipped<{ fragmentId: string; text: string }>> = []
-        let anchoredMentions: typeof mentions = []
+        const anchoredMentions: LibrarianMention[] = []
         const proseLower = (opts?.proseFragmentId && sourceProse?.content)
           ? sourceProse.content.toLowerCase()
           : null
 
         for (const m of mentions) {
-          if (opts && !checkedFragments.has(m.fragmentId)) {
+          const fid = m.fragmentId.trim()
+          const text = m.text.trim()
+          if (!text) continue
+          if (!fid || (opts && !checkedFragments.has(fid))) {
             skippedMentions.push({
-              fragmentId: m.fragmentId,
-              text: m.text,
-              reason: `Unknown fragment ID "${m.fragmentId}". Mentions must cite existing catalog records.`,
+              fragmentId: fid,
+              text,
+              reason: `Unknown fragment ID "${fid}". Mentions must cite existing catalog records.`,
             })
             continue
           }
           if (proseLower) {
-            const anchored = anchorMentionText(m.text, proseLower)
+            const anchored = anchorMentionText(text, proseLower)
             if (anchored == null) {
               skippedMentions.push({
-                fragmentId: m.fragmentId,
-                text: m.text,
+                fragmentId: fid,
+                text,
                 reason: 'Not verbatim in the passage, so it cannot be highlighted.',
               })
               continue
             }
-            anchoredMentions.push({ ...m, text: anchored })
+            anchoredMentions.push({ fragmentId: fid, text: anchored })
           } else {
-            anchoredMentions.push(m)
+            anchoredMentions.push({ fragmentId: fid, text })
           }
         }
 
@@ -1197,8 +1494,9 @@ export function createAnalysisTools(
           if (!opts?.proseFragmentId) {
             groundedContradictions.push({
               ...contradiction,
+              recordCorrectionReason: contradiction.recordCorrectionReason ?? undefined,
               conflictingEvidence: (contradiction.conflictingEvidence ?? [])
-                .map((evidence) => ({ ...evidence, evidenceText: '' })),
+                .map((evidence: any) => ({ ...evidence, evidenceText: '' })),
             })
             continue
           }
@@ -1221,7 +1519,7 @@ export function createAnalysisTools(
 
           // The record is shown sentence-numbered too, so the conflicting side
           // is cited rather than re-quoted, exactly like the prose side.
-          const evidenceChecks = await Promise.all((contradiction.conflictingEvidence ?? []).map(async (evidence) => {
+          const evidenceChecks = await Promise.all((contradiction.conflictingEvidence ?? []).map(async (evidence: any) => {
             const fragment = checkedFragments.get(evidence.fragmentId)
               ?? await getFragment(opts.dataDir, opts.storyId, evidence.fragmentId)
             const reusable = Boolean(fragment && fragment.type !== 'prose' && fragment.type !== 'summary')
@@ -1269,6 +1567,7 @@ export function createAnalysisTools(
           focusedThreadCount: collector.continuityProjection.threadFocus.length,
           knowledgeOperationCount: collector.continuityProjection.knowledgeOperations.length,
           directionCount: collector.directions.length,
+          directionsProvided: collector.directions.length > 0,
           ...(resolvedFragments.length > 0 ? {
             resolvedFragments,
             resolvedFragmentNote: 'Full records for what you just reported, not already in your context. Their sentences are numbered for correction targeting. Use them for directions and record maintenance; no further reads are needed for these.',
@@ -1283,6 +1582,327 @@ export function createAnalysisTools(
             skippedContradictions,
             skippedContradictionNote: 'Contradictions are review findings, not guesses. Cite sentence numbers on both sides.',
           } : {}),
+        }
+      },
+    })
+
+    tools.reportObservation = tool({
+      description: 'Step 1 of 3: Report grounded narrative observations: retrospective summary, scene frame, catalog mentions, and candidate/contradiction records.',
+      inputSchema: toExactJsonSchema(reportObservationInputSchema),
+      execute: async (input: ReportObservationInput) => {
+        const {
+          summary,
+          scene = { transition: 'uncertain', evidenceSegments: [] },
+          mentions = [],
+          candidateFragmentIds = [],
+          contradictions = [],
+        } = input
+        if (!summary || summary.trim().length === 0) {
+          return { ok: false, note: 'Empty summary: please provide a concise retrospective summary of the prose.' }
+        }
+
+        const sourceProse = opts?.proseFragmentId
+          ? await getFragment(opts.dataDir, opts.storyId, opts.proseFragmentId)
+          : null
+        const proseSegments = segmentText(sourceProse?.content ?? '')
+
+        const checkedFragments = new Map<string, Fragment>()
+        if (opts) {
+          try {
+            const allStoryFragments = await listFragments(opts.dataDir, opts.storyId)
+            for (const f of allStoryFragments) checkedFragments.set(f.id, f)
+          } catch {
+            // best-effort fallback
+          }
+          if (checkedFragments.size === 0) {
+            const uniqueIds = [...new Set<string>([
+              ...mentions.map((m) => m.fragmentId).filter(Boolean),
+              ...candidateFragmentIds,
+              ...contradictions.flatMap((c: any) => [
+                ...(c.fragmentIds ?? []),
+                ...(c.conflictingEvidence ?? []).map((evidence: any) => evidence.fragmentId),
+              ]),
+              ...(scene.location?.fragmentId ? [scene.location.fragmentId] : []),
+            ].filter((id): id is string => typeof id === 'string' && id.trim().length > 0))]
+
+            const checks = await Promise.all(
+              uniqueIds.map(async (fid) => ({ fid, fragment: await getFragment(opts.dataDir, opts.storyId, fid) })),
+            )
+            for (const check of checks) {
+              if (check.fragment) checkedFragments.set(check.fid, check.fragment)
+            }
+          }
+        }
+
+        const normalizedProjection = normalizeContinuityProjection({
+          scene,
+        }, proseSegments, continuityRegistry, {
+          checkedFragments: opts ? checkedFragments : undefined,
+        })
+        collector.continuityProjection.scene = normalizedProjection.projection.scene
+        collector.summaryUpdate = summary
+
+        // Anchor mentions
+        const skippedMentions: Array<Skipped<{ fragmentId: string; text: string }>> = []
+        const anchoredMentions: LibrarianMention[] = []
+        const proseLower = (opts?.proseFragmentId && sourceProse?.content)
+          ? sourceProse.content.toLowerCase()
+          : null
+
+        for (const m of mentions) {
+          const fid = m.fragmentId.trim()
+          const text = m.text.trim()
+          if (!text) continue
+          if (!fid || (opts && !checkedFragments.has(fid))) {
+            skippedMentions.push({
+              fragmentId: fid,
+              text,
+              reason: `Unknown fragment ID "${fid}". Mentions must cite existing catalog records.`,
+            })
+            continue
+          }
+          if (proseLower) {
+            const anchored = anchorMentionText(text, proseLower)
+            if (anchored == null) {
+              skippedMentions.push({
+                fragmentId: fid,
+                text,
+                reason: 'Not verbatim in the passage, so it cannot be highlighted.',
+              })
+              continue
+            }
+            anchoredMentions.push({ fragmentId: fid, text: anchored })
+          } else {
+            anchoredMentions.push({ fragmentId: fid, text })
+          }
+        }
+
+        collector.mentions = anchoredMentions
+
+        const rawCandidateIds = (candidateFragmentIds ?? []).filter((id): id is string => typeof id === 'string')
+        const validCandidateFragmentIds = opts
+          ? rawCandidateIds.filter((id) => checkedFragments.has(id))
+          : rawCandidateIds
+        collector.candidateFragmentIds = [...new Set(validCandidateFragmentIds)]
+
+        // Contradiction Grounding
+        const skippedContradictions: Array<Skipped<{ description: string }>> = []
+        const groundedContradictions: AnalysisCollector['contradictions'] = []
+        for (const contradiction of contradictions) {
+          if (!opts?.proseFragmentId) {
+            groundedContradictions.push({
+              ...contradiction,
+              recordCorrectionReason: contradiction.recordCorrectionReason ?? undefined,
+              conflictingEvidence: (contradiction.conflictingEvidence ?? [])
+                .map((evidence: any) => ({ ...evidence, evidenceText: '' })),
+            })
+            continue
+          }
+          const citedSource = citedEvidence(proseSegments, contradiction.sourceSegments ?? [])
+          const citationIssue = citationProblem(citedSource)
+          if (citationIssue) {
+            skippedContradictions.push({
+              description: contradiction.description,
+              reason: citationIssue,
+            })
+            continue
+          }
+          if ((contradiction.conflictingEvidence ?? []).length === 0) {
+            skippedContradictions.push({
+              description: contradiction.description,
+              reason: 'The finding did not cite a conflicting sentence in a reusable record.',
+            })
+            continue
+          }
+
+          const evidenceChecks = await Promise.all((contradiction.conflictingEvidence ?? []).map(async (evidence: any) => {
+            const fragment = checkedFragments.get(evidence.fragmentId)
+              ?? await getFragment(opts.dataDir, opts.storyId, evidence.fragmentId)
+            const reusable = Boolean(fragment && fragment.type !== 'prose' && fragment.type !== 'summary')
+            const resolved = reusable
+              ? citedEvidence(segmentText(fragment!.content), evidence.segments)
+              : { evidence: { evidenceSegments: [] as number[], evidenceText: '' }, invalid: [] as number[] }
+            return { fragmentId: evidence.fragmentId, valid: reusable && citationProblem(resolved) === null, resolved }
+          }))
+          const badEvidence = evidenceChecks.find((check) => !check.valid)
+          if (badEvidence) {
+            skippedContradictions.push({
+              description: contradiction.description,
+              reason: `Cite the numbered sentence in ${badEvidence.fragmentId} that carries the incompatible claim; it must be a reusable non-prose record.`,
+            })
+            continue
+          }
+          const conflictingEvidence = evidenceChecks.map((check) => ({
+            fragmentId: check.fragmentId,
+            segments: check.resolved.evidence.evidenceSegments,
+            evidenceText: check.resolved.evidence.evidenceText,
+          }))
+          groundedContradictions.push({
+            description: contradiction.description,
+            ...(contradiction.recordCorrectionReason ? { recordCorrectionReason: contradiction.recordCorrectionReason } : {}),
+            fragmentIds: uniqueStrings(evidenceChecks.map((check) => check.fragmentId)),
+            sourceSegments: citedSource.evidence.evidenceSegments,
+            sourceEvidenceText: citedSource.evidence.evidenceText,
+            conflictingEvidence,
+          })
+        }
+        collector.contradictions = groundedContradictions
+
+        // Deliver resolved fragments with numbered sentences for mentions, candidates, and contradictory records
+        const fragmentIdsToDeliver = uniqueStrings([
+          ...anchoredMentions.map((mention) => mention.fragmentId),
+          ...validCandidateFragmentIds,
+          ...groundedContradictions.flatMap((c) => c.conflictingEvidence?.map((e) => e.fragmentId) ?? []),
+        ])
+        const resolvedFragments = deliverResolvedFragments(
+          checkedFragments,
+          fragmentIdsToDeliver,
+          numberedFragmentIds,
+        )
+
+        hasReported = true
+        emitProgress('observation')
+
+        return {
+          ok: true,
+          nextInstruction: 'Step 1 complete. Now execute reportContinuity for characters physically present in this scene. Note only significant physical or gear changes (e.g. broken weapon, injury) as key/value pairs in state. If no changes occurred, omit state or leave it empty []. If no permanent corrections or new records are needed, leave corrections and newRecords empty [].',
+          summaryLength: summary.length,
+          mentionCount: anchoredMentions.length,
+          candidateFragmentCount: collector.candidateFragmentIds.length,
+          contradictionCount: collector.contradictions.length,
+          sceneTransition: collector.continuityProjection.scene?.transition ?? 'uncertain',
+          ...(resolvedFragments.length > 0 ? {
+            resolvedFragments,
+            resolvedFragmentNote: 'Full records for what you just reported, not already in your context. Their sentences are numbered for correction targeting. Use them for continuity and record maintenance; no further reads are needed for these.',
+          } : {}),
+          ...(skippedMentions.length > 0 ? { skippedMentions } : {}),
+          ...(skippedContradictions.length > 0 ? { skippedContradictions } : {}),
+        }
+      },
+    })
+
+    tools.reportContinuity = tool({
+      description: 'Step 2 of 3: Report active character working memory (immediate kinetic posture, sparse state of important changes like a broken weapon or injury, knowledge, secrets), entity states, threads, and optional record corrections. If no permanent corrections are needed, leave corrections empty [].',
+      inputSchema: toExactJsonSchema(reportContinuityInputSchema),
+      execute: async (input: ReportContinuityInput) => {
+        const {
+          characters = [],
+          entities = [],
+          threads = [],
+          evidenceSegments = [],
+          corrections = [],
+          newRecords = [],
+        } = input
+        const sourceProse = opts?.proseFragmentId
+          ? await getFragment(opts.dataDir, opts.storyId, opts.proseFragmentId)
+          : null
+        const proseSegments = segmentText(sourceProse?.content ?? '')
+
+        const checkedFragments = new Map<string, Fragment>()
+        if (opts) {
+          try {
+            const allStoryFragments = await listFragments(opts.dataDir, opts.storyId)
+            for (const f of allStoryFragments) checkedFragments.set(f.id, f)
+          } catch {
+            // best-effort fallback
+          }
+          if (checkedFragments.size === 0) {
+            const uniqueIds = [...new Set<string>([
+              ...characters.flatMap((c) => [c.id, c.characterId]).filter((id): id is string => Boolean(id)),
+              ...entities.flatMap((e) => [e.id, e.entityId]).filter((id): id is string => Boolean(id)),
+              ...(corrections ?? []).map((c) => c.fragmentId),
+            ].filter((id): id is string => typeof id === 'string' && id.trim().length > 0))]
+
+            const checks = await Promise.all(
+              uniqueIds.map(async (fid) => ({ fid, fragment: await getFragment(opts.dataDir, opts.storyId, fid) })),
+            )
+            for (const check of checks) {
+              if (check.fragment) checkedFragments.set(check.fid, check.fragment)
+            }
+          }
+        }
+
+        const normalizedProjection = normalizeContinuityProjection({
+          scene: collector.continuityProjection.scene,
+          characters,
+          entities,
+          threads,
+        }, proseSegments, continuityRegistry, {
+          checkedFragments: opts ? checkedFragments : undefined,
+        })
+
+        collector.continuityProjection.characterStates = normalizedProjection.projection.characterStates
+        collector.continuityProjection.entityStates = normalizedProjection.projection.entityStates
+        collector.continuityProjection.threadOperations = normalizedProjection.projection.threadOperations
+        collector.continuityProjection.threadFocus = normalizedProjection.projection.threadFocus
+
+        // Record proposals: corrections and new reusable records
+        const proposalSkipped: any[] = []
+        if (opts?.disableSuggestions !== true && opts?.proseFragmentId) {
+          if (corrections && corrections.length > 0) {
+            const evidence = await resolveEvidence(evidenceSegments)
+            if (evidence.error) {
+              proposalSkipped.push(evidence.error)
+            } else {
+              const { operations, unresolved } = await resolveCorrectionOperations(corrections)
+              const result = await queueValidatedProposal({
+                toolName: 'reportContinuity',
+                proposalKind: 'correction',
+                evidence: evidence.evidence!,
+                operations,
+                rejected: unresolved,
+              })
+              if (!result.ok && 'skipped' in result && Array.isArray(result.skipped)) {
+                proposalSkipped.push(...result.skipped)
+              }
+            }
+          }
+
+          if (newRecords && newRecords.length > 0) {
+            const evidence = await resolveEvidence(evidenceSegments)
+            if (evidence.error) {
+              proposalSkipped.push(evidence.error)
+            } else {
+              const result = await queueValidatedProposal({
+                toolName: 'reportContinuity',
+                proposalKind: 'new-fragment',
+                evidence: evidence.evidence!,
+                operations: newRecords.map((operation) => ({ ...operation, description: operation.description ?? '', action: 'create_fragment' as const })),
+              })
+              if (!result.ok && 'skipped' in result && Array.isArray(result.skipped)) {
+                proposalSkipped.push(...result.skipped)
+              }
+            }
+          }
+        }
+
+        emitProgress(collector.fragmentChangeProposals.length > 0 ? 'record-maintenance' : 'observation')
+
+        return {
+          ok: true,
+          nextInstruction: 'Step 2 complete. Now execute reportDirections to report three distinct creative narrative directions for the next passage.',
+          characterCount: Object.keys(normalizedProjection.projection.characterStates ?? {}).length,
+          entityCount: Object.keys(normalizedProjection.projection.entityStates ?? {}).length,
+          threadCount: (normalizedProjection.projection.threadOperations ?? []).length,
+          proposalCount: collector.fragmentChangeProposals.length,
+          ...(normalizedProjection.skipped.length > 0 ? { skippedContinuity: normalizedProjection.skipped } : {}),
+          ...(proposalSkipped.length > 0 ? { skippedProposals: proposalSkipped } : {}),
+        }
+      },
+    })
+  }
+
+  if (opts?.disableDirections !== true) {
+    tools.reportDirections = tool({
+      description: 'Step 3 of 3: Report three distinct creative narrative directions for what could happen in the next passage. Analysis is complete after this call.',
+      inputSchema: toExactJsonSchema(reportDirectionsInputSchema),
+      execute: async (input: ReportDirectionsInput) => {
+        collector.directions = input.directions
+        emitProgress('directions')
+        return {
+          ok: true,
+          nextInstruction: 'Step 3 complete. Analysis finished.',
+          directionCount: collector.directions.length,
         }
       },
     })
@@ -1301,151 +1921,13 @@ export function createAnalysisTools(
   }
 
   if (!opts?.disableSuggestions && opts?.proseFragmentId) {
-    const customTypes = opts?.customFragmentTypes ?? []
-    const allowedTypes = ['character', 'knowledge', ...customTypes.map(t => t.type)]
-    const resolveEvidence = async (cited: number[]) => {
-      const prose = await getFragment(opts.dataDir, opts.storyId, opts.proseFragmentId!)
-      const resolved = citedEvidence(segmentText(prose?.content ?? ''), cited)
-      const problem = citationProblem(resolved)
-      if (problem) {
-        return {
-          error: {
-            ok: false,
-            proposalCount: collector.fragmentChangeProposals.length,
-            queuedOperationCount: 0,
-            invalid: 1,
-            evidenceMatched: false,
-            note: `${problem} Cite sentence numbers from the New Prose Fragment.`,
-          },
-        }
-      }
-      return { evidence: resolved.evidence }
-    }
-
-    /** A proposal call is one atomic, self-contained author-facing change. */
-    const queueValidatedProposal = async (params: {
-      toolName: 'proposeRecordCorrections' | 'proposeNewRecords'
-      proposalKind: 'correction' | 'new-fragment'
-      evidence: CitedEvidence
-      title?: string
-      rationale?: string
-      operations: FragmentChangeOperation[]
-      rejected?: AnalysisProposalSkipped[]
-    }) => {
-      const skipped: AnalysisProposalSkipped[] = [...(params.rejected ?? [])]
-      for (const operation of params.operations) {
-        if (operation.action === 'replace_text') {
-          const contractError = correctionContractError(operation)
-          if (contractError) {
-            skipped.push({ operationId: operation.operationId ?? '', action: operation.action, reason: contractError })
-          }
-        }
-      }
-
-      const validation = skipped.length === 0
-        ? await validateOperations(opts.dataDir, opts.storyId, params.operations, {
-          allowedCreateTypes: allowedTypes,
-          createTypeScopeDescription: 'librarian analysis proposals',
-        })
-        : { operations: [], results: [] as OperationValidation[] }
-      for (const result of validation.results) {
-        if (result.status !== 'valid') skipped.push(skippedOperation(result))
-      }
-
-      if (skipped.length > 0 || validation.operations.length !== params.operations.length) {
-        return {
-          ok: false,
-          proposalCount: collector.fragmentChangeProposals.length,
-          queuedOperationCount: 0,
-          invalid: skipped.length,
-          evidenceMatched: true,
-          ...operationEchoFields(validation.results),
-          skipped,
-          note: 'The proposal was not queued because one or more operations were invalid.',
-        }
-      }
-
-      queueFragmentChangeProposal({
-        collector,
-        title: params.title,
-        rationale: params.rationale,
-        proposalKind: params.proposalKind,
-        evidenceSegments: params.evidence.evidenceSegments,
-        evidenceText: params.evidence.evidenceText,
-        eligibilityReason: params.rationale,
-        autoApplySafe: true,
-        operations: validation.operations,
-        validation: validation.results,
-      })
-      emitProgress('record-maintenance')
-      return {
-        ok: true,
-        proposalCount: collector.fragmentChangeProposals.length,
-        queuedOperationCount: validation.operations.length,
-        invalid: 0,
-        evidenceMatched: true,
-        autoApplySafe: true,
-        ...operationEchoFields(validation.results),
-      }
-    }
-
     tools.proposeRecordCorrections = tool({
       description: 'Queue author-reviewed corrections for reusable records proven wrong by a grounded reportAnalysis finding. Do not rewrite prose or unresolved conflicts.',
       inputSchema: librarianRecordCorrectionsInputSchema,
       execute: async ({ title, evidenceSegments, rationale, corrections }) => {
         const evidence = await resolveEvidence(evidenceSegments)
         if (evidence.error) return evidence.error
-        // Resolve each cited sentence into the exact span it addresses. The
-        // model never states the old text, so it cannot get it wrong; an
-        // unresolvable citation is reported against the numbering it saw.
-        const unresolved: AnalysisProposalSkipped[] = []
-        const operations: FragmentChangeOperation[] = []
-        for (const correction of corrections) {
-          const field = correction.field ?? 'content'
-          const target = await getFragment(opts.dataDir, opts.storyId, correction.fragmentId)
-          const current = target?.[field]
-          if (!target || typeof current !== 'string') {
-            unresolved.push({
-              operationId: '',
-              action: 'replace_text',
-              reason: `There is no reusable record ${correction.fragmentId}${field === 'content' ? '' : ` with a ${field} field`}.`,
-            })
-            continue
-          }
-          if (!numberedFragmentIds.has(correction.fragmentId)) {
-            unnumberedProposalAttemptIds.add(correction.fragmentId)
-            unresolved.push({
-              operationId: '',
-              action: 'replace_text',
-              reason: `${correction.fragmentId} has not been shown with numbered sentences. Include it in candidateFragmentIds or report mentions to inspect its numbered sentences.`,
-            })
-            continue
-          }
-          const segments = segmentText(current)
-          const segment = segments.find((candidate) => candidate.index === correction.segment)
-          if (!segment) {
-            unresolved.push({
-              operationId: '',
-              action: 'replace_text',
-              reason: `${correction.fragmentId}.${field} has ${segments.length} numbered sentences; ${correction.segment} is not one of them.`,
-            })
-            continue
-          }
-          const twins = segments.filter((candidate) => candidate.text === segment.text)
-          operations.push({
-            action: 'replace_text',
-            fragmentId: correction.fragmentId,
-            field,
-            oldText: segment.text,
-            newText: correction.newText,
-            replaceAll: false,
-            ...(twins.length > 1
-              ? { occurrence: twins.findIndex((candidate) => candidate.index === segment.index) + 1 }
-              : {}),
-            ...(correction.reason ? { reason: correction.reason } : {}),
-          })
-        }
-
+        const { operations, unresolved } = await resolveCorrectionOperations(corrections)
         return queueValidatedProposal({
           toolName: 'proposeRecordCorrections',
           proposalKind: 'correction',
@@ -1470,7 +1952,7 @@ export function createAnalysisTools(
           evidence: evidence.evidence!,
           title,
           rationale,
-          operations: newFragments.map((operation) => ({ ...operation, action: 'create_fragment' as const })),
+          operations: newFragments.map((operation) => ({ ...operation, description: operation.description ?? '', action: 'create_fragment' as const })),
         })
       },
     })

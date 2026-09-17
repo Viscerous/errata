@@ -1,5 +1,5 @@
 import { MISSING_SYSTEM_PROMPT_FALLBACK } from '../instructions'
-import type { ToolSet } from 'ai'
+import { hasToolCall, type ToolSet } from 'ai'
 import type { Fragment, StoryMeta } from '@/contracts/story'
 import { compileAgentContext } from '../agents/compile-agent-context'
 import type { ActivityStreamEvent } from '../agents/activity-stream'
@@ -37,6 +37,8 @@ import {
   type ToolLoopStepUsage,
 } from './tool-runner'
 import { isAnalyzeWorkflowComplete, selectAnalyzeToolStage } from './analyze-stages'
+
+export const DEFAULT_ANALYZE_IDLE_TIMEOUT_MS = 180_000
 
 type LibrarianRuntime = Awaited<ReturnType<typeof resolveAgentRuntime>>
 
@@ -331,6 +333,18 @@ async function runOnlineAnalyzePass(
       },
     })
 
+    const availableToolNames = Object.keys(compiled.tools)
+    const hasObservationTool = availableToolNames.includes('reportObservation')
+    const hasContinuityTool = availableToolNames.includes('reportContinuity')
+    const hasDirectionsTool = availableToolNames.includes('reportDirections') && !disableDirections
+
+    const terminalTool = hasDirectionsTool
+      ? 'reportDirections'
+      : (hasContinuityTool ? 'reportContinuity' : 'reportAnalysis')
+    const terminalRequiresTool = hasDirectionsTool
+      ? (hasContinuityTool ? 'reportContinuity' : 'reportAnalysis')
+      : (hasObservationTool ? 'reportObservation' : undefined)
+
     const result = await runCompiledToolPass({
       compiled,
       model,
@@ -339,18 +353,23 @@ async function runOnlineAnalyzePass(
       topK,
       providerOptions,
       maxOutputTokens: guards.maxOutputTokens,
-      maxSteps: 8,
+      maxSteps: 5,
       emit,
       abortSignal,
-      idleTimeoutMs,
+      idleTimeoutMs: idleTimeoutMs ?? DEFAULT_ANALYZE_IDLE_TIMEOUT_MS,
+      terminalToolName: terminalTool,
+      terminalRequiresToolName: terminalRequiresTool,
       prepareStep: ({ steps }) => {
-        const stage = selectAnalyzeToolStage(Object.keys(compiled.tools), steps)
+        const stage = selectAnalyzeToolStage(availableToolNames, steps)
         return {
           activeTools: stage.activeTools,
-          toolChoice: stage.stage === 'primary' ? 'required' : 'auto',
+          toolChoice: stage.activeTools.length > 0 ? 'required' : 'none',
         }
       },
-      stopWhen: ({ steps }) => isAnalyzeWorkflowComplete(Object.keys(compiled.tools), steps),
+      stopWhen: [
+        hasToolCall(terminalTool),
+        ({ steps }) => isAnalyzeWorkflowComplete(availableToolNames, steps),
+      ],
     })
     const { modelId: servedModelId, usage } = await resolveAndReportServedUsage(
       dataDir,
@@ -360,11 +379,12 @@ async function runOnlineAnalyzePass(
       { providerId, configuredModelId: modelId, servedModelId: result.servedModelId },
     )
     const toolCallNames = result.toolCalls.map((call) => call.toolName)
-    const deterministicallyComplete = isAnalyzeWorkflowComplete(Object.keys(compiled.tools), [{
+    const deterministicallyComplete = isAnalyzeWorkflowComplete(availableToolNames, [{
       toolResults: result.toolCalls.map((call) => ({ toolName: call.toolName, output: call.result })),
     }])
     const successfulReport = [...result.toolCalls].reverse().find((call) => (
-      call.toolName === 'reportAnalysis' && booleanToolResultField(call.result, 'ok') === true
+      (call.toolName === 'reportContinuity' || call.toolName === 'reportAnalysis' || call.toolName === 'reportObservation')
+      && booleanToolResultField(call.result, 'ok') === true
     ))
     // A natural stop after inspecting newly supplied records is itself the
     // model's "nothing else changed" signal. Only forced endings (step/length

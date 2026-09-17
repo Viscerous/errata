@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React from 'react'
-import { render, fireEvent, screen, waitFor } from '@testing-library/react'
+import { render, fireEvent, screen, waitFor, cleanup } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -12,6 +12,7 @@ const { proposeDirections, generateAndSave, getStory } = vi.hoisted(() => ({
 
 vi.mock('@/lib/api', () => ({
   api: {
+    agents: { cancel: vi.fn().mockResolvedValue(undefined) },
     generation: {
       proposeDirections,
       cancel: vi.fn(),
@@ -116,6 +117,7 @@ describe('direction card activation', () => {
   })
 
   afterEach(() => {
+    cleanup()
     vi.unstubAllGlobals()
     localStorage.clear()
   })
@@ -194,9 +196,10 @@ describe('direction card activation', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'Play the protagonist' }))
     expect(localStorage.getItem('errata:generation-mode')).toBe('play')
     first.unmount()
-    mount('story-two')
+    const second = mount('story-two')
     expect(screen.getAllByRole('tab').slice(0, 2).map((tab) => tab.textContent)).toEqual(['Direct', 'Play'])
     expect(screen.getByRole('tab', { name: 'Play the protagonist' }).getAttribute('aria-selected')).toBe('true')
+    second.unmount()
   })
 
   it('commits on Enter for a keyboard user, whose focus was its own interaction', async () => {

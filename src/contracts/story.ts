@@ -3,7 +3,7 @@ import { AUTHOR_INPUT_MODES } from './generation'
 
 export const FragmentIdSchema = z.string().regex(/^[a-z]{2,4}-[a-z0-9]{4,12}$/, {
   message: "Invalid fragment ID format. Must consist of a lowercase type prefix (2-4 letters), a hyphen, and 4-12 lowercase alphanumeric characters (e.g., 'ch-nezeze', 'loca-thehague'). No uppercase letters, spaces, or hyphens inside the suffix are allowed.",
-})
+}).max(17)
 
 export const FRAGMENT_TYPES = ['prose', 'character', 'guideline', 'knowledge', 'image', 'icon', 'marker', 'summary'] as const
 

@@ -19,31 +19,35 @@ import type { StoredLibrarianState } from '@/contracts/librarian'
 import { fragmentBaseHash } from '@/server/fragments/change-operations'
 
 // Mock the AI SDK to prevent real LLM calls
-vi.mock('ai', () => ({
-  stepCountIs: vi.fn((n: number) => n),
-  streamText: vi.fn(() => {
-    const text = 'Generated text'
-    // Create a proper ReadableStream for textStream that supports tee()
-    const textStream = new ReadableStream<string>({
-      start(controller) {
-        controller.enqueue(text)
-        controller.close()
-      },
-    })
-    return {
-      textStream,
-      text: Promise.resolve(text),
-      usage: Promise.resolve({ promptTokens: 10, completionTokens: 20, totalTokens: 30 }),
-      finishReason: Promise.resolve('stop' as const),
-      steps: Promise.resolve([]),
-      toTextStreamResponse: () =>
-        new Response(text, { headers: { 'Content-Type': 'text/plain; charset=utf-8' } }),
-    }
-  }),
-  tool: vi.fn((def: unknown) => def),
-  generateText: vi.fn(),
-  generateObject: vi.fn(),
-}))
+vi.mock('ai', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('ai')>()
+  return {
+    ...actual,
+    stepCountIs: vi.fn((n: number) => n),
+    streamText: vi.fn(() => {
+      const text = 'Generated text'
+      // Create a proper ReadableStream for textStream that supports tee()
+      const textStream = new ReadableStream<string>({
+        start(controller) {
+          controller.enqueue(text)
+          controller.close()
+        },
+      })
+      return {
+        textStream,
+        text: Promise.resolve(text),
+        usage: Promise.resolve({ promptTokens: 10, completionTokens: 20, totalTokens: 30 }),
+        finishReason: Promise.resolve('stop' as const),
+        steps: Promise.resolve([]),
+        toTextStreamResponse: () =>
+          new Response(text, { headers: { 'Content-Type': 'text/plain; charset=utf-8' } }),
+      }
+    }),
+    tool: vi.fn((def: unknown) => def),
+    generateText: vi.fn(),
+    generateObject: vi.fn(),
+  }
+})
 
 function makeAnalysis(overrides: Partial<LibrarianAnalysis> = {}): LibrarianAnalysis {
   return {
@@ -800,6 +804,137 @@ describe('librarian API routes', () => {
         }),
       )
       expect(res.status).toBe(422)
+    })
+  })
+
+  describe('GET /stories/:storyId/librarian/continuity', () => {
+    it('returns 404 for non-existent story', async () => {
+      const res = await app.fetch(
+        new Request('http://localhost/api/stories/nonexistent/librarian/continuity'),
+      )
+      expect(res.status).toBe(404)
+    })
+
+    it('returns empty ledger and view when no prose or characters exist', async () => {
+      const res = await app.fetch(
+        new Request(`http://localhost/api/stories/${storyId}/librarian/continuity`),
+      )
+      expect(res.status).toBe(200)
+      const data = await res.json()
+      expect(data).toHaveProperty('ledger')
+      expect(data).toHaveProperty('view')
+      expect(data.latestAnalysisId).toBeNull()
+    })
+
+    it('seeds character live state from fragment meta when no prose analyses exist', async () => {
+      await createFragment(dataDir, storyId, {
+        id: 'ch-hero',
+        type: 'character',
+        name: 'Hero',
+        description: 'Protagonist',
+        content: 'A brave adventurer.',
+        tags: [],
+        refs: [],
+        sticky: false,
+        placement: 'user',
+        createdAt: '2025-01-01T00:00:00.000Z',
+        updatedAt: '2025-01-01T00:00:00.000Z',
+        order: 0,
+        meta: {
+          liveState: {
+            immediate: 'crouched behind shield',
+            state: { attire: 'travelling cloak', gear: 'iron sword' },
+            knowledge: ['the gate is barred'],
+            secrets: ['carries the lost map'],
+          },
+        },
+      })
+
+      const res = await app.fetch(
+        new Request(`http://localhost/api/stories/${storyId}/librarian/continuity`),
+      )
+      expect(res.status).toBe(200)
+      const data = await res.json()
+      expect(data.ledger.characterStates).toHaveLength(1)
+      expect(data.ledger.characterStates[0]).toMatchObject({
+        characterId: 'ch-hero',
+        name: 'Hero',
+        immediate: 'crouched behind shield',
+        state: { attire: 'travelling cloak', gear: 'iron sword' },
+      })
+    })
+  })
+
+  describe('PUT /stories/:storyId/librarian/characters/:characterId/live-state', () => {
+    it('returns 404 if character does not exist', async () => {
+      const res = await app.fetch(
+        new Request(`http://localhost/api/stories/${storyId}/librarian/characters/nonexistent/live-state`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ immediate: 'standing' }),
+        }),
+      )
+      expect(res.status).toBe(404)
+    })
+
+    it('updates character live state in fragment meta and invalidates cache', async () => {
+      await createFragment(dataDir, storyId, {
+        id: 'ch-alice',
+        type: 'character',
+        name: 'Alice',
+        description: 'Scholar',
+        content: 'A quiet scholar.',
+        tags: [],
+        refs: [],
+        sticky: false,
+        placement: 'user',
+        createdAt: '2025-01-01T00:00:00.000Z',
+        updatedAt: '2025-01-01T00:00:00.000Z',
+        order: 0,
+        meta: {},
+      })
+
+      const putRes = await app.fetch(
+        new Request(`http://localhost/api/stories/${storyId}/librarian/characters/ch-alice/live-state`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            immediate: 'inspecting ancient tome',
+            state: { attire: 'scholar robes', gear: 'quill and ink' },
+            knowledge: ['the cipher is solved'],
+            secrets: ['hides a secret diary'],
+          }),
+        }),
+      )
+      expect(putRes.status).toBe(200)
+      const putData = await putRes.json()
+      expect(putData.ok).toBe(true)
+      expect(putData.characterState).toMatchObject({
+        characterId: 'ch-alice',
+        name: 'Alice',
+        immediate: 'inspecting ancient tome',
+        state: { attire: 'scholar robes', gear: 'quill and ink' },
+        knowledge: ['the cipher is solved'],
+        secrets: ['hides a secret diary'],
+      })
+
+      // Check updated fragment meta
+      const updatedFrag = await getFragment(dataDir, storyId, 'ch-alice')
+      expect(updatedFrag?.meta?.liveState).toMatchObject({
+        immediate: 'inspecting ancient tome',
+        state: { attire: 'scholar robes', gear: 'quill and ink' },
+      })
+
+      // Check continuity endpoint reflects the change
+      const contRes = await app.fetch(
+        new Request(`http://localhost/api/stories/${storyId}/librarian/continuity`),
+      )
+      expect(contRes.status).toBe(200)
+      const contData = await contRes.json()
+      const char = contData.ledger.characterStates.find((c: any) => c.characterId === 'ch-alice')
+      expect(char).toBeDefined()
+      expect(char.immediate).toBe('inspecting ancient tome')
+      expect(char.state.attire).toBe('scholar robes')
     })
   })
 })

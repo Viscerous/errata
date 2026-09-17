@@ -431,7 +431,7 @@ async function validateCreateOperation(
   if (operation.name.length > 100) {
     errors.push(makeOperationError('name_too_long', 'Fragment name exceeds 100 characters.'))
   }
-  if (operation.description.length > 250) {
+  if (typeof operation.description === 'string' && operation.description.length > 250) {
     errors.push(makeOperationError('description_too_long', 'Description exceeds 250 characters.'))
   }
   if (operation.content.trim().length === 0) {

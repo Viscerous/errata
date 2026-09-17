@@ -23,11 +23,7 @@ describe('librarian analyze tool stages', () => {
   it('keeps the common path in one request while omitting inspection tools', () => {
     expect(selectAnalyzeToolStage(tools, [])).toEqual({
       stage: 'primary',
-      activeTools: [
-        'reportAnalysis',
-        'proposeRecordCorrections',
-        'proposeNewRecords',
-      ],
+      activeTools: ['reportAnalysis'],
     })
   })
 
@@ -58,11 +54,7 @@ describe('librarian analyze tool stages', () => {
       step({ toolName: 'reportAnalysis', output: { ok: false, skippedContinuity: [{}] } }),
     ])).toEqual({
       stage: 'primary',
-      activeTools: [
-        'reportAnalysis',
-        'proposeRecordCorrections',
-        'proposeNewRecords',
-      ],
+      activeTools: ['reportAnalysis'],
     })
   })
 
@@ -105,6 +97,17 @@ describe('librarian analyze tool stages', () => {
     expect(isAnalyzeWorkflowComplete(tools, steps)).toBe(true)
   })
 
+  it('completes deterministically when an inspected report is followed by a natural model stop without proposals', () => {
+    const steps = [
+      step({
+        toolName: 'reportAnalysis',
+        output: { ok: true, inspectionRequired: true, resolvedFragments: [{ id: 'ch-1' }] },
+      }),
+      { toolResults: [] },
+    ]
+    expect(isAnalyzeWorkflowComplete(tools, steps)).toBe(true)
+  })
+
   it('uses the un-staged surface when the report tool is disabled', () => {
     const available = ['readFragments']
     expect(selectAnalyzeToolStage(available, [])).toEqual({
@@ -138,7 +141,67 @@ describe('librarian analyze tool stages', () => {
       characters: stage.toolNames.reduce((sum, name) => sum + (charactersByName.get(name) ?? 0), 0),
     }))
 
-    expect(stageCharacters.find((stage) => stage.id === 'primary')!.characters).toBeLessThan(totalCharacters)
-    expect(stageCharacters.find((stage) => stage.id === 'inspection')!.characters).toBe(totalCharacters)
+    expect(stageCharacters.find((stage) => stage.id === 'observation')!.characters).toBeLessThan(totalCharacters)
+    expect(stageCharacters.find((stage) => stage.id === 'continuity')!.characters).toBeLessThan(totalCharacters)
+    expect(stageCharacters.find((stage) => stage.id === 'directions')!.characters).toBeLessThan(totalCharacters)
+  })
+
+  it('sequences observation followed by directions when reportDirections is available', () => {
+    const stagedTools = ['reportAnalysis', 'reportDirections', 'readFragments', 'proposeRecordCorrections']
+    expect(selectAnalyzeToolStage(stagedTools, [])).toEqual({
+      stage: 'primary',
+      activeTools: ['reportAnalysis'],
+    })
+
+    const observationDone = [step({ toolName: 'reportAnalysis', output: { ok: true, directionsProvided: false } })]
+    expect(isAnalyzeWorkflowComplete(stagedTools, observationDone)).toBe(false)
+    expect(selectAnalyzeToolStage(stagedTools, observationDone)).toEqual({
+      stage: 'directions',
+      activeTools: ['reportDirections'],
+    })
+
+    const directionsDone = [
+      ...observationDone,
+      step({ toolName: 'reportDirections', output: { ok: true, directionCount: 3 } }),
+    ]
+    expect(isAnalyzeWorkflowComplete(stagedTools, directionsDone)).toBe(true)
+    expect(selectAnalyzeToolStage(stagedTools, directionsDone)).toEqual({
+      stage: 'inspection',
+      activeTools: [],
+    })
+  })
+
+  it('sequences observation -> continuity -> directions in the 3-beat pipeline', () => {
+    const threeBeatTools = ['reportObservation', 'reportContinuity', 'reportDirections', 'readFragments']
+    // Step 0: observation
+    expect(selectAnalyzeToolStage(threeBeatTools, [])).toEqual({
+      stage: 'observation',
+      activeTools: ['reportObservation'],
+    })
+    expect(isAnalyzeWorkflowComplete(threeBeatTools, [])).toBe(false)
+
+    // Step 1: continuity
+    const step0Done = [step({ toolName: 'reportObservation', output: { ok: true } })]
+    expect(isAnalyzeWorkflowComplete(threeBeatTools, step0Done)).toBe(false)
+    expect(selectAnalyzeToolStage(threeBeatTools, step0Done)).toEqual({
+      stage: 'continuity',
+      activeTools: ['reportContinuity'],
+    })
+
+    // Step 2: directions
+    const step1Done = [...step0Done, step({ toolName: 'reportContinuity', output: { ok: true } })]
+    expect(isAnalyzeWorkflowComplete(threeBeatTools, step1Done)).toBe(false)
+    expect(selectAnalyzeToolStage(threeBeatTools, step1Done)).toEqual({
+      stage: 'directions',
+      activeTools: ['reportDirections'],
+    })
+
+    // Complete
+    const step2Done = [...step1Done, step({ toolName: 'reportDirections', output: { ok: true } })]
+    expect(isAnalyzeWorkflowComplete(threeBeatTools, step2Done)).toBe(true)
+    expect(selectAnalyzeToolStage(threeBeatTools, step2Done)).toEqual({
+      stage: 'inspection',
+      activeTools: [],
+    })
   })
 })

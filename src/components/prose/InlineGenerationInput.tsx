@@ -84,7 +84,7 @@ export function InlineGenerationInput({
     const controller = abortRef.current
     const runId = runIdRef.current
     if (!controller) return
-    if (runId) void api.agents.cancel(storyId, runId).catch(() => controller.abort())
+    if (runId) void api.agents.cancel(storyId, runId)?.catch(() => controller.abort())
     else controller.abort()
   }, [storyId])
 

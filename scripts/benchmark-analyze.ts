@@ -22,6 +22,7 @@ interface Options {
   runs: number
   label: string
   idleTimeoutMs: number
+  inPlace: boolean
 }
 
 interface Sample {
@@ -48,7 +49,10 @@ function parseArgs(argv: string[]): Options {
   for (const arg of argv) {
     if (!arg.startsWith('--')) continue
     const separator = arg.indexOf('=')
-    if (separator === -1) continue
+    if (separator === -1) {
+      values.set(arg.slice(2), 'true')
+      continue
+    }
     values.set(arg.slice(2, separator), arg.slice(separator + 1))
   }
   const storyId = values.get('story')?.trim()
@@ -64,10 +68,14 @@ function parseArgs(argv: string[]): Options {
     runs: Math.max(1, Number.parseInt(values.get('runs') || '3', 10) || 3),
     label: values.get('label')?.trim() || 'analyze',
     idleTimeoutMs: Math.max(1, Number.parseInt(values.get('idle-timeout-ms') || '1800000', 10) || 1_800_000),
+    inPlace: values.has('in-place') || values.has('persist'),
   }
 }
 
 async function copyFixture(options: Options): Promise<{ root: string; dataDir: string }> {
+  if (options.inPlace) {
+    return { root: '', dataDir: options.dataDir }
+  }
   const root = await mkdtemp(join(tmpdir(), 'errata-analyze-'))
   const dataDir = join(root, 'data')
   await mkdir(join(dataDir, 'stories'), { recursive: true })
@@ -208,7 +216,7 @@ for (let index = 0; index < options.runs; index += 1) {
         contradictions: [],
       }
       samples.push(sample)
-      console.info(`[${options.label}] run ${index + 1}/${options.runs} failed before producing an analysis (${sample.durationMs} ms)`)
+      console.info(`[${options.label}] run ${index + 1}/${options.runs} failed before producing an analysis (${sample.durationMs} ms): ${error ?? 'unknown'}`)
       continue
     }
     const pass = analysis.passes?.find((candidate) => candidate.name === 'analyze')
@@ -239,7 +247,9 @@ for (let index = 0; index < options.runs; index += 1) {
       `[${options.label}] run ${index + 1}/${options.runs} ${sample.workflowComplete ? 'finished' : 'failed'} in ${sample.durationMs} ms (${sample.stepCount} steps)`,
     )
   } finally {
-    await rm(fixture.root, { recursive: true, force: true })
+    if (fixture.root) {
+      await rm(fixture.root, { recursive: true, force: true })
+    }
   }
 }
 

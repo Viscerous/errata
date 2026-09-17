@@ -82,6 +82,9 @@ export const qk = {
   librarianAnalyses: (storyId: string | undefined, branchId: BranchId) =>
     ['librarian-analyses', storyId, branchId] as const,
 
+  librarianContinuity: (storyId: string | undefined, branchId: BranchId) =>
+    ['librarian-continuity', storyId, branchId] as const,
+
   librarianConversations: (storyId: string | undefined, branchId: BranchId) =>
     ['librarian-conversations', storyId, branchId] as const,
 
@@ -144,5 +147,11 @@ export const q = {
       queryKey: qk.fragmentVersions(storyId, branchId, fragmentId),
       // Only observed when a fragmentId is present (call sites gate with `enabled`).
       queryFn: () => api.fragments.listVersions(storyId!, fragmentId!, branchId),
+    }),
+
+  librarianContinuity: (storyId: string | undefined, branchId: BranchId) =>
+    queryOptions({
+      queryKey: qk.librarianContinuity(storyId, branchId),
+      queryFn: () => api.librarian.getContinuity(storyId!),
     }),
 } as const

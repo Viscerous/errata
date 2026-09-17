@@ -1,14 +1,20 @@
 /** Tool exposure and deterministic completion for the adaptive Analyze loop. */
 
 export const ANALYZE_REPORT_TOOL = 'reportAnalysis'
+export const ANALYZE_OBSERVATION_TOOL = 'reportObservation'
+export const ANALYZE_CONTINUITY_TOOL = 'reportContinuity'
+export const ANALYZE_DIRECTIONS_TOOL = 'reportDirections'
+
 const ANALYZE_INSPECTION_TOOLS = new Set([
   'readFragments',
   'findFragments',
   'listFragments',
   'listFragmentTypes',
+  'proposeRecordCorrections',
+  'proposeNewRecords',
 ])
 
-export type AnalyzeToolStage = 'primary' | 'inspection'
+export type AnalyzeToolStage = 'observation' | 'continuity' | 'directions' | 'primary' | 'inspection'
 
 export interface AnalyzeToolResult {
   toolName: string
@@ -45,7 +51,12 @@ function lastResult(results: readonly AnalyzeToolResult[], toolName: string): An
 }
 
 function primaryTools(availableTools: readonly string[]): string[] {
-  return availableTools.filter((name) => !ANALYZE_INSPECTION_TOOLS.has(name))
+  return availableTools.filter(
+    (name) => !ANALYZE_INSPECTION_TOOLS.has(name)
+      && name !== ANALYZE_DIRECTIONS_TOOL
+      && name !== ANALYZE_OBSERVATION_TOOL
+      && name !== ANALYZE_CONTINUITY_TOOL,
+  )
 }
 
 /**
@@ -61,15 +72,47 @@ export function isAnalyzeWorkflowComplete(
   const results = flattenResults(steps)
   if (results.length === 0) return false
 
+  // 3-Beat Staged Pipeline
+  if (availableTools.includes(ANALYZE_OBSERVATION_TOOL)) {
+    const obs = lastResult(results, ANALYZE_OBSERVATION_TOOL)
+    if (!obs || !outputOk(obs.output)) return false
+
+    if (availableTools.includes(ANALYZE_CONTINUITY_TOOL)) {
+      const cont = lastResult(results, ANALYZE_CONTINUITY_TOOL)
+      if (!cont || !outputOk(cont.output)) return false
+    }
+
+    if (availableTools.includes(ANALYZE_DIRECTIONS_TOOL)) {
+      const dir = lastResult(results, ANALYZE_DIRECTIONS_TOOL)
+      if (!dir || !outputOk(dir.output)) return false
+    }
+
+    return true
+  }
+
+  // Legacy fallback: single reportAnalysis or staged reportAnalysis + reportDirections
   if (availableTools.includes(ANALYZE_REPORT_TOOL)) {
     const report = lastResult(results, ANALYZE_REPORT_TOOL)
     if (!report || !outputOk(report.output)) return false
+
+    if (availableTools.includes(ANALYZE_DIRECTIONS_TOOL)) {
+      const directionsProvided = outputRecord(report.output)?.directionsProvided === true
+      const directionsReport = lastResult(results, ANALYZE_DIRECTIONS_TOOL)
+      if (!directionsProvided && (!directionsReport || !outputOk(directionsReport.output))) {
+        return false
+      }
+      return true
+    }
+
     if (hasResolvedFragments(report.output)) {
-      const reportIndex = results.lastIndexOf(report)
-      const hasFollowupProposal = results.slice(reportIndex + 1).some((r) => (
-        r.toolName === 'proposeRecordCorrections' || r.toolName === 'proposeNewRecords'
-      ))
-      if (!hasFollowupProposal) return false
+      const lastStep = steps[steps.length - 1]
+      const lastStepHadProposal = lastStep?.toolResults?.some(
+        (r) => r.toolName === 'proposeRecordCorrections' || r.toolName === 'proposeNewRecords',
+      )
+      if (lastStepHadProposal) return true
+      const lastStepHadTools = (lastStep?.toolResults?.length ?? 0) > 0
+      if (!lastStepHadTools) return true
+      return false
     }
   }
 
@@ -81,20 +124,60 @@ export function selectAnalyzeToolStage(
   availableTools: readonly string[],
   steps: readonly AnalyzeStep[],
 ): AnalyzeStageSelection {
+  const results = flattenResults(steps)
+
+  // 3-Beat Staged Pipeline: Observation -> Continuity -> Directions
+  if (availableTools.includes(ANALYZE_OBSERVATION_TOOL)) {
+    const obs = lastResult(results, ANALYZE_OBSERVATION_TOOL)
+    if (!obs || !outputOk(obs.output)) {
+      return { stage: 'observation', activeTools: [ANALYZE_OBSERVATION_TOOL] }
+    }
+
+    if (availableTools.includes(ANALYZE_CONTINUITY_TOOL)) {
+      const cont = lastResult(results, ANALYZE_CONTINUITY_TOOL)
+      if (!cont || !outputOk(cont.output)) {
+        return { stage: 'continuity', activeTools: [ANALYZE_CONTINUITY_TOOL] }
+      }
+    }
+
+    if (availableTools.includes(ANALYZE_DIRECTIONS_TOOL)) {
+      const dir = lastResult(results, ANALYZE_DIRECTIONS_TOOL)
+      if (!dir || !outputOk(dir.output)) {
+        return { stage: 'directions', activeTools: [ANALYZE_DIRECTIONS_TOOL] }
+      }
+    }
+
+    return { stage: 'inspection', activeTools: [] }
+  }
+
+  // Legacy fallback: reportAnalysis (+ optional reportDirections)
   if (!availableTools.includes(ANALYZE_REPORT_TOOL)) {
     return { stage: 'primary', activeTools: [...availableTools] }
   }
-  const results = flattenResults(steps)
   if (results.length === 0) {
     return { stage: 'primary', activeTools: primaryTools(availableTools) }
   }
 
   const latestReport = lastResult(results, ANALYZE_REPORT_TOOL)
-  if (latestReport && hasResolvedFragments(latestReport.output)) {
+  if (!latestReport || !outputOk(latestReport.output)) {
+    return { stage: 'primary', activeTools: primaryTools(availableTools) }
+  }
+
+  if (availableTools.includes(ANALYZE_DIRECTIONS_TOOL)) {
+    const directionsProvided = outputRecord(latestReport.output)?.directionsProvided === true
+    const latestDirections = lastResult(results, ANALYZE_DIRECTIONS_TOOL)
+    if (!directionsProvided && (!latestDirections || !outputOk(latestDirections.output))) {
+      return { stage: 'directions', activeTools: [ANALYZE_DIRECTIONS_TOOL] }
+    }
+    // Directions are satisfied: never reopen inspection turns.
+    return { stage: 'inspection', activeTools: [] }
+  }
+
+  if (hasResolvedFragments(latestReport.output)) {
     return { stage: 'inspection', activeTools: [...availableTools] }
   }
 
-  return { stage: 'primary', activeTools: primaryTools(availableTools) }
+  return { stage: 'inspection', activeTools: [] }
 }
 
 export interface AnalyzeStageDefinition {
@@ -107,21 +190,63 @@ export interface AnalyzeStageDefinition {
 
 /** Static stage map used by the context preview. */
 export function describeAnalyzeToolStages(availableTools: readonly string[]): AnalyzeStageDefinition[] {
+  // 3-Beat Staged Pipeline Description
+  if (availableTools.includes(ANALYZE_OBSERVATION_TOOL)) {
+    const stages: AnalyzeStageDefinition[] = [
+      {
+        id: 'observation',
+        label: 'Observation',
+        description: 'First request: grounded narrative observation and mentions.',
+        conditional: false,
+        toolNames: [ANALYZE_OBSERVATION_TOOL],
+      },
+    ]
+    if (availableTools.includes(ANALYZE_CONTINUITY_TOOL)) {
+      stages.push({
+        id: 'continuity',
+        label: 'Continuity',
+        description: 'Second request: character live state, entities, and open threads.',
+        conditional: false,
+        toolNames: [ANALYZE_CONTINUITY_TOOL],
+      })
+    }
+    if (availableTools.includes(ANALYZE_DIRECTIONS_TOOL)) {
+      stages.push({
+        id: 'directions',
+        label: 'Directions',
+        description: 'Third request: three distinct next-passage directions.',
+        conditional: false,
+        toolNames: [ANALYZE_DIRECTIONS_TOOL],
+      })
+    }
+    return stages
+  }
+
   if (!availableTools.includes(ANALYZE_REPORT_TOOL)) return []
-  return [
+  const stages: AnalyzeStageDefinition[] = [
     {
       id: 'primary',
       label: 'Primary',
-      description: 'Normal one-request path: optional record proposals followed by the complete report.',
+      description: 'First request: observation and working memory update.',
       conditional: false,
       toolNames: primaryTools(availableTools),
     },
-    {
-      id: 'inspection',
-      label: 'Record inspection',
-      description: 'Used only when the report loads record bodies that may prompt proposals or a revised report.',
-      conditional: true,
-      toolNames: [...availableTools],
-    },
   ]
+  if (availableTools.includes(ANALYZE_DIRECTIONS_TOOL)) {
+    stages.push({
+      id: 'directions',
+      label: 'Directions',
+      description: 'Second request: three distinct next-passage directions.',
+      conditional: false,
+      toolNames: [ANALYZE_DIRECTIONS_TOOL],
+    })
+  }
+  stages.push({
+    id: 'inspection',
+    label: 'Record inspection',
+    description: 'Used only when the report loads record bodies that may prompt proposals or a revised report.',
+    conditional: true,
+    toolNames: [...availableTools],
+  })
+  return stages
 }

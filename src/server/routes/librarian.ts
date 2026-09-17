@@ -1,6 +1,11 @@
 import { Elysia, t } from 'elysia'
-import { getStory, getFragment, listFragments } from '../fragments/storage'
+import { getStory, getFragment, listFragments, updateFragment } from '../fragments/storage'
 import { getActiveProseIds } from '../fragments/prose-chain'
+import {
+  buildContinuityLedger,
+  projectContinuityView,
+  invalidateContinuityCache,
+} from '../librarian/continuity-view'
 import {
   getGenerationLog,
   listGenerationLogs,
@@ -107,6 +112,129 @@ export function librarianRoutes(dataDir: string) {
         warningByFragmentId: Object.fromEntries(warningEntries.filter((entry): entry is [string, string] => entry !== null)),
       } satisfies LibrarianAnalysisStatusResponse
     }, { detail: { summary: 'Get passage-analysis and story-summary coverage' } })
+
+    .get('/stories/:storyId/librarian/continuity', async ({ params, set }) => {
+      const story = await getStory(dataDir, params.storyId)
+      if (!story) {
+        set.status = 404
+        return { error: 'Story not found' }
+      }
+      const [activeProseIds, analysisIndex] = await Promise.all([
+        getActiveProseIds(dataDir, params.storyId),
+        getAnalysisIndex(dataDir, params.storyId),
+      ])
+      const activeProse = (await Promise.all(activeProseIds.map((id) => getFragment(dataDir, params.storyId, id))))
+        .filter((fragment): fragment is NonNullable<typeof fragment> => fragment?.type === 'prose' && !fragment.archived)
+      const ledger = await buildContinuityLedger({
+        dataDir,
+        storyId: params.storyId,
+        activeProseFragments: activeProse,
+        analysisIndex,
+      })
+      const view = projectContinuityView(ledger)
+      const latestProseId = activeProse.at(-1)?.id
+      const latestAnalysisId = latestProseId
+        ? analysisIndex?.latestProjectionByFragmentId[latestProseId]?.analysisId ?? analysisIndex?.latestByFragmentId[latestProseId]?.analysisId ?? null
+        : null
+      return {
+        ledger: ledger ?? null,
+        view: view ?? null,
+        latestAnalysisId,
+      }
+    }, { detail: { summary: 'Get branch folded continuity ledger and view' } })
+
+    .put('/stories/:storyId/librarian/characters/:characterId/live-state', async ({ params, body, set }) => {
+      const story = await getStory(dataDir, params.storyId)
+      if (!story) {
+        set.status = 404
+        return { error: 'Story not found' }
+      }
+      const charFragment = await getFragment(dataDir, params.storyId, params.characterId)
+      if (!charFragment) {
+        set.status = 404
+        return { error: 'Character fragment not found' }
+      }
+
+      const input = body as {
+        immediate?: string
+        state?: Record<string, string>
+        knowledge?: string[]
+        secrets?: string[]
+      }
+
+      const [activeProseIds, analysisIndex] = await Promise.all([
+        getActiveProseIds(dataDir, params.storyId),
+        getAnalysisIndex(dataDir, params.storyId),
+      ])
+      const activeProse = (await Promise.all(activeProseIds.map((id) => getFragment(dataDir, params.storyId, id))))
+        .filter((fragment): fragment is NonNullable<typeof fragment> => fragment?.type === 'prose' && !fragment.archived)
+      const latestProseId = activeProse.at(-1)?.id
+      const latestAnalysisId = latestProseId
+        ? analysisIndex?.latestProjectionByFragmentId[latestProseId]?.analysisId ?? analysisIndex?.latestByFragmentId[latestProseId]?.analysisId ?? null
+        : null
+
+      if (latestAnalysisId) {
+        const analysis = await getLibrarianAnalysis(dataDir, params.storyId, latestAnalysisId)
+        if (analysis) {
+          if (!analysis.continuityProjection) {
+            analysis.continuityProjection = {
+              version: 2,
+              scene: { transition: 'continue', line: 'present' },
+              stateOperations: [],
+              threadOperations: [],
+              threadFocus: [],
+              knowledgeOperations: [],
+              characterStates: {},
+            }
+          }
+          analysis.continuityProjection.characterStates = analysis.continuityProjection.characterStates ?? {}
+          analysis.continuityProjection.characterStates[params.characterId] = {
+            characterId: params.characterId,
+            name: charFragment.name,
+            immediate: input.immediate?.trim() || undefined,
+            state: input.state ?? {},
+            knowledge: input.knowledge ?? [],
+            secrets: input.secrets ?? [],
+          }
+          await saveLibrarianAnalysis(dataDir, params.storyId, analysis)
+        }
+      }
+
+      await updateFragment(dataDir, params.storyId, {
+        ...charFragment,
+        meta: {
+          ...charFragment.meta,
+          liveState: {
+            immediate: input.immediate?.trim() || undefined,
+            state: input.state ?? {},
+            knowledge: input.knowledge ?? [],
+            secrets: input.secrets ?? [],
+          },
+        },
+      })
+
+      invalidateContinuityCache(dataDir, params.storyId, latestAnalysisId ?? undefined)
+
+      return {
+        ok: true,
+        characterState: {
+          characterId: params.characterId,
+          name: charFragment.name,
+          immediate: input.immediate?.trim() || undefined,
+          state: input.state ?? {},
+          knowledge: input.knowledge ?? [],
+          secrets: input.secrets ?? [],
+        },
+      }
+    }, {
+      body: t.Object({
+        immediate: t.Optional(t.String()),
+        state: t.Optional(t.Record(t.String(), t.String())),
+        knowledge: t.Optional(t.Array(t.String())),
+        secrets: t.Optional(t.Array(t.String())),
+      }),
+      detail: { summary: 'Update live state for a character on the active branch' },
+    })
 
     .post('/stories/:storyId/librarian/analyze', async ({ params, body, set }) => {
       const story = await getStory(dataDir, params.storyId)

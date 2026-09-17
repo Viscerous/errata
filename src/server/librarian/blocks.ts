@@ -88,32 +88,66 @@ export function buildAnalyzeSystemPrompt(opts?: {
   const hasTool = (toolName: string): boolean => enabledTools
     ? enabledTools.has(toolName)
     : !disabledTools.has(toolName)
+  const isStaged = (enabledTools ? enabledTools.has('reportObservation') : false)
+    || (enabledTools ? enabledTools.has('reportContinuity') : false)
   const canReport = hasTool('reportAnalysis')
+  const canSuggestDirections = opts?.disableDirections !== true && hasTool('reportDirections')
   const canMaintainRecords = opts?.disableSuggestions !== true && (
     hasTool('proposeRecordCorrections') || hasTool('proposeNewRecords')
   )
-  const canSuggestDirections = opts?.disableDirections !== true && canReport
   const guidance: string[] = []
 
-  if (canReport) {
-    const directionPhrase = canSuggestDirections ? ', and three next-passage directions' : ''
-    guidance.push(`Call **reportAnalysis** with the complete narrative observation (summary, scene, characters, entities, threads, mentions${directionPhrase}).
-- **summary**: concise retrospective summary of the new prose as past history.
-- **scene**: transition (advance, continue, cut) and any location or time change.
-- **characters**: active characters with telegraphic live state: 'immediate' for the physical/kinetic posture right now; dynamic 'state' keys (attire, injuries, gear, status) that persist across scenes until changed or cleared (set to "" or "none" when healed/removed); 'knowledge' for new facts learned; and 'secrets' for withheld deceptions.
-- **entities**: non-character entity state updates (locations, objects) with dynamic 'state' keys.
-- **threads**: list active unresolved narrative questions or plot threads.
-- **mentions**: list catalog fragments (e.g. 'ch-0001') whose exact name appears verbatim in the new prose; leave empty [] if none.
-- **candidateFragmentIds**: record IDs only when reporting contradictions to inspect; leave empty [] otherwise.`)
+  if (isStaged) {
+    guidance.push(`You analyze the new prose in three sequential beats using the required tool at each step. Do NOT write markdown summaries or conversational responses in text—all reporting must be submitted via the active tool call.
+
+Step 1: **reportObservation**
+- summary: Concise retrospective summary of what happened in the new prose as past history.
+- scene: Transition (advance, continue, cut) and any location or narrative time anchor.
+- mentions: Exact verbatim appearances of known catalog records (e.g. 'ch-0001') in the prose, mapped to their fragment ID.
+- candidateFragmentIds: Optional catalog IDs that may require attention or update. Omit or leave empty [] if none.
+- contradictions: Incompatibilities between new prose and existing catalog records. Cite sentence numbers on both sides. Omit or leave empty [] if none.
+
+Step 2: **reportContinuity**
+- characters: Characters physically present or acting in this scene (based on Step 1 mentions). Do NOT list absent background cast. Cite characterId for catalog characters — name may be omitted, it resolves from the catalog:
+  - immediate: Kinetic posture or physical action right now (e.g. "tense posture; catching breath against the wall").
+  - state: Sparse dynamic state as key/value pairs of important physical or gear changes (e.g. [{"key":"weapon","value":"broken"}] or [{"key":"leftArm","value":"injured"}]). Omit or leave empty [] if no changes occurred in this passage. To clear a previous condition, set value to "healed" or "none" (e.g. [{"key":"leftArm","value":"healed"}]). Never pass an empty string as a value.
+  - knowledge: Significant new facts learned or deduced in this scene. Omit or leave empty [] if none.
+  - secrets: Deceptions, hidden motives, or withheld truths. Omit or leave empty [] if none.
+- entities: Non-character entity state changes (locations, artefacts, factions). Omit or leave empty [] if none.
+- threads: Active unresolved narrative questions or plot threads (1 to 3 items). Omit or leave empty [] if none.
+- corrections: Optional permanent corrections to delivered catalog records (from Step 1) when canon truly changed. Cite target fragmentId and segment number from delivered records. Omit or leave empty [] if none.
+- newRecords: Optional new reusable named records established by this prose. Omit or leave empty [] if none.
+
+Step 3: **reportDirections**
+- directions: Three distinct, compelling next-passage directions based on the narrative situation.
+
+Execution bounds:
+- Complete each step immediately using the active tool.
+- Step 1 leads directly to Step 2; Step 2 leads to Step 3; once reportDirections is submitted, the analysis is complete.`)
+
+    if (canMaintainRecords) {
+      guidance.push('If candidate records were flagged for permanent evolution or contradictions, inspect their numbered sentences and make any optional record-maintenance proposals in reportContinuity. Routine working memory belongs in characters and does NOT need proposals.')
+    }
+  } else if (canReport) {
+    guidance.push(`Execute the **reportAnalysis** tool immediately to report your narrative observations. Do NOT write markdown summaries or conversational responses in text—all observations must be submitted via the tool call.
+
+Observation guidelines:
+- characters: active characters with working memory. Cite characterId for catalog characters (name optional — it resolves from the catalog). Set 'immediate' for current physical/kinetic beat; dynamic 'state' dictionary (noting important changes like a broken weapon or injury, leave {} if none); 'knowledge' for new facts learned; and 'secrets' for withheld deceptions.
+- entities: non-character entity state updates (locations, objects, factions) with dynamic 'state' dictionary.
+- mentions: characters and entities present or referenced in this scene, mapping contextually to their known fragment ID (e.g. matching surnames, nicknames, or titles to their cast record).
+- scene: transition (advance, continue, cut) and any location or narrative time anchor.
+- summary: concise retrospective summary of the new prose as past history.
+- threads: list active unresolved narrative questions or plot threads.`)
+
+    if (canSuggestDirections) {
+      guidance.push('Step 3: When requested in the directions step, execute **reportDirections** with three distinct, compelling next-passage directions based on the narrative situation.')
+    }
+
+    if (canMaintainRecords) {
+      guidance.push('If candidate records were flagged for permanent evolution or contradictions, inspect their numbered sentences and make any optional record-maintenance proposals in the follow-up inspection step. Routine working memory (attire, posture, secrets) belongs in reportAnalysis.characters and does NOT need proposals.')
+    }
   } else {
     guidance.push('Review the new prose against the supplied context without inventing a replacement reporting tool.')
-  }
-
-  if (canReport && canMaintainRecords) {
-    guidance.push('If candidate records were requested for reported contradictions, inspect their numbered sentences and make any optional record-maintenance proposals in the follow-up step. The analysis ends once the proposal is submitted.')
-  }
-  if (canSuggestDirections) {
-    guidance.push('When ready to report, include three distinct next-passage directions in the first **reportAnalysis** call. If newly supplied records change the findings, include revised directions in the replacement report.')
   }
 
   return `

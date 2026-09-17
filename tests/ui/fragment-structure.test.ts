@@ -14,6 +14,7 @@ describe('fragment workspace structure', () => {
     expect(editor).toContain('FragmentTextField')
     expect(editor).toContain('FragmentVersionHistory')
     expect(editor).toContain('FragmentMetadataPanel')
+    expect(editor).toContain('CharacterLiveStatePanel')
     expect(editor.split('\n').length).toBeLessThan(800)
   })
 

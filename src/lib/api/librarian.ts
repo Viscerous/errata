@@ -4,6 +4,8 @@ import type {
   LibrarianAnalysisSummary,
   LibrarianAnalysisStatusResponse,
   LibrarianAnalysis,
+  LibrarianContinuityResponse,
+  UpdateCharacterLiveStateResponse,
   LibrarianAcceptChangeProposalResponse,
   LibrarianRevertChangeProposalResponse,
   ChatHistory,
@@ -16,6 +18,25 @@ export const librarian = {
     apiFetch<LibrarianStatusResponse>(`/stories/${storyId}/librarian/status`),
   getAnalysisIndex: (storyId: string) =>
     apiFetch<LibrarianAnalysisStatusResponse>(`/stories/${storyId}/librarian/analysis-index`),
+  getContinuity: (storyId: string) =>
+    apiFetch<LibrarianContinuityResponse>(`/stories/${storyId}/librarian/continuity`),
+  updateCharacterLiveState: (
+    storyId: string,
+    characterId: string,
+    data: {
+      immediate?: string
+      state?: Record<string, string>
+      knowledge?: string[]
+      secrets?: string[]
+    },
+  ) =>
+    apiFetch<UpdateCharacterLiveStateResponse>(
+      `/stories/${storyId}/librarian/characters/${characterId}/live-state`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      },
+    ),
   analyze: (storyId: string, fragmentId: string) =>
     apiFetch<{ ok: boolean; fragmentId: string }>(`/stories/${storyId}/librarian/analyze`, {
       method: 'POST',
