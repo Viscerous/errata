@@ -263,14 +263,14 @@ describe('summary roll-up maintenance', () => {
     expect(await listSummaryRollupNodes(dataDir, 'story-test')).toEqual([])
   })
 
-  it('runs with reasoning off and an output budget above the record cap', async () => {
+  it('respects the story thinking preference and keeps an output budget above the record cap', async () => {
     await createStory(dataDir, makeStory({ disableThinking: false }))
     await seedPassages(dataDir, 6)
 
     await deriveNextSummaryRollupNode(dataDir, 'story-test')
 
     const settings = agentMock.mock.calls[0][0] as { providerOptions?: unknown; maxOutputTokens: number }
-    expect(settings.providerOptions).toEqual({ openaiCompatible: { reasoningEffort: 'none' } })
+    expect(settings.providerOptions).toBeUndefined()
     expect(settings.maxOutputTokens).toBeGreaterThan(SUMMARY_ROLLUP_MAX_TEXT_CHARS / 4)
   })
 

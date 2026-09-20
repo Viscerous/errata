@@ -12,7 +12,7 @@ import { withKeyLock } from '../async-lock'
 import { createLogger } from '../logging'
 import { drainAgentStream } from '../agents/drain-agent-stream'
 import type { AgentStreamEvent } from '../agents/stream-types'
-import { buildProviderOptions, resolveAgentRuntime, samplingCallSettings } from '../llm/client'
+import { resolveAgentRuntime, samplingCallSettings } from '../llm/client'
 import { resolveAndReportServedUsage } from '../llm/usage-normalizer'
 import { getObservedServedModelId } from '../llm/served-models'
 import { getAnalysisIndex } from './storage'
@@ -396,9 +396,9 @@ async function deriveNextSummaryRollupNodeInner(
   if (!story || story.settings.disableLibrarianAutoAnalysis === true) return null
   const runtime = await resolveAgentRuntime(dataDir, storyId, 'librarian', story)
   // Keyed on what was last served, not what the story asked for: this key has to
-  // identify the weights, and a configured id does not. The thinking toggle is
-  // deliberately absent — roll-ups always run with reasoning off (see below), so
-  // keying on it would evict every node whenever the story toggles it.
+  // identify the weights, and a configured id does not. Thinking still follows
+  // the story preference, but it does not change the model whose output the
+  // roll-up tree summarizes, so it is not part of node identity.
   const observedModelId = getObservedServedModelId(runtime.providerId, runtime.modelId)
   // A process restart is also a possible local-model swap. Until one response
   // identifies what is currently behind the endpoint, plan from leaves under a
@@ -441,10 +441,9 @@ async function deriveNextSummaryRollupNodeInner(
     // call reliably needs.
     stopWhen: [terminalToolSucceeded(ROLLUP_TOOL_NAME), stepCountIs(2)],
     ...samplingCallSettings(runtime),
-    // Compression, not deliberation. Reasoning stays off whatever the story
-    // setting says: with it on, the output budget is spent before the record is
-    // reached, which is how this tier produced nothing at all.
-    providerOptions: buildProviderOptions(true),
+    // Thinking follows the same story-level preference as every other role.
+    // A task must not silently override the user's configured model behaviour.
+    providerOptions: runtime.providerOptions,
     maxOutputTokens: Math.min(
       runtime.guards.maxOutputTokens ?? SUMMARY_ROLLUP_MAX_OUTPUT_TOKENS,
       SUMMARY_ROLLUP_MAX_OUTPUT_TOKENS,
