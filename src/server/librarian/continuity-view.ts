@@ -36,6 +36,9 @@ export type {
 
 const MAX_CURRENT_STATE = 24
 const MAX_KNOWLEDGE_PER_CHARACTER = 16
+const MAX_LIVE_LIST_ITEMS = 24
+const MAX_CHARACTER_STATES = 24
+const MAX_ENTITY_STATES = 24
 /**
  * Threads only leave this list when resolved or abandoned, so an unbounded list
  * grows for the life of the story. It is not just a rendering concern: the live
@@ -105,6 +108,12 @@ function cloneLedger(ledger: ContinuityLedger | undefined): ContinuityLedger | u
 
 function takeLatest<T>(items: T[], maxItems: number): T[] {
   return items.slice(-maxItems)
+}
+
+function takeMostRecentlySourced<T extends { narrativePosition: number }>(items: T[], maxItems: number): T[] {
+  return [...items]
+    .sort((left, right) => left.narrativePosition - right.narrativePosition)
+    .slice(-maxItems)
 }
 
 function cacheSet(key: string, signature: string, ledger: ContinuityLedger | undefined): void {
@@ -213,6 +222,7 @@ export async function buildContinuityLedger(params: {
   const liveEntities = new Map<string, FoldedEntityLiveState>()
   const threadVisibility = new Map<string, LiveThreadEntry['visibility']>()
   let staleProjectionCount = 0
+  let sawCharacterRoster = false
 
   for (const item of loaded) {
     const source = sourceOf(item)
@@ -238,9 +248,11 @@ export async function buildContinuityLedger(params: {
       }
       for (const [_, char] of liveCharacters) {
         char.immediate = undefined
+        char.present = false
       }
       for (const [_, ent] of liveEntities) {
         ent.immediate = undefined
+        ent.present = false
       }
     }
     const impliedLine = transition === 'enter-flashback'
@@ -363,6 +375,17 @@ export async function buildContinuityLedger(params: {
       }
     }
 
+    const presentCharacterKeys = projection.presentCharacterKeys
+      ?? (projection.characterStates ? Object.keys(projection.characterStates) : undefined)
+    if (presentCharacterKeys) {
+      sawCharacterRoster = true
+      for (const character of liveCharacters.values()) {
+        character.present = false
+        character.immediate = undefined
+      }
+    }
+    const presentCharacterSet = new Set((presentCharacterKeys ?? []).map(normalizeContinuityKey))
+
     if (projection.characterStates) {
       for (const [key, update] of Object.entries(projection.characterStates)) {
         const charKey = normalizeContinuityKey(key)
@@ -378,25 +401,36 @@ export async function buildContinuityLedger(params: {
             }
           }
         }
-        const knowledge = [
+        const knowledge = takeLatest([...new Set([
           ...(existing?.knowledge ?? []),
           ...(update.knowledge ?? []),
-        ]
-        const secrets = [
+        ])], MAX_LIVE_LIST_ITEMS)
+        const secrets = takeLatest([...new Set([
           ...(existing?.secrets ?? []),
           ...(update.secrets ?? []),
-        ]
+        ])], MAX_LIVE_LIST_ITEMS)
         liveCharacters.set(charKey, {
           ...source,
           characterId: update.characterId ?? existing?.characterId,
           name: update.name || existing?.name || key,
           immediate: update.immediate ?? existing?.immediate,
           state,
-          knowledge: [...new Set(knowledge)],
-          secrets: [...new Set(secrets)],
+          knowledge,
+          secrets,
+          ...(presentCharacterKeys ? { present: presentCharacterSet.has(charKey) } : existing?.present !== undefined ? { present: existing.present } : {}),
         })
       }
     }
+
+    const presentEntityKeys = projection.presentEntityKeys
+      ?? (projection.entityStates ? Object.keys(projection.entityStates) : undefined)
+    if (presentEntityKeys) {
+      for (const entity of liveEntities.values()) {
+        entity.present = false
+        entity.immediate = undefined
+      }
+    }
+    const presentEntitySet = new Set((presentEntityKeys ?? []).map(normalizeContinuityKey))
 
     if (projection.entityStates) {
       for (const [key, update] of Object.entries(projection.entityStates)) {
@@ -413,10 +447,10 @@ export async function buildContinuityLedger(params: {
             }
           }
         }
-        const notes = [
+        const notes = takeLatest([...new Set([
           ...(existing?.notes ?? []),
           ...(update.notes ?? []),
-        ]
+        ])], MAX_LIVE_LIST_ITEMS)
         liveEntities.set(entityKey, {
           ...source,
           entityId: update.entityId ?? existing?.entityId,
@@ -424,7 +458,8 @@ export async function buildContinuityLedger(params: {
           category: update.category ?? existing?.category,
           immediate: update.immediate ?? existing?.immediate,
           state,
-          notes: [...new Set(notes)],
+          notes,
+          ...(presentEntityKeys ? { present: presentEntitySet.has(entityKey) } : existing?.present !== undefined ? { present: existing.present } : {}),
         })
       }
     }
@@ -434,28 +469,30 @@ export async function buildContinuityLedger(params: {
     ...thread,
     visibility: threadVisibility.get(thread.threadKey) ?? ('dormant' as const),
   }))
-  if (liveCharacters.size === 0) {
-    const characters = await listFragments(params.dataDir, params.storyId, 'character').catch(() => [])
-    for (const char of characters) {
-      const liveState = char.meta?.liveState as {
-        immediate?: string
-        state?: Record<string, string>
-        knowledge?: string[]
-        secrets?: string[]
-      } | undefined
-      if (liveState && (liveState.immediate || (liveState.state && Object.keys(liveState.state).length > 0) || (liveState.knowledge && liveState.knowledge.length > 0) || (liveState.secrets && liveState.secrets.length > 0))) {
-        liveCharacters.set(normalizeContinuityKey(char.name), {
-          sourceFragmentId: char.id,
-          analysisId: '',
-          narrativePosition: 0,
-          characterId: char.id,
-          name: char.name,
-          immediate: liveState.immediate,
-          state: liveState.state ?? {},
-          knowledge: liveState.knowledge ?? [],
-          secrets: liveState.secrets ?? [],
-        })
-      }
+  const characters = await listFragments(params.dataDir, params.storyId, 'character').catch(() => [])
+  for (const char of characters) {
+    const existingKey = [...liveCharacters].find(([, entry]) => entry.characterId === char.id)?.[0]
+      ?? normalizeContinuityKey(char.name)
+    if (liveCharacters.has(existingKey)) continue
+    const liveState = char.meta?.liveState as {
+      immediate?: string
+      state?: Record<string, string>
+      knowledge?: string[]
+      secrets?: string[]
+    } | undefined
+    if (liveState && (liveState.immediate || (liveState.state && Object.keys(liveState.state).length > 0) || (liveState.knowledge && liveState.knowledge.length > 0) || (liveState.secrets && liveState.secrets.length > 0))) {
+      liveCharacters.set(normalizeContinuityKey(char.name), {
+        sourceFragmentId: char.id,
+        analysisId: '',
+        narrativePosition: 0,
+        characterId: char.id,
+        name: char.name,
+        immediate: liveState.immediate,
+        state: liveState.state ?? {},
+        knowledge: liveState.knowledge ?? [],
+        secrets: liveState.secrets ?? [],
+        ...(sawCharacterRoster ? { present: false } : {}),
+      })
     }
   }
 
@@ -513,13 +550,19 @@ export function projectContinuityView(
   }
   const characterKnowledge = [...knowledgeByCharacterId.values()]
     .flatMap((entries) => takeLatest(entries, MAX_KNOWLEDGE_PER_CHARACTER))
+  const characterStates = ledger.characterStates
+    ? takeMostRecentlySourced(ledger.characterStates, MAX_CHARACTER_STATES)
+    : undefined
+  const entityStates = ledger.entityStates
+    ? takeMostRecentlySourced(ledger.entityStates, MAX_ENTITY_STATES)
+    : undefined
 
   return {
     currentState,
     liveThreads,
     characterKnowledge,
-    ...(ledger.characterStates ? { characterStates: ledger.characterStates } : {}),
-    ...(ledger.entityStates ? { entityStates: ledger.entityStates } : {}),
+    ...(characterStates ? { characterStates } : {}),
+    ...(entityStates ? { entityStates } : {}),
     currentScene: ledger.currentScene,
     staleProjectionCount: ledger.staleProjectionCount,
   }
@@ -640,12 +683,20 @@ function activeCast(source: ContinuitySource): Set<string> {
   return new Set([
     ...(source.stickyCharacters ?? []).map((fragment) => fragment.id),
     ...(source.recentCharacters ?? []).map((fragment) => fragment.id),
+    ...(source.continuityView?.characterStates ?? [])
+      .filter((character) => character.present !== false && Boolean(character.characterId))
+      .map((character) => character.characterId!),
   ])
 }
 
 function charactersInScope(source: ContinuitySource, scope: CharacterScope): Set<string> {
   if (scope === 'all') {
-    return new Set(source.continuityView?.characterKnowledge.map((entry) => entry.characterId) ?? [])
+    return new Set([
+      ...(source.continuityView?.characterKnowledge.map((entry) => entry.characterId) ?? []),
+      ...(source.continuityView?.characterStates ?? [])
+        .map((character) => character.characterId)
+        .filter((id): id is string => Boolean(id)),
+    ])
   }
   if (scope === 'passage-candidates') {
     return new Set([
@@ -734,6 +785,7 @@ export function renderContinuity(source: ContinuitySource, reader: ContinuityRea
     view,
     presentation,
     charactersInScope(source, policy.characterScope),
+    reader === 'librarian.analyze',
   )
 }
 
@@ -742,6 +794,7 @@ function renderAuthorialContinuity(
   view: ContinuityView,
   presentation: AuthorialPresentation,
   characterIds: Set<string>,
+  showThreadKeys: boolean,
 ): string {
   const copy = AUTHORIAL_PRESENTATION_COPY[presentation]
   const parts = [
@@ -774,7 +827,7 @@ function renderAuthorialContinuity(
     parts.push([
       copy.threadHeading,
       copy.threadGuidance,
-      ...threads.map((thread) => `- [${thread.visibility}] ${thread.label}${thread.note ? ` — ${thread.note}` : ''}`),
+      ...threads.map((thread) => `- [${thread.visibility}]${showThreadKeys ? ` [${thread.threadKey}]` : ''} ${thread.label}${thread.note ? ` — ${thread.note}` : ''}`),
     ].join('\n'))
   }
 
@@ -796,9 +849,13 @@ function renderAuthorialContinuity(
     ].filter((line): line is string => Boolean(line)).join('\n\n'))
   }
 
-  if (view.characterStates && view.characterStates.length > 0) {
+  const scopedCharacterStates = (view.characterStates ?? []).filter((character) => (
+    character.present !== false
+    && (!character.characterId || characterIds.has(character.characterId))
+  ))
+  if (scopedCharacterStates.length > 0) {
     const lines: string[] = ['### Active character live states']
-    for (const char of view.characterStates) {
+    for (const char of scopedCharacterStates) {
       const details: string[] = []
       if (char.immediate) {
         details.push(`  - Immediate: ${char.immediate}`)
@@ -822,9 +879,10 @@ function renderAuthorialContinuity(
     }
   }
 
-  if (view.entityStates && view.entityStates.length > 0) {
+  const activeEntityStates = (view.entityStates ?? []).filter((entity) => entity.present !== false)
+  if (activeEntityStates.length > 0) {
     const lines: string[] = ['### Active entity live states']
-    for (const ent of view.entityStates) {
+    for (const ent of activeEntityStates) {
       const details: string[] = []
       if (ent.immediate) {
         details.push(`  - Immediate: ${ent.immediate}`)

@@ -1,131 +1,57 @@
 import { describe, expect, it } from 'vitest'
 import {
+  buildAnalyzeStagePlan,
   describeAnalyzeToolStages,
-  isAnalyzeWorkflowComplete,
-  selectAnalyzeToolStage,
-  type AnalyzeStep,
 } from '@/server/librarian/analyze-stages'
 import { createEmptyCollector, createLibrarianOnlineTools } from '@/server/librarian/analysis-tools'
 import { describeToolSurface } from '@/server/llm/tool-surface'
 
-const tools = [
-  'reportAnalysis',
-  'readFragments',
-  'proposeRecordCorrections',
-  'proposeNewRecords',
-]
-
-function step(...toolResults: Array<{ toolName: string; output: unknown }>): AnalyzeStep {
-  return { toolResults }
-}
-
 describe('librarian analyze tool stages', () => {
-  it('keeps the common path in one request while omitting inspection tools', () => {
-    expect(selectAnalyzeToolStage(tools, [])).toEqual({
-      stage: 'primary',
-      activeTools: ['reportAnalysis'],
-    })
+  it('builds one ordered request per available reporting task', () => {
+    const stages = buildAnalyzeStagePlan([
+      'reportAnalysis',
+      'reportObservation',
+      'reportContinuity',
+      'reportMaintenance',
+      'reportDirections',
+    ])
+
+    expect(stages.map((stage) => stage.id)).toEqual([
+      'observation',
+      'continuity',
+      'maintenance',
+      'directions',
+    ])
+    expect(stages.map((stage) => stage.toolNames)).toEqual([
+      ['reportObservation'],
+      ['reportContinuity'],
+      ['reportMaintenance'],
+      ['reportDirections'],
+    ])
+    expect(stages.find((stage) => stage.id === 'maintenance')?.conditional).toBe(true)
+    expect(stages.filter((stage) => stage.id !== 'maintenance').every((stage) => !stage.conditional)).toBe(true)
   })
 
-  it('completes deterministically after the final report succeeds', () => {
-    expect(isAnalyzeWorkflowComplete(tools, [
-      step({ toolName: 'reportAnalysis', output: { ok: true } }),
-    ])).toBe(true)
+  it('uses the legacy combined report only when observation is unavailable', () => {
+    expect(buildAnalyzeStagePlan(['reportAnalysis', 'reportDirections']).map((stage) => ({
+      id: stage.id,
+      toolName: stage.toolName,
+    }))).toEqual([
+      { id: 'observation', toolName: 'reportAnalysis' },
+      { id: 'directions', toolName: 'reportDirections' },
+    ])
   })
 
-  it('does not require an optional proposal that was never called', () => {
-    expect(isAnalyzeWorkflowComplete(tools, [
-      step({ toolName: 'reportAnalysis', output: { ok: true } }),
-    ])).toBe(true)
+  it('returns no runnable plan without an observation report tool', () => {
+    expect(buildAnalyzeStagePlan(['reportContinuity', 'reportDirections'])).toEqual([])
   })
 
-  it('holds rejected work open but does not turn an optional proposal into a requirement', () => {
-    expect(isAnalyzeWorkflowComplete(tools, [step(
-      { toolName: 'reportAnalysis', output: { ok: false } },
-    )])).toBe(false)
-    expect(isAnalyzeWorkflowComplete(tools, [step(
-      { toolName: 'proposeRecordCorrections', output: { ok: false } },
-      { toolName: 'reportAnalysis', output: { ok: true } },
-    )])).toBe(true)
+  it('uses the same plan for context preview', () => {
+    const available = ['reportObservation', 'reportContinuity', 'reportDirections']
+    expect(describeAnalyzeToolStages(available)).toEqual(buildAnalyzeStagePlan(available))
   })
 
-  it('returns to the primary surface after a rejected report', () => {
-    expect(selectAnalyzeToolStage(tools, [
-      step({ toolName: 'reportAnalysis', output: { ok: false, skippedContinuity: [{}] } }),
-    ])).toEqual({
-      stage: 'primary',
-      activeTools: ['reportAnalysis'],
-    })
-  })
-
-  it('opens the full surface when a report resolves records for inspection', () => {
-    const steps = [step(
-      {
-        toolName: 'reportAnalysis',
-        output: { ok: true, inspectionRequired: true, resolvedFragments: [{ id: 'ch-1', content: '[1] Existing claim.' }] },
-      },
-    )]
-    expect(isAnalyzeWorkflowComplete(tools, steps)).toBe(false)
-    expect(selectAnalyzeToolStage(tools, steps)).toEqual({
-      stage: 'inspection',
-      activeTools: tools,
-    })
-  })
-
-  it('keeps inspection open across reads until a final report replaces the preliminary one', () => {
-    const inspected = [
-      step({
-        toolName: 'reportAnalysis',
-        output: { ok: true, inspectionRequired: true, resolvedFragments: [{ id: 'ch-1' }] },
-      }),
-      step({ toolName: 'readFragments', output: { fragments: [{ id: 'kn-1' }] } }),
-    ]
-    expect(selectAnalyzeToolStage(tools, inspected)).toMatchObject({ stage: 'inspection' })
-
-    const closed = [...inspected, step({ toolName: 'reportAnalysis', output: { ok: true } })]
-    expect(isAnalyzeWorkflowComplete(tools, closed)).toBe(true)
-  })
-
-  it('completes deterministically after a proposal follows an inspected report', () => {
-    const steps = [
-      step({
-        toolName: 'reportAnalysis',
-        output: { ok: true, inspectionRequired: true, resolvedFragments: [{ id: 'ch-1' }] },
-      }),
-      step({ toolName: 'proposeRecordCorrections', output: { ok: true, proposalCount: 1 } }),
-    ]
-    expect(isAnalyzeWorkflowComplete(tools, steps)).toBe(true)
-  })
-
-  it('completes deterministically when an inspected report is followed by a natural model stop without proposals', () => {
-    const steps = [
-      step({
-        toolName: 'reportAnalysis',
-        output: { ok: true, inspectionRequired: true, resolvedFragments: [{ id: 'ch-1' }] },
-      }),
-      { toolResults: [] },
-    ]
-    expect(isAnalyzeWorkflowComplete(tools, steps)).toBe(true)
-  })
-
-  it('uses the un-staged surface when the report tool is disabled', () => {
-    const available = ['readFragments']
-    expect(selectAnalyzeToolStage(available, [])).toEqual({
-      stage: 'primary',
-      activeTools: available,
-    })
-    expect(describeAnalyzeToolStages(available)).toEqual([])
-  })
-
-  it('describes the same two surfaces for the context preview', () => {
-    const stages = describeAnalyzeToolStages(tools)
-    expect(stages.map((stage) => stage.id)).toEqual(['primary', 'inspection'])
-    expect(stages[0].toolNames).not.toContain('readFragments')
-    expect(stages[1].toolNames).toContain('readFragments')
-    expect(stages[1]).toMatchObject({ conditional: true, toolNames: tools })
-  })
-
-  it('makes the one-request primary surface smaller than the unstaged surface', async () => {
+  it('keeps every isolated tool surface smaller than the combined surface', async () => {
     const toolSet = createLibrarianOnlineTools(createEmptyCollector(), {
       dataDir: '',
       storyId: '',
@@ -135,73 +61,11 @@ describe('librarian analyze tool stages', () => {
       Object.entries(toolSet).map(async ([name, tool]) => describeToolSurface(name, tool)),
     )
     const charactersByName = new Map(surfaces.map((surface) => [surface.name, surface.characters]))
-    const totalCharacters = surfaces.reduce((sum, surface) => sum + surface.characters, 0)
-    const stageCharacters = describeAnalyzeToolStages(Object.keys(toolSet)).map((stage) => ({
-      id: stage.id,
-      characters: stage.toolNames.reduce((sum, name) => sum + (charactersByName.get(name) ?? 0), 0),
-    }))
+    const combinedCharacters = charactersByName.get('reportAnalysis') ?? Number.POSITIVE_INFINITY
 
-    expect(stageCharacters.find((stage) => stage.id === 'observation')!.characters).toBeLessThan(totalCharacters)
-    expect(stageCharacters.find((stage) => stage.id === 'continuity')!.characters).toBeLessThan(totalCharacters)
-    expect(stageCharacters.find((stage) => stage.id === 'directions')!.characters).toBeLessThan(totalCharacters)
-  })
-
-  it('sequences observation followed by directions when reportDirections is available', () => {
-    const stagedTools = ['reportAnalysis', 'reportDirections', 'readFragments', 'proposeRecordCorrections']
-    expect(selectAnalyzeToolStage(stagedTools, [])).toEqual({
-      stage: 'primary',
-      activeTools: ['reportAnalysis'],
-    })
-
-    const observationDone = [step({ toolName: 'reportAnalysis', output: { ok: true, directionsProvided: false } })]
-    expect(isAnalyzeWorkflowComplete(stagedTools, observationDone)).toBe(false)
-    expect(selectAnalyzeToolStage(stagedTools, observationDone)).toEqual({
-      stage: 'directions',
-      activeTools: ['reportDirections'],
-    })
-
-    const directionsDone = [
-      ...observationDone,
-      step({ toolName: 'reportDirections', output: { ok: true, directionCount: 3 } }),
-    ]
-    expect(isAnalyzeWorkflowComplete(stagedTools, directionsDone)).toBe(true)
-    expect(selectAnalyzeToolStage(stagedTools, directionsDone)).toEqual({
-      stage: 'inspection',
-      activeTools: [],
-    })
-  })
-
-  it('sequences observation -> continuity -> directions in the 3-beat pipeline', () => {
-    const threeBeatTools = ['reportObservation', 'reportContinuity', 'reportDirections', 'readFragments']
-    // Step 0: observation
-    expect(selectAnalyzeToolStage(threeBeatTools, [])).toEqual({
-      stage: 'observation',
-      activeTools: ['reportObservation'],
-    })
-    expect(isAnalyzeWorkflowComplete(threeBeatTools, [])).toBe(false)
-
-    // Step 1: continuity
-    const step0Done = [step({ toolName: 'reportObservation', output: { ok: true } })]
-    expect(isAnalyzeWorkflowComplete(threeBeatTools, step0Done)).toBe(false)
-    expect(selectAnalyzeToolStage(threeBeatTools, step0Done)).toEqual({
-      stage: 'continuity',
-      activeTools: ['reportContinuity'],
-    })
-
-    // Step 2: directions
-    const step1Done = [...step0Done, step({ toolName: 'reportContinuity', output: { ok: true } })]
-    expect(isAnalyzeWorkflowComplete(threeBeatTools, step1Done)).toBe(false)
-    expect(selectAnalyzeToolStage(threeBeatTools, step1Done)).toEqual({
-      stage: 'directions',
-      activeTools: ['reportDirections'],
-    })
-
-    // Complete
-    const step2Done = [...step1Done, step({ toolName: 'reportDirections', output: { ok: true } })]
-    expect(isAnalyzeWorkflowComplete(threeBeatTools, step2Done)).toBe(true)
-    expect(selectAnalyzeToolStage(threeBeatTools, step2Done)).toEqual({
-      stage: 'inspection',
-      activeTools: [],
-    })
+    for (const stage of describeAnalyzeToolStages(Object.keys(toolSet))) {
+      if (stage.toolName === 'reportAnalysis') continue
+      expect(charactersByName.get(stage.toolName), stage.toolName).toBeLessThan(combinedCharacters)
+    }
   })
 })

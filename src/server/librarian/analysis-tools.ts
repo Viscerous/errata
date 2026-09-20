@@ -42,25 +42,77 @@ import {
   validateOperations,
 } from '../fragments/change-operations'
 
-const mentionTextSchema = z.string().trim().min(1).max(120).describe('The exact name, title, or key term as it appears in the prose, copied verbatim — no added quotes, no paraphrase')
-
-/**
- * Anchor a reported mention to the prose it annotates: the highlight regex can
- * only bind text that actually occurs in the passage (case-insensitive).
- */
-export function anchorMentionText(text: string, proseLower: string): string | null {
-  const raw = text.trim()
-  return raw && proseLower.includes(raw.toLowerCase()) ? raw : null
-}
+const mentionTextSchema = z.string().trim().min(1).max(120)
 
 export const mentionInputSchema = z.object({
   fragmentId: FragmentIdSchema.describe('The ID of the mentioned catalog fragment from the catalog (e.g. "kn-bakagu", "ch-buguzi")'),
-  text: mentionTextSchema,
+  // The mention decision is the fragment ID (which record the prose references,
+  // judged contextually). The record's name is highlighted automatically, so the
+  // model need not retype a span. `text` is a rare override for an alias that
+  // differs from the record name; `segment` is the numbered sentence the
+  // reference sits in (point at it rather than retype it).
+  text: mentionTextSchema.optional().describe('Optional: a specific name, title, or key term exactly as it appears in the prose. Usually omit — the record name highlights automatically. Provide only for an alias that differs from the record name.'),
+  segment: z.preprocess((val) => {
+    const n = typeof val === 'string' ? parseInt(val, 10) : typeof val === 'number' ? val : NaN
+    return Number.isInteger(n) && n > 0 ? n : undefined
+  }, z.number().int().positive().optional())
+    .describe('Optional: the numbered sentence in the new prose where this record is referenced. The prose is numbered in the prompt; point at the sentence instead of retyping it.'),
 })
 
 /** Map collected mentions to the prose annotation shape used for highlighting. */
 export function toMentionAnnotations(mentions: LibrarianMention[]) {
-  return mentions.map(m => ({ type: 'mention' as const, fragmentId: m.fragmentId, text: m.text }))
+  const seen = new Set<string>()
+  return mentions.flatMap((mention) => {
+    const key = `${mention.fragmentId}\u0000${mention.text.toLocaleLowerCase()}`
+    if (!mention.text.trim() || seen.has(key)) return []
+    seen.add(key)
+    return [{ type: 'mention' as const, fragmentId: mention.fragmentId, text: mention.text }]
+  })
+}
+
+/**
+ * Resolve the highlight term for a mention. The model's verbatim span wins when
+ * it is actually in the prose (a specific alias or term); otherwise the record's
+ * catalog name is used, so a mention is highlighted without the model retyping
+ * anything. Returns the term to store on the mention (empty only if neither).
+ */
+export function resolveMentionTerm(opts: {
+  fragmentId: string
+  modelText?: string
+  prose?: string
+  segment?: number
+  resolveName?: (fragmentId: string) => string | undefined
+}): string {
+  const text = (opts.modelText ?? '').trim()
+  const prose = opts.prose ?? ''
+  const citedSegment = opts.segment
+    ? segmentText(prose).find((segment) => segment.index === opts.segment)?.text
+    : undefined
+  const scopes = [citedSegment, prose].filter((value): value is string => Boolean(value))
+  const exactSourceText = (candidate: string): string | undefined => {
+    if (!candidate) return undefined
+    const needle = candidate.toLocaleLowerCase()
+    for (const scope of scopes) {
+      const offset = scope.toLocaleLowerCase().indexOf(needle)
+      if (offset >= 0) return scope.slice(offset, offset + candidate.length)
+    }
+    return undefined
+  }
+
+  const modelAnchor = exactSourceText(text)
+  if (modelAnchor) return modelAnchor
+
+  const recordName = (opts.resolveName?.(opts.fragmentId) ?? '').trim()
+  const fullNameAnchor = exactSourceText(recordName)
+  if (fullNameAnchor) return fullNameAnchor
+  const nameParts = recordName.split(/[^\p{L}\p{N}_]+/u)
+    .filter((part) => part.length >= 3)
+    .sort((a, b) => b.length - a.length)
+  for (const part of nameParts) {
+    const anchor = exactSourceText(part)
+    if (anchor) return anchor
+  }
+  return ''
 }
 
 // --- Collector ---
@@ -151,15 +203,27 @@ export function forgivingArray<T extends z.ZodTypeAny>(
   if (options?.max !== undefined) arr = arr.max(options.max)
 
   return z.preprocess((val) => {
-    if (val === null || val === undefined) return []
-    if (Array.isArray(val)) return val
-    if (typeof val === 'string') {
+    let items: unknown[]
+    if (val === null || val === undefined) items = []
+    else if (Array.isArray(val)) items = val
+    else if (typeof val === 'string') {
       const trimmed = val.trim()
-      if (!trimmed || trimmed.toLowerCase() === 'none' || trimmed.toLowerCase() === 'n/a') return []
-      return [trimmed]
+      items = (!trimmed || trimmed.toLowerCase() === 'none' || trimmed.toLowerCase() === 'n/a') ? [] : [trimmed]
     }
-    if (typeof val === 'object') return [val]
-    return []
+    else if (typeof val === 'object') items = [val]
+    else items = []
+
+    // Forgive per entry: keep only items the element schema accepts, so a single
+    // malformed entry (a hallucinated ID, a dropped field) does not fail the
+    // whole batched report. The surviving items are then grounded by the caller;
+    // `min` on the inner array still fails a required array when every entry is
+    // dropped, and the slice below trims overflow instead of rejecting it.
+    const kept: unknown[] = []
+    for (const item of items) {
+      const parsed = elementSchema.safeParse(item)
+      if (parsed.success) kept.push(parsed.data)
+    }
+    return options?.max !== undefined ? kept.slice(0, options.max) : kept
   }, arr)
 }
 
@@ -173,18 +237,20 @@ export function forgivingNumberArray<T extends z.ZodType<number> = z.ZodNumber>(
   if (options?.max !== undefined) arr = arr.max(options.max)
 
   return z.preprocess((val) => {
-    if (val === null || val === undefined) return []
-    if (Array.isArray(val)) {
-      return val
+    let nums: number[]
+    if (val === null || val === undefined) nums = []
+    else if (Array.isArray(val)) {
+      nums = val
         .map((v) => (typeof v === 'number' ? v : typeof v === 'string' ? parseInt(v, 10) : NaN))
         .filter((n) => Number.isInteger(n) && n > 0)
     }
-    if (typeof val === 'number' && Number.isInteger(val) && val > 0) return [val]
-    if (typeof val === 'string') {
+    else if (typeof val === 'number' && Number.isInteger(val) && val > 0) nums = [val]
+    else if (typeof val === 'string') {
       const parsed = parseInt(val, 10)
-      if (Number.isInteger(parsed) && parsed > 0) return [parsed]
+      nums = Number.isInteger(parsed) && parsed > 0 ? [parsed] : []
     }
-    return []
+    else nums = []
+    return options?.max !== undefined ? nums.slice(0, options.max) : nums
   }, arr)
 }
 
@@ -283,7 +349,7 @@ export function buildReportAnalysisInputSchema(
     scene: sceneSchema
       .describe('Changed scene frame fields; transition uncertain withdraws the claim.'),
     mentions: forgivingArray(mentionInputSchema, { max: 24 }).default([])
-      .describe('Distinct listed-fragment mentions using exact prose text, never bare pronouns.'),
+      .describe('Distinct catalog records this prose references, judged by meaning; a verbatim highlight span is optional.'),
   })
 
   return options.includeDirections === false
@@ -314,13 +380,17 @@ export type ContradictionInput = z.infer<typeof contradictionInputSchema>
 
 export const reportObservationInputSchema = z.object({
   summary: z.string().trim().min(1).max(1200).describe('Concise retrospective summary of the new prose as past history.'),
+  events: forgivingArray(z.string().trim().min(1).max(500), { max: 12 }).default([])
+    .describe('Distinct events that occurred in this passage, in narrative order. Use empty [] if the summary alone is sufficient.'),
   scene: sceneSchema.describe('Changed scene frame fields; transition uncertain withdraws the claim.'),
   mentions: forgivingArray(mentionInputSchema, { max: 24 }).default([])
-    .describe('Distinct listed-fragment mentions using exact prose text, never bare pronouns.'),
-  candidateFragmentIds: forgivingArray(z.string().trim().max(64), { max: 12 }).default([]).optional()
-    .describe('Optional candidate fragment IDs from catalog that may need attention. Omit or leave empty [] if none.'),
-  contradictions: forgivingArray(contradictionInputSchema, { max: 6 }).default([]).optional()
-    .describe('Optional contradictions with established records. Omit or leave empty [] if none.'),
+    .describe('Distinct catalog records this prose references, judged by meaning; the record name highlights automatically, a verbatim span is optional.'),
+  candidateFragmentIds: forgivingArray(z.string().trim().max(64), { max: 12 }).default([])
+    .describe('Candidate fragment IDs from the catalog that may need durable-record attention. Use empty [] if none.'),
+  contradictions: forgivingArray(contradictionInputSchema, { max: 6 }).default([])
+    .describe('Contradictions with established records. Use empty [] if none.'),
+  maintenanceNeeded: z.boolean().default(false)
+    .describe('True only when this prose may justify a new reusable record or a permanent correction.'),
 })
 
 export type ReportObservationInput = z.infer<typeof reportObservationInputSchema>
@@ -366,21 +436,28 @@ export const librarianNewRecordsInputSchema = z.object({
 
 export const reportContinuityInputSchema = z.object({
   characters: forgivingArray(CharacterLiveStateInputSchema, { max: 12 }).default([])
-    .describe('Active characters in this scene: immediate posture, sparse state dictionary of important physical/gear changes, and epistemic updates. Do NOT list absent background cast.'),
-  entities: forgivingArray(EntityLiveStateInputSchema, { max: 12 }).default([]).optional()
-    .describe('Optional non-character entity updates (locations, artefacts, factions) with dynamic state keys. Omit or leave empty [] if none.'),
+    .describe('Active characters in this scene. Each item needs ref: use its catalog ID when available, otherwise its name. Do NOT list absent background cast.'),
+  entities: forgivingArray(EntityLiveStateInputSchema, { max: 12 }).default([])
+    .describe('Non-character entities actively participating in this scene. Each item needs ref: use its catalog ID when available, otherwise its name. Use empty [] if none are active.'),
   // See reportAnalysis: grammar bound stays at or below stored label max (240).
-  threads: forgivingArray(z.string().trim().max(240), { max: 12 }).default([]).optional()
-    .describe('Active narrative threads or open plot questions (e.g. "Who poisoned the king?"). Omit or leave empty [] if none.'),
-  evidenceSegments: forgivingNumberArray(undefined, { max: 24 }).optional()
-    .describe('New-prose sentence numbers establishing any permanent record corrections or new records. Omit or leave empty [] if no corrections.'),
-  corrections: forgivingArray(correctionProposalItemSchema, { max: 6 }).default([]).optional()
-    .describe('Optional permanent corrections to existing catalog records when canon truly changes; cite fragmentId and segment number from delivered records. Omit or leave empty [] if none.'),
-  newRecords: forgivingArray(newFragmentProposalItemSchema, { max: 4 }).default([]).optional()
-    .describe('Optional new reusable named records established by this prose (character, knowledge, etc.). Omit or leave empty [] if none.'),
+  threads: forgivingArray(z.string().trim().max(240), { max: 12 }).default([])
+    .describe('Current foreground narrative threads. Reuse a supplied thread key for an existing thread; otherwise provide a concise label for a new open question. This is a snapshot: omitted existing threads become dormant.'),
+  resolvedThreads: forgivingArray(z.string().trim().max(100), { max: 12 }).default([])
+    .describe('Existing thread keys conclusively answered or closed by this passage. Use empty [] if none.'),
 })
 
 export type ReportContinuityInput = z.infer<typeof reportContinuityInputSchema>
+
+export const reportMaintenanceInputSchema = z.object({
+  evidenceSegments: forgivingNumberArray(undefined, { max: 24 }).default([])
+    .describe('New-prose sentence numbers establishing the proposed corrections or records.'),
+  corrections: forgivingArray(correctionProposalItemSchema, { max: 6 }).default([])
+    .describe('Permanent corrections to delivered catalog records when canon truly changed. Use empty [] if none.'),
+  newRecords: forgivingArray(newFragmentProposalItemSchema, { max: 4 }).default([])
+    .describe('New reusable named records established by this prose. Use empty [] if none.'),
+})
+
+export type ReportMaintenanceInput = z.infer<typeof reportMaintenanceInputSchema>
 
 export const reportDirectionsInputSchema = z.object({
   directions: forgivingArray(suggestionDirectionSchema, { min: 1, max: 4 })
@@ -591,11 +668,20 @@ const CLEARED_STATE_VALUES = new Set(['none', 'cleared', 'removed', 'healed', 'e
 type NormalizedContinuityInput = {
   scene?: SceneUpdate | NonNullable<ReportAnalysisInput['scene']>
   threads?: string[]
+  resolvedThreads?: string[]
   characters?: CharacterLiveStateInput[]
   entities?: EntityLiveStateInput[]
   stateOperations?: any[]
   threadOperations?: any[]
   knowledgeOperations?: any[]
+}
+
+function liveStateRef(value: unknown, idField: 'characterId' | 'entityId'): string {
+  if (!value || typeof value !== 'object') return ''
+  const record = value as Record<string, unknown>
+  const candidate = [record.ref, record[idField], record.id, record.name]
+    .find((item) => typeof item === 'string' && item.trim())
+  return typeof candidate === 'string' ? candidate.trim() : ''
 }
 
 function normalizeContinuityProjection(
@@ -720,19 +806,55 @@ function normalizeContinuityProjection(
   // delta without the model having to state each acted-on thread twice.
   const threadFocus: ThreadFocus[] = []
 
+  const registryThreadsByKey = new Map(registry.thread.map((entry) => [normalizeContinuityKey(entry.key), entry]))
+  const registryThreadsByLabel = new Map(registry.thread.map((entry) => [normalizeContinuityKey(entry.label), entry]))
+  const activeThreadKeys = new Set<string>()
+  const resolvedThreadKeys = new Set<string>()
+
+  for (const value of input.resolvedThreads ?? []) {
+    const requested = normalizeContinuityKey(value)
+    const existing = registryThreadsByKey.get(requested) ?? registryThreadsByLabel.get(requested)
+    if (!existing) {
+      skipped.push({ kind: 'thread', key: value, reason: `No unresolved thread matches "${value}".` })
+      continue
+    }
+    const threadKey = normalizeContinuityKey(existing.key)
+    if (resolvedThreadKeys.has(threadKey)) continue
+    resolvedThreadKeys.add(threadKey)
+    threadOperations.push({
+      action: 'resolve',
+      threadKey,
+      relatedFragmentIds: [],
+      evidenceSegments: [],
+      evidenceText: '',
+    })
+  }
+
   for (const t of input.threads ?? []) {
     const label = typeof t === 'string' ? t.trim() : ''
     if (!label) continue
-    const threadKey = derivedContinuityKey(label)
+    const requested = normalizeContinuityKey(label)
+    const existing = registryThreadsByKey.get(requested) ?? registryThreadsByLabel.get(requested)
+    const threadKey = normalizeContinuityKey(existing?.key ?? derivedContinuityKey(label))
+    if (resolvedThreadKeys.has(threadKey) || activeThreadKeys.has(threadKey)) continue
+    activeThreadKeys.add(threadKey)
     threadOperations.push({
-      action: 'open',
+      action: existing ? 'advance' : 'open',
       threadKey,
-      label,
+      label: existing?.label ?? label,
       relatedFragmentIds: [],
       evidenceSegments: [],
       evidenceText: '',
     })
     threadFocus.push({ threadKey, visibility: 'foreground' })
+  }
+
+  // The compact small-model contract is a foreground snapshot. Anything still
+  // unresolved but omitted remains available to directions as dormant memory.
+  for (const existing of registry.thread) {
+    const threadKey = normalizeContinuityKey(existing.key)
+    if (activeThreadKeys.has(threadKey) || resolvedThreadKeys.has(threadKey)) continue
+    threadFocus.push({ threadKey, visibility: 'dormant' })
   }
 
   for (const { visibility, ...operation } of input.threadOperations ?? []) {
@@ -832,8 +954,9 @@ function normalizeContinuityProjection(
 
   const characterStates: Record<string, CharacterLiveState> = {}
   for (const c of input.characters ?? []) {
-    const suppliedName = c.name?.trim() ?? ''
-    let resolvedId = c.characterId?.trim() || c.id?.trim()
+    const ref = liveStateRef(c, 'characterId')
+    const suppliedName = c.name?.trim() || (FragmentIdSchema.safeParse(ref).success ? '' : ref)
+    let resolvedId = FragmentIdSchema.safeParse(ref).success ? ref : undefined
     if (resolvedId && options?.checkedFragments) {
       const match = options.checkedFragments.get(resolvedId)
       if (!match || match.type !== 'character') {
@@ -893,8 +1016,9 @@ function normalizeContinuityProjection(
 
   const entityStates: Record<string, EntityLiveState> = {}
   for (const e of input.entities ?? []) {
-    const suppliedName = e.name?.trim() ?? ''
-    let resolvedId = e.entityId?.trim() || e.id?.trim()
+    const ref = liveStateRef(e, 'entityId')
+    const suppliedName = e.name?.trim() || (FragmentIdSchema.safeParse(ref).success ? '' : ref)
+    let resolvedId = FragmentIdSchema.safeParse(ref).success ? ref : undefined
     if (resolvedId && options?.checkedFragments) {
       const match = options.checkedFragments.get(resolvedId)
       if (!match) resolvedId = undefined
@@ -992,6 +1116,8 @@ function normalizeContinuityProjection(
       threadOperations,
       threadFocus,
       knowledgeOperations,
+      presentCharacterKeys: Object.keys(characterStates),
+      presentEntityKeys: Object.keys(entityStates),
       ...(Object.keys(characterStates).length > 0 ? { characterStates } : {}),
       ...(Object.keys(entityStates).length > 0 ? { entityStates } : {}),
     },
@@ -1132,6 +1258,7 @@ export function createAnalysisTools(
     disableSuggestions?: boolean;
     includeReadTools?: boolean;
     includeReportTool?: boolean;
+    includeStandaloneProposalTools?: boolean;
     numberedFragmentIds?: Set<string> | readonly string[];
     continuityKeys?: ContinuityKeyRegistry;
     customFragmentTypes?: Array<{ type: string; name: string }>;
@@ -1202,7 +1329,7 @@ export function createAnalysisTools(
 
   /** A proposal call is one atomic, self-contained author-facing change. */
   const queueValidatedProposal = async (params: {
-    toolName: 'proposeRecordCorrections' | 'proposeNewRecords' | 'reportContinuity'
+    toolName: 'proposeRecordCorrections' | 'proposeNewRecords' | 'reportMaintenance'
     proposalKind: 'correction' | 'new-fragment'
     evidence: CitedEvidence
     title?: string
@@ -1337,6 +1464,7 @@ export function createAnalysisTools(
           stateOperations = [],
           threadOperations = [],
           knowledgeOperations = [],
+          maintenanceNeeded = false,
         } = input
         const candidateFragmentIds: string[] = Array.isArray(input.candidateFragmentIds)
           ? input.candidateFragmentIds.filter((id: unknown): id is string => typeof id === 'string')
@@ -1387,8 +1515,8 @@ export function createAnalysisTools(
               ...((stateOperations ?? []).flatMap((op: any) => op?.subject?.fragmentId ? [op.subject.fragmentId] : [])),
               ...((threadOperations ?? []).flatMap((operation: any) => operation?.relatedFragmentIds ?? [])),
               ...((knowledgeOperations ?? []).map((operation: any) => operation?.characterId)),
-              ...characters.flatMap((c) => [c.id, c.characterId]).filter((id): id is string => Boolean(id)),
-              ...entities.flatMap((e) => [e.id, e.entityId]).filter((id): id is string => Boolean(id)),
+              ...characters.map((c) => liveStateRef(c, 'characterId')).filter(Boolean),
+              ...entities.map((e) => liveStateRef(e, 'entityId')).filter(Boolean),
             ].filter((id): id is string => typeof id === 'string' && id.trim().length > 0))]
 
             const checks = await Promise.all(
@@ -1424,17 +1552,16 @@ export function createAnalysisTools(
         collector.summaryUpdate = summary
         collector.directions = directions
 
-        // A highlight can only bind text that actually occurs in the passage.
+        // Mentions are the model's contextual judgment about which catalog
+        // records the prose references. The highlight term resolves to the
+        // record's catalog name, so a mention highlights without the model
+        // retyping a span; an in-prose verbatim span overrides it for aliases.
         const skippedMentions: Array<Skipped<{ fragmentId: string; text: string }>> = []
-        const anchoredMentions: LibrarianMention[] = []
-        const proseLower = (opts?.proseFragmentId && sourceProse?.content)
-          ? sourceProse.content.toLowerCase()
-          : null
+        const reportedMentions: LibrarianMention[] = []
 
         for (const m of mentions) {
           const fid = m.fragmentId.trim()
-          const text = m.text.trim()
-          if (!text) continue
+          const text = (m.text ?? '').trim()
           if (!fid || (opts && !checkedFragments.has(fid))) {
             skippedMentions.push({
               fragmentId: fid,
@@ -1443,23 +1570,22 @@ export function createAnalysisTools(
             })
             continue
           }
-          if (proseLower) {
-            const anchored = anchorMentionText(text, proseLower)
-            if (anchored == null) {
-              skippedMentions.push({
-                fragmentId: fid,
-                text,
-                reason: 'Not verbatim in the passage, so it cannot be highlighted.',
-              })
-              continue
-            }
-            anchoredMentions.push({ fragmentId: fid, text: anchored })
-          } else {
-            anchoredMentions.push({ fragmentId: fid, text })
-          }
+          reportedMentions.push({
+            fragmentId: fid,
+            text: resolveMentionTerm({
+              fragmentId: fid,
+              modelText: m.text,
+              prose: sourceProse?.content ?? '',
+              segment: m.segment,
+              resolveName: (id) => checkedFragments.get(id)?.name,
+            }),
+            ...(m.segment != null && proseSegments.some((s) => s.index === m.segment)
+              ? { segment: m.segment }
+              : {}),
+          })
         }
 
-        collector.mentions = anchoredMentions
+        collector.mentions = reportedMentions
         const validCandidateFragmentIds = opts
           ? candidateFragmentIds.filter((id) => checkedFragments.has(id))
           : candidateFragmentIds
@@ -1473,7 +1599,7 @@ export function createAnalysisTools(
         // trips.
         const resolvedFragments = deliverResolvedFragments(
           checkedFragments,
-          [...anchoredMentions.map((mention) => mention.fragmentId), ...validCandidateFragmentIds],
+          [...reportedMentions.map((mention) => mention.fragmentId), ...validCandidateFragmentIds],
           numberedFragmentIds,
         )
         // Mention bodies improve the next writer context but do not, by
@@ -1573,6 +1699,7 @@ export function createAnalysisTools(
             resolvedFragmentNote: 'Full records for what you just reported, not already in your context. Their sentences are numbered for correction targeting. Use them for directions and record maintenance; no further reads are needed for these.',
           } : {}),
           ...(inspectionRequired ? { inspectionRequired: true } : {}),
+          maintenanceNeeded: maintenanceNeeded === true,
           ...(normalizedProjection.skipped.length > 0 ? { skippedContinuity: normalizedProjection.skipped } : {}),
           ...(skippedMentions.length > 0 ? {
             skippedMentions,
@@ -1587,15 +1714,17 @@ export function createAnalysisTools(
     })
 
     tools.reportObservation = tool({
-      description: 'Step 1 of 3: Report grounded narrative observations: retrospective summary, scene frame, catalog mentions, and candidate/contradiction records.',
+      description: 'Report grounded narrative observations: retrospective summary, scene frame, catalog mentions, and candidate/contradiction records.',
       inputSchema: toExactJsonSchema(reportObservationInputSchema),
       execute: async (input: ReportObservationInput) => {
         const {
           summary,
+          events = [],
           scene = { transition: 'uncertain', evidenceSegments: [] },
           mentions = [],
           candidateFragmentIds = [],
           contradictions = [],
+          maintenanceNeeded = false,
         } = input
         if (!summary || summary.trim().length === 0) {
           return { ok: false, note: 'Empty summary: please provide a concise retrospective summary of the prose.' }
@@ -1641,18 +1770,18 @@ export function createAnalysisTools(
         })
         collector.continuityProjection.scene = normalizedProjection.projection.scene
         collector.summaryUpdate = summary
+        collector.events = events
 
-        // Anchor mentions
+        // Mentions are the model's contextual judgment about which catalog
+        // records the prose references. The highlight term resolves to the
+        // record's catalog name, so a mention highlights without the model
+        // retyping a span; an in-prose verbatim span overrides it for aliases.
         const skippedMentions: Array<Skipped<{ fragmentId: string; text: string }>> = []
-        const anchoredMentions: LibrarianMention[] = []
-        const proseLower = (opts?.proseFragmentId && sourceProse?.content)
-          ? sourceProse.content.toLowerCase()
-          : null
+        const reportedMentions: LibrarianMention[] = []
 
         for (const m of mentions) {
           const fid = m.fragmentId.trim()
-          const text = m.text.trim()
-          if (!text) continue
+          const text = (m.text ?? '').trim()
           if (!fid || (opts && !checkedFragments.has(fid))) {
             skippedMentions.push({
               fragmentId: fid,
@@ -1661,23 +1790,22 @@ export function createAnalysisTools(
             })
             continue
           }
-          if (proseLower) {
-            const anchored = anchorMentionText(text, proseLower)
-            if (anchored == null) {
-              skippedMentions.push({
-                fragmentId: fid,
-                text,
-                reason: 'Not verbatim in the passage, so it cannot be highlighted.',
-              })
-              continue
-            }
-            anchoredMentions.push({ fragmentId: fid, text: anchored })
-          } else {
-            anchoredMentions.push({ fragmentId: fid, text })
-          }
+          reportedMentions.push({
+            fragmentId: fid,
+            text: resolveMentionTerm({
+              fragmentId: fid,
+              modelText: m.text,
+              prose: sourceProse?.content ?? '',
+              segment: m.segment,
+              resolveName: (id) => checkedFragments.get(id)?.name,
+            }),
+            ...(m.segment != null && proseSegments.some((s) => s.index === m.segment)
+              ? { segment: m.segment }
+              : {}),
+          })
         }
 
-        collector.mentions = anchoredMentions
+        collector.mentions = reportedMentions
 
         const rawCandidateIds = (candidateFragmentIds ?? []).filter((id): id is string => typeof id === 'string')
         const validCandidateFragmentIds = opts
@@ -1750,7 +1878,7 @@ export function createAnalysisTools(
 
         // Deliver resolved fragments with numbered sentences for mentions, candidates, and contradictory records
         const fragmentIdsToDeliver = uniqueStrings([
-          ...anchoredMentions.map((mention) => mention.fragmentId),
+          ...reportedMentions.map((mention) => mention.fragmentId),
           ...validCandidateFragmentIds,
           ...groundedContradictions.flatMap((c) => c.conflictingEvidence?.map((e) => e.fragmentId) ?? []),
         ])
@@ -1765,15 +1893,17 @@ export function createAnalysisTools(
 
         return {
           ok: true,
-          nextInstruction: 'Step 1 complete. Now execute reportContinuity for characters physically present in this scene. Note only significant physical or gear changes (e.g. broken weapon, injury) as key/value pairs in state. If no changes occurred, omit state or leave it empty []. If no permanent corrections or new records are needed, leave corrections and newRecords empty [].',
+          nextInstruction: 'Observation complete. Stop here; the pipeline will invoke the continuity task separately.',
           summaryLength: summary.length,
-          mentionCount: anchoredMentions.length,
+          eventCount: collector.events.length,
+          mentionCount: reportedMentions.length,
           candidateFragmentCount: collector.candidateFragmentIds.length,
           contradictionCount: collector.contradictions.length,
           sceneTransition: collector.continuityProjection.scene?.transition ?? 'uncertain',
+          maintenanceNeeded,
           ...(resolvedFragments.length > 0 ? {
             resolvedFragments,
-            resolvedFragmentNote: 'Full records for what you just reported, not already in your context. Their sentences are numbered for correction targeting. Use them for continuity and record maintenance; no further reads are needed for these.',
+            resolvedFragmentNote: 'Full records for what you just reported, not already in your context. Their sentences are numbered for correction targeting. Use them for record maintenance; no further reads are needed for these.',
           } : {}),
           ...(skippedMentions.length > 0 ? { skippedMentions } : {}),
           ...(skippedContradictions.length > 0 ? { skippedContradictions } : {}),
@@ -1782,16 +1912,14 @@ export function createAnalysisTools(
     })
 
     tools.reportContinuity = tool({
-      description: 'Step 2 of 3: Report active character working memory (immediate kinetic posture, sparse state of important changes like a broken weapon or injury, knowledge, secrets), entity states, threads, and optional record corrections. If no permanent corrections are needed, leave corrections empty [].',
+      description: 'Report only current continuity: active character and entity rosters, immediate working state, and foreground or resolved narrative threads. Every roster item needs ref: use its catalog ID when available, otherwise its name.',
       inputSchema: toExactJsonSchema(reportContinuityInputSchema),
       execute: async (input: ReportContinuityInput) => {
         const {
           characters = [],
           entities = [],
           threads = [],
-          evidenceSegments = [],
-          corrections = [],
-          newRecords = [],
+          resolvedThreads = [],
         } = input
         const sourceProse = opts?.proseFragmentId
           ? await getFragment(opts.dataDir, opts.storyId, opts.proseFragmentId)
@@ -1808,9 +1936,8 @@ export function createAnalysisTools(
           }
           if (checkedFragments.size === 0) {
             const uniqueIds = [...new Set<string>([
-              ...characters.flatMap((c) => [c.id, c.characterId]).filter((id): id is string => Boolean(id)),
-              ...entities.flatMap((e) => [e.id, e.entityId]).filter((id): id is string => Boolean(id)),
-              ...(corrections ?? []).map((c) => c.fragmentId),
+              ...characters.map((c) => liveStateRef(c, 'characterId')).filter(Boolean),
+              ...entities.map((e) => liveStateRef(e, 'entityId')).filter(Boolean),
             ].filter((id): id is string => typeof id === 'string' && id.trim().length > 0))]
 
             const checks = await Promise.all(
@@ -1827,81 +1954,103 @@ export function createAnalysisTools(
           characters,
           entities,
           threads,
+          resolvedThreads,
         }, proseSegments, continuityRegistry, {
           checkedFragments: opts ? checkedFragments : undefined,
         })
 
         collector.continuityProjection.characterStates = normalizedProjection.projection.characterStates
         collector.continuityProjection.entityStates = normalizedProjection.projection.entityStates
+        collector.continuityProjection.presentCharacterKeys = normalizedProjection.projection.presentCharacterKeys
+        collector.continuityProjection.presentEntityKeys = normalizedProjection.projection.presentEntityKeys
         collector.continuityProjection.threadOperations = normalizedProjection.projection.threadOperations
         collector.continuityProjection.threadFocus = normalizedProjection.projection.threadFocus
-
-        // Record proposals: corrections and new reusable records
-        const proposalSkipped: any[] = []
-        if (opts?.disableSuggestions !== true && opts?.proseFragmentId) {
-          if (corrections && corrections.length > 0) {
-            const evidence = await resolveEvidence(evidenceSegments)
-            if (evidence.error) {
-              proposalSkipped.push(evidence.error)
-            } else {
-              const { operations, unresolved } = await resolveCorrectionOperations(corrections)
-              const result = await queueValidatedProposal({
-                toolName: 'reportContinuity',
-                proposalKind: 'correction',
-                evidence: evidence.evidence!,
-                operations,
-                rejected: unresolved,
-              })
-              if (!result.ok && 'skipped' in result && Array.isArray(result.skipped)) {
-                proposalSkipped.push(...result.skipped)
-              }
-            }
-          }
-
-          if (newRecords && newRecords.length > 0) {
-            const evidence = await resolveEvidence(evidenceSegments)
-            if (evidence.error) {
-              proposalSkipped.push(evidence.error)
-            } else {
-              const result = await queueValidatedProposal({
-                toolName: 'reportContinuity',
-                proposalKind: 'new-fragment',
-                evidence: evidence.evidence!,
-                operations: newRecords.map((operation) => ({ ...operation, description: operation.description ?? '', action: 'create_fragment' as const })),
-              })
-              if (!result.ok && 'skipped' in result && Array.isArray(result.skipped)) {
-                proposalSkipped.push(...result.skipped)
-              }
-            }
-          }
-        }
-
-        emitProgress(collector.fragmentChangeProposals.length > 0 ? 'record-maintenance' : 'observation')
+        emitProgress('observation')
 
         return {
           ok: true,
-          nextInstruction: 'Step 2 complete. Now execute reportDirections to report three distinct creative narrative directions for the next passage.',
+          nextInstruction: 'Continuity complete. Stop here; the pipeline will invoke directions separately when enabled.',
           characterCount: Object.keys(normalizedProjection.projection.characterStates ?? {}).length,
           entityCount: Object.keys(normalizedProjection.projection.entityStates ?? {}).length,
           threadCount: (normalizedProjection.projection.threadOperations ?? []).length,
-          proposalCount: collector.fragmentChangeProposals.length,
           ...(normalizedProjection.skipped.length > 0 ? { skippedContinuity: normalizedProjection.skipped } : {}),
-          ...(proposalSkipped.length > 0 ? { skippedProposals: proposalSkipped } : {}),
         }
       },
     })
+
+    if (opts?.disableSuggestions !== true && opts?.proseFragmentId) {
+      tools.reportMaintenance = tool({
+        description: 'Report only durable-record maintenance supported by the supplied numbered prose and records. Use empty arrays when review finds no safe correction or new reusable record.',
+        inputSchema: toExactJsonSchema(reportMaintenanceInputSchema),
+        execute: async (input: ReportMaintenanceInput) => {
+          const { evidenceSegments = [], corrections = [], newRecords = [] } = input
+          const proposalSkipped: any[] = []
+          let queuedOperationCount = 0
+          let invalid = 0
+          const recordResult = (result: { queuedOperationCount?: number; invalid?: number }) => {
+            queuedOperationCount += result.queuedOperationCount ?? 0
+            invalid += result.invalid ?? 0
+          }
+          const hasProposalWork = corrections.length > 0 || newRecords.length > 0
+          const evidence = hasProposalWork ? await resolveEvidence(evidenceSegments) : undefined
+
+          if (evidence?.error) {
+            recordResult(evidence.error)
+            proposalSkipped.push(evidence.error)
+          } else {
+            if (corrections.length > 0) {
+              const { operations, unresolved } = await resolveCorrectionOperations(corrections)
+              const result = await queueValidatedProposal({
+                toolName: 'reportMaintenance',
+                proposalKind: 'correction',
+                evidence: evidence!.evidence!,
+                operations,
+                rejected: unresolved,
+              })
+              recordResult(result)
+              if (!result.ok && 'skipped' in result && Array.isArray(result.skipped)) {
+                proposalSkipped.push(...result.skipped)
+              }
+            }
+
+            if (newRecords.length > 0) {
+              const result = await queueValidatedProposal({
+                toolName: 'reportMaintenance',
+                proposalKind: 'new-fragment',
+                evidence: evidence!.evidence!,
+                operations: newRecords.map((operation) => ({ ...operation, description: operation.description ?? '', action: 'create_fragment' as const })),
+              })
+              recordResult(result)
+              if (!result.ok && 'skipped' in result && Array.isArray(result.skipped)) {
+                proposalSkipped.push(...result.skipped)
+              }
+            }
+          }
+
+          emitProgress('record-maintenance')
+          return {
+            ok: true,
+            nextInstruction: 'Record maintenance complete. Stop here.',
+            proposalCount: collector.fragmentChangeProposals.length,
+            queuedOperationCount,
+            invalid,
+            ...(proposalSkipped.length > 0 ? { skippedProposals: proposalSkipped } : {}),
+          }
+        },
+      })
+    }
   }
 
   if (opts?.disableDirections !== true) {
     tools.reportDirections = tool({
-      description: 'Step 3 of 3: Report three distinct creative narrative directions for what could happen in the next passage. Analysis is complete after this call.',
+      description: 'Report three distinct creative narrative directions for what could happen in the next passage. Analysis is complete after this call.',
       inputSchema: toExactJsonSchema(reportDirectionsInputSchema),
       execute: async (input: ReportDirectionsInput) => {
         collector.directions = input.directions
         emitProgress('directions')
         return {
           ok: true,
-          nextInstruction: 'Step 3 complete. Analysis finished.',
+          nextInstruction: 'Directions complete. Analysis finished.',
           directionCount: collector.directions.length,
         }
       },
@@ -1920,7 +2069,7 @@ export function createAnalysisTools(
     Object.assign(tools, readTools)
   }
 
-  if (!opts?.disableSuggestions && opts?.proseFragmentId) {
+  if (!opts?.disableSuggestions && opts?.proseFragmentId && opts.includeStandaloneProposalTools !== false) {
     tools.proposeRecordCorrections = tool({
       description: 'Queue author-reviewed corrections for reusable records proven wrong by a grounded reportAnalysis finding. Do not rewrite prose or unresolved conflicts.',
       inputSchema: librarianRecordCorrectionsInputSchema,
@@ -1965,9 +2114,9 @@ export function createAnalysisTools(
  * The analyze toolset. Single source for the runtime handler and the agent's
  * available-tools list, so the toggle path and the model stay in sync.
  *
- * Online analysis uses one shared collector and numbered-record ledger. The
- * adaptive Analyze loop reports its observation, then reads/proposes as needed
- * without returning bodies already available in the prompt or tool history.
+ * Online analysis uses one shared collector and numbered-record ledger. Its
+ * isolated observation, continuity, and directions requests report into that
+ * collector without returning bodies already available in their prompt.
  * Deeper router/audit/backfill jobs can feed candidates into this same shape.
  */
 export function createLibrarianOnlineTools(
@@ -1986,8 +2135,9 @@ export function createLibrarianOnlineTools(
 ): ToolSet {
   return createAnalysisTools(collector, {
     ...opts,
-    includeReadTools: opts.disableSuggestions !== true || opts.disableDirections !== true,
+    includeReadTools: false,
     includeReportTool: true,
+    includeStandaloneProposalTools: false,
   })
 }
 

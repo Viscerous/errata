@@ -268,15 +268,30 @@ export const stateKeyValuePairSchema = z.object({
 // same dictionary while staying grammatically finite; the forgiving
 // preprocess still accepts plain records from non-grammar clients.
 export function forgivingDynamicState() {
+  const toPair = (key: unknown, value: unknown) => ({
+    key: String(key ?? '').trim().slice(0, 100),
+    value: String(value ?? '').trim().slice(0, 500),
+  })
   return z.preprocess((val) => {
-    if (val === null || val === undefined) return []
-    if (Array.isArray(val)) return val
-    if (typeof val === 'object') {
-      return Object.entries(val as Record<string, unknown>)
-        .filter(([, v]) => v !== null && v !== undefined)
-        .map(([k, v]) => ({ key: String(k), value: String(v) }))
+    let pairs: Array<{ key: string; value: string }>
+    if (val === null || val === undefined) pairs = []
+    else if (Array.isArray(val)) {
+      pairs = val
+        .filter((item) => item !== null && typeof item === 'object')
+        .map((item) => {
+          const record = item as { key?: unknown; value?: unknown }
+          return toPair(record.key, record.value)
+        })
+        .filter((pair) => pair.key.length > 0)
     }
-    return []
+    else if (typeof val === 'object') {
+      pairs = Object.entries(val as Record<string, unknown>)
+        .filter(([, v]) => v !== null && v !== undefined)
+        .map(([k, v]) => toPair(k, v))
+        .filter((pair) => pair.key.length > 0)
+    }
+    else pairs = []
+    return pairs.slice(0, 32)
   }, z.array(stateKeyValuePairSchema).max(32))
 }
 
@@ -285,52 +300,66 @@ export function forgivingStringArray(maxLen = 500, options?: { min?: number; max
   if (options?.min !== undefined) arr = arr.min(options.min)
   if (options?.max !== undefined) arr = arr.max(options.max)
   return z.preprocess((val) => {
-    if (val === null || val === undefined) return []
-    if (Array.isArray(val)) {
-      return val
-        .map((v) => (v === null || v === undefined ? '' : String(v)))
-        .filter((s) => s.trim().length > 0)
+    let items: string[]
+    if (val === null || val === undefined) items = []
+    else if (Array.isArray(val)) {
+      items = val
+        .map((v) => (v === null || v === undefined ? '' : String(v).trim()))
+        .filter((s) => s.length > 0)
     }
-    if (typeof val === 'string') {
+    else if (typeof val === 'string') {
       const trimmed = val.trim()
-      if (!trimmed || trimmed.toLowerCase() === 'none' || trimmed.toLowerCase() === 'n/a') return []
-      return [trimmed]
+      items = (!trimmed || trimmed.toLowerCase() === 'none' || trimmed.toLowerCase() === 'n/a') ? [] : [trimmed]
     }
-    return []
+    else items = []
+    // An over-long entry is truncated, not fatal; overflow is trimmed, not rejected.
+    const clamped = items.map((s) => s.slice(0, maxLen))
+    return options?.max !== undefined ? clamped.slice(0, options.max) : clamped
   }, arr)
 }
 
-export const CharacterLiveStateInputSchema = z.object({
-  id: z.string().trim().max(64).optional(),
-  characterId: z.string().trim().max(64).optional(),
-  // Optional so a model that cites the catalog id need not restate the name;
-  // normalization resolves it from the delivered character record.
-  name: z.string().trim().min(1).max(160).optional(),
-  immediate: z.string().trim().max(300).optional()
-    .describe('Immediate kinetic/tactile beat right now (e.g. "tense posture; catching breath against the wall").'),
-  state: forgivingDynamicState().optional()
-    .describe('Sparse dynamic state as key/value pairs, e.g. [{"key":"weapon","value":"broken"}]. Note ONLY important physical or gear changes of note (e.g. broken weapon, acquired item, severe injury). Omit or leave empty [] if no changes occurred in this passage. Do not record mundane inventory.'),
-  knowledge: forgivingStringArray(500, { max: 12 }).default([]).optional()
-    .describe('New facts learned, witnessed, or deduced in this scene. Omit or leave empty [] if none.'),
-  secrets: forgivingStringArray(500, { max: 12 }).default([]).optional()
-    .describe('Active deceptions, hidden motives, or withheld truths. Omit or leave empty [] if none.'),
-})
+function injectLiveStateRef(value: unknown, idField: 'characterId' | 'entityId'): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value
+  const record = value as Record<string, unknown>
+  if (typeof record.ref === 'string' && record.ref.trim()) return value
+  const legacyRef = [record[idField], record.id, record.name]
+    .find((candidate) => typeof candidate === 'string' && candidate.trim())
+  return legacyRef ? { ...record, ref: legacyRef } : value
+}
+
+export const CharacterLiveStateInputSchema = z.preprocess(
+  (value) => injectLiveStateRef(value, 'characterId'),
+  z.object({
+    ref: z.string().trim().min(1).max(160)
+      .describe('Character catalog ID when available; otherwise the character name.'),
+    name: z.string().trim().min(1).max(160).optional(),
+    immediate: z.string().trim().max(300).optional()
+      .describe('Immediate kinetic/tactile beat right now (e.g. "tense posture; catching breath against the wall").'),
+    state: forgivingDynamicState().optional()
+      .describe('Sparse dynamic state as key/value pairs, e.g. [{"key":"weapon","value":"broken"}]. Note ONLY important physical or gear changes of note (e.g. broken weapon, acquired item, severe injury). Omit or leave empty [] if no changes occurred in this passage. Do not record mundane inventory.'),
+    knowledge: forgivingStringArray(500, { max: 12 }).optional()
+      .describe('New facts learned, witnessed, or deduced in this scene. Omit or leave empty [] if none.'),
+    secrets: forgivingStringArray(500, { max: 12 }).optional()
+      .describe('Active deceptions, hidden motives, or withheld truths. Omit or leave empty [] if none.'),
+  }),
+)
 
 export type CharacterLiveStateInput = z.infer<typeof CharacterLiveStateInputSchema>
 
-export const EntityLiveStateInputSchema = z.object({
-  id: z.string().trim().max(64).optional(),
-  entityId: z.string().trim().max(64).optional(),
-  // Optional so a model that cites the catalog id need not restate the name;
-  // normalization resolves it from the delivered record.
-  name: z.string().trim().min(1).max(160).optional(),
-  category: z.enum(['location', 'artefact', 'faction', 'other']).optional(),
-  immediate: z.string().trim().max(300).optional()
-    .describe('Immediate kinetic or visual state in this scene.'),
-  state: forgivingDynamicState().optional()
-    .describe('Sparse dynamic state as key/value pairs for notable entity changes, e.g. [{"key":"condition","value":"damaged"}]. Omit or leave empty [] if no changes.'),
-  notes: forgivingStringArray(500, { max: 12 }).default([]).optional(),
-})
+export const EntityLiveStateInputSchema = z.preprocess(
+  (value) => injectLiveStateRef(value, 'entityId'),
+  z.object({
+    ref: z.string().trim().min(1).max(160)
+      .describe('Entity catalog ID when available; otherwise the entity name.'),
+    name: z.string().trim().min(1).max(160).optional(),
+    category: z.enum(['location', 'artefact', 'faction', 'other']).optional(),
+    immediate: z.string().trim().max(300).optional()
+      .describe('Immediate kinetic or visual state in this scene.'),
+    state: forgivingDynamicState().optional()
+      .describe('Sparse dynamic state as key/value pairs for notable entity changes, e.g. [{"key":"condition","value":"damaged"}]. Omit or leave empty [] if no changes.'),
+    notes: forgivingStringArray(500, { max: 12 }).optional(),
+  }),
+)
 
 export type EntityLiveStateInput = z.infer<typeof EntityLiveStateInputSchema>
 
@@ -343,6 +372,10 @@ export const ContinuityProjectionSchema = z.strictObject({
   /** Sparse prominence updates; omission retains the prior value. */
   threadFocus: z.array(ThreadFocusSchema).default([]),
   knowledgeOperations: z.array(KnowledgeOperationSchema).default([]),
+  /** Snapshot of who is physically active in this passage; state remains durable when absent. */
+  presentCharacterKeys: z.array(z.string().trim().min(1).max(160)).max(24).optional(),
+  /** Snapshot of non-character entities actively participating in this passage. */
+  presentEntityKeys: z.array(z.string().trim().min(1).max(160)).max(24).optional(),
   characterStates: z.record(z.string(), CharacterLiveStateSchema).optional(),
   entityStates: z.record(z.string(), EntityLiveStateSchema).optional(),
 })
@@ -394,6 +427,8 @@ export interface FoldedCharacterLiveState extends ProjectionSource {
   state: Record<string, string>
   knowledge: string[]
   secrets: string[]
+  /** False means retained working memory for an off-scene character. */
+  present?: boolean
 }
 
 export interface FoldedEntityLiveState extends ProjectionSource {
@@ -403,6 +438,8 @@ export interface FoldedEntityLiveState extends ProjectionSource {
   immediate?: string
   state: Record<string, string>
   notes: string[]
+  /** False means retained working memory for an off-scene entity. */
+  present?: boolean
 }
 
 export interface ContinuityLedger {

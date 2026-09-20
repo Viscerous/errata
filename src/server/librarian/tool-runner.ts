@@ -33,6 +33,7 @@ export interface ToolLoopPassArgs {
 export interface ToolLoopPassResult {
   fullText: string
   toolCalls: Array<{ toolName: string; args: Record<string, unknown>; result: unknown }>
+  toolErrors: Array<{ toolName: string; error: string }>
   stepCount: number
   finishReason: string
   servedModelId?: string
@@ -43,6 +44,8 @@ export interface ToolLoopPassResult {
 
 export interface ToolLoopStepUsage {
   stepNumber: number
+  /** Parent pipeline stage when several isolated requests are aggregated. */
+  stage?: string
   finishReason: string
   usage: unknown
   servedModelId?: string
@@ -162,6 +165,7 @@ export async function runToolLoopPass(args: ToolLoopPassArgs): Promise<ToolLoopP
     return {
       fullText: drained.fullText,
       toolCalls: drained.toolCalls,
+      toolErrors: drained.toolErrors,
       stepCount: drained.stepCount,
       finishReason: drained.finishReason,
       servedModelId: drained.servedModelId,

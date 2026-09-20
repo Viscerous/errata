@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
-  anchorMentionText,
   buildReportAnalysisInputSchema,
   createAnalysisTools,
   createEmptyCollector,
   createLibrarianOnlineTools,
+  forgivingArray,
+  forgivingNumberArray,
   librarianNewRecordsInputSchema,
   librarianRecordCorrectionsInputSchema,
   listLibrarianAnalyzeToolNames,
@@ -12,9 +13,12 @@ import {
   reportAnalysisInputSchema,
   reportContinuityInputSchema,
   reportDirectionsInputSchema,
+  reportMaintenanceInputSchema,
   reportObservationInputSchema,
+  resolveMentionTerm,
   timelineEventsFor,
 } from '@/server/librarian/analysis-tools'
+import { forgivingStringArray } from '@/contracts/continuity'
 import { z } from 'zod/v4'
 import { getFragment } from '@/server/fragments/storage'
 import type { Fragment } from '@/contracts/story'
@@ -92,14 +96,13 @@ describe('analysis tool contracts', () => {
     }).success).toBe(false)
   })
 
-  it('exposes one shared online tool set without duplicate prose and summary reads', () => {
+  it('exposes only isolated reporting tools to online Analyze', () => {
     const tools = createLibrarianOnlineTools(createEmptyCollector(), {
       dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001',
     })
-    expect(Object.keys(tools)).toEqual(expect.arrayContaining([
-      'reportAnalysis', 'readFragments', 'listFragmentTypes', 'proposeRecordCorrections',
-      'proposeNewRecords',
-    ]))
+    expect(Object.keys(tools)).toEqual([
+      'reportAnalysis', 'reportObservation', 'reportContinuity', 'reportMaintenance', 'reportDirections',
+    ])
     expect(tools).not.toHaveProperty('readProseChain')
     expect(tools).not.toHaveProperty('readStorySummary')
     expect(listLibrarianAnalyzeToolNames()).toEqual(Object.keys(tools))
@@ -148,7 +151,7 @@ describe('reportAnalysis', () => {
 
   it('publishes normalized progress as soon as semantic tools succeed', async () => {
     const prose = mockFragment({ id: 'pr-0001', type: 'prose', content: 'Alice entered the north hall.' })
-    const record = mockFragment({ id: 'ch-0001' })
+    const record = mockFragment({ id: 'ch-0001', name: 'Alice Cooper' })
     vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => (
       id === prose.id ? prose : id === record.id ? record : null
     ))
@@ -176,7 +179,10 @@ describe('reportAnalysis', () => {
       fragmentId: prose.id,
       stage: 'inspection',
       summaryUpdate: 'Alice entered the hall.',
-      mentions: [{ fragmentId: record.id, text: 'Alice' }],
+      mentions: [
+        { fragmentId: record.id, text: 'Alice' },
+        { fragmentId: record.id, text: 'Alice' },
+      ],
       timelineEvents: [{ event: 'Alice entered the north hall.', position: 'after' }],
       directions: expect.arrayContaining([expect.objectContaining({ title: 'Wait' })]),
     }))
@@ -192,11 +198,12 @@ describe('reportAnalysis', () => {
     expect(collector.events).toEqual(events)
   })
 
-  it('keeps exact mentions and reports non-verbatim ones without rewriting them', async () => {
+  it('resolves mention highlights to the in-prose span or the catalog name', async () => {
     const prose = mockFragment({ id: 'pr-0001', type: 'prose', content: 'Alice studied the Silver ash by the gate.' })
     vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => {
       if (id === 'pr-0001') return prose
-      if (id === 'ch-0001' || id === 'kn-0001') return mockFragment({ id })
+      if (id === 'ch-0001') return mockFragment({ id, name: 'Alice' })
+      if (id === 'kn-0001') return mockFragment({ id, name: 'Silver ash' })
       return null
     })
     const collector = createEmptyCollector()
@@ -206,16 +213,44 @@ describe('reportAnalysis', () => {
       mentions: [
         { fragmentId: 'ch-0001', text: 'Alice' },
         { fragmentId: 'kn-0001', text: '"Silver ash"' },
+        { fragmentId: 'ch-0001' },
       ],
       candidateFragmentIds: ['ch-0001', 'ch-0001'],
     }, executionContext)
-    expect(collector.mentions).toEqual([{ fragmentId: 'ch-0001', text: 'Alice' }])
+    // 'Alice' appears verbatim in the prose so it is kept; '"Silver ash"' is not
+    // verbatim (the quotes are not in the prose) so it resolves to the catalog
+    // name; a spanless mention also resolves to the catalog name.
+    expect(collector.mentions).toEqual([
+      { fragmentId: 'ch-0001', text: 'Alice' },
+      { fragmentId: 'kn-0001', text: 'Silver ash' },
+      { fragmentId: 'ch-0001', text: 'Alice' },
+    ])
     expect(collector.candidateFragmentIds).toEqual(['ch-0001'])
-    expect(result).toMatchObject({ mentionCount: 1, candidateFragmentCount: 1 })
-    expect(result.skippedMentions).toEqual([{
-      fragmentId: 'kn-0001', text: '"Silver ash"',
-      reason: 'Not verbatim in the passage, so it cannot be highlighted.',
-    }])
+    expect(result).toMatchObject({ mentionCount: 3, candidateFragmentCount: 1 })
+    expect(result.skippedMentions ?? []).toEqual([])
+  })
+
+  it('captures a valid mention segment and drops an out-of-range one', async () => {
+    const prose = mockFragment({ id: 'pr-0001', type: 'prose', content: 'Alice studied the gate. The ash was cold.' })
+    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => {
+      if (id === 'pr-0001') return prose
+      if (id === 'ch-0001') return mockFragment({ id, name: 'Alice' })
+      return null
+    })
+    const collector = createEmptyCollector()
+    const tools = createAnalysisTools(collector, { dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001' })
+    const result = await tools.reportAnalysis.execute!({
+      summary: 'Alice at the gate.',
+      mentions: [
+        { fragmentId: 'ch-0001', segment: 1 },
+        { fragmentId: 'ch-0001', segment: 9 },
+      ],
+    }, executionContext)
+    expect(collector.mentions).toEqual([
+      { fragmentId: 'ch-0001', text: 'Alice', segment: 1 },
+      { fragmentId: 'ch-0001', text: 'Alice' },
+    ])
+    expect(result).toMatchObject({ mentionCount: 2 })
   })
 
   it('grounds continuity evidence and skips invalid operations without rejecting the report', async () => {
@@ -273,12 +308,29 @@ describe('reportAnalysis', () => {
     })
   })
 
-  it('uses exact mention text and places events from the scene line', () => {
-    expect(anchorMentionText('Silver ash', 'alice found silver ash.')).toBe('Silver ash')
-    expect(anchorMentionText('"Silver ash"', 'alice found silver ash.')).toBeNull()
+  it('places events from the scene line and validates mention fragment IDs', () => {
     expect(timelineEventsFor(['Alice remembers.'], { transition: 'continue', line: 'flashback' }))
       .toEqual([{ event: 'Alice remembers.', position: 'before' }])
     expect(mentionInputSchema.safeParse({ fragmentId: 'bad-id', text: 'Alice' }).success).toBe(false)
+  })
+
+  it('resolves mention highlight terms from the prose span or catalog name', () => {
+    const resolveName = (id: string) => (id === 'ch-0001' ? 'Alice' : id === 'kn-0001' ? 'Silver ash' : undefined)
+    expect(resolveMentionTerm({ fragmentId: 'ch-0001', modelText: 'Alice', prose: 'Alice left.', resolveName })).toBe('Alice')
+    expect(resolveMentionTerm({ fragmentId: 'ch-0001', modelText: 'Miss Alice', prose: 'Alice left.', resolveName })).toBe('Alice')
+    expect(resolveMentionTerm({ fragmentId: 'ch-0001', modelText: 'the captain', prose: 'Alice left.', resolveName })).toBe('Alice')
+    expect(resolveMentionTerm({ fragmentId: 'ch-0001', prose: 'Alice left.', resolveName })).toBe('Alice')
+    expect(resolveMentionTerm({ fragmentId: 'ch-0001', modelText: 'the captain', prose: 'the captain left.', resolveName: () => 'Alice' })).toBe('the captain')
+    expect(resolveMentionTerm({ fragmentId: 'kn-0001', resolveName })).toBe('')
+    expect(resolveMentionTerm({ fragmentId: 'ch-0001', modelText: 'ghost', resolveName: () => undefined })).toBe('')
+  })
+
+  it('accepts an optional mention segment and drops invalid numbers', () => {
+    expect(mentionInputSchema.safeParse({ fragmentId: 'ch-0001' }).success).toBe(true)
+    expect(mentionInputSchema.parse({ fragmentId: 'ch-0001', segment: 3 }).segment).toBe(3)
+    expect(mentionInputSchema.parse({ fragmentId: 'ch-0001', segment: '3' }).segment).toBe(3)
+    expect(mentionInputSchema.parse({ fragmentId: 'ch-0001', segment: 0 }).segment).toBeUndefined()
+    expect(mentionInputSchema.parse({ fragmentId: 'ch-0001', segment: 'x' }).segment).toBeUndefined()
   })
 })
 
@@ -710,7 +762,7 @@ describe('3-beat staged pipeline tools', () => {
     expect(collector.contradictions[0].sourceSegments).toEqual([1])
   })
 
-  it('reportContinuity processes live state and queues validated record corrections and new records', async () => {
+  it('separates live continuity from validated record maintenance', async () => {
     const prose = mockFragment({
       id: 'pr-0001',
       type: 'prose',
@@ -737,10 +789,10 @@ describe('3-beat staged pipeline tools', () => {
       numberedFragmentIds,
     })
 
-    const result = await tools.reportContinuity.execute({
+    const continuityResult = await tools.reportContinuity.execute({
       characters: [
         {
-          characterId: 'ch-0001',
+          ref: 'ch-0001',
           name: 'Old Knight',
           immediate: 'Standing at the threshold',
            state: [
@@ -752,6 +804,10 @@ describe('3-beat staged pipeline tools', () => {
       ],
       entities: [],
       threads: ['Why was the gate unlocked?'],
+      resolvedThreads: [],
+    }, executionContext)
+
+    const maintenanceResult = await tools.reportMaintenance.execute({
       evidenceSegments: [1],
       corrections: [
         {
@@ -771,10 +827,11 @@ describe('3-beat staged pipeline tools', () => {
       ],
     }, executionContext)
 
-    expect(result.ok).toBe(true)
-    expect(result.characterCount).toBe(1)
-    expect(result.threadCount).toBe(1)
-    expect(result.proposalCount).toBe(2)
+    expect(continuityResult.ok).toBe(true)
+    expect(continuityResult.characterCount).toBe(1)
+    expect(continuityResult.threadCount).toBe(1)
+    expect(maintenanceResult.proposalCount).toBe(2)
+    expect(collector.continuityProjection.presentCharacterKeys).toEqual(['ch-0001'])
 
     expect(collector.fragmentChangeProposals).toHaveLength(2)
     const correctionProposal = collector.fragmentChangeProposals.find(p => p.proposalKind === 'correction')
@@ -793,6 +850,41 @@ describe('3-beat staged pipeline tools', () => {
       type: 'knowledge',
       name: 'North Gate Lore',
     }))
+  })
+
+  it('treats compact threads as a foreground snapshot and resolves existing keys explicitly', async () => {
+    const collector = createEmptyCollector()
+    const tools = createAnalysisTools(collector, {
+      dataDir: '/tmp',
+      storyId: 'story-test',
+      continuityKeys: {
+        thread: [
+          { index: 1, key: 'who_unlocked_the_gate', label: 'Who unlocked the gate?' },
+          { index: 2, key: 'where_is_the_map', label: 'Where is the map?' },
+          { index: 3, key: 'why_the_bells_rang', label: 'Why did the bells ring?' },
+        ],
+      },
+    })
+
+    const result = await tools.reportContinuity.execute({
+      characters: [],
+      entities: [],
+      threads: ['who_unlocked_the_gate'],
+      resolvedThreads: ['where_is_the_map'],
+    }, executionContext)
+
+    expect(result.ok).toBe(true)
+    expect(collector.continuityProjection.threadOperations).toEqual(expect.arrayContaining([
+      expect.objectContaining({ threadKey: 'who_unlocked_the_gate', action: 'advance' }),
+      expect.objectContaining({ threadKey: 'where_is_the_map', action: 'resolve' }),
+    ]))
+    expect(collector.continuityProjection.threadFocus).toEqual(expect.arrayContaining([
+      { threadKey: 'who_unlocked_the_gate', visibility: 'foreground' },
+      { threadKey: 'why_the_bells_rang', visibility: 'dormant' },
+    ]))
+    expect(collector.continuityProjection.threadFocus).not.toContainEqual(
+      { threadKey: 'where_is_the_map', visibility: 'dormant' },
+    )
   })
 
   it('reportContinuity rejects corrections against records not shown numbered', async () => {
@@ -822,8 +914,7 @@ describe('3-beat staged pipeline tools', () => {
       numberedFragmentIds,
     })
 
-    const result = await tools.reportContinuity.execute({
-      characters: [],
+    const result = await tools.reportMaintenance.execute({
       evidenceSegments: [1],
       corrections: [
         {
@@ -839,6 +930,47 @@ describe('3-beat staged pipeline tools', () => {
     expect(result.proposalCount).toBe(0)
     expect(result.skippedProposals).toHaveLength(1)
     expect(result.skippedProposals[0].reason).toContain('has not been shown with numbered sentences')
+  })
+
+  it('validates shared maintenance evidence once for mixed proposal work', async () => {
+    const prose = mockFragment({
+      id: 'pr-0001',
+      type: 'prose',
+      content: 'The old knight carried a silver sword.',
+    })
+    vi.mocked(getFragment).mockImplementation(async (_dir, _story, id) => (
+      id === 'pr-0001' ? prose : null
+    ))
+
+    const collector = createEmptyCollector()
+    const tools = createAnalysisTools(collector, {
+      dataDir: '/tmp',
+      storyId: 'story-test',
+      proseFragmentId: 'pr-0001',
+      numberedFragmentIds: new Set(['ch-0001']),
+    })
+
+    const result = await tools.reportMaintenance.execute({
+      evidenceSegments: [99],
+      corrections: [{
+        fragmentId: 'ch-0001',
+        field: 'content',
+        segment: 1,
+        newText: 'The old knight carries a silver sword.',
+      }],
+      newRecords: [{
+        type: 'knowledge',
+        name: 'North Gate Lore',
+        content: 'The north gate has stood since the first dynasty.',
+      }],
+    }, executionContext)
+
+    expect(result.invalid).toBe(1)
+    expect(result.queuedOperationCount).toBe(0)
+    expect(result.skippedProposals).toHaveLength(1)
+    expect(result.skippedProposals[0].note).toContain('Cited sentence 99 does not exist')
+    expect(collector.fragmentChangeProposals).toEqual([])
+    expect(getFragment).toHaveBeenCalledTimes(1)
   })
 
   it('reportDirections stores creative narrative options', async () => {
@@ -864,6 +996,7 @@ describe('3-beat staged pipeline tools', () => {
       const schemas = [
         { name: 'reportObservation', schema: reportObservationInputSchema },
         { name: 'reportContinuity', schema: reportContinuityInputSchema },
+        { name: 'reportMaintenance', schema: reportMaintenanceInputSchema },
         { name: 'reportDirections', schema: reportDirectionsInputSchema },
       ]
 
@@ -878,6 +1011,26 @@ describe('3-beat staged pipeline tools', () => {
         expect(oneOfMatches.length, `${name} has oneOf`).toBe(0)
         expect(nullTypeMatches.length, `${name} has type: "null"`).toBe(0)
       }
+    })
+
+    it('emits bounded report identities and explicit top-level arrays', () => {
+      const continuity = z.toJSONSchema(reportContinuityInputSchema) as any
+      const maintenance = z.toJSONSchema(reportMaintenanceInputSchema) as any
+      const observation = z.toJSONSchema(reportObservationInputSchema) as any
+
+      expect(continuity.required).toEqual(['characters', 'entities', 'threads', 'resolvedThreads'])
+      expect(continuity.properties.characters.items.required).toContain('ref')
+      expect(continuity.properties.entities.items.required).toContain('ref')
+      expect(maintenance.required).toEqual(['evidenceSegments', 'corrections', 'newRecords'])
+      expect(observation.required).toEqual([
+        'summary',
+        'events',
+        'scene',
+        'mentions',
+        'candidateFragmentIds',
+        'contradictions',
+        'maintenanceNeeded',
+      ])
     })
 
     it('coerces empty string or null state to empty array [] without crashing', () => {
@@ -917,9 +1070,6 @@ describe('3-beat staged pipeline tools', () => {
         ],
         entities: '',
         threads: null,
-        evidenceSegments: '',
-        corrections: '',
-        newRecords: null,
       })
       expect(result.success).toBe(true)
       if (result.success) {
@@ -927,10 +1077,14 @@ describe('3-beat staged pipeline tools', () => {
         expect(result.data.characters[0].secrets).toEqual([])
         expect(result.data.entities).toEqual([])
         expect(result.data.threads).toEqual([])
-        expect(result.data.evidenceSegments).toEqual([])
-        expect(result.data.corrections).toEqual([])
-        expect(result.data.newRecords).toEqual([])
       }
+
+      const maintenance = reportMaintenanceInputSchema.parse({
+        evidenceSegments: '',
+        corrections: '',
+        newRecords: null,
+      })
+      expect(maintenance).toEqual({ evidenceSegments: [], corrections: [], newRecords: [] })
     })
 
     it('coerces single string or number inputs into arrays', () => {
@@ -939,14 +1093,13 @@ describe('3-beat staged pipeline tools', () => {
           { name: 'Victoria', knowledge: 'Learned the truth' },
         ],
         threads: 'Who poisoned the king?',
-        evidenceSegments: 4,
       })
       expect(result.success).toBe(true)
       if (result.success) {
         expect(result.data.characters[0].knowledge).toEqual(['Learned the truth'])
         expect(result.data.threads).toEqual(['Who poisoned the king?'])
-        expect(result.data.evidenceSegments).toEqual([4])
       }
+      expect(reportMaintenanceInputSchema.parse({ evidenceSegments: 4 }).evidenceSegments).toEqual([4])
     })
 
     it('coerces candidateFragmentIds, mentions, and contradictions in reportObservation', () => {
@@ -966,8 +1119,7 @@ describe('3-beat staged pipeline tools', () => {
     })
 
     it('coerces string segment numbers in correctionProposalItemSchema', () => {
-      const result = reportContinuityInputSchema.safeParse({
-        characters: [],
+      const result = reportMaintenanceInputSchema.safeParse({
         evidenceSegments: [1],
         corrections: [
           {
@@ -979,8 +1131,69 @@ describe('3-beat staged pipeline tools', () => {
       })
       expect(result.success).toBe(true)
       if (result.success) {
-        expect(result.data.corrections?.[0].segment).toBe(2)
+        expect(result.data.corrections[0].segment).toBe(2)
       }
     })
+  })
+})
+
+describe('forgiving array per-item forgiveness', () => {
+  it('drops a schema-invalid entry without failing the whole array', () => {
+    const schema = forgivingArray(mentionInputSchema, { max: 24 })
+    const result = schema.safeParse([
+      { fragmentId: 'ch-0001' },
+      { fragmentId: 'zzz' },
+      { fragmentId: 'kn-bakagu', text: 'Bakagu' },
+    ])
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data).toEqual([
+        { fragmentId: 'ch-0001' },
+        { fragmentId: 'kn-bakagu', text: 'Bakagu' },
+      ])
+    }
+  })
+
+  it('trims an over-limit array instead of rejecting it', () => {
+    const schema = forgivingArray(mentionInputSchema, { max: 2 })
+    const items = Array.from({ length: 5 }, (_, i) => ({ fragmentId: `ch-000${i + 1}` }))
+    const result = schema.safeParse(items)
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data).toEqual([{ fragmentId: 'ch-0001' }, { fragmentId: 'ch-0002' }])
+    }
+  })
+
+  it('still fails a min-required array when every entry is dropped', () => {
+    const schema = forgivingArray(mentionInputSchema, { min: 1, max: 24 })
+    const result = schema.safeParse([{ fragmentId: 'zzz' }, { fragmentId: 'yyy' }])
+    expect(result.success).toBe(false)
+  })
+
+  it('keeps a min-required array that still has one valid entry', () => {
+    const schema = forgivingArray(mentionInputSchema, { min: 1, max: 24 })
+    const result = schema.safeParse([{ fragmentId: 'zzz' }, { fragmentId: 'ch-0001' }])
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data).toEqual([{ fragmentId: 'ch-0001' }])
+    }
+  })
+
+  it('trims and filters a number array by the same rules', () => {
+    const schema = forgivingNumberArray(z.number().int().positive(), { max: 3 })
+    const result = schema.safeParse([1, '2', 0, 3, 4, '7'])
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data).toEqual([1, 2, 3])
+    }
+  })
+
+  it('clamps an over-long string entry and trims the array', () => {
+    const schema = forgivingStringArray(10, { max: 2 })
+    const result = schema.safeParse(['short', 'a-very-long-entry-that-exceeds-the-cap', 'third'])
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data).toEqual(['short', 'a-very-lon'])
+    }
   })
 })

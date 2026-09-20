@@ -250,13 +250,26 @@ async function runLibrarianInner(
   // Mentions remain source annotations. Summary history lives only in the
   // source-linked analysis artifact; duplicating it into mutable prose metadata
   // creates a second, staleable authority.
-  const hasMentions = pipeline.workflowComplete && collector.mentions.length > 0
+  const canRefreshMentions = pipeline.workflowComplete
 
-  if (hasMentions) {
+  if (canRefreshMentions) {
     const proseFragment = await getFragment(dataDir, storyId, fragmentId)
     if (proseFragment) {
+      // Only mentions carrying a non-empty highlight anchor become prose
+      // annotations; the renderer highlights whatever spans it can find.
+      const highlightableMentions = collector.mentions.filter((m) => m.text.trim().length > 0)
       const updatedMeta = { ...proseFragment.meta }
-      updatedMeta.annotations = toMentionAnnotations(collector.mentions)
+      const existingAnnotations = Array.isArray(updatedMeta.annotations)
+        ? updatedMeta.annotations.filter((annotation) => (
+            !annotation || typeof annotation !== 'object' || (annotation as { type?: unknown }).type !== 'mention'
+          ))
+        : []
+      const annotations = [
+        ...existingAnnotations,
+        ...toMentionAnnotations(highlightableMentions),
+      ]
+      if (annotations.length > 0) updatedMeta.annotations = annotations
+      else delete updatedMeta.annotations
 
       await updateFragment(dataDir, storyId, {
         ...proseFragment,
@@ -264,7 +277,7 @@ async function runLibrarianInner(
       })
       requestLogger.debug('Saved librarian metadata to prose fragment', {
         fragmentId,
-        annotationCount: collector.mentions.length,
+        annotationCount: highlightableMentions.length,
       })
     }
   }

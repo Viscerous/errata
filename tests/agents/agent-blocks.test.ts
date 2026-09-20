@@ -191,7 +191,7 @@ describe('Librarian Analyze Blocks', () => {
 
     const memory = blocks.find((block) => block.id === 'continuity-memory')
     expect(memory?.content).toContain('Alice — location: north gate')
-    expect(memory?.content).toContain('[dormant] The missing key')
+    expect(memory?.content).toContain('[dormant] [missing-key] The missing key')
   })
 
   it('renders recent-context characters in full and drops them from the catalog', () => {
@@ -606,25 +606,18 @@ describe('Librarian Analyze Prompt', () => {
   it('keeps only role and cross-tool workflow in the system instruction', () => {
     const prompt = buildAnalyzeSystemPrompt()
     expect(prompt).toContain('Analyze the new prose against the supplied story context')
-    expect(prompt).toContain('Execute the **reportAnalysis** tool immediately')
-    expect(prompt).toContain('optional record-maintenance proposals')
-    expect(prompt).toContain('three distinct, compelling next-passage directions')
+    expect(prompt).toContain('one active reporting task')
+    expect(prompt).toContain('Use the active tool exactly once')
+    expect(prompt).not.toContain('reportAnalysis')
+    expect(prompt).not.toContain('reportDirections')
   })
 
-  it('derives workflow guidance from the tools that are actually available', () => {
-    const noDirections = buildAnalyzeSystemPrompt({ disableDirections: true })
-    expect(noDirections).toContain('optional record-maintenance proposals')
-    expect(noDirections).not.toContain('next-passage directions')
-
-    const noSuggestions = buildAnalyzeSystemPrompt({ disableSuggestions: true })
-    expect(noSuggestions).toContain('three distinct, compelling next-passage directions')
-    expect(noSuggestions).not.toContain('optional record-maintenance proposals')
-
+  it('keeps unavailable stages out of the invariant prompt', () => {
     const noOptionalTools = buildAnalyzeSystemPrompt({
-      disabledTools: ['proposeRecordCorrections', 'proposeNewRecords'],
+      disabledTools: ['reportMaintenance', 'reportDirections'],
     })
-    expect(noOptionalTools).toContain('Execute the **reportAnalysis** tool immediately')
-    expect(noOptionalTools).not.toContain('optional record-maintenance proposals')
+    expect(noOptionalTools).toContain('one active reporting task')
+    expect(noOptionalTools).not.toContain('reportMaintenance')
 
     const noReport = buildAnalyzeSystemPrompt({ enabledTools: [] })
     expect(noReport).toContain('without inventing a replacement reporting tool')

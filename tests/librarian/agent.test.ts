@@ -107,38 +107,117 @@ function makeFragment(
  * The tool execute functions from the real analysis tools will run.
  */
 function mockStreamWithToolCalls(toolCalls: Array<{ toolName: string; args: Record<string, unknown> }>) {
-  mockAgentStream.mockImplementation(async (_args: unknown, tools: Record<string, { execute: (args: unknown) => Promise<unknown> }>) => {
+  mockAgentStream.mockImplementation(async (streamArgs: unknown, tools: Record<string, { execute: (args: unknown) => Promise<unknown> }>) => {
     return {
       fullStream: (async function* () {
-        let callId = 0
-        let lastReportArgs: Record<string, unknown> | null = null
-        let reportNeedsReplacement = false
-        let lastExecutedTool = ''
-        for (const tc of toolCalls) {
-          const toolDef = tools[tc.toolName]
-          if (!toolDef?.execute) continue
-          const id = `call-${callId++}`
-          yield { type: 'tool-call' as const, toolCallId: id, toolName: tc.toolName, input: tc.args }
-          // Actually execute the tool so the collector gets populated
-          const output: unknown = await toolDef.execute(tc.args)
-          yield { type: 'tool-result' as const, toolCallId: id, toolName: tc.toolName, output }
-          lastExecutedTool = tc.toolName
-          if (tc.toolName === 'reportAnalysis') {
-            lastReportArgs = tc.args
-            reportNeedsReplacement = !!output && typeof output === 'object'
-              && (output as Record<string, unknown>).inspectionRequired === true
+        const prompt = typeof streamArgs === 'object' && streamArgs !== null
+          && typeof (streamArgs as { prompt?: unknown }).prompt === 'string'
+          ? (streamArgs as { prompt: string }).prompt
+          : ''
+
+        // Older fixture data describes the semantic findings rather than the
+        // isolated request that carries them. Translate it onto the exact active
+        // production report so every test exercises the staged path.
+        if (prompt.includes('Call reportMaintenance exactly once')) {
+          const correctionCalls = toolCalls.filter((call) => call.toolName === 'proposeRecordCorrections')
+          const newRecordCalls = toolCalls.filter((call) => call.toolName === 'proposeNewRecords')
+          const evidenceSegments = [...new Set([...correctionCalls, ...newRecordCalls].flatMap((call) => (
+            Array.isArray(call.args.evidenceSegments) ? call.args.evidenceSegments : []
+          )))].filter((value): value is number => typeof value === 'number')
+          const input = {
+            evidenceSegments,
+            corrections: correctionCalls.flatMap((call) => (
+              Array.isArray(call.args.corrections) ? call.args.corrections : []
+            )),
+            newRecords: newRecordCalls.flatMap((call) => (
+              Array.isArray(call.args.newFragments) ? call.args.newFragments : []
+            )),
           }
+          const id = 'call-maintenance'
+          yield { type: 'tool-call' as const, toolCallId: id, toolName: 'reportMaintenance', input }
+          const output = await tools.reportMaintenance.execute(input)
+          yield { type: 'tool-result' as const, toolCallId: id, toolName: 'reportMaintenance', output }
+          yield { type: 'finish' as const, finishReason: 'stop' }
+          return
         }
-        if (lastReportArgs && (reportNeedsReplacement || lastExecutedTool !== 'reportAnalysis')) {
-          const id = `call-${callId++}`
-          yield { type: 'tool-call' as const, toolCallId: id, toolName: 'reportAnalysis', input: lastReportArgs }
-          const output: unknown = await tools.reportAnalysis.execute(lastReportArgs)
-          yield { type: 'tool-result' as const, toolCallId: id, toolName: 'reportAnalysis', output }
+
+        const lastArgs = (names: string[]) => [...toolCalls]
+          .reverse()
+          .find((call) => names.includes(call.toolName))?.args ?? {}
+        const legacy = lastArgs(['reportObservation', 'reportAnalysis'])
+        let toolName: string
+        let input: Record<string, unknown>
+        if (prompt.includes('Call reportObservation exactly once')) {
+          toolName = 'reportObservation'
+          input = {
+            ...legacy,
+            maintenanceNeeded: toolCalls.some((call) => (
+              call.toolName === 'proposeRecordCorrections' || call.toolName === 'proposeNewRecords'
+            )),
+          }
+        } else if (prompt.includes('Call reportContinuity exactly once')) {
+          const continuity = lastArgs(['reportContinuity', 'reportAnalysis'])
+          toolName = 'reportContinuity'
+          input = {
+            characters: continuity.characters ?? [],
+            entities: continuity.entities ?? [],
+            threads: continuity.threads ?? [],
+            resolvedThreads: continuity.resolvedThreads ?? [],
+          }
+        } else if (prompt.includes('Call reportDirections exactly once')) {
+          const directions = lastArgs(['reportDirections', 'reportAnalysis'])
+          toolName = 'reportDirections'
+          input = { directions: directions.directions ?? [] }
+        } else {
+          toolName = 'reportAnalysis'
+          input = legacy
         }
+        const id = `call-${toolName}`
+        yield { type: 'tool-call' as const, toolCallId: id, toolName, input }
+        const output = await tools[toolName].execute(input)
+        yield { type: 'tool-result' as const, toolCallId: id, toolName, output }
         yield { type: 'finish' as const, finishReason: 'stop' }
       })(),
     }
   })
+}
+
+function isolatedAnalyzeCall(
+  prompt: string | undefined,
+  inputs: {
+    observation: Record<string, unknown>
+    continuity?: Record<string, unknown>
+    directions?: Record<string, unknown>
+  },
+): { toolName: string; input: Record<string, unknown> } {
+  if (prompt?.includes('Call reportObservation exactly once')) {
+    return { toolName: 'reportObservation', input: inputs.observation }
+  }
+  if (prompt?.includes('Call reportContinuity exactly once')) {
+    return {
+      toolName: 'reportContinuity',
+      input: inputs.continuity ?? { characters: [], entities: [], threads: [], resolvedThreads: [] },
+    }
+  }
+  if (prompt?.includes('Call reportDirections exactly once') && inputs.directions) {
+    return { toolName: 'reportDirections', input: inputs.directions }
+  }
+  throw new Error(`Unexpected Analyze stage prompt: ${prompt ?? '(missing)'}`)
+}
+
+function singleToolStream(
+  tools: Record<string, { execute: (args: unknown) => Promise<unknown> }>,
+  call: { toolName: string; input: Record<string, unknown> },
+) {
+  return {
+    fullStream: (async function* () {
+      const id = `call-${call.toolName}`
+      yield { type: 'tool-call' as const, toolCallId: id, toolName: call.toolName, input: call.input }
+      const output = await tools[call.toolName].execute(call.input)
+      yield { type: 'tool-result' as const, toolCallId: id, toolName: call.toolName, output }
+      yield { type: 'finish' as const, finishReason: 'stop' }
+    })(),
+  }
 }
 
 function correctionProposalArgs(
@@ -233,7 +312,7 @@ describe('librarian agent', () => {
     })
 
     mockAgentStream.mockImplementation(async (
-      _args: unknown,
+      args: { prompt?: string },
       tools: Record<string, { description?: string; execute: (args: unknown) => Promise<unknown> }>,
       opts?: { instructions?: string },
     ) => {
@@ -245,16 +324,9 @@ describe('librarian agent', () => {
         expect(tools.proposeNewRecords.description).toContain('Allowed type values: character, knowledge, location')
       }
 
-      return {
-        fullStream: (async function* () {
-          const id = 'call-0'
-          const input = { summary: 'They crossed a market.' }
-          yield { type: 'tool-call' as const, toolCallId: id, toolName: 'reportAnalysis', input }
-          const output = tools.reportAnalysis ? await tools.reportAnalysis.execute(input) : { ok: true }
-          yield { type: 'tool-result' as const, toolCallId: id, toolName: 'reportAnalysis', output }
-          yield { type: 'finish' as const, finishReason: 'stop' }
-        })(),
-      }
+      return singleToolStream(tools, isolatedAnalyzeCall(args.prompt, {
+        observation: { summary: 'They crossed a market.' },
+      }))
     })
 
     await runLibrarian(dataDir, storyId, 'pr-0001')
@@ -283,6 +355,63 @@ describe('librarian agent', () => {
       directions: { requirement: 'disabled', completion: 'disabled' },
     })
     expect(await listFragments(dataDir, storyId, 'summary')).toHaveLength(0)
+  })
+
+  it('runs observation and continuity as isolated requests with a compact handoff', async () => {
+    await createStory(dataDir, makeStory())
+    await createFragment(dataDir, storyId, makeFragment({
+      id: 'ch-0001',
+      type: 'character',
+      name: 'Unrelated Character',
+      content: 'A catalog record that the passage does not mention.',
+    }))
+    await createFragment(dataDir, storyId, makeFragment({
+      id: 'pr-0001',
+      content: 'The empty gate swung open in the wind.',
+    }))
+    await setupProseChain(dataDir, storyId, ['pr-0001'])
+
+    const prompts: string[] = []
+    mockAgentStream.mockImplementation(async (
+      args: { prompt?: string },
+      tools: Record<string, { execute: (input: Record<string, unknown>) => Promise<unknown> }>,
+      opts?: { onStepFinish?: (event: Record<string, unknown>) => Promise<void> | void },
+    ) => {
+      const requestIndex = prompts.length
+      prompts.push(args.prompt ?? '')
+      return {
+        fullStream: (async function* () {
+          const toolName = requestIndex === 0 ? 'reportObservation' : 'reportContinuity'
+          const input = requestIndex === 0
+            ? { summary: 'The empty gate swung open in the wind.', mentions: [], candidateFragmentIds: [], contradictions: [] }
+            : { characters: [], entities: [], threads: [], resolvedThreads: [] }
+          const id = `stage-${requestIndex}`
+          yield { type: 'tool-call' as const, toolCallId: id, toolName, input }
+          yield { type: 'tool-result' as const, toolCallId: id, toolName, output: await tools[toolName].execute(input) }
+          await opts?.onStepFinish?.({
+            stepNumber: 0,
+            finishReason: 'tool-calls',
+            usage: { inputTokens: 100 + requestIndex, outputTokens: 10 + requestIndex },
+            response: { modelId: `test-stage-${requestIndex}` },
+          })
+          yield { type: 'finish' as const, finishReason: 'tool-calls' }
+        })(),
+      }
+    })
+
+    const result = await runLibrarian(dataDir, storyId, 'pr-0001')
+
+    expect(result.summaryUpdate).toContain('empty gate')
+    expect(prompts).toHaveLength(2)
+    expect(prompts[0]).toContain('## Fragment Catalog')
+    expect(prompts[0]).toContain('Perform only the observation task')
+    expect(prompts[1]).not.toContain('## Fragment Catalog')
+    expect(prompts[1]).toContain('Perform only the continuity task')
+    expect(prompts[1]).toContain('The observation request has completed')
+    expect(result.passes?.find((pass) => pass.name === 'analyze')?.diagnostics?.stepUsage).toEqual([
+      expect.objectContaining({ stepNumber: 0, stage: 'observation', modelId: 'test-stage-0' }),
+      expect.objectContaining({ stepNumber: 1, stage: 'continuity', modelId: 'test-stage-1' }),
+    ])
   })
 
   it('keeps summary history in the source-linked analysis artifact', async () => {
@@ -365,23 +494,9 @@ describe('librarian agent', () => {
       tools: Record<string, { execute: (args: unknown) => Promise<unknown> }>,
     ) => {
       if (!capturedPrompt && args.prompt) capturedPrompt = args.prompt
-      return {
-        fullStream: (async function* () {
-          if (!tools.reportAnalysis) {
-            yield { type: 'finish' as const, finishReason: 'stop' }
-            return
-          }
-          const input = { summary: 'Alice fought bravely.' }
-          yield { type: 'tool-call' as const, toolCallId: 'call-report', toolName: 'reportAnalysis', input }
-          yield {
-            type: 'tool-result' as const,
-            toolCallId: 'call-report',
-            toolName: 'reportAnalysis',
-            output: await tools.reportAnalysis.execute(input),
-          }
-          yield { type: 'finish' as const, finishReason: 'stop' }
-        })(),
-      }
+      return singleToolStream(tools, isolatedAnalyzeCall(args.prompt, {
+        observation: { summary: 'Alice fought bravely.' },
+      }))
     })
 
     await runLibrarian(dataDir, storyId, 'pr-0001')
@@ -392,7 +507,7 @@ describe('librarian agent', () => {
     expect(capturedPrompt).toContain('Alice carries a rune-etched blade.')
   })
 
-  it('keeps resolved records available within one adaptive Analyze loop', async () => {
+  it('hands resolved records to isolated maintenance without a read round trip', async () => {
     await createStory(dataDir, makeStory({
       settings: {
         modelOverrides: {
@@ -413,74 +528,53 @@ describe('librarian agent', () => {
     }))
     await setupProseChain(dataDir, storyId, ['pr-0001'])
 
-    let duplicateReadResult: unknown
+    let maintenancePrompt = ''
     mockAgentStream.mockImplementation(async (
       args: { prompt?: string },
       tools: Record<string, { execute: (args: unknown) => Promise<unknown> }>,
-      opts?: { onStepFinish?: (event: Record<string, unknown>) => Promise<void> | void },
     ) => ({
       fullStream: (async function* () {
-        expect(args.prompt).not.toContain('## Recorded Observation Checkpoint')
-        const input = {
-          summary: 'Alice resigned from command at dawn.',
-          candidateFragmentIds: ['ch-0001'],
+        let toolName: string
+        let input: Record<string, unknown>
+        if (args.prompt?.includes('Call reportObservation exactly once')) {
+          toolName = 'reportObservation'
+          input = {
+            summary: 'Alice resigned from command at dawn.',
+            candidateFragmentIds: ['ch-0001'],
+            maintenanceNeeded: true,
+          }
+        } else if (args.prompt?.includes('Call reportContinuity exactly once')) {
+          toolName = 'reportContinuity'
+          input = { characters: [], entities: [], threads: [], resolvedThreads: [] }
+        } else {
+          toolName = 'reportMaintenance'
+          maintenancePrompt = args.prompt ?? ''
+          input = {
+            evidenceSegments: [1],
+            corrections: [{
+              fragmentId: 'ch-0001',
+              field: 'content',
+              segment: 1,
+              newText: 'Alice no longer commands the north gate.',
+            }],
+            newRecords: [],
+          }
         }
-        yield { type: 'tool-call' as const, toolCallId: 'observe', toolName: 'reportAnalysis', input }
-        yield {
-          type: 'tool-result' as const,
-          toolCallId: 'observe',
-          toolName: 'reportAnalysis',
-          output: await tools.reportAnalysis.execute(input),
-        }
-        await opts?.onStepFinish?.({
-          stepNumber: 0,
-          finishReason: 'tool-calls',
-          usage: { inputTokens: 111, outputTokens: 22 },
-          response: { modelId: 'test-model' },
-        })
-        const readInput = { fragmentIds: ['ch-0001'] }
-        duplicateReadResult = await tools.readFragments.execute(readInput)
-        yield { type: 'tool-call' as const, toolCallId: 'read', toolName: 'readFragments', input: readInput }
-        yield { type: 'tool-result' as const, toolCallId: 'read', toolName: 'readFragments', output: duplicateReadResult }
-        yield { type: 'tool-call' as const, toolCallId: 'final-report', toolName: 'reportAnalysis', input }
-        yield {
-          type: 'tool-result' as const,
-          toolCallId: 'final-report',
-          toolName: 'reportAnalysis',
-          output: await tools.reportAnalysis.execute(input),
-        }
-        await opts?.onStepFinish?.({
-          stepNumber: 1,
-          finishReason: 'tool-calls',
-          usage: { inputTokens: 333, outputTokens: 44 },
-          response: { modelId: 'test-model' },
-        })
+        yield { type: 'tool-call' as const, toolCallId: toolName, toolName, input }
+        const output = await tools[toolName].execute(input)
+        yield { type: 'tool-result' as const, toolCallId: toolName, toolName, output }
         yield { type: 'finish' as const, finishReason: 'stop' }
       })(),
     }))
 
     const analysis = await runLibrarian(dataDir, storyId, 'pr-0001')
 
-    expect(duplicateReadResult).toEqual({ fragments: [], missing: [], alreadyAvailable: ['ch-0001'] })
+    expect(maintenancePrompt).toContain('Alice commands the north gate.')
+    expect(maintenancePrompt).toContain('Alice resigned from command at dawn.')
     expect(analysis.passes?.map((pass) => [pass.name, pass.status])).toEqual([
       ['analyze', 'complete'],
     ])
-    expect(analysis.passes?.[0].diagnostics?.stepUsage).toEqual([
-      {
-        stepNumber: 0,
-        finishReason: 'tool-calls',
-        modelId: 'test-model',
-        inputTokens: 111,
-        outputTokens: 22,
-      },
-      {
-        stepNumber: 1,
-        finishReason: 'tool-calls',
-        modelId: 'test-model',
-        inputTokens: 333,
-        outputTokens: 44,
-      },
-    ])
+    expect(analysis.fragmentChangeProposals).toHaveLength(1)
     expect(analysis.passes?.[0].diagnostics?.sampling).toEqual({ temperature: 0.6, topP: 0.95, topK: 20 })
   })
 
@@ -595,7 +689,7 @@ describe('librarian agent', () => {
     expect(state.recentMentions['loc-0001']).toEqual(['pr-0001'])
   })
 
-  it('runs directions in the fused Analyze pass when enabled', async () => {
+  it('runs directions in an isolated Analyze request when enabled', async () => {
     await createStory(dataDir, makeStory({ settings: { disableLibrarianDirections: false } }))
     await createFragment(dataDir, storyId, makeFragment({
       id: 'pr-0001',
@@ -611,26 +705,18 @@ describe('librarian agent', () => {
     ]
 
     mockAgentStream.mockImplementation(async (
-      _args: unknown,
+      args: { prompt?: string },
       tools: Record<string, { execute: (args: unknown) => Promise<unknown> }>,
-    ) => {
-      return {
-        fullStream: (async function* () {
-          if (tools.reportAnalysis) {
-            const input = { summary: 'The road reached a quiet city gate.', directions }
-            yield { type: 'tool-call' as const, toolCallId: 'call-observe', toolName: 'reportAnalysis', input }
-            yield { type: 'tool-result' as const, toolCallId: 'call-observe', toolName: 'reportAnalysis', output: await tools.reportAnalysis.execute(input) }
-          }
-          yield { type: 'finish' as const, finishReason: 'stop' }
-        })(),
-      }
-    })
+    ) => singleToolStream(tools, isolatedAnalyzeCall(args.prompt, {
+      observation: { summary: 'The road reached a quiet city gate.' },
+      directions: { directions },
+    })))
 
     const analysis = await runLibrarian(dataDir, storyId, 'pr-0001')
 
     const analyzePass = analysis.passes?.find((pass) => pass.name === 'analyze')
     expect(analyzePass?.status).toBe('complete')
-    expect(analyzePass?.diagnostics?.reportToolCallCount).toBe(1)
+    expect(analyzePass?.diagnostics?.reportToolCallCount).toBe(3)
     expect(analysis.directions).toEqual(directions)
     expect(analysis.analyzeLanes?.directions).toEqual({ requirement: 'required', completion: 'complete' })
   })
@@ -680,28 +766,31 @@ describe('librarian agent', () => {
     await setupProseChain(dataDir, storyId, ['pr-0001'])
 
     mockAgentStream.mockImplementation(async (
-      _args: unknown,
+      args: { prompt?: string },
       tools: Record<string, { execute: (args: unknown) => Promise<unknown> }>,
       opts?: { onStepFinish?: (event: Record<string, unknown>) => Promise<void> | void },
-    ) => ({
-      fullStream: (async function* () {
-        const input = { summary: 'The hero reached the gate.' }
-        yield { type: 'tool-call' as const, toolCallId: 'call-observe', toolName: 'reportAnalysis', input }
-        yield {
-          type: 'tool-result' as const,
-          toolCallId: 'call-observe',
-          toolName: 'reportAnalysis',
-          output: await tools.reportAnalysis.execute(input),
-        }
-        await opts?.onStepFinish?.({
-          stepNumber: 0,
-          finishReason: 'tool-calls',
-          usage: { inputTokens: 321, outputTokens: 123 },
-          response: { modelId: 'test-model' },
+    ) => {
+      if (args.prompt?.includes('Call reportObservation exactly once')) {
+        const call = isolatedAnalyzeCall(args.prompt, {
+          observation: { summary: 'The hero reached the gate.' },
         })
-        throw new Error('late proposal connection failure')
-      })(),
-    }))
+        return {
+          fullStream: (async function* () {
+            const id = 'call-observe'
+            yield { type: 'tool-call' as const, toolCallId: id, toolName: call.toolName, input: call.input }
+            yield { type: 'tool-result' as const, toolCallId: id, toolName: call.toolName, output: await tools[call.toolName].execute(call.input) }
+            await opts?.onStepFinish?.({
+              stepNumber: 0,
+              finishReason: 'tool-calls',
+              usage: { inputTokens: 321, outputTokens: 123 },
+              response: { modelId: 'test-model' },
+            })
+            yield { type: 'finish' as const, finishReason: 'tool-calls' }
+          })(),
+        }
+      }
+      throw new Error('late proposal connection failure')
+    })
 
     await expect(runLibrarian(dataDir, storyId, 'pr-0001')).rejects.toThrow(
       'was saved but did not fully complete: late proposal connection failure',
@@ -715,9 +804,10 @@ describe('librarian agent', () => {
       completedStepCount: 1,
       inputTokens: 321,
       outputTokens: 123,
-      stepUsage: [{
-        stepNumber: 0,
-        finishReason: 'tool-calls',
+       stepUsage: [{
+         stepNumber: 0,
+         stage: 'observation',
+         finishReason: 'tool-calls',
         modelId: 'test-model',
         inputTokens: 321,
         outputTokens: 123,
@@ -740,33 +830,23 @@ describe('librarian agent', () => {
     await setupProseChain(dataDir, storyId, ['pr-0001'])
 
     mockAgentStream.mockImplementation(async (
-      _args: unknown,
+      args: { prompt?: string },
       tools: Record<string, { execute: (args: unknown) => Promise<unknown> }>,
-    ) => ({
-      fullStream: (async function* () {
-        const input = {
-          summary: 'Alice crossed the north hall.',
-          mentions: [{ fragmentId: 'ch-0001', text: 'Alice' }],
-          stateOperations: [{
-            action: 'set',
-            subject: { label: 'Alice' },
-            facet: 'location',
-            value: 'north hall',
-            scope: 'cross-scene',
-            evidenceSegments: [1],
-          }],
-        }
-        yield { type: 'tool-call' as const, toolCallId: 'report', toolName: 'reportAnalysis', input }
-        yield {
-          type: 'tool-result' as const,
-          toolCallId: 'report',
-          toolName: 'reportAnalysis',
-          output: await tools.reportAnalysis.execute(input),
-        }
-        // No model-authored finish marker is needed after accepted required work.
-        yield { type: 'finish' as const, finishReason: 'stop' }
-      })(),
-    }))
+    ) => singleToolStream(tools, isolatedAnalyzeCall(args.prompt, {
+      observation: {
+        summary: 'Alice crossed the north hall.',
+        mentions: [{ fragmentId: 'ch-0001', text: 'Alice' }],
+      },
+      continuity: {
+        characters: [{
+          ref: 'ch-0001',
+          state: [{ key: 'location', value: 'north hall' }],
+        }],
+        entities: [],
+        threads: [],
+        resolvedThreads: [],
+      },
+    })))
 
     await runLibrarian(dataDir, storyId, 'pr-0001')
 
@@ -774,7 +854,8 @@ describe('librarian agent', () => {
     expect(summaries).toHaveLength(1)
     const analysis = await getAnalysis(dataDir, storyId, summaries[0].id)
     expect(analysis?.summaryUpdate).toBe('Alice crossed the north hall.')
-    expect(analysis?.continuityProjection?.stateOperations).toHaveLength(1)
+    expect(analysis?.continuityProjection?.characterStates?.['ch-0001']?.state)
+      .toEqual({ location: 'north hall' })
     expect(analysis?.passes?.[0]).toMatchObject({ name: 'analyze', status: 'complete' })
 
     const state = await getState(dataDir, storyId)
@@ -938,20 +1019,11 @@ describe('librarian agent', () => {
     await setupProseChain(dataDir, storyId, ['pr-0001'])
 
     mockAgentStream.mockImplementation(async (
-      _args: unknown,
+      args: { prompt?: string },
       tools: Record<string, { execute: (args: unknown) => Promise<unknown> }>,
-    ) => {
-      return {
-        fullStream: (async function* () {
-          if (tools.reportAnalysis) {
-            const input = { summary: 'The guard captain resigned.' }
-            yield { type: 'tool-call' as const, toolCallId: 'call-observe', toolName: 'reportAnalysis', input }
-            yield { type: 'tool-result' as const, toolCallId: 'call-observe', toolName: 'reportAnalysis', output: await tools.reportAnalysis.execute(input) }
-          }
-          yield { type: 'finish' as const, finishReason: 'stop' }
-        })(),
-      }
-    })
+    ) => singleToolStream(tools, isolatedAnalyzeCall(args.prompt, {
+      observation: { summary: 'The guard captain resigned.' },
+    })))
 
     const analysis = await runLibrarian(dataDir, storyId, 'pr-0001')
     const byId = new Map(analysis.candidateFragments?.map((candidate) => [candidate.fragmentId, candidate]))
@@ -1015,20 +1087,11 @@ describe('librarian agent', () => {
     await setupProseChain(dataDir, storyId, ['pr-0001'])
 
     mockAgentStream.mockImplementation(async (
-      _args: unknown,
+      args: { prompt?: string },
       tools: Record<string, { execute: (args: unknown) => Promise<unknown> }>,
-    ) => {
-      return {
-        fullStream: (async function* () {
-          if (tools.reportAnalysis) {
-            const input = { summary: 'A masked figure abdicated.' }
-            yield { type: 'tool-call' as const, toolCallId: 'call-observe', toolName: 'reportAnalysis', input }
-            yield { type: 'tool-result' as const, toolCallId: 'call-observe', toolName: 'reportAnalysis', output: await tools.reportAnalysis.execute(input) }
-          }
-          yield { type: 'finish' as const, finishReason: 'stop' }
-        })(),
-      }
-    })
+    ) => singleToolStream(tools, isolatedAnalyzeCall(args.prompt, {
+      observation: { summary: 'A masked figure abdicated.' },
+    })))
 
     const analysis = await runLibrarian(dataDir, storyId, 'pr-0001')
 
@@ -1574,7 +1637,7 @@ describe('librarian agent', () => {
     })
   })
 
-  it('keeps competing corrections pending without mutating the record', async () => {
+  it('rejects competing corrections in one bounded maintenance report without mutating the record', async () => {
     await createStory(dataDir, makeStory({
       settings: {
         autoApplyLibrarianSuggestions: true,
@@ -1593,8 +1656,8 @@ describe('librarian agent', () => {
     }))
     await setupProseChain(dataDir, storyId, ['pr-0001'])
 
-    // Two proposals rewriting the same span differently remain distinct work
-    // for the author; neither gets to make the other stale by writing first.
+    // A single bounded maintenance report cannot safely apply two different
+    // replacements to the same source span.
     mockStreamWithToolCalls([
       {
         toolName: 'reportAnalysis',
@@ -1631,10 +1694,9 @@ describe('librarian agent', () => {
     ])
 
     const analysis = await runLibrarian(dataDir, storyId, 'pr-0001')
-    expect(analysis.fragmentChangeProposals).toHaveLength(2)
-    expect(analysis.fragmentChangeProposals.every((proposal) => proposal.autoApplySafe === false)).toBe(true)
-    expect(analysis.fragmentChangeProposals.every((proposal) => proposal.accepted === undefined)).toBe(true)
-    expect(analysis.fragmentChangeProposals.every((proposal) => proposal.stale === undefined)).toBe(true)
+    expect(analysis.fragmentChangeProposals).toEqual([])
+    expect(analysis.passes?.find((pass) => pass.name === 'analyze')?.diagnostics)
+      .toMatchObject({ proposalToolFailureCount: 1, proposalInvalidOperationCount: 2 })
 
     const updated = await getFragment(dataDir, storyId, 'ch-0001')
     expect(updated?.content).toContain('is captain of the guard')
@@ -1672,7 +1734,7 @@ describe('librarian agent', () => {
     const analysis = await runLibrarian(dataDir, storyId, 'pr-0001')
     expect(analysis.fragmentChangeProposals).toEqual([])
     expect(analysis.passes?.find((pass) => pass.name === 'analyze')?.diagnostics)
-      .toMatchObject({ proposalToolCallCount: 0, proposalQueuedOperationCount: 0 })
+      .toMatchObject({ proposalToolCallCount: 1, proposalQueuedOperationCount: 0 })
 
     const updated = await getFragment(dataDir, storyId, 'ch-0001')
     expect(updated?.content).toBe('Alice waits at the gate.')

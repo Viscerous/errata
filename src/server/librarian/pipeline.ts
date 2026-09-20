@@ -1,9 +1,14 @@
 import { MISSING_SYSTEM_PROMPT_FALLBACK } from '../instructions'
-import { hasToolCall, type ToolSet } from 'ai'
+import type { ToolSet } from 'ai'
 import type { Fragment, StoryMeta } from '@/contracts/story'
 import { compileAgentContext } from '../agents/compile-agent-context'
 import type { ActivityStreamEvent } from '../agents/activity-stream'
-import type { ContextMessage } from '../llm/context-builder'
+import {
+  compileBlocks,
+  expandMessagesFragmentTags,
+  type ContextBlock,
+  type ContextMessage,
+} from '../llm/context-builder'
 import { samplingDiagnostics, type resolveAgentRuntime } from '../llm/client'
 import { normalizeTokenUsage, resolveAndReportServedUsage } from '../llm/usage-normalizer'
 import type { ContextSelectionSource, FragmentSignal } from '../llm/context-selection'
@@ -14,6 +19,7 @@ import {
   createLibrarianOnlineTools,
   type AnalysisCollector,
 } from './analysis-tools'
+import { buildAnalyzeStagePlan, type AnalyzeStageId } from './analyze-stages'
 import {
   type FragmentCandidate,
   fragmentCandidateIds,
@@ -36,7 +42,6 @@ import {
   type ToolLoopStopWhen,
   type ToolLoopStepUsage,
 } from './tool-runner'
-import { isAnalyzeWorkflowComplete, selectAnalyzeToolStage } from './analyze-stages'
 
 export const DEFAULT_ANALYZE_IDLE_TIMEOUT_MS = 180_000
 
@@ -49,7 +54,7 @@ type PipelineLogger = {
 }
 
 interface RunCompiledPassArgs {
-  compiled: { messages: ContextMessage[]; tools: ToolSet; blocks: Array<{ id: string }> }
+  compiled: { messages: ContextMessage[]; tools: ToolSet; blocks: ContextBlock[] }
   model: ToolLoopPassArgs['model']
   temperature: ToolLoopPassArgs['temperature']
   topP: ToolLoopPassArgs['topP']
@@ -98,9 +103,17 @@ interface CandidateState {
   observedFragmentIds: string[]
 }
 
+class AnalyzeStageIncompleteError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'AnalyzeStageIncompleteError'
+  }
+}
+
 async function runCompiledToolPass(args: RunCompiledPassArgs): Promise<{
   fullText: string
   toolCalls: Array<{ toolName: string; args: Record<string, unknown>; result: unknown }>
+  toolErrors: Array<{ toolName: string; error: string }>
   stepCount: number
   finishReason: string
   servedModelId?: string
@@ -128,6 +141,90 @@ async function runCompiledToolPass(args: RunCompiledPassArgs): Promise<{
     prepareStep: args.prepareStep,
     stopWhen: args.stopWhen,
   })
+}
+
+async function withAnalyzeStagePrompt(
+  compiled: RunCompiledPassArgs['compiled'],
+  dataDir: string,
+  storyId: string,
+  stage: AnalyzeStageId,
+  directive: string,
+  handoff?: string,
+  relevantFragmentIds: ReadonlySet<string> = new Set(),
+): Promise<RunCompiledPassArgs['compiled']> {
+  const compactBuiltinIds = new Set(['story-summary', 'continuity-memory', 'prose-new'])
+  const blocks = compiled.blocks.filter((block) => {
+    if (stage === 'observation' || block.role === 'system' || block.source !== 'builtin') return true
+    if (compactBuiltinIds.has(block.id)) return true
+    const ids = block.fragmentContext?.fragmentIds ?? []
+    return (stage === 'continuity' || stage === 'maintenance')
+      && ids.some((id) => relevantFragmentIds.has(id))
+  })
+  blocks.push({
+    id: `analyze-stage-${stage}`,
+    role: 'user',
+    content: ['## Current analysis task', directive, handoff].filter(Boolean).join('\n\n'),
+    order: 900,
+    source: 'builtin',
+  })
+  let messages = compileBlocks(blocks)
+  messages = await expandMessagesFragmentTags(messages, dataDir, storyId)
+  return {
+    ...compiled,
+    messages,
+    blocks,
+  }
+}
+
+function successfulToolCall(
+  toolCalls: OnlineToolCall[],
+  toolName: string,
+): OnlineToolCall | undefined {
+  return [...toolCalls].reverse().find((call) => (
+    call.toolName === toolName && booleanToolResultField(call.result, 'ok') === true
+  ))
+}
+
+function continuityHandoff(collector: AnalysisCollector): string {
+  return [
+    'The observation request has completed. Treat this compact handoff as its result:',
+    JSON.stringify({
+      summary: collector.summaryUpdate,
+      scene: collector.continuityProjection.scene,
+      mentions: collector.mentions,
+      candidateFragmentIds: collector.candidateFragmentIds,
+      contradictions: collector.contradictions,
+    }),
+  ].join('\n')
+}
+
+function maintenanceHandoff(collector: AnalysisCollector, observationResult?: unknown): string {
+  const result = observationResult && typeof observationResult === 'object'
+    ? observationResult as Record<string, unknown>
+    : undefined
+  return [
+    'Observation found durable-record work. Review only the cited evidence and supplied numbered records:',
+    JSON.stringify({
+      summary: collector.summaryUpdate,
+      candidateFragmentIds: collector.candidateFragmentIds,
+      contradictions: collector.contradictions,
+      resolvedFragments: result?.resolvedFragments,
+    }),
+  ].join('\n')
+}
+
+function directionsHandoff(collector: AnalysisCollector): string {
+  return [
+    'The observation and continuity requests have completed. Base directions on this compact handoff:',
+    JSON.stringify({
+      summary: collector.summaryUpdate,
+      scene: collector.continuityProjection.scene,
+      characterStates: collector.continuityProjection.characterStates,
+      entityStates: collector.continuityProjection.entityStates,
+      threadOperations: collector.continuityProjection.threadOperations,
+      threadFocus: collector.continuityProjection.threadFocus,
+    }),
+  ].join('\n')
 }
 
 function candidateState(candidates: MergedFragmentCandidate[], mentionedFragmentIds: string[]): CandidateState {
@@ -254,6 +351,7 @@ function completedStepUsageDiagnostics(stepUsages: ToolLoopStepUsage[]): Array<R
       stepNumber: step.stepNumber,
       finishReason: step.finishReason,
       ...(step.servedModelId ? { modelId: step.servedModelId } : {}),
+      ...(step.stage ? { stage: step.stage } : {}),
       ...(step.activeTools ? { activeTools: step.activeTools } : {}),
       ...(step.durationMs !== undefined ? { durationMs: step.durationMs } : {}),
       ...(usage ? { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens } : {}),
@@ -277,6 +375,13 @@ async function runOnlineAnalyzePass(
     ...config.headers,
     'User-Agent': config.headers['User-Agent'] ?? 'errata-librarian/1.0',
   }
+  const completedStageUsages: ToolLoopStepUsage[] = []
+  const completedToolCalls: OnlineToolCall[] = []
+  const completedToolErrors: Array<{ toolName: string; error: string }> = []
+  let completedInputTokens = 0
+  let completedOutputTokens = 0
+  let lastServedModelId: string | undefined
+  let activeStageId: AnalyzeStageId | undefined
 
   try {
     const context = await buildAnalyzeContext(dataDir, storyId, story, {
@@ -334,81 +439,130 @@ async function runOnlineAnalyzePass(
     })
 
     const availableToolNames = Object.keys(compiled.tools)
-    const hasObservationTool = availableToolNames.includes('reportObservation')
-    const hasContinuityTool = availableToolNames.includes('reportContinuity')
-    const hasDirectionsTool = availableToolNames.includes('reportDirections') && !disableDirections
+    const stages = buildAnalyzeStagePlan(availableToolNames)
+    if (stages.length === 0) throw new Error('Analyze has no enabled observation report tool')
 
-    const terminalTool = hasDirectionsTool
-      ? 'reportDirections'
-      : (hasContinuityTool ? 'reportContinuity' : 'reportAnalysis')
-    const terminalRequiresTool = hasDirectionsTool
-      ? (hasContinuityTool ? 'reportContinuity' : 'reportAnalysis')
-      : (hasObservationTool ? 'reportObservation' : undefined)
+    let observationToolOutput: unknown
+    let fullText = ''
+    let finishReason = 'unknown'
+    let stepCount = 0
+    const completedStageIds = new Set<string>()
+    for (const stage of stages) {
+      const maintenanceNeeded = collector.candidateFragmentIds.length > 0
+        || collector.contradictions.length > 0
+        || booleanToolResultField(observationToolOutput, 'maintenanceNeeded') === true
+      if (stage.id === 'maintenance' && !maintenanceNeeded) {
+        completedStageIds.add(stage.id)
+        continue
+      }
+      const relevantFragmentIds = new Set([
+        ...collector.mentions.map((mention) => mention.fragmentId),
+        ...collector.candidateFragmentIds,
+        ...collector.contradictions.flatMap((contradiction) => contradiction.fragmentIds),
+      ])
+      const stageCompiled = await withAnalyzeStagePrompt(
+        compiled,
+        dataDir,
+        storyId,
+        stage.id,
+        stage.directive,
+        stage.id === 'continuity'
+          ? continuityHandoff(collector)
+          : stage.id === 'maintenance'
+            ? maintenanceHandoff(collector, observationToolOutput)
+            : stage.id === 'directions' ? directionsHandoff(collector) : undefined,
+        relevantFragmentIds,
+      )
+      requestLogger.debug('Calling isolated analyze stage', {
+        stage: stage.id,
+        toolName: stage.toolName,
+      })
+      activeStageId = stage.id
+      const stageResult = await runCompiledToolPass({
+        compiled: stageCompiled,
+        model,
+        temperature,
+        topP,
+        topK,
+        providerOptions,
+        // Respect the story's configured limit when present. Analyze does not
+        // invent a role-wide ceiling: reasoning budgets vary materially by model.
+        maxOutputTokens: guards.maxOutputTokens,
+        maxSteps: 1,
+        emit,
+        abortSignal,
+        idleTimeoutMs: idleTimeoutMs ?? DEFAULT_ANALYZE_IDLE_TIMEOUT_MS,
+        prepareStep: () => ({ activeTools: [stage.toolName], toolChoice: 'required' }),
+      })
+      const reported = await resolveAndReportServedUsage(
+        dataDir,
+        storyId,
+        'librarian.analyze',
+        stageResult.totalUsage,
+        { providerId, configuredModelId: modelId, servedModelId: stageResult.servedModelId },
+      )
+      lastServedModelId = reported.modelId
+      // Some providers (and interrupted SDK streams) omit aggregate usage even
+      // though each completed step carries it. Preserve those tokens in the
+      // pass diagnostics; prefer the provider aggregate when both are present.
+      const accountedUsage = reported.usage ?? aggregateCompletedStepUsage(stageResult.stepUsages)
+      if (accountedUsage) {
+        completedInputTokens += accountedUsage.inputTokens
+        completedOutputTokens += accountedUsage.outputTokens
+      }
+      const stageUsageOffset = completedStageUsages.length
+      completedStageUsages.push(...stageResult.stepUsages.map((usage, index) => ({
+        ...usage,
+        stepNumber: stageUsageOffset + index,
+        stage: stage.id,
+      })))
+      completedToolCalls.push(...stageResult.toolCalls)
+      completedToolErrors.push(...stageResult.toolErrors)
+      fullText += stageResult.fullText
+      finishReason = stageResult.finishReason
+      stepCount += stageResult.stepCount
 
-    const result = await runCompiledToolPass({
-      compiled,
-      model,
-      temperature,
-      topP,
-      topK,
-      providerOptions,
-      maxOutputTokens: guards.maxOutputTokens,
-      maxSteps: 5,
-      emit,
-      abortSignal,
-      idleTimeoutMs: idleTimeoutMs ?? DEFAULT_ANALYZE_IDLE_TIMEOUT_MS,
-      terminalToolName: terminalTool,
-      terminalRequiresToolName: terminalRequiresTool,
-      prepareStep: ({ steps }) => {
-        const stage = selectAnalyzeToolStage(availableToolNames, steps)
-        return {
-          activeTools: stage.activeTools,
-          toolChoice: stage.activeTools.length > 0 ? 'required' : 'none',
-        }
-      },
-      stopWhen: [
-        hasToolCall(terminalTool),
-        ({ steps }) => isAnalyzeWorkflowComplete(availableToolNames, steps),
-      ],
-    })
-    const { modelId: servedModelId, usage } = await resolveAndReportServedUsage(
-      dataDir,
-      storyId,
-      'librarian.analyze',
-      result.totalUsage,
-      { providerId, configuredModelId: modelId, servedModelId: result.servedModelId },
-    )
-    const toolCallNames = result.toolCalls.map((call) => call.toolName)
-    const deterministicallyComplete = isAnalyzeWorkflowComplete(availableToolNames, [{
-      toolResults: result.toolCalls.map((call) => ({ toolName: call.toolName, output: call.result })),
-    }])
-    const successfulReport = [...result.toolCalls].reverse().find((call) => (
-      (call.toolName === 'reportContinuity' || call.toolName === 'reportAnalysis' || call.toolName === 'reportObservation')
-      && booleanToolResultField(call.result, 'ok') === true
-    ))
-    // A natural stop after inspecting newly supplied records is itself the
-    // model's "nothing else changed" signal. Only forced endings (step/length
-    // limits) still require the deterministic report boundary.
-    const workflowComplete = Boolean(successfulReport)
-      && (disableDirections || collector.directions.length > 0)
-      && (deterministicallyComplete || result.finishReason === 'stop')
-    const proposalToolNames = new Set(['proposeRecordCorrections', 'proposeNewRecords'])
-    const proposalToolResults = result.toolCalls
+      const expectedCall = successfulToolCall(stageResult.toolCalls, stage.toolName)
+      if (stage.id === 'observation') {
+        observationToolOutput = expectedCall?.result
+      }
+      const stageComplete = Boolean(expectedCall)
+        || (stage.id === 'directions' && collector.directions.length > 0)
+      if (!stageComplete) {
+        const detail = stageResult.toolErrors.map((item) => item.error).join('; ')
+        throw new AnalyzeStageIncompleteError(`${stage.id} stage did not complete ${stage.toolName}${detail ? `: ${detail}` : ''}`)
+      }
+      completedStageIds.add(stage.id)
+      activeStageId = undefined
+    }
+
+    const toolCallNames = completedToolCalls.map((call) => call.toolName)
+    const directionsRequired = stages.some((stage) => stage.id === 'directions')
+    const workflowComplete = stages.every((stage) => completedStageIds.has(stage.id))
+      && (!directionsRequired || collector.directions.length > 0)
+    const proposalToolNames = new Set(['reportMaintenance'])
+    const proposalToolResults = completedToolCalls
       .filter((call) => proposalToolNames.has(call.toolName))
       .map((call) => call.result)
-    const stepUsage = completedStepUsageDiagnostics(result.stepUsages)
+    const stepUsage = completedStepUsageDiagnostics(completedStageUsages)
     const durationMs = Date.now() - startTime
     const diagnostics = {
       toolNames: Object.keys(compiled.tools),
       toolCallNames,
+      toolErrors: completedToolErrors,
       blockIds: compiled.blocks.map((block) => block.id),
-      inputTokens: usage?.inputTokens,
-      outputTokens: usage?.outputTokens,
+      inputTokens: completedInputTokens,
+      outputTokens: completedOutputTokens,
       sampling,
       stepUsage,
-      reportToolCallCount: toolCallNames.filter((name) => name === 'reportAnalysis').length,
+      reportToolCallCount: toolCallNames.filter((name) => (
+        name === 'reportAnalysis' || name === 'reportObservation' || name === 'reportContinuity'
+        || name === 'reportMaintenance' || name === 'reportDirections'
+      )).length,
       proposalToolCallCount: proposalToolResults.length,
-      proposalToolFailureCount: proposalToolResults.filter((result) => booleanToolResultField(result, 'ok') === false).length,
+      proposalToolFailureCount: proposalToolResults.filter((result) => (
+        booleanToolResultField(result, 'ok') === false || numericToolResultField(result, 'invalid') > 0
+      )).length,
       proposalQueuedOperationCount: proposalToolResults.reduce<number>((sum, result) => sum + numericToolResultField(result, 'queuedOperationCount'), 0),
       proposalInvalidOperationCount: proposalToolResults.reduce<number>((sum, result) => sum + numericToolResultField(result, 'invalid'), 0),
       workflowComplete,
@@ -421,53 +575,62 @@ async function runOnlineAnalyzePass(
     requestLogger.info('LLM online analysis completed', {
       durationMs,
       providerId,
-      modelId: servedModelId,
+      modelId: lastServedModelId ?? modelId,
       providerName: config.providerName,
       baseURL: config.baseURL,
       headers: Object.keys(requestHeaders),
-      finishReason: result.finishReason,
-      stepCount: result.stepCount,
+      finishReason,
+      stepCount,
       ...diagnostics,
     })
     return {
-      fullText: result.fullText,
-      stepCount: result.stepCount,
-      finishReason: result.finishReason,
-      toolCalls: result.toolCalls,
+      fullText,
+      stepCount,
+      finishReason,
+      toolCalls: completedToolCalls,
       workflowComplete,
       pass: passRecord({
         name: 'analyze',
         status: workflowComplete ? 'complete' : 'failed',
         startedAt,
         durationMs,
-        modelId: servedModelId,
-        stepCount: result.stepCount,
-        finishReason: result.finishReason,
+        modelId: lastServedModelId ?? modelId,
+        stepCount,
+        finishReason,
         ...(!workflowComplete ? { error: 'Analyze ended before its required tool work completed' } : {}),
         diagnostics,
       }),
     }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error)
-    const stepUsages = error instanceof ToolLoopPassError ? error.stepUsages : []
-    const partialUsage = aggregateCompletedStepUsage(stepUsages)
+    const failedStageUsages = error instanceof ToolLoopPassError
+      ? error.stepUsages.map((usage, index) => ({
+          ...usage,
+          stepNumber: completedStageUsages.length + index,
+          ...(activeStageId ? { stage: activeStageId } : {}),
+        }))
+      : []
+    const stepUsages = [...completedStageUsages, ...failedStageUsages]
+    const failedStageUsage = aggregateCompletedStepUsage(failedStageUsages)
     const stepUsage = completedStepUsageDiagnostics(stepUsages)
-    const partialServedModelId = [...stepUsages].reverse().find((step) => step.servedModelId)?.servedModelId
-    let attributedModelId = modelId
-    if (partialUsage) {
+    const partialServedModelId = [...failedStageUsages].reverse().find((step) => step.servedModelId)?.servedModelId
+    let attributedModelId = lastServedModelId ?? modelId
+    if (failedStageUsage) {
       const reported = await resolveAndReportServedUsage(
         dataDir,
         storyId,
         'librarian.analyze',
-        Promise.resolve(partialUsage),
+        Promise.resolve(failedStageUsage),
         { providerId, configuredModelId: modelId, servedModelId: partialServedModelId },
       )
       attributedModelId = reported.modelId
     }
     const diagnostics = {
       completedStepCount: stepUsages.length,
-      inputTokens: partialUsage?.inputTokens,
-      outputTokens: partialUsage?.outputTokens,
+      inputTokens: completedInputTokens + (failedStageUsage?.inputTokens ?? 0),
+      outputTokens: completedOutputTokens + (failedStageUsage?.outputTokens ?? 0),
+      toolCallNames: completedToolCalls.map((call) => call.toolName),
+      toolErrors: completedToolErrors,
       sampling,
       stepUsage,
     }
@@ -475,7 +638,7 @@ async function runOnlineAnalyzePass(
     emit({ type: 'error', error: errorMessage })
     return {
       fullText: '',
-      toolCalls: [],
+      toolCalls: completedToolCalls,
       workflowComplete: false,
       error,
       pass: passRecord({
@@ -510,7 +673,9 @@ export async function runLibrarianPipeline(input: LibrarianPipelineInput): Promi
   const passFailed = analyzeOutcome.pass.status === 'failed'
   const observationPresent = collector.summaryUpdate.trim().length > 0
   if (!observationPresent) {
-    if (analyzeOutcome.error instanceof Error) throw analyzeOutcome.error
+    if (analyzeOutcome.error instanceof Error && !(analyzeOutcome.error instanceof AnalyzeStageIncompleteError)) {
+      throw analyzeOutcome.error
+    }
     throw new Error('Analyze ended without completing the required observation lane')
   }
 
@@ -521,10 +686,10 @@ export async function runLibrarianPipeline(input: LibrarianPipelineInput): Promi
     observationComplete: observationPresent,
   })
   let completionError: string | undefined
-  if (analyzeOutcome.error instanceof Error) {
-    completionError = analyzeOutcome.pass.error ?? 'Analyze stopped after completing its observation lane'
-  } else if (analyzeLanes.directions.completion === 'incomplete') {
+  if (analyzeLanes.directions.completion === 'incomplete') {
     completionError = 'Analyze ended without completing automatic directions required by the story setting'
+  } else if (analyzeOutcome.error instanceof Error) {
+    completionError = analyzeOutcome.pass.error ?? 'Analyze stopped after completing its observation lane'
   } else if (passFailed) {
     completionError = analyzeOutcome.pass.error ?? 'Analyze stopped without successfully finishing'
   }

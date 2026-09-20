@@ -165,8 +165,9 @@ describe('compileAgentContext', () => {
     const instructions = result.blocks.find((block) => block.id === 'instructions')!
 
     expect(Object.keys(result.tools)).toEqual(['reportAnalysis'])
-    expect(instructions.content).toContain('Execute the **reportAnalysis** tool immediately')
-    expect(instructions.content).not.toContain('optional record-maintenance proposals')
+    expect(instructions.content).toContain('This request has one active reporting task.')
+    expect(instructions.content).toContain('Use the active tool exactly once, then stop.')
+    expect(instructions.content).not.toContain('record-maintenance')
   })
 
   it('applies block overrides from config', async () => {

@@ -20,7 +20,7 @@ export interface LibrarianCandidateFragment {
   score?: number
 }
 
-export type LibrarianMention = { fragmentId: string; text: string }
+export type LibrarianMention = { fragmentId: string; text: string; segment?: number }
 
 export type LibrarianAnalyzeLaneRequirement = 'required' | 'conditional' | 'disabled'
 export type LibrarianAnalyzeLaneCompletion = 'complete' | 'not-needed' | 'incomplete' | 'disabled'

@@ -19,6 +19,7 @@ import {
 import { createStory, createFragment, getFragment } from '@/server/fragments/storage'
 import { saveAnalysis, type LibrarianAnalysis } from '@/server/librarian/storage'
 import type { Fragment, StoryMeta } from '@/contracts/story'
+import type { ContinuityLedger } from '@/contracts/continuity'
 import { analysisSourceRevision } from '@/server/librarian/continuity-source'
 
 async function buildContinuityView(
@@ -85,6 +86,32 @@ describe('continuity view', () => {
 
   afterEach(async () => {
     await cleanup()
+  })
+
+  it('caps live state by latest source position rather than first insertion order', () => {
+    const characterStates = Array.from({ length: 25 }, (_, index) => ({
+      sourceFragmentId: `pr-${index}`,
+      analysisId: `la-${index}`,
+      narrativePosition: index === 0 ? 100 : index + 1,
+      characterId: `ch-${index}`,
+      name: `Character ${index}`,
+      state: {},
+      knowledge: [],
+      secrets: [],
+    }))
+    const ledger: ContinuityLedger = {
+      currentState: [],
+      liveThreads: [],
+      characterKnowledge: [],
+      characterStates,
+      staleProjectionCount: 0,
+    }
+
+    const view = projectContinuityView(ledger)
+
+    expect(view?.characterStates).toHaveLength(24)
+    expect(view?.characterStates?.some((character) => character.characterId === 'ch-0')).toBe(true)
+    expect(view?.characterStates?.some((character) => character.characterId === 'ch-1')).toBe(false)
   })
 
   it('does not turn analyses without a projection into a second Writer memory channel', async () => {
@@ -1134,6 +1161,59 @@ describe('renderContinuity', () => {
       expect(chat).toContain('Sitting beside the hearth')
       expect(chat).toContain('travel cloak')
       expect(chat).toContain('Carrying the map')
+    })
+
+    it('treats the reported cast as a presence snapshot while retaining off-scene working memory', async () => {
+      const story = makeStory()
+      await createStory(dataDir, story)
+
+      const frag1 = makeFragment({ id: 'pr-0001', type: 'prose', order: 1, content: 'Alice and Bob waited at the gate.' })
+      await createFragment(dataDir, story.id, frag1)
+      await saveAnalysis(dataDir, story.id, {
+        ...analysis(frag1.id, 1),
+        sourceRevision: analysisSourceRevision(frag1),
+        continuityProjection: {
+          version: 2,
+          scene: { transition: 'continue', line: 'present' },
+          stateOperations: [], threadOperations: [], threadFocus: [], knowledgeOperations: [],
+          presentCharacterKeys: ['ch-0001', 'ch-0002'],
+          characterStates: {
+            'ch-0001': { characterId: 'ch-0001', name: 'Alice', immediate: 'Leaning on the gate', state: { attire: 'red coat' } },
+            'ch-0002': { characterId: 'ch-0002', name: 'Bob', immediate: 'Watching the road' },
+          },
+        },
+      })
+
+      const frag2 = makeFragment({ id: 'pr-0002', type: 'prose', order: 2, content: 'Bob remained after Alice left.' })
+      await createFragment(dataDir, story.id, frag2)
+      await saveAnalysis(dataDir, story.id, {
+        ...analysis(frag2.id, 2),
+        sourceRevision: analysisSourceRevision(frag2),
+        continuityProjection: {
+          version: 2,
+          scene: { transition: 'continue', line: 'present' },
+          stateOperations: [], threadOperations: [], threadFocus: [], knowledgeOperations: [],
+          presentCharacterKeys: ['ch-0002'],
+          characterStates: {
+            'ch-0002': { characterId: 'ch-0002', name: 'Bob', immediate: 'Alone at the gate' },
+          },
+        },
+      })
+
+      const ledger = await buildContinuityLedger({
+        dataDir,
+        storyId: story.id,
+        activeProseFragments: [frag1, frag2],
+      })
+      const alice = ledger?.characterStates?.find((character) => character.characterId === 'ch-0001')
+      expect(alice).toMatchObject({ present: false, state: { attire: 'red coat' } })
+      expect(alice?.immediate).toBeUndefined()
+
+      const rendered = renderContinuity({ continuityView: projectContinuityView(ledger) }, 'generation.writer')!
+      expect(rendered).toContain('Bob')
+      expect(rendered).toContain('Alone at the gate')
+      expect(rendered).not.toContain('Alice')
+      expect(rendered).not.toContain('red coat')
     })
 
     it('clears immediate posture across a cut transition while preserving persistent state', async () => {

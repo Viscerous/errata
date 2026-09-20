@@ -75,85 +75,26 @@ function renderNumberedFragmentSheet(fragment: Fragment): string {
 
 // ─── Librarian Analyze ───
 
-export function buildAnalyzeSystemPrompt(opts?: { 
-  disableDirections?: boolean; 
-  disableSuggestions?: boolean;
+export function buildAnalyzeSystemPrompt(opts?: {
   disabledTools?: Iterable<string>;
   enabledTools?: Iterable<string>;
 }): string {
-  // Keep only cross-tool workflow here. Field semantics and validation contracts
-  // belong to the tool that receives them.
   const disabledTools = new Set(opts?.disabledTools ?? [])
   const enabledTools = opts?.enabledTools ? new Set(opts.enabledTools) : null
   const hasTool = (toolName: string): boolean => enabledTools
     ? enabledTools.has(toolName)
     : !disabledTools.has(toolName)
-  const isStaged = (enabledTools ? enabledTools.has('reportObservation') : false)
-    || (enabledTools ? enabledTools.has('reportContinuity') : false)
-  const canReport = hasTool('reportAnalysis')
-  const canSuggestDirections = opts?.disableDirections !== true && hasTool('reportDirections')
-  const canMaintainRecords = opts?.disableSuggestions !== true && (
-    hasTool('proposeRecordCorrections') || hasTool('proposeNewRecords')
-  )
-  const guidance: string[] = []
-
-  if (isStaged) {
-    guidance.push(`You analyze the new prose in three sequential beats using the required tool at each step. Do NOT write markdown summaries or conversational responses in text—all reporting must be submitted via the active tool call.
-
-Step 1: **reportObservation**
-- summary: Concise retrospective summary of what happened in the new prose as past history.
-- scene: Transition (advance, continue, cut) and any location or narrative time anchor.
-- mentions: Exact verbatim appearances of known catalog records (e.g. 'ch-0001') in the prose, mapped to their fragment ID.
-- candidateFragmentIds: Optional catalog IDs that may require attention or update. Omit or leave empty [] if none.
-- contradictions: Incompatibilities between new prose and existing catalog records. Cite sentence numbers on both sides. Omit or leave empty [] if none.
-
-Step 2: **reportContinuity**
-- characters: Characters physically present or acting in this scene (based on Step 1 mentions). Do NOT list absent background cast. Cite characterId for catalog characters — name may be omitted, it resolves from the catalog:
-  - immediate: Kinetic posture or physical action right now (e.g. "tense posture; catching breath against the wall").
-  - state: Sparse dynamic state as key/value pairs of important physical or gear changes (e.g. [{"key":"weapon","value":"broken"}] or [{"key":"leftArm","value":"injured"}]). Omit or leave empty [] if no changes occurred in this passage. To clear a previous condition, set value to "healed" or "none" (e.g. [{"key":"leftArm","value":"healed"}]). Never pass an empty string as a value.
-  - knowledge: Significant new facts learned or deduced in this scene. Omit or leave empty [] if none.
-  - secrets: Deceptions, hidden motives, or withheld truths. Omit or leave empty [] if none.
-- entities: Non-character entity state changes (locations, artefacts, factions). Omit or leave empty [] if none.
-- threads: Active unresolved narrative questions or plot threads (1 to 3 items). Omit or leave empty [] if none.
-- corrections: Optional permanent corrections to delivered catalog records (from Step 1) when canon truly changed. Cite target fragmentId and segment number from delivered records. Omit or leave empty [] if none.
-- newRecords: Optional new reusable named records established by this prose. Omit or leave empty [] if none.
-
-Step 3: **reportDirections**
-- directions: Three distinct, compelling next-passage directions based on the narrative situation.
-
-Execution bounds:
-- Complete each step immediately using the active tool.
-- Step 1 leads directly to Step 2; Step 2 leads to Step 3; once reportDirections is submitted, the analysis is complete.`)
-
-    if (canMaintainRecords) {
-      guidance.push('If candidate records were flagged for permanent evolution or contradictions, inspect their numbered sentences and make any optional record-maintenance proposals in reportContinuity. Routine working memory belongs in characters and does NOT need proposals.')
-    }
-  } else if (canReport) {
-    guidance.push(`Execute the **reportAnalysis** tool immediately to report your narrative observations. Do NOT write markdown summaries or conversational responses in text—all observations must be submitted via the tool call.
-
-Observation guidelines:
-- characters: active characters with working memory. Cite characterId for catalog characters (name optional — it resolves from the catalog). Set 'immediate' for current physical/kinetic beat; dynamic 'state' dictionary (noting important changes like a broken weapon or injury, leave {} if none); 'knowledge' for new facts learned; and 'secrets' for withheld deceptions.
-- entities: non-character entity state updates (locations, objects, factions) with dynamic 'state' dictionary.
-- mentions: characters and entities present or referenced in this scene, mapping contextually to their known fragment ID (e.g. matching surnames, nicknames, or titles to their cast record).
-- scene: transition (advance, continue, cut) and any location or narrative time anchor.
-- summary: concise retrospective summary of the new prose as past history.
-- threads: list active unresolved narrative questions or plot threads.`)
-
-    if (canSuggestDirections) {
-      guidance.push('Step 3: When requested in the directions step, execute **reportDirections** with three distinct, compelling next-passage directions based on the narrative situation.')
-    }
-
-    if (canMaintainRecords) {
-      guidance.push('If candidate records were flagged for permanent evolution or contradictions, inspect their numbered sentences and make any optional record-maintenance proposals in the follow-up inspection step. Routine working memory (attire, posture, secrets) belongs in reportAnalysis.characters and does NOT need proposals.')
-    }
-  } else {
-    guidance.push('Review the new prose against the supplied context without inventing a replacement reporting tool.')
-  }
+  const hasReportTool = ['reportObservation', 'reportAnalysis', 'reportContinuity', 'reportMaintenance', 'reportDirections']
+    .some(hasTool)
 
   return `
 Analyze the new prose against the supplied story context and keep its durable records accurate.
 
-${guidance.join('\n\n')}
+${hasReportTool
+    ? `This request has one active reporting task. Use the active tool exactly once, then stop. Do not write a markdown summary or conversational response, plan a later task, or repeat work supplied in a completed-stage handoff.
+
+Ground claims in the numbered prose and supplied records. Prefer omission over invention. Field semantics and output bounds are defined by the active tool.`
+    : 'Review the prose against the supplied context without inventing a replacement reporting tool.'}
 `.trim()
 }
 
@@ -217,8 +158,6 @@ export function createLibrarianAnalyzeBlocks(ctx: AgentBlockContext): ContextBlo
     id: 'instructions',
     role: 'system',
     content: buildAnalyzeSystemPrompt({
-      disableDirections: ctx.story.settings?.disableLibrarianDirections === true,
-      disableSuggestions: ctx.story.settings?.disableLibrarianSuggestions === true,
       disabledTools: ctx.disabledTools,
       enabledTools: ctx.enabledTools,
     }).trim(),
