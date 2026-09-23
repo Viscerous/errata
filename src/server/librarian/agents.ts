@@ -6,7 +6,7 @@ import { instructionRegistry } from '../instructions'
 import type { AgentDefinition } from '../agents/types'
 import { coreProposalToolNames, coreReadToolNames, createFragmentTools } from '../llm/tools'
 import { getStory } from '../fragments/storage'
-import { createEmptyCollector, createLibrarianOnlineTools, listLibrarianAnalyzeToolNames } from './analysis-tools'
+import { createAnalysisTools, createEmptyCollector, listLibrarianAnalyzeToolNames } from './analysis-tools'
 import { runLibrarian } from './agent'
 import { librarianChat, createLibrarianChatBespokeTools } from './chat'
 import { refineFragment } from './refine'
@@ -152,7 +152,7 @@ export function registerLibrarianAgents(): void {
     availableTools: listLibrarianAnalyzeToolNames(),
     resolveTools: async ({ dataDir, storyId }) => {
       const story = await getStory(dataDir, storyId)
-      return createLibrarianOnlineTools(createEmptyCollector(), {
+      return createAnalysisTools(createEmptyCollector(), {
         dataDir,
         storyId,
         disableDirections: story?.settings.disableLibrarianDirections === true,

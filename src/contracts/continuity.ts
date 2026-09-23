@@ -139,60 +139,15 @@ export const SceneUpdateSchema = z.strictObject({
 
 export type SceneUpdate = z.infer<typeof SceneUpdateSchema>
 
-export const StateSubjectSchema = z.strictObject({
-  key: z.string().trim().min(1).max(100),
-  label: z.string().trim().min(1).max(160),
-  fragmentId: FragmentIdSchema.optional(),
-})
-
-export type StateSubject = z.infer<typeof StateSubjectSchema>
-
-export const StateScopeSchema = z.enum(['scene', 'cross-scene'])
-export type StateScope = z.infer<typeof StateScopeSchema>
-
-const stateOperationBaseShape = {
-  ...citedEvidenceShape,
-  stateKey: z.string().trim().min(1).max(100),
-}
-
-export const StateSetOperationSchema = z.strictObject({
-  ...stateOperationBaseShape,
-  action: z.literal('set'),
-  subject: StateSubjectSchema,
-  facet: z.string().trim().min(1).max(100),
-  /** Distinguishes simultaneous values of one facet, such as two injuries. */
-  slot: z.string().trim().min(1).max(100).optional(),
-  value: z.string().trim().min(1).max(300),
-  certainty: z.enum(['explicit', 'implied']),
-  /** Scene is the ordinary case; cross-scene is an explicit durable claim. */
-  scope: StateScopeSchema,
-  /** Optional story-time expiry for a cross-scene condition. */
-  until: NarrativeTimeSchema.optional(),
-})
-
-export type StateSetOperation = z.infer<typeof StateSetOperationSchema>
-
-export const StateClearOperationSchema = z.strictObject({
-  ...stateOperationBaseShape,
-  action: z.literal('clear'),
-})
-
-export type StateClearOperation = z.infer<typeof StateClearOperationSchema>
-
-export const StateOperationSchema = z.discriminatedUnion('action', [
-  StateSetOperationSchema,
-  StateClearOperationSchema,
-])
-
-export type StateOperation = z.infer<typeof StateOperationSchema>
-
+/**
+ * Threads are reported as a snapshot of what is in the foreground plus what this
+ * passage settles; opening and advancing differ only in whether the key was
+ * already live.
+ */
 export const ThreadOperationSchema = z.strictObject({
-  ...citedEvidenceShape,
   threadKey: z.string().trim().min(1).max(100),
-  action: z.enum(['open', 'advance', 'resolve', 'abandon']),
+  action: z.enum(['open', 'advance', 'resolve']),
   label: z.string().trim().min(1).max(240).optional(),
-  note: z.string().trim().min(1).max(300).optional(),
-  relatedFragmentIds: z.array(FragmentIdSchema).max(20),
 })
 
 export type ThreadOperation = z.infer<typeof ThreadOperationSchema>
@@ -204,79 +159,30 @@ export const ThreadFocusSchema = z.strictObject({
 
 export type ThreadFocus = z.infer<typeof ThreadFocusSchema>
 
-/** One live identity, numbered so an operation can address it exactly. */
-export interface RegistryEntry {
-  index: number
+/** A live thread as the analyst may address it: by key, or by its label. */
+export interface ThreadRegistryEntry {
   key: string
   label: string
-  detail?: string
-  /** Character id for knowledge, whose keys are scoped per character. */
-  scope?: string
-  /** Exact structured identity, present only for state-lane entries. */
-  subject?: StateSubject
-  facet?: string
-  slot?: string
 }
 
 export interface ContinuityRegistry {
-  state: RegistryEntry[]
-  thread: RegistryEntry[]
-  knowledge: RegistryEntry[]
+  thread: ThreadRegistryEntry[]
   /** Live-state items of the subjects shown to the analyst, in rendered order. */
   items: LiveStateRegistryEntry[]
 }
 
-export const KnowledgeOperationSchema = z.strictObject({
-  ...citedEvidenceShape,
-  characterId: FragmentIdSchema,
-  knowledgeKey: z.string().trim().min(1).max(100),
-  action: z.enum(['learn', 'correct', 'forget']),
-  fact: z.string().trim().min(1).max(400).optional(),
-  acquisition: z.enum(['witnessed', 'told', 'inferred', 'other']),
-})
-
-export type KnowledgeOperation = z.infer<typeof KnowledgeOperationSchema>
-
-
-export function forgivingStringArray(maxLen = 500, options?: { min?: number; max?: number }) {
-  let arr = z.array(z.string().trim().max(maxLen))
-  if (options?.min !== undefined) arr = arr.min(options.min)
-  if (options?.max !== undefined) arr = arr.max(options.max)
-  return z.preprocess((val) => {
-    let items: string[]
-    if (val === null || val === undefined) items = []
-    else if (Array.isArray(val)) {
-      items = val
-        .map((v) => (v === null || v === undefined ? '' : String(v).trim()))
-        .filter((s) => s.length > 0)
-    }
-    else if (typeof val === 'string') {
-      const trimmed = val.trim()
-      items = (!trimmed || trimmed.toLowerCase() === 'none' || trimmed.toLowerCase() === 'n/a') ? [] : [trimmed]
-    }
-    else items = []
-    // An over-long entry is truncated, not fatal; overflow is trimmed, not rejected.
-    const clamped = items.map((s) => s.slice(0, maxLen))
-    return options?.max !== undefined ? clamped.slice(0, options.max) : clamped
-  }, arr)
-}
-
-
 export const ContinuityProjectionSchema = z.strictObject({
-  version: z.literal(3),
+  version: z.literal(4),
   scene: SceneUpdateSchema,
   // Producer and prompt budgets are policy, not persisted truth invariants.
-  stateOperations: z.array(StateOperationSchema).default([]),
   threadOperations: z.array(ThreadOperationSchema).default([]),
   /** Sparse prominence updates; omission retains the prior value. */
   threadFocus: z.array(ThreadFocusSchema).default([]),
-  knowledgeOperations: z.array(KnowledgeOperationSchema).default([]),
   /**
-   * Characters and entities active in this passage and what changed for them.
-   * Present means reported; absent when the passage reported no roster, so a
-   * failed continuity lane cannot mark everyone as gone.
+   * Characters and entities this passage reports and what changed for them.
+   * Those reported present are the scene's roster; everyone else is elsewhere.
    */
-  liveStates: z.array(LiveStateReportSchema).max(32).optional(),
+  liveStates: z.array(LiveStateReportSchema).max(32).default([]),
 })
 
 export type ContinuityProjection = z.infer<typeof ContinuityProjectionSchema>
@@ -285,17 +191,6 @@ export interface ProjectionSource {
   sourceFragmentId: string
   analysisId: string
   narrativePosition: number
-}
-
-export interface CurrentStateEntry extends ProjectionSource {
-  stateKey: string
-  subject: StateSubject
-  facet: string
-  slot?: string
-  value: string
-  certainty: 'explicit' | 'implied'
-  scope: StateScope
-  until?: NarrativeTime
 }
 
 export interface SceneFrame extends ProjectionSource {
@@ -307,31 +202,18 @@ export interface SceneFrame extends ProjectionSource {
 export interface LiveThreadEntry extends ProjectionSource {
   threadKey: string
   label: string
-  note?: string
-  relatedFragmentIds: string[]
   visibility: 'foreground' | 'background' | 'dormant'
 }
 
-export interface CharacterKnowledgeEntry extends ProjectionSource {
-  characterId: string
-  knowledgeKey: string
-  fact: string
-  acquisition: 'witnessed' | 'told' | 'inferred' | 'other'
-}
-
 export interface ContinuityLedger {
-  currentState: CurrentStateEntry[]
   liveThreads: LiveThreadEntry[]
-  characterKnowledge: CharacterKnowledgeEntry[]
   liveStates?: FoldedLiveState[]
   currentScene?: SceneFrame
   staleProjectionCount: number
 }
 
 export interface ContinuityView {
-  currentState: CurrentStateEntry[]
   liveThreads: LiveThreadEntry[]
-  characterKnowledge: CharacterKnowledgeEntry[]
   liveStates?: FoldedLiveState[]
   currentScene?: SceneFrame
   staleProjectionCount: number

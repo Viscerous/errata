@@ -14,35 +14,28 @@ import {
   type LiveStateSource,
 } from '@/contracts/live-state'
 import { proseContentHash } from './continuity-source'
-import { continuityKeyLabel, normalizeContinuityKey, scopedContinuityIdentity } from '@/lib/continuity-keys'
+import { continuityKeyLabel, normalizeContinuityKey } from '@/lib/continuity-keys'
 import type {
-  CharacterKnowledgeEntry,
   ContinuityLedger,
   ContinuityRegistry,
   ContinuityView,
-  CurrentStateEntry,
   LiveThreadEntry,
   ProjectionSource,
-  RegistryEntry,
   SceneFrame,
 } from '@/contracts/continuity'
 
 export type {
-  CharacterKnowledgeEntry,
   ContinuityLedger,
   ContinuityView,
-  CurrentStateEntry,
   FoldedLiveState,
   LiveThreadEntry,
   ProjectionSource,
   SceneFrame,
 }
 
-const MAX_CURRENT_STATE = 24
-const MAX_KNOWLEDGE_PER_CHARACTER = 16
 const MAX_LIVE_STATES = 48
 /**
- * Threads only leave this list when resolved or abandoned, so an unbounded list
+ * Threads only leave this list when resolved, so an unbounded list
  * grows for the life of the story. It is not just a rendering concern: the live
  * registry is rendered into the analyst prompt, so every extra key still costs
  * context budget on the model least able to spare it.
@@ -224,11 +217,10 @@ export async function buildContinuityLedger(params: {
     }
   }))).filter((item): item is LoadedAnalysis => item !== null)
 
-  type SceneCursor = { frame?: SceneFrame; state: Map<string, CurrentStateEntry> }
-  let cursor: SceneCursor = { state: new Map() }
-  const suspended: SceneCursor[] = []
+  // The scene frame of the line being read; entering a time overlay suspends it.
+  let frame: SceneFrame | undefined
+  const suspended: Array<SceneFrame | undefined> = []
   const liveThreads = new Map<string, LiveThreadEntry>()
-  const characterKnowledge = new Map<string, CharacterKnowledgeEntry>()
   const liveStates = new LiveStateFold()
   const threadVisibility = new Map<string, LiveThreadEntry['visibility']>()
   let staleProjectionCount = 0
@@ -265,30 +257,25 @@ export async function buildContinuityLedger(params: {
     const scene = projection.scene
     const transition = scene.transition === 'uncertain' ? 'continue' : scene.transition
     if (transition === 'enter-flashback' || transition === 'enter-flash-forward') {
-      suspended.push(cursor)
-      cursor = { state: new Map() }
+      suspended.push(frame)
+      frame = undefined
       liveStates.enterLine(transition === 'enter-flashback' ? 'flashback' : 'flash-forward')
     } else if (transition === 'return') {
-      cursor = suspended.pop() ?? { state: new Map() }
+      frame = suspended.pop()
       liveStates.returnToPriorLine()
     } else if (transition === 'cut' || transition === 'advance') {
       liveStates.sceneBoundary()
     }
 
-    if (transition === 'cut') {
-      for (const [key, entry] of cursor.state) {
-        if (entry.scope === 'scene') cursor.state.delete(key)
-      }
-    }
     const impliedLine = transition === 'enter-flashback'
       ? 'flashback'
       : transition === 'enter-flash-forward'
         ? 'flash-forward'
         : undefined
     const line = transition === 'return'
-      ? cursor.frame?.line ?? 'present'
-      : impliedLine ?? (scene.line && scene.line !== 'uncertain' ? scene.line : cursor.frame?.line ?? 'present')
-    const priorFrame = cursor.frame
+      ? frame?.line ?? 'present'
+      : impliedLine ?? (scene.line && scene.line !== 'uncertain' ? scene.line : frame?.line ?? 'present')
+    const priorFrame = frame
     let resultingTime = scene.time ?? priorFrame?.time
     if (!scene.time && transition === 'advance' && scene.elapsed && priorFrame?.time) {
       const advanceBound = (value: string | undefined, seconds: number | undefined): string | undefined => {
@@ -309,26 +296,11 @@ export async function buildContinuityLedger(params: {
         ...((earliest || latest) ? { certainty: earliest === latest ? 'exact' : 'bounded' as const } : {}),
       }
     }
-    cursor.frame = {
+    frame = {
       ...source,
       line,
       ...(scene.location ? { location: scene.location } : priorFrame?.location ? { location: priorFrame.location } : {}),
       ...(resultingTime ? { time: resultingTime } : {}),
-    }
-
-    // Time expiry is deliberately conservative. Human labels and unresolved
-    // calendars never trigger deletion; only a current lower bound strictly
-    // beyond a deadline upper bound proves that an assertion expired.
-    const currentEarliest = cursor.frame.time?.earliest
-      ? Date.parse(cursor.frame.time.earliest)
-      : Number.NaN
-    if (Number.isFinite(currentEarliest)) {
-      for (const [key, entry] of cursor.state) {
-        if (!entry.until) continue
-        const deadline = entry.until.latest ?? entry.until.earliest
-        const deadlineLatest = deadline ? Date.parse(deadline) : Number.NaN
-        if (Number.isFinite(deadlineLatest) && currentEarliest > deadlineLatest) cursor.state.delete(key)
-      }
     }
 
     // Prominence is a sparse update, not a snapshot. Omission retains the prior
@@ -338,31 +310,11 @@ export async function buildContinuityLedger(params: {
       threadVisibility.set(normalizeContinuityKey(focus.threadKey), focus.visibility)
     }
 
-    for (const operation of projection.stateOperations) {
-      const stateKey = normalizeContinuityKey(operation.stateKey)
-      if (operation.action === 'clear') {
-        cursor.state.delete(stateKey)
-        continue
-      }
-      cursor.state.delete(stateKey)
-      cursor.state.set(stateKey, {
-        ...source,
-        stateKey,
-        subject: operation.subject,
-        facet: operation.facet,
-        ...(operation.slot ? { slot: operation.slot } : {}),
-        value: operation.value,
-        certainty: operation.certainty,
-        scope: operation.scope,
-        ...(operation.until ? { until: operation.until } : {}),
-      })
-    }
-
     // Narrative threads are reader-facing continuity and can be opened or
     // resolved by any scene. Their prominence remains a separate sparse delta.
     for (const operation of projection.threadOperations) {
       const threadKey = normalizeContinuityKey(operation.threadKey)
-      if (operation.action === 'resolve' || operation.action === 'abandon') {
+      if (operation.action === 'resolve') {
         liveThreads.delete(threadKey)
         threadVisibility.delete(threadKey)
         continue
@@ -373,31 +325,8 @@ export async function buildContinuityLedger(params: {
         ...source,
         threadKey,
         label: operation.label ?? existing?.label ?? continuityKeyLabel(threadKey),
-        ...(operation.note ? { note: operation.note } : existing?.note ? { note: existing.note } : {}),
-        relatedFragmentIds: operation.relatedFragmentIds.length > 0
-          ? operation.relatedFragmentIds
-          : existing?.relatedFragmentIds ?? [],
         visibility: 'dormant',
       })
-    }
-
-    if (cursor.frame.line !== 'flash-forward') {
-      for (const operation of projection.knowledgeOperations) {
-        const key = scopedContinuityIdentity(operation.knowledgeKey, operation.characterId)
-        if (operation.action === 'forget') {
-          characterKnowledge.delete(key)
-          continue
-        }
-        if (!operation.fact) continue
-        characterKnowledge.delete(key)
-        characterKnowledge.set(key, {
-          ...source,
-          characterId: operation.characterId,
-          knowledgeKey: normalizeContinuityKey(operation.knowledgeKey),
-          fact: operation.fact,
-          acquisition: operation.acquisition,
-        })
-      }
     }
 
     liveStates.applyReports(projection.liveStates, source)
@@ -410,17 +339,13 @@ export async function buildContinuityLedger(params: {
   }))
   const foldedLiveStates = liveStates.result()
   const ledger: ContinuityLedger | undefined = (
-    cursor.state.size > 0
-    || allThreads.length > 0
-    || characterKnowledge.size > 0
+    allThreads.length > 0
     || foldedLiveStates.length > 0
-    || hasSceneSignal(cursor.frame)
+    || hasSceneSignal(frame)
   ) ? {
-      currentState: [...cursor.state.values()],
       liveThreads: allThreads,
-      characterKnowledge: [...characterKnowledge.values()],
       ...(foldedLiveStates.length > 0 ? { liveStates: foldedLiveStates } : {}),
-      currentScene: cursor.frame,
+      currentScene: frame,
       staleProjectionCount,
     } : undefined
 
@@ -437,7 +362,6 @@ export function projectContinuityView(
   ledger: ContinuityLedger | undefined,
 ): ContinuityView | undefined {
   if (!ledger) return undefined
-  const currentState = takeLatest(ledger.currentState, MAX_CURRENT_STATE)
 
   // A focused thread always survives; fill the remainder from the recent
   // dormant tail. Insertion order is recency of update.
@@ -451,22 +375,12 @@ export function projectContinuityView(
     ? ledger.liveThreads
     : ledger.liveThreads.filter((thread) => thread.visibility !== 'dormant' || retainedDormant.has(thread))
 
-  // Per-character rather than overall: one talkative character must not crowd
-  // the rest out of the registry the analyst reuses keys from.
-  const knowledgeByCharacterId = new Map<string, CharacterKnowledgeEntry[]>()
-  for (const entry of ledger.characterKnowledge) {
-    knowledgeByCharacterId.set(entry.characterId, [...(knowledgeByCharacterId.get(entry.characterId) ?? []), entry])
-  }
-  const characterKnowledge = [...knowledgeByCharacterId.values()]
-    .flatMap((entries) => takeLatest(entries, MAX_KNOWLEDGE_PER_CHARACTER))
   const liveStates = ledger.liveStates
     ? takeMostRecentlySourced(ledger.liveStates, MAX_LIVE_STATES)
     : undefined
 
   return {
-    currentState,
     liveThreads,
-    characterKnowledge,
     ...(liveStates ? { liveStates } : {}),
     currentScene: ledger.currentScene,
     staleProjectionCount: ledger.staleProjectionCount,
@@ -497,10 +411,10 @@ type ContinuityPresentation =
   | 'writing-constraints'
   | 'direction-candidates'
   | 'editing-reference'
-  | 'registry'
+  | 'full-reference'
   | 'self'
-type AuthorialPresentation = Exclude<ContinuityPresentation, 'registry' | 'self'>
-type CharacterScope = 'all' | 'active-cast' | 'passage-candidates' | 'target-related-cast' | 'target-character'
+type AuthorialPresentation = Exclude<ContinuityPresentation, 'self'>
+type CharacterScope = 'all' | 'active-cast' | 'target-related-cast' | 'target-character'
 
 type ContinuityPolicy =
   | { presentation: Exclude<ContinuityPresentation, 'self'>; characterScope: CharacterScope }
@@ -517,8 +431,8 @@ const POLICY_BY_READER: Record<ContinuityReader, ContinuityPolicy> = {
   // observes narrative continuity naturally instead of parsing numbered registry tables.
   'librarian.analyze': { presentation: 'direction-candidates', characterScope: 'active-cast' },
   // General Librarian chat reads the fold only on demand, but when asked it
-  // needs the whole registry rather than a passage-local subset.
-  'librarian.chat': { presentation: 'registry', characterScope: 'all' },
+  // needs the whole ledger rather than a passage-local subset.
+  'librarian.chat': { presentation: 'full-reference', characterScope: 'all' },
   'librarian.refine': { presentation: 'editing-reference', characterScope: 'target-related-cast' },
   // Character optimization is explicitly about one sheet. Pinning and recency
   // must not decide whether that character's own knowledge reaches the editor.
@@ -554,30 +468,33 @@ const AUTHORIAL_PRESENTATION_COPY: Record<AuthorialPresentation, AuthorialPresen
     threadHeading: '### Open continuity relevant to this edit',
     threadGuidance: 'These are unresolved story questions, not facts to bake into the target fragment. Do not advance, resolve, or turn them into permanent traits or lore while editing.',
   },
+  'full-reference': {
+    introduction: 'It is the whole ledger as tracked, including characters elsewhere and threads that have gone quiet.',
+    includeDormantThreads: true,
+    threadHeading: '### Unresolved threads',
+    threadGuidance: 'Open questions the story has raised and not answered. A dormant one has gone quiet, not been resolved.',
+  },
 }
 
 /**
  * What the renderer needs, stated as the minimum rather than as a context type:
- * ids to scope knowledge by, and the folded view itself. Every agent's block
+ * ids to scope characters by, and the folded view itself. Every agent's block
  * context already satisfies this, so a call site passes itself.
  */
 export interface ContinuitySource {
   continuityView?: ContinuityView
   /** Complete fold for readers that need identity access beyond prompt values. */
   continuityLedger?: ContinuityLedger
-  stickyCharacters?: Array<{ id: string; name?: string }>
-  recentCharacters?: Array<{ id: string; name?: string }>
-  characterCatalog?: Array<{ id: string; name?: string }>
-  allCharacters?: Array<{ id: string; name?: string }>
-  attentionCandidateIds?: string[]
+  stickyCharacters?: Array<{ id: string }>
+  recentCharacters?: Array<{ id: string }>
   /** The character a `self` reader is speaking as. */
-  character?: { id: string; name?: string }
+  character?: { id: string }
   /** The fragment an editing reader is changing. */
-  targetFragment?: { id: string; type: string; name?: string; refs?: string[] }
+  targetFragment?: { id: string; type: string; refs?: string[] }
 }
 
 /**
- * Which characters' awareness the reader is entitled to see.
+ * Which characters' state the reader is entitled to see beyond the scene.
  *
  * Derived here rather than at each call site, where the same spread was written
  * three times and could drift independently. It encodes today's behaviour; it
@@ -596,19 +513,10 @@ function activeCast(source: ContinuitySource): Set<string> {
 
 function charactersInScope(source: ContinuitySource, scope: CharacterScope): Set<string> {
   if (scope === 'all') {
-    return new Set([
-      ...(source.continuityView?.characterKnowledge.map((entry) => entry.characterId) ?? []),
-      ...(source.continuityView?.liveStates ?? [])
-        .filter((subject) => subject.kind === 'character')
-        .map((subject) => subject.fragmentId)
-        .filter((id): id is string => Boolean(id)),
-    ])
-  }
-  if (scope === 'passage-candidates') {
-    return new Set([
-      ...(source.attentionCandidateIds ?? []),
-      ...(source.recentCharacters ?? []).map((fragment) => fragment.id),
-    ])
+    return new Set((source.continuityView?.liveStates ?? [])
+      .filter((subject) => subject.kind === 'character')
+      .map((subject) => subject.fragmentId)
+      .filter((id): id is string => Boolean(id)))
   }
   if (scope === 'target-character') {
     return new Set(source.targetFragment?.type === 'character' ? [source.targetFragment.id] : [])
@@ -620,54 +528,6 @@ function charactersInScope(source: ContinuitySource, scope: CharacterScope): Set
     return characters
   }
   return activeCast(source)
-}
-
-/** Resolve mutable display names from the current context; folded records keep stable IDs. */
-function characterName(source: ContinuitySource, characterId: string): string | undefined {
-  const candidates = [
-    source.character,
-    source.targetFragment?.type === 'character' ? source.targetFragment : undefined,
-    ...(source.stickyCharacters ?? []),
-    ...(source.recentCharacters ?? []),
-    ...(source.characterCatalog ?? []),
-    ...(source.allCharacters ?? []),
-  ]
-  return candidates.find((candidate) => candidate?.id === characterId)?.name?.trim() || undefined
-}
-
-/**
- * Give every authorial group an unambiguous display label without leaking its
- * storage ID. Duplicate current names and unavailable sheets receive stable
- * ordinals in the order their folded knowledge appears.
- */
-function characterLabels(source: ContinuitySource, characterIds: Iterable<string>): Map<string, string> {
-  const resolved = [...characterIds].map((id) => ({ id, name: characterName(source, id) }))
-  const counts = new Map<string, number>()
-  for (const { name } of resolved) {
-    if (!name) continue
-    const key = name.toLocaleLowerCase()
-    counts.set(key, (counts.get(key) ?? 0) + 1)
-  }
-
-  const labels = new Map<string, string>()
-  const seenNames = new Map<string, number>()
-  let unavailable = 0
-  for (const { id, name } of resolved) {
-    if (!name) {
-      unavailable += 1
-      labels.set(id, `Unavailable character ${unavailable}`)
-      continue
-    }
-    const key = name.toLocaleLowerCase()
-    if ((counts.get(key) ?? 0) === 1) {
-      labels.set(id, name)
-      continue
-    }
-    const ordinal = (seenNames.get(key) ?? 0) + 1
-    seenNames.set(key, ordinal)
-    labels.set(id, `${name} (character ${ordinal})`)
-  }
-  return labels
 }
 
 /**
@@ -683,11 +543,7 @@ export function renderContinuity(source: ContinuitySource, reader: ContinuityRea
     return source.character ? renderSelfAwareness(view, source.character.id) : null
   }
   if (!view) return null
-  if (presentation === 'registry') {
-    return renderContinuityRegistry(source, reader === 'librarian.chat')
-  }
   return renderAuthorialContinuity(
-    source,
     view,
     presentation,
     charactersInScope(source, policy.characterScope),
@@ -696,11 +552,11 @@ export function renderContinuity(source: ContinuitySource, reader: ContinuityRea
 }
 
 function renderAuthorialContinuity(
-  source: ContinuitySource,
   view: ContinuityView,
   presentation: AuthorialPresentation,
   characterIds: Set<string>,
-  showThreadKeys: boolean,
+  /** The analyst reports against keys, ids, and item numbers; no other reader needs them. */
+  forAnalyst: boolean,
 ): string {
   const copy = AUTHORIAL_PRESENTATION_COPY[presentation]
   const parts = [
@@ -717,15 +573,6 @@ function renderAuthorialContinuity(
       ...(frame.time ? [`- Time: ${frame.time.label} (${frame.time.certainty})`] : []),
     ].join('\n'))
   }
-  if (view.currentState.length > 0) {
-    parts.push([
-      '### Current narrative state',
-      ...view.currentState.map((item) => (
-        `- ${item.subject.label} — ${item.facet}${item.slot ? `/${item.slot}` : ''}: ${item.value}`
-      )),
-    ].join('\n'))
-  }
-
   const threads = copy.includeDormantThreads
     ? view.liveThreads
     : view.liveThreads.filter((thread) => thread.visibility !== 'dormant')
@@ -733,29 +580,11 @@ function renderAuthorialContinuity(
     parts.push([
       copy.threadHeading,
       copy.threadGuidance,
-      ...threads.map((thread) => `- [${thread.visibility}]${showThreadKeys ? ` [${thread.threadKey}]` : ''} ${thread.label}${thread.note ? ` — ${thread.note}` : ''}`),
+      ...threads.map((thread) => `- [${thread.visibility}]${forAnalyst ? ` [${thread.threadKey}]` : ''} ${thread.label}`),
     ].join('\n'))
   }
 
-  const knowledge = view.characterKnowledge.filter((entry) => characterIds.has(entry.characterId))
-  if (knowledge.length > 0) {
-    const knowledgeByCharacter = new Map<string, CharacterKnowledgeEntry[]>()
-    for (const entry of knowledge) {
-      const entries = knowledgeByCharacter.get(entry.characterId) ?? []
-      entries.push(entry)
-      knowledgeByCharacter.set(entry.characterId, entries)
-    }
-    const labels = characterLabels(source, knowledgeByCharacter.keys())
-    parts.push([
-      '### Character awareness boundaries',
-      ...[...knowledgeByCharacter].map(([characterId, entries]) => [
-        `${labels.get(characterId)} knows or believes:`,
-        ...entries.map((entry) => `- ${entry.fact}`),
-      ].join('\n')),
-    ].filter((line): line is string => Boolean(line)).join('\n\n'))
-  }
-
-  const liveStates = renderLiveStates(view, characterIds, showThreadKeys)
+  const liveStates = renderLiveStates(view, characterIds, forAnalyst)
   if (liveStates) parts.push(liveStates)
 
   return parts.join('\n\n')
@@ -814,11 +643,11 @@ function itemsByField(items: FoldedLiveState['items']): Array<[string, FoldedLiv
 function renderLiveStates(
   view: ContinuityView,
   characterIds: Set<string>,
-  numbered: boolean,
+  forAnalyst: boolean,
 ): string | null {
   const shown = shownLiveStates(view, characterIds)
   if (shown.length === 0) return null
-  const numbers = numbered
+  const numbers = forAnalyst
     ? new Map(numberLiveStateItems(shown).map((entry) => [`${entry.kind}:${entry.subjectKey}:${entry.id}`, entry.index]))
     : undefined
   const names = new Map((view.liveStates ?? []).map((subject) => [subject.key, subject.name]))
@@ -829,7 +658,7 @@ function renderLiveStates(
   for (const subject of shown) {
     const header = [
       `**${subject.name}**`,
-      subject.fragmentId ? ` (\`${subject.fragmentId}\`)` : '',
+      forAnalyst && subject.fragmentId ? ` (\`${subject.fragmentId}\`)` : '',
       subject.category ? ` [${subject.category}]` : '',
       subject.present ? '' : ' — not in the current scene',
     ].join('')
@@ -855,14 +684,13 @@ function renderLiveStates(
 /**
  * What one character knows, addressed to them.
  *
- * Deliberately narrower than the authorial view: durable state and story threads
- * are authorial records, and a character allowed to read them starts acting on
- * offstage facts. The awareness boundary is the part that is theirs — and the
- * part that stops a reply from treating the story summary, which sits in the same
- * prompt, as the character's own memory.
+ * Deliberately narrower than the authorial view: other characters' state and
+ * story threads are authorial records, and a character allowed to read them
+ * starts acting on offstage facts. Their own live state is the part that is
+ * theirs — and the part that stops a reply from treating the story summary,
+ * which sits in the same prompt, as the character's own memory.
  */
 function renderSelfAwareness(view: ContinuityView | undefined, characterId: string): string {
-  const known = view?.characterKnowledge.filter((entry) => entry.characterId === characterId) ?? []
   const charState = view?.liveStates?.find((subject) => subject.kind === 'character' && subject.fragmentId === characterId)
   const lines = [
     '## What You Know',
@@ -874,94 +702,28 @@ function renderSelfAwareness(view: ContinuityView | undefined, characterId: stri
       lines.push(`- ${field}:`, ...items.map((item) => `  - ${item.text}`))
     }
   }
-  if (known.length > 0) {
-    lines.push(...known.map((entry) => `- ${entry.fact} (${entry.acquisition})`))
-  }
-  if (!charState && known.length === 0) {
+  if (!charState) {
     lines.push('- (nothing beyond your character sheet and the present conversation)')
   }
   return lines.join('\n')
 }
 
 /**
- * The registry as the analyst sees it. The block it reads and the tool it writes
- * back through are built from this one function, so an entry number means the
- * same thing on both sides — knowledge is filtered by character scope here, and
- * a second derivation would silently number it differently.
+ * What the analyst may address, exactly as its continuity block renders it:
+ * live threads by key or label, and live-state items by the numbers shown
+ * beside them. The block and the report are built from this one derivation, so
+ * a number means the same thing on both sides.
  */
-export function continuityRegistry(
-  source: ContinuitySource,
-  options: { includeAllDetails?: boolean } = {},
-): ContinuityRegistry {
+export function continuityRegistry(source: ContinuitySource): ContinuityRegistry {
   const view = source.continuityView
   const ledger = source.continuityLedger ?? view
-  if (!ledger) return { state: [], thread: [], knowledge: [], items: [] }
-  const characterIds = charactersInScope(source, 'passage-candidates')
-  const knowers = characterLabels(source, ledger.characterKnowledge.map((entry) => entry.characterId))
-  const detailedState = new Set(view?.currentState.map((entry) => entry.stateKey) ?? [])
-  const detailedThreads = new Set(view?.liveThreads.map((entry) => entry.threadKey) ?? [])
-  const detailedKnowledge = new Set(
-    view?.characterKnowledge.map((entry) => scopedContinuityIdentity(entry.knowledgeKey, entry.characterId)) ?? [],
-  )
+  if (!ledger) return { thread: [], items: [] }
   const analyzePolicy = POLICY_BY_READER['librarian.analyze']
   const items = view && analyzePolicy.presentation !== 'self'
     ? numberLiveStateItems(shownLiveStates(view, charactersInScope(source, analyzePolicy.characterScope)))
     : []
   return {
+    thread: ledger.liveThreads.map((thread) => ({ key: thread.threadKey, label: thread.label })),
     items,
-    state: ledger.currentState.map((item, index) => ({
-      index: index + 1,
-      key: item.stateKey,
-      label: `${item.subject.label} — ${item.facet}${item.slot ? `/${item.slot}` : ''}`,
-      ...(options.includeAllDetails || detailedState.has(item.stateKey) ? { detail: item.value } : {}),
-      subject: item.subject,
-      facet: item.facet,
-      ...(item.slot ? { slot: item.slot } : {}),
-    })),
-    thread: ledger.liveThreads.map((thread, index) => ({
-      index: index + 1,
-      key: thread.threadKey,
-      label: thread.label,
-      detail: options.includeAllDetails || detailedThreads.has(thread.threadKey)
-        ? (thread.note ? `${thread.visibility} — ${thread.note}` : thread.visibility)
-        : thread.visibility,
-    })),
-    knowledge: ledger.characterKnowledge
-      .filter((entry) => characterIds.has(entry.characterId))
-      .map((entry, index) => ({
-        index: index + 1,
-        key: entry.knowledgeKey,
-        label: options.includeAllDetails
-          || detailedKnowledge.has(scopedContinuityIdentity(entry.knowledgeKey, entry.characterId))
-          ? entry.fact
-          : continuityKeyLabel(entry.knowledgeKey),
-        detail: `known by ${knowers.get(entry.characterId)} (${entry.characterId})`,
-        scope: entry.characterId,
-      })),
   }
-}
-
-/** Full keyed registry for the Librarian, including dormant unresolved threads. */
-export function renderContinuityRegistry(source: ContinuitySource, includeAllDetails: boolean): string {
-  const registry = continuityRegistry(source, { includeAllDetails })
-  const section = (heading: string, entries: RegistryEntry[], guidance?: string): string | null => (
-    entries.length === 0 ? null : [
-      heading,
-      ...(guidance ? [guidance] : []),
-      ...entries.map((entry) => (
-        `[${entry.index}] ${entry.key} | ${entry.label}${entry.detail ? ` | ${entry.detail}` : ''}`
-      )),
-    ].join('\n')
-  )
-  return [
-    '## Continuity Registry Before This Passage',
-    'These are tracked continuity identities in the branch-local ledger (NOT catalog fragment IDs). Point at an entry by its number to update it; only a genuinely new condition or thread gets a fresh key.',
-    section('### Current state (update via stateOperations: set/clear)', registry.state),
-    section('### Live threads (update via threadOperations: open/advance/resolve/abandon)', registry.thread, 'Opening or advancing a thread promotes it automatically. Resolve or abandon only with explicit source evidence.'),
-    section(
-      '### Character knowledge (update via knowledgeOperations: learn/correct/forget)',
-      registry.knowledge,
-      'The character is the knower, not necessarily the person or thing described by the fact.',
-    ),
-  ].filter((part): part is string => part !== null).join('\n\n')
 }

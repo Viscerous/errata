@@ -389,7 +389,7 @@ export async function getAnalysis(
  */
 function normalizeStoredAnalysis(data: Record<string, unknown>): LibrarianAnalysis {
   const projection = data.continuityProjection as { version?: unknown } | undefined
-  if (projection && projection.version !== 3) {
+  if (projection && projection.version !== 4) {
     const { continuityProjection: _earlier, ...rest } = data
     return normalizeAnalysis(rest)
   }

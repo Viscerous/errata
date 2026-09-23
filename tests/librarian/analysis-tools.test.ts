@@ -1,24 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Tool } from 'ai'
 import {
-  buildReportAnalysisInputSchema,
+  buildPassageReportInputSchema,
   createAnalysisTools,
   createEmptyCollector,
-  createLibrarianOnlineTools,
   forgivingArray,
   forgivingNumberArray,
-  librarianNewRecordsInputSchema,
-  librarianRecordCorrectionsInputSchema,
   listLibrarianAnalyzeToolNames,
   mentionInputSchema,
-  reportAnalysisInputSchema,
-  reportContinuityInputSchema,
-  reportDirectionsInputSchema,
   reportMaintenanceInputSchema,
-  reportObservationInputSchema,
+  reportPassageInputSchema,
   resolveMentionTerm,
   timelineEventsFor,
 } from '@/server/librarian/analysis-tools'
-import { forgivingStringArray } from '@/contracts/continuity'
 import { liveStateItemId } from '@/contracts/live-state'
 import { z } from 'zod/v4'
 import { getFragment } from '@/server/fragments/storage'
@@ -39,6 +33,15 @@ const executionContext = {
   abortSignal: undefined as unknown as AbortSignal,
 }
 
+/** Call a report as the SDK does: validate the input against its schema, then execute. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function report(tool: Tool, input: unknown): Promise<any> {
+  const schema = tool.inputSchema as { validate: (value: unknown) => Promise<{ success: boolean; value?: unknown; error?: unknown }> | { success: boolean; value?: unknown; error?: unknown } }
+  const parsed = await schema.validate(input)
+  if (!parsed.success) throw parsed.error
+  return tool.execute!(parsed.value, executionContext)
+}
+
 function mockFragment(overrides: Partial<Fragment> = {}): Fragment {
   return {
     id: 'ch-0001', type: 'character', name: 'Alice', description: 'A warrior.',
@@ -48,137 +51,109 @@ function mockFragment(overrides: Partial<Fragment> = {}): Fragment {
   }
 }
 
+function serveFragments(...fragments: Fragment[]) {
+  const byId = new Map(fragments.map((fragment) => [fragment.id, fragment]))
+  vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => byId.get(id) ?? null)
+}
+
+const threeDirections = [
+  { title: 'Wait', description: 'The pause lengthens.', instruction: 'Continue the pause.' },
+  { title: 'Enter', description: 'A visitor arrives.', instruction: 'Introduce the visitor.' },
+  { title: 'Leave', description: 'Alice departs.', instruction: 'Follow Alice outside.' },
+]
+
 describe('analysis tool contracts', () => {
   beforeEach(() => vi.mocked(getFragment).mockResolvedValue(null))
 
   it('creates an empty collector', () => {
     expect(createEmptyCollector()).toEqual({
-      summaryUpdate: '', events: [], mentions: [], candidateFragmentIds: [], newRecordNames: [], contradictions: [],
+      summaryUpdate: '', events: [], mentions: [], newRecordNames: [], contradictions: [],
       fragmentChangeProposals: [], directions: [],
       continuityProjection: {
-        version: 3, scene: { transition: 'uncertain' }, stateOperations: [],
-        threadOperations: [], threadFocus: [], knowledgeOperations: [],
+        version: 4, scene: { transition: 'uncertain' }, threadOperations: [], threadFocus: [], liveStates: [],
       },
     })
   })
 
   it('requires one self-contained report instead of synthesizing missing content', () => {
-    expect(reportAnalysisInputSchema.safeParse({}).success).toBe(false)
-    expect(reportAnalysisInputSchema.safeParse({ summary: '   ' }).success).toBe(false)
-    const parsed = reportAnalysisInputSchema.parse({
-      summary: 'Alice waited.', participantIds: ['ch-0001'], witnessIds: ['ch-0002'],
-      directions: [
-        { title: 'Wait', description: 'The pause lengthens.', instruction: 'Continue the pause.' },
-        { title: 'Enter', description: 'A visitor arrives.', instruction: 'Introduce the visitor.' },
-        { title: 'Leave', description: 'Alice departs.', instruction: 'Follow Alice outside.' },
-      ],
+    expect(reportPassageInputSchema.safeParse({}).success).toBe(false)
+    expect(reportPassageInputSchema.safeParse({ summary: '   ' }).success).toBe(false)
+    const parsed = reportPassageInputSchema.parse({
+      summary: 'Alice waited.', participantIds: ['ch-0001'], directions: threeDirections,
     })
     expect(parsed).not.toHaveProperty('participantIds')
-    expect(parsed).not.toHaveProperty('witnessIds')
   })
 
-  it('accepts a useful report with fewer than three directions without retrying the analysis', () => {
-    const directions = [
-      { title: 'Wait', description: 'The pause lengthens.', instruction: 'Continue the pause.' },
-      { title: 'Enter', description: 'A visitor arrives.', instruction: 'Introduce the visitor.' },
-    ]
-    expect(reportAnalysisInputSchema.safeParse({ summary: 'Alice waited.', directions }).success).toBe(true)
-    expect(reportAnalysisInputSchema.safeParse({ summary: 'Alice waited.', directions: directions.slice(0, 1) }).success).toBe(true)
-    expect(reportAnalysisInputSchema.safeParse({ summary: 'Alice waited.', directions: [] }).success).toBe(false)
-    expect(buildReportAnalysisInputSchema({}, { includeDirections: false }).safeParse({ summary: 'Alice waited.' }).success).toBe(true)
+  it('keeps a report whose directions are missing or fewer than three', () => {
+    expect(reportPassageInputSchema.parse({ summary: 'Alice waited.', directions: threeDirections.slice(0, 1) }).directions).toHaveLength(1)
+    expect(reportPassageInputSchema.parse({ summary: 'Alice waited.' }).directions).toEqual([])
+    expect(buildPassageReportInputSchema({ includeDirections: false }).parse({ summary: 'Alice waited.', directions: threeDirections }))
+      .not.toHaveProperty('directions')
   })
 
-  it('requires proposal evidence and work in every proposal call', () => {
-    expect(librarianRecordCorrectionsInputSchema.safeParse({
-      evidenceSegments: [], corrections: [],
-    }).success).toBe(false)
-    expect(librarianNewRecordsInputSchema.safeParse({
-      evidenceSegments: [1], newFragments: [],
-    }).success).toBe(false)
-  })
-
-  it('exposes only isolated reporting tools to online Analyze', () => {
-    const tools = createLibrarianOnlineTools(createEmptyCollector(), {
+  it('exposes the passage report and record maintenance to online Analyze', () => {
+    const tools = createAnalysisTools(createEmptyCollector(), {
       dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001',
     })
-    expect(Object.keys(tools)).toEqual([
-      'reportAnalysis', 'reportObservation', 'reportContinuity', 'reportMaintenance', 'reportDirections',
-    ])
-    expect(tools).not.toHaveProperty('readProseChain')
-    expect(tools).not.toHaveProperty('readStorySummary')
+    expect(Object.keys(tools)).toEqual(['reportPassage', 'reportMaintenance'])
     expect(listLibrarianAnalyzeToolNames()).toEqual(Object.keys(tools))
   })
 
-  it('omits optional proposal and direction tools when disabled', () => {
+  it('omits record maintenance and directions when disabled', () => {
     const tools = createAnalysisTools(createEmptyCollector(), {
-      dataDir: '/tmp', storyId: 'story-test', disableSuggestions: true, disableDirections: true,
+      dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001', disableSuggestions: true, disableDirections: true,
     })
-    expect(tools).toHaveProperty('reportAnalysis')
-    expect(tools).not.toHaveProperty('proposeRecordCorrections')
-    expect(tools).not.toHaveProperty('proposeNewRecords')
-    expect(tools).not.toHaveProperty('proposeDirections')
+    expect(Object.keys(tools)).toEqual(['reportPassage'])
+    const schema = (tools.reportPassage.inputSchema as { jsonSchema: { properties: Record<string, unknown> } }).jsonSchema
+    expect(schema.properties).not.toHaveProperty('directions')
   })
 
-  it('collects directions in the self-contained report', async () => {
+  it('collects directions in the passage report', async () => {
     const collector = createEmptyCollector()
     const tools = createAnalysisTools(collector)
-    await tools.reportAnalysis.execute!({
-      summary: 'Alice waited.',
-      directions: [
-        { title: 'Wait', description: 'The pause lengthens.', instruction: 'Continue the pause.' },
-        { title: 'Enter', description: 'A visitor arrives.', instruction: 'Introduce the visitor.' },
-        { title: 'Leave', description: 'Alice departs.', instruction: 'Follow Alice outside.' },
-      ],
-    }, executionContext)
+    await report(tools.reportPassage, { summary: 'Alice waited.', directions: threeDirections })
     expect(collector.directions).toHaveLength(3)
   })
 })
 
-describe('reportAnalysis', () => {
+describe('reportPassage', () => {
   beforeEach(() => vi.mocked(getFragment).mockResolvedValue(null))
 
   it('stores the model report directly and replaces it on a later report', async () => {
     const collector = createEmptyCollector()
     const tools = createAnalysisTools(collector)
-    await tools.reportAnalysis.execute!({
+    await report(tools.reportPassage, {
       summary: 'First summary.', events: ['First event.', 'Second event.'],
       contradictions: [{ description: 'A conflict.', fragmentIds: [] }],
-    }, executionContext)
-    await tools.reportAnalysis.execute!({ summary: 'Replacement summary.', events: ['Replacement event.'] }, executionContext)
+    })
+    await report(tools.reportPassage, { summary: 'Replacement summary.', events: ['Replacement event.'] })
     expect(collector.summaryUpdate).toBe('Replacement summary.')
     expect(collector.events).toEqual(['Replacement event.'])
     expect(collector.contradictions).toEqual([])
   })
 
-  it('publishes normalized progress as soon as semantic tools succeed', async () => {
+  it('publishes normalized progress when the report succeeds', async () => {
     const prose = mockFragment({ id: 'pr-0001', type: 'prose', content: 'Alice entered the north hall.' })
     const record = mockFragment({ id: 'ch-0001', name: 'Alice Cooper' })
-    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => (
-      id === prose.id ? prose : id === record.id ? record : null
-    ))
+    serveFragments(prose, record)
     const onProgress = vi.fn()
     const tools = createAnalysisTools(createEmptyCollector(), {
       dataDir: '/tmp', storyId: 'story-test', proseFragmentId: prose.id, onProgress,
     })
 
-    await tools.reportAnalysis.execute!({
+    await report(tools.reportPassage, {
       summary: 'Alice entered the hall.',
       events: ['Alice entered the north hall.'],
       mentions: [
         { fragmentId: record.id, text: 'Alice' },
         { fragmentId: record.id, text: 'Alice Cooper' },
       ],
-      candidateFragmentIds: [record.id],
-      directions: [
-        { title: 'Wait', description: 'The hall settles.', instruction: 'Let the hall settle.' },
-        { title: 'Search', description: 'Alice looks around.', instruction: 'Search the hall.' },
-        { title: 'Leave', description: 'Alice moves on.', instruction: 'Leave the hall.' },
-      ],
-    }, executionContext)
+      directions: threeDirections,
+    })
 
     expect(onProgress).toHaveBeenLastCalledWith(expect.objectContaining({
       fragmentId: prose.id,
-      stage: 'inspection',
+      stage: 'passage',
       summaryUpdate: 'Alice entered the hall.',
       mentions: [{ fragmentId: record.id, text: 'Alice' }],
       timelineEvents: [{ event: 'Alice entered the north hall.', position: 'after' }],
@@ -186,123 +161,316 @@ describe('reportAnalysis', () => {
     }))
   })
 
-  it('does not silently clip verbose report content', async () => {
-    const collector = createEmptyCollector()
-    const tools = createAnalysisTools(collector)
-    const summary = 'S'.repeat(5000)
-    const events = Array.from({ length: 20 }, (_, index) => `Event ${index} ${'x'.repeat(300)}`)
-    await tools.reportAnalysis.execute!({ summary, events }, executionContext)
-    expect(collector.summaryUpdate).toBe(summary)
-    expect(collector.events).toEqual(events)
+  it('announces record maintenance when the report found evidence for it', async () => {
+    const prose = mockFragment({ id: 'pr-0001', type: 'prose', content: 'Alice rode to Valdris.' })
+    serveFragments(prose)
+    const onProgress = vi.fn()
+    const tools = createAnalysisTools(createEmptyCollector(), {
+      dataDir: '/tmp', storyId: 'story-test', proseFragmentId: prose.id, onProgress,
+    })
+    await report(tools.reportPassage, { summary: 'Alice rode on.', newRecordNames: ['Valdris'] })
+    expect(onProgress).toHaveBeenLastCalledWith(expect.objectContaining({ stage: 'record-maintenance' }))
   })
 
   it('resolves mention highlights to the in-prose span or the catalog name', async () => {
-    const prose = mockFragment({ id: 'pr-0001', type: 'prose', content: 'Alice studied the Silver ash by the gate.' })
-    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => {
-      if (id === 'pr-0001') return prose
-      if (id === 'ch-0001') return mockFragment({ id, name: 'Alice' })
-      if (id === 'kn-0001') return mockFragment({ id, name: 'Silver ash' })
-      return null
-    })
+    serveFragments(
+      mockFragment({ id: 'pr-0001', type: 'prose', content: 'Alice studied the Silver ash by the gate.' }),
+      mockFragment({ id: 'ch-0001', name: 'Alice' }),
+      mockFragment({ id: 'kn-0001', name: 'Silver ash' }),
+    )
     const collector = createEmptyCollector()
     const tools = createAnalysisTools(collector, { dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001' })
-    const result = await tools.reportAnalysis.execute!({
+    const result = await report(tools.reportPassage, {
       summary: 'Alice studies the ash.',
       mentions: [
         { fragmentId: 'ch-0001', text: 'Alice' },
         { fragmentId: 'kn-0001', text: '"Silver ash"' },
-        { fragmentId: 'ch-0001' },
+        { fragmentId: 'ch-0001', text: 'she' },
       ],
-      candidateFragmentIds: ['ch-0001', 'ch-0001'],
-    }, executionContext)
+    })
     // 'Alice' appears verbatim in the prose so it is kept; '"Silver ash"' is not
     // verbatim (the quotes are not in the prose) so it resolves to the catalog
-    // name; a spanless mention also resolves to the catalog name, and so
-    // collapses into the first Alice mention.
+    // name; a pronoun is no highlight, so it also resolves to the catalog name
+    // and collapses into the first Alice mention.
     expect(collector.mentions).toEqual([
       { fragmentId: 'ch-0001', text: 'Alice' },
       { fragmentId: 'kn-0001', text: 'Silver ash' },
     ])
-    expect(collector.candidateFragmentIds).toEqual(['ch-0001'])
-    expect(result).toMatchObject({ mentionCount: 2, candidateFragmentCount: 1 })
-    expect(result.skippedMentions ?? []).toEqual([])
+    expect(result).toMatchObject({ mentionCount: 2 })
+    expect(result.skippedMentions).toBeUndefined()
   })
 
-  it('collapses per-sentence restatements of one mention', async () => {
-    const prose = mockFragment({ id: 'pr-0001', type: 'prose', content: 'Alice studied the gate. The ash was cold.' })
-    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => {
-      if (id === 'pr-0001') return prose
-      if (id === 'ch-0001') return mockFragment({ id, name: 'Alice' })
-      return null
-    })
+  it('keeps one mention per record and wording', async () => {
+    serveFragments(
+      mockFragment({ id: 'pr-0001', type: 'prose', content: 'The old knight drew his sword. The old knight opened the gate.' }),
+      mockFragment({ id: 'ch-0001', name: 'Old Knight', content: 'A knight.' }),
+    )
     const collector = createEmptyCollector()
     const tools = createAnalysisTools(collector, { dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001' })
-    const result = await tools.reportAnalysis.execute!({
-      summary: 'Alice at the gate.',
+    await report(tools.reportPassage, {
+      summary: 'The old knight drew his sword and opened the gate.',
       mentions: [
-        { fragmentId: 'ch-0001', segment: 1 },
-        { fragmentId: 'ch-0001', segment: 9 },
+        { fragmentId: 'ch-0001', text: 'old knight', segment: 1 },
+        { fragmentId: 'ch-0001', text: 'Old Knight', segment: 2 },
+        { fragmentId: 'ch-0001', text: 'his sword' },
       ],
-    }, executionContext)
-    expect(collector.mentions).toEqual([{ fragmentId: 'ch-0001', text: 'Alice' }])
-    expect(result).toMatchObject({ mentionCount: 1 })
-  })
-
-  it('grounds continuity evidence and skips invalid operations without rejecting the report', async () => {
-    const prose = mockFragment({ id: 'pr-0001', type: 'prose', content: 'Alice entered the north hall. She rested.' })
-    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => id === 'pr-0001' ? prose : null)
-    const collector = createEmptyCollector()
-    const tools = createAnalysisTools(collector, { dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001' })
-    const result = await tools.reportAnalysis.execute!({
-      summary: 'Alice entered and rested.',
-      stateOperations: [
-        { action: 'set', subject: { label: 'Alice' }, facet: 'location', value: 'north hall', evidenceSegments: [1] },
-        { action: 'set', subject: { label: 'Alice' }, facet: 'mood', value: 'calm', evidenceSegments: [9] },
-      ],
-    }, executionContext)
-    expect(result).toMatchObject({ ok: true, stateOperationCount: 1 })
-    expect(result.skippedContinuity).toHaveLength(1)
-    expect(collector.continuityProjection.stateOperations[0]).toMatchObject({
-      stateKey: 'alice_location', value: 'north hall', evidenceSegments: [1],
-      evidenceText: 'Alice entered the north hall.',
     })
+    expect(collector.mentions).toEqual([
+      { fragmentId: 'ch-0001', text: 'old knight' },
+      { fragmentId: 'ch-0001', text: 'his sword' },
+    ])
   })
 
-  it('can open and advance one continuity identity in the same report', async () => {
-    const prose = mockFragment({ id: 'pr-0001', type: 'prose', content: 'A question opened. New evidence appeared.' })
-    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => id === 'pr-0001' ? prose : null)
+  it('skips mentions of unknown records without rejecting the report', async () => {
+    serveFragments(
+      mockFragment({ id: 'pr-0001', type: 'prose', content: 'Alice walked to the harbor.' }),
+      mockFragment({ id: 'ch-0001', name: 'Alice' }),
+    )
     const collector = createEmptyCollector()
     const tools = createAnalysisTools(collector, { dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001' })
-    await tools.reportAnalysis.execute!({
-      summary: 'A question opened and advanced.',
-      threadOperations: [
-        { key: 'who_closed_the_dike', action: 'open', label: 'Who closed the dike?', evidenceSegments: [1] },
-        { key: 'who_closed_the_dike', action: 'advance', note: 'New evidence.', evidenceSegments: [2] },
+    const result = await report(tools.reportPassage, {
+      summary: 'Alice arrived at the harbor.',
+      mentions: [
+        { fragmentId: 'ch-0001', text: 'Alice' },
+        { fragmentId: 'ch-9999', text: 'Ghost' },
       ],
-    }, executionContext)
-    expect(collector.continuityProjection.threadOperations.map(({ action }) => action)).toEqual(['open', 'advance'])
+      scene: { transition: 'continue', location: { key: 'harbor', label: 'Harbor', fragmentId: 'loc-9999' }, evidenceSegments: [1] },
+    })
+    expect(result).toMatchObject({ ok: true, mentionCount: 1 })
+    expect(result.skippedMentions).toEqual([expect.objectContaining({ fragmentId: 'ch-9999' })])
+    expect(collector.continuityProjection.scene.location).toEqual({ key: 'harbor', label: 'Harbor' })
   })
 
-  it('grounds contradictions on both the prose and a reusable record', async () => {
-    const prose = mockFragment({ id: 'pr-0001', type: 'prose', content: 'Alice has green eyes.' })
-    const record = mockFragment({ id: 'ch-0001', content: 'Alice has blue eyes.' })
-    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => id === prose.id ? prose : id === record.id ? record : null)
+  it('grounds contradictions on both the prose and a reusable record, and delivers that record numbered once', async () => {
+    const prose = mockFragment({
+      id: 'pr-0001', type: 'prose',
+      content: 'The old knight carried a silver sword. He opened the north gate alone.',
+    })
+    const record = mockFragment({
+      id: 'ch-0001', name: 'Old Knight',
+      content: 'The old knight carries a rusty spear. He refuses to guard the gate.',
+    })
+    serveFragments(prose, record)
     const collector = createEmptyCollector()
-    const tools = createAnalysisTools(collector, { dataDir: '/tmp', storyId: 'story-test', proseFragmentId: prose.id })
-    const result = await tools.reportAnalysis.execute!({
-      summary: 'Alice has green eyes.',
-      contradictions: [{
-        description: 'Her eye colour conflicts.', sourceSegments: [1],
-        conflictingEvidence: [{ fragmentId: record.id, segments: [1] }],
+    const numberedFragmentIds = new Set<string>()
+    const tools = createAnalysisTools(collector, {
+      dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001', numberedFragmentIds,
+    })
+    const input = {
+      summary: 'The old knight carried his silver sword and opened the north gate alone.',
+      scene: { transition: 'advance', evidenceSegments: [2] },
+      mentions: [{ fragmentId: 'ch-0001', text: 'old knight' }],
+      contradictions: [
+        {
+          description: 'The knight has a silver sword, not a rusty spear.',
+          sourceSegments: [1],
+          conflictingEvidence: [{ fragmentId: 'ch-0001', segments: [1] }],
+        },
+        {
+          description: 'Invalid contradiction citing a sentence that does not exist.',
+          sourceSegments: [99],
+          conflictingEvidence: [{ fragmentId: 'ch-0001', segments: [1] }],
+        },
+      ],
+    }
+
+    const first = await report(tools.reportPassage, input)
+    const second = await report(tools.reportPassage, input)
+
+    expect(first).toMatchObject({ ok: true, mentionCount: 1, contradictionCount: 1 })
+    expect(first.skippedContradictions).toEqual([expect.objectContaining({ reason: expect.stringContaining('99') })])
+    expect(first.resolvedFragments).toEqual([expect.objectContaining({
+      id: 'ch-0001', content: expect.stringContaining('[1] The old knight carries a rusty spear.'),
+    })])
+    expect(second).not.toHaveProperty('resolvedFragments')
+    expect(numberedFragmentIds.has('ch-0001')).toBe(true)
+    expect(collector.contradictions).toEqual([expect.objectContaining({
+      description: 'The knight has a silver sword, not a rusty spear.',
+      sourceSegments: [1],
+      sourceEvidenceText: 'The old knight carried a silver sword.',
+      conflictingEvidence: [expect.objectContaining({ evidenceText: 'The old knight carries a rusty spear.' })],
+    })])
+  })
+
+  it('keeps only new record names the prose uses and the catalog lacks', async () => {
+    const prose = mockFragment({ id: 'pr-0001', type: 'prose', content: 'Alice rode to Valdris past the Salt Gate.' })
+    const alice = mockFragment({ id: 'ch-0001', name: 'Alice' })
+    serveFragments(prose, alice)
+    const collector = createEmptyCollector()
+    const tools = createAnalysisTools(collector, { dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001' })
+    await report(tools.reportPassage, {
+      summary: 'Alice rode to Valdris.',
+      mentions: [{ fragmentId: 'ch-0001', text: 'Alice' }],
+      newRecordNames: ['Valdris', 'salt gate', 'Alice', 'Mirewood'],
+    })
+    expect(collector.newRecordNames).toEqual(['Valdris', 'Salt Gate'])
+  })
+
+  it('withdraws a scene claim without evidence but keeps the rest of the report', async () => {
+    serveFragments(mockFragment({ id: 'pr-0001', type: 'prose', content: 'Night fell. The ship waited.' }))
+    const collector = createEmptyCollector()
+    const tools = createAnalysisTools(collector, { dataDir: '/tmp', storyId: 'story-test', proseFragmentId: 'pr-0001' })
+    const result = await report(tools.reportPassage, {
+      summary: 'Night fell over the waiting ship.',
+      scene: { transition: 'cut', evidenceSegments: [9] },
+    })
+    expect(result.ok).toBe(true)
+    expect(collector.summaryUpdate).toBe('Night fell over the waiting ship.')
+    expect(collector.continuityProjection.scene).toEqual({ transition: 'uncertain' })
+    expect(result.skippedContinuity).toEqual([expect.objectContaining({ kind: 'scene', key: 'cut' })])
+  })
+
+  it('normalizes character and entity live states and falls back to the summary for timeline events', async () => {
+    const collector = createEmptyCollector()
+    const tools = createAnalysisTools(collector)
+
+    const result = await report(tools.reportPassage, {
+      summary: 'Alice examined the old tower gates while the wind howled outside.',
+      characters: [{
+        character: 'ch-0001',
+        set: [
+          { field: 'Currently', value: 'Catching breath; dust clinging to boots' },
+          { field: 'attire', value: 'tattered travel cloak' },
+          { field: 'injury', value: 'none' },
+          { field: 'gear', value: 'holding brass lantern' },
+        ],
+        add: [
+          { field: 'Knows', text: 'The tower gate was unlatched from within' },
+          { field: 'Secrets', text: 'Carrying the brass key' },
+        ],
       }],
-    }, executionContext)
-    expect(result).toMatchObject({ ok: true, contradictionCount: 1 })
-    expect(collector.contradictions[0]).toMatchObject({
-      sourceEvidenceText: 'Alice has green eyes.',
-      conflictingEvidence: [{ evidenceText: 'Alice has blue eyes.' }],
+      entities: [{
+        entity: 'Old Tower',
+        category: 'location',
+        set: [
+          { field: 'Currently', value: 'Cold draft whistling through the iron bars' },
+          { field: 'gate', value: 'unlatched' },
+        ],
+        add: [{ field: 'Notes', text: 'Pre-war construction' }],
+      }],
     })
+
+    expect(result.ok).toBe(true)
+    const [alice, tower] = collector.continuityProjection.liveStates
+    expect(alice).toEqual({
+      kind: 'character',
+      key: 'ch-0001',
+      fragmentId: 'ch-0001',
+      name: 'ch-0001',
+      present: true,
+      set: [
+        { field: 'Currently', value: 'Catching breath; dust clinging to boots' },
+        { field: 'attire', value: 'tattered travel cloak' },
+        { field: 'injury', value: '' },
+        { field: 'gear', value: 'holding brass lantern' },
+      ],
+      add: [
+        { id: liveStateItemId('Knows', 'The tower gate was unlatched from within'), field: 'Knows', text: 'The tower gate was unlatched from within' },
+        { id: liveStateItemId('Secrets', 'Carrying the brass key'), field: 'Secrets', text: 'Carrying the brass key' },
+      ],
+      update: [],
+    })
+    expect(tower).toMatchObject({
+      kind: 'entity',
+      key: 'old_tower',
+      name: 'Old Tower',
+      category: 'location',
+      present: true,
+      add: [{ field: 'Notes', text: 'Pre-war construction' }],
+    })
+
+    const timeline = timelineEventsFor([], collector.continuityProjection.scene, collector.summaryUpdate)
+    expect(timeline).toEqual([{ event: collector.summaryUpdate, position: 'after' }])
   })
 
+  it('ends numbered entries on their owner and records who learned a revealed secret', async () => {
+    serveFragments(
+      mockFragment({ id: 'ch-0001', name: 'Victoria', content: 'The sovereign.' }),
+      mockFragment({ id: 'ch-0002', name: 'Aris Thorne', content: 'A researcher.' }),
+    )
+    const secretId = liveStateItemId('Secrets', 'craves the ruin of her status')
+    const beliefId = liveStateItemId('Knows', 'the baseline is only a sample')
+    const collector = createEmptyCollector()
+    const tools = createAnalysisTools(collector, {
+      dataDir: '/tmp',
+      storyId: 'story-test',
+      registry: {
+        items: [
+          { index: 1, kind: 'character', subjectKey: 'ch-0001', subjectName: 'Victoria', id: secretId, field: 'Secrets', text: 'craves the ruin of her status' },
+          { index: 2, kind: 'character', subjectKey: 'ch-0002', subjectName: 'Aris Thorne', id: beliefId, field: 'Knows', text: 'the baseline is only a sample' },
+        ],
+      },
+    })
+
+    const result = await report(tools.reportPassage, {
+      summary: 'Thorne learned the truth.',
+      characters: [{ character: 'ch-0002', set: [{ field: 'Currently', value: 'kneeling by the dais' }] }],
+      // Only Thorne is present; the revealed secret is Victoria's.
+      update: [
+        { item: 1, happened: 'revealed', to: ['Aris Thorne'] },
+        { item: 2, happened: 'changed', now: 'the baseline is the source' },
+        { item: 9, happened: 'resolved' },
+      ],
+    })
+
+    expect(result.ok).toBe(true)
+    expect(collector.continuityProjection.liveStates).toEqual([
+      expect.objectContaining({
+        key: 'ch-0002',
+        present: true,
+        set: [{ field: 'Currently', value: 'kneeling by the dais' }],
+        update: [{
+          id: beliefId,
+          happened: 'changed',
+          now: { id: liveStateItemId('Knows', 'the baseline is the source'), text: 'the baseline is the source' },
+        }],
+      }),
+      expect.objectContaining({
+        key: 'ch-0001',
+        name: 'Victoria',
+        present: false,
+        update: [{ id: secretId, happened: 'revealed', to: ['ch-0002'] }],
+      }),
+    ])
+    expect(result.skippedContinuity).toEqual([expect.objectContaining({ kind: 'item', key: '9' })])
+  })
+
+  it('treats threads as a foreground snapshot and resolves existing keys explicitly', async () => {
+    const collector = createEmptyCollector()
+    const tools = createAnalysisTools(collector, {
+      dataDir: '/tmp',
+      storyId: 'story-test',
+      registry: {
+        thread: [
+          { key: 'who_unlocked_the_gate', label: 'Who unlocked the gate?' },
+          { key: 'where_is_the_map', label: 'Where is the map?' },
+          { key: 'why_the_bells_rang', label: 'Why did the bells ring?' },
+        ],
+      },
+    })
+
+    const result = await report(tools.reportPassage, {
+      summary: 'The map turned up.',
+      threads: ['who_unlocked_the_gate', 'Who lit the beacon?'],
+      resolvedThreads: ['Where is the map?', 'unknown_question'],
+    })
+
+    expect(result.ok).toBe(true)
+    expect(collector.continuityProjection.threadOperations).toEqual([
+      { threadKey: 'where_is_the_map', action: 'resolve' },
+      { threadKey: 'who_unlocked_the_gate', action: 'advance', label: 'Who unlocked the gate?' },
+      { threadKey: 'who_lit_the_beacon', action: 'open', label: 'Who lit the beacon?' },
+    ])
+    expect(collector.continuityProjection.threadFocus).toEqual([
+      { threadKey: 'who_unlocked_the_gate', visibility: 'foreground' },
+      { threadKey: 'who_lit_the_beacon', visibility: 'foreground' },
+      { threadKey: 'why_the_bells_rang', visibility: 'dormant' },
+    ])
+    expect(result.skippedContinuity).toEqual([expect.objectContaining({ kind: 'thread', key: 'unknown_question' })])
+  })
+})
+
+describe('mention terms', () => {
   it('places events from the scene line and validates mention fragment IDs', () => {
     expect(timelineEventsFor(['Alice remembers.'], { transition: 'continue', line: 'flashback' }))
       .toEqual([{ event: 'Alice remembers.', position: 'before' }])
@@ -344,7 +512,7 @@ describe('reportAnalysis', () => {
   })
 })
 
-describe('record proposals', () => {
+describe('reportMaintenance', () => {
   const prose = mockFragment({
     id: 'pr-0001', type: 'prose',
     content: 'Alice resigned from the guard. The Lantern Archive opened.',
@@ -353,12 +521,11 @@ describe('record proposals', () => {
     id: 'ch-0001',
     content: 'Alice is captain of the guard. She keeps the north gate. She keeps the north gate.',
   })
+  const archive = { type: 'knowledge', name: 'Lantern Archive', description: 'An archive.', content: 'The archive opened.' }
 
-  beforeEach(() => {
-    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => id === prose.id ? prose : id === record.id ? record : null)
-  })
+  beforeEach(() => serveFragments(prose, record))
 
-  function proposalTools(numberedFragmentIds: string[] = ['ch-0001']) {
+  function maintenanceTools(numberedFragmentIds: string[] = ['ch-0001']) {
     const collector = createEmptyCollector()
     const tools = createAnalysisTools(collector, {
       dataDir: '/tmp', storyId: 'story-test', proseFragmentId: prose.id,
@@ -368,12 +535,12 @@ describe('record proposals', () => {
   }
 
   it('resolves a numbered sentence into an exact oldText/newText operation', async () => {
-    const { collector, tools } = proposalTools()
-    const result = await tools.proposeRecordCorrections.execute!({
+    const { collector, tools } = maintenanceTools()
+    const result = await report(tools.reportMaintenance, {
       evidenceSegments: [1],
       corrections: [{ fragmentId: record.id, segment: 1, newText: 'Alice is the former captain of the guard.' }],
-    }, executionContext)
-    expect(result).toMatchObject({ ok: true, queuedOperationCount: 1 })
+    })
+    expect(result).toMatchObject({ ok: true, queuedOperationCount: 1, invalid: 0 })
     expect(collector.fragmentChangeProposals[0].operations[0]).toMatchObject({
       action: 'replace_text', fragmentId: record.id, oldText: 'Alice is captain of the guard.',
       newText: 'Alice is the former captain of the guard.', replaceAll: false,
@@ -381,884 +548,152 @@ describe('record proposals', () => {
   })
 
   it('adds an occurrence only when the anchored sentence repeats', async () => {
-    const { collector, tools } = proposalTools()
-    await tools.proposeRecordCorrections.execute!({
+    const { collector, tools } = maintenanceTools()
+    await report(tools.reportMaintenance, {
       evidenceSegments: [1],
       corrections: [{ fragmentId: record.id, segment: 3, newText: 'She leaves the north gate.' }],
-    }, executionContext)
+    })
     expect(collector.fragmentChangeProposals[0].operations[0]).toMatchObject({ occurrence: 2 })
   })
 
   it('keeps replacement text exactly as authored', async () => {
-    const { collector, tools } = proposalTools()
-    await tools.proposeRecordCorrections.execute!({
+    const { collector, tools } = maintenanceTools()
+    await report(tools.reportMaintenance, {
       evidenceSegments: [1],
       corrections: [{ fragmentId: record.id, segment: 1, newText: '[1] Alice resigned. She now advises the guard.' }],
-    }, executionContext)
+    })
     expect(collector.fragmentChangeProposals[0].operations[0]).toMatchObject({
       newText: '[1] Alice resigned. She now advises the guard.',
     })
   })
 
-  it('rejects an invalid batch atomically', async () => {
-    const { collector, tools } = proposalTools()
-    const result = await tools.proposeRecordCorrections.execute!({
+  it('rejects an invalid batch of corrections atomically', async () => {
+    const { collector, tools } = maintenanceTools()
+    const result = await report(tools.reportMaintenance, {
       evidenceSegments: [1],
       corrections: [
         { fragmentId: record.id, segment: 1, newText: 'Alice resigned.' },
         { fragmentId: record.id, segment: 99, newText: 'Missing sentence.' },
       ],
-    }, executionContext)
-    expect(result).toMatchObject({ ok: false, queuedOperationCount: 0, invalid: 1 })
+    })
+    expect(result).toMatchObject({ queuedOperationCount: 0, invalid: 1 })
     expect(collector.fragmentChangeProposals).toEqual([])
   })
 
   it('requires the target record to have been shown with numbered sentences', async () => {
-    const { tools } = proposalTools([])
-    const result = await tools.proposeRecordCorrections.execute!({
+    const { tools } = maintenanceTools([])
+    const result = await report(tools.reportMaintenance, {
       evidenceSegments: [1], corrections: [{ fragmentId: record.id, segment: 1, newText: 'Alice resigned.' }],
-    }, executionContext)
-    expect(result).toMatchObject({ ok: false, queuedOperationCount: 0 })
-    expect(JSON.stringify(result)).toContain('has not been shown with numbered sentences')
-  })
-
-  it('requires valid new-prose evidence', async () => {
-    const { collector, tools } = proposalTools()
-    const result = await tools.proposeNewRecords.execute!({
-      evidenceSegments: [99],
-      newFragments: [{ type: 'knowledge', name: 'Lantern Archive', description: 'An archive.', content: 'The archive opened.' }],
-    }, executionContext)
-    expect(result).toMatchObject({ ok: false, evidenceMatched: false, queuedOperationCount: 0 })
-    expect(collector.fragmentChangeProposals).toEqual([])
-  })
-
-  it('does not deduplicate separate self-contained proposal calls', async () => {
-    const { collector, tools } = proposalTools()
-    const input = {
-      title: 'A new institution', evidenceSegments: [2],
-      newFragments: [{ type: 'knowledge', name: 'Lantern Archive', description: 'An archive.', content: 'The archive opened.' }],
-    }
-    await tools.proposeNewRecords.execute!(input, executionContext)
-    await tools.proposeNewRecords.execute!(input, executionContext)
-    expect(collector.fragmentChangeProposals).toHaveLength(2)
-  })
-
-  it('returns resolved candidate records once and numbers their contents', async () => {
-    const { tools } = proposalTools([])
-    const first = await tools.reportAnalysis.execute!({ summary: 'Alice resigned.', candidateFragmentIds: [record.id] }, executionContext)
-    const second = await tools.reportAnalysis.execute!({ summary: 'Alice resigned.', candidateFragmentIds: [record.id] }, executionContext)
-    expect(first.resolvedFragments[0].content).toContain('[1] Alice is captain')
-    expect(first).toMatchObject({ inspectionRequired: true })
-    expect(second).not.toHaveProperty('resolvedFragments')
-  })
-
-  it('still inspects a specifically requested record when suggestions are disabled', async () => {
-    const tools = createAnalysisTools(createEmptyCollector(), {
-      dataDir: '/tmp', storyId: 'story-test', proseFragmentId: prose.id,
-      disableSuggestions: true, disableDirections: true, numberedFragmentIds: [],
     })
-    const result = await tools.reportAnalysis.execute!({
-      summary: 'Alice resigned.', candidateFragmentIds: [record.id],
-    }, executionContext)
-    expect(result).toMatchObject({ inspectionRequired: true })
-  })
-})
-
-describe('continuity registry addressing', () => {
-  const registry = {
-    state: [{ index: 1, key: 'captivity_status', label: 'Captivity status' }],
-    thread: [{ index: 1, key: 'who_closed_the_dike', label: 'Who closed the dike?' }],
-    knowledge: [{ index: 1, key: 'queen_identity', label: 'Queen identity', scope: 'ch-0001' }],
-  }
-
-  it('keeps continuity keys open rather than using a closed enum', () => {
-    const schema = buildReportAnalysisInputSchema(registry)
-    expect(schema.safeParse({
-      summary: 'A new state emerged.',
-      directions: [
-        { title: 'Wait', description: 'The moment holds.', instruction: 'Remain in the moment.' },
-        { title: 'Act', description: 'The state drives action.', instruction: 'Act on the new state.' },
-        { title: 'Leave', description: 'The scene closes.', instruction: 'End the scene.' },
-      ],
-      stateOperations: [{
-        key: 'new_state', action: 'set', subject: { label: 'Alice' }, facet: 'condition',
-        value: 'free', evidenceSegments: [1],
-      }],
-    }).success).toBe(true)
-  })
-
-  it('skips a non-create action against an unknown identity while keeping the report', async () => {
-    const prose = mockFragment({ id: 'pr-0001', type: 'prose', content: 'The question ended.' })
-    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => id === prose.id ? prose : null)
-    const collector = createEmptyCollector()
-    const tools = createAnalysisTools(collector, {
-      dataDir: '/tmp', storyId: 'story-test', proseFragmentId: prose.id, continuityKeys: registry,
-    })
-    const result = await tools.reportAnalysis.execute!({
-      summary: 'The question ended.',
-      threadOperations: [{ key: 'unknown_question', action: 'resolve', evidenceSegments: [1] }],
-    }, executionContext)
-    expect(result).toMatchObject({ ok: true, threadOperationCount: 0 })
-    expect(JSON.stringify(result)).toContain('No thread identity is tracked under unknown_question')
-  })
-
-  it('resolves a live identity by registry entry', async () => {
-    const prose = mockFragment({ id: 'pr-0001', type: 'prose', content: 'The question ended.' })
-    vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => id === prose.id ? prose : null)
-    const collector = createEmptyCollector()
-    const tools = createAnalysisTools(collector, {
-      dataDir: '/tmp', storyId: 'story-test', proseFragmentId: prose.id, continuityKeys: registry,
-    })
-    await tools.reportAnalysis.execute!({
-      summary: 'The question ended.', threadOperations: [{ entry: 1, action: 'resolve', evidenceSegments: [1] }],
-    }, executionContext)
-    expect(collector.continuityProjection.threadOperations[0]).toMatchObject({
-      threadKey: 'who_closed_the_dike', action: 'resolve',
-    })
-  })
-})
-
-describe('reportAnalysis resilience and forgiving boundaries', () => {
-  it('forgives non-ISO time bounds and preserves descriptive label', () => {
-    const schema = buildReportAnalysisInputSchema({}, { includeDirections: false })
-    const parsed = schema.parse({
-      summary: 'Night fell over the harbor.',
-      scene: {
-        transition: 'continue',
-        time: {
-          label: '03:14 at night',
-          earliest: '03:14',
-          latest: 'unknown',
-        },
-      },
-    })
-    expect(parsed.scene?.time?.label).toBe('03:14 at night')
-    expect((parsed.scene?.time as Record<string, unknown> | undefined)?.earliest).toBeUndefined()
-    expect((parsed.scene?.time as Record<string, unknown> | undefined)?.latest).toBeUndefined()
-  })
-
-  it('parses streamlined report schema with characters, entities, and threads', () => {
-    const schema = buildReportAnalysisInputSchema({}, { includeDirections: false })
-    const parsed = schema.parse({
-      summary: 'Alice advanced her position.',
-      threads: ['Who unlocked the gate?'],
-       characters: [
-         {
-           character: 'Alice',
-           set: [{ field: 'Currently', value: 'Alert and scanning the perimeter' }, { field: 'posture', value: 'ready' }],
-         },
-       ],
-     })
-     expect(parsed.threads).toEqual(['Who unlocked the gate?'])
-     expect(parsed.characters[0]).toMatchObject({
-       character: 'Alice',
-       set: [
-         { field: 'Currently', value: 'Alert and scanning the perimeter' },
-         { field: 'posture', value: 'ready' },
-       ],
-     })
-  })
-
-  it('skips unknown fragment mentions and non-character knowledge operations without throwing', async () => {
-    const prose = mockFragment({ id: 'pr-0001', type: 'prose', content: 'Alice walked to the harbor.' })
-    const character = mockFragment({ id: 'ch-0001', type: 'character', name: 'Alice', content: 'Alice is a guard.' })
-    const location = mockFragment({ id: 'loc-0001', type: 'location', name: 'Harbor', content: 'A windy dock.' })
-
-    vi.mocked(getFragment).mockImplementation(async (_dir, _story, id) => {
-      if (id === prose.id) return prose
-      if (id === character.id) return character
-      if (id === location.id) return location
-      return null
-    })
-
-    const collector = createEmptyCollector()
-    const tools = createAnalysisTools(collector, {
-      dataDir: '/tmp',
-      storyId: 'story-test',
-      proseFragmentId: prose.id,
-      continuityKeys: {},
-    })
-
-    const result = await tools.reportAnalysis.execute!({
-      summary: 'Alice arrived at the harbor.',
-      mentions: [
-        { fragmentId: 'ch-0001', text: 'Alice' },
-        { fragmentId: 'ch-9999', text: 'Ghost' },
-      ],
-      stateOperations: [
-        {
-          action: 'set',
-          subject: { label: 'Alice', fragmentId: 'ch-9999' },
-          facet: 'posture',
-          value: 'alert',
-          evidenceSegments: [1],
-        },
-      ],
-      threadOperations: [
-        {
-          action: 'open',
-          label: 'What lies in the mist?',
-          relatedFragmentIds: ['ch-0001', 'ch-9999'],
-          evidenceSegments: [1],
-        },
-      ],
-      knowledgeOperations: [
-        {
-          characterId: 'ch-9999',
-          action: 'learn',
-          fact: 'The gate is unlocked.',
-          evidenceSegments: [1],
-        },
-        {
-          characterId: 'loc-0001',
-          action: 'learn',
-          fact: 'The harbor is quiet.',
-          evidenceSegments: [1],
-        },
-      ],
-    }, executionContext)
-
-    expect(result.ok).toBe(true)
-    expect(result.mentionCount).toBe(1)
-    expect(result.skippedMentions).toHaveLength(1)
-    expect(result.skippedMentions[0].fragmentId).toBe('ch-9999')
-
-    expect(collector.continuityProjection.stateOperations).toHaveLength(1)
-    const firstOp = collector.continuityProjection.stateOperations[0]
-    expect(firstOp.action).toBe('set')
-    if (firstOp.action === 'set') {
-      expect(firstOp.subject.fragmentId).toBeUndefined()
-      expect(firstOp.subject.label).toBe('Alice')
-    }
-
-    expect(collector.continuityProjection.threadOperations).toHaveLength(1)
-    expect(collector.continuityProjection.threadOperations[0].relatedFragmentIds).toEqual(['ch-0001'])
-
-    expect(result.skippedContinuity).toEqual(expect.arrayContaining([
-      expect.objectContaining({ kind: 'knowledge', key: 'ch-9999' }),
-      expect.objectContaining({ kind: 'knowledge', key: 'loc-0001' }),
-    ]))
-  })
-
-  it('normalizes character and entity live states and falls back to summary for timeline events', async () => {
-    const collector = createEmptyCollector()
-    const tools = createAnalysisTools(collector)
-    const executionContext = { messages: [] }
-
-    const result = await tools.reportAnalysis.execute({
-      summary: 'Alice examined the old tower gates while the wind howled outside.',
-      characters: [
-        {
-          character: 'ch-0001',
-          set: [
-            { field: 'Currently', value: 'Catching breath; dust clinging to boots' },
-            { field: 'attire', value: 'tattered travel cloak' },
-            { field: 'injury', value: 'none' },
-            { field: 'gear', value: 'holding brass lantern' },
-          ],
-          add: [
-            { field: 'Knows', text: 'The tower gate was unlatched from within' },
-            { field: 'Secrets', text: 'Carrying the brass key' },
-          ],
-        },
-      ],
-      entities: [
-        {
-          entity: 'Old Tower',
-          category: 'location',
-          set: [
-            { field: 'Currently', value: 'Cold draft whistling through the iron bars' },
-            { field: 'gate', value: 'unlatched' },
-          ],
-          add: [{ field: 'Notes', text: 'Pre-war construction' }],
-        },
-      ],
-    }, executionContext)
-
-    expect(result.ok).toBe(true)
-    expect(collector.summaryUpdate).toContain('old tower gates')
-    const [alice, tower] = collector.continuityProjection.liveStates ?? []
-    expect(alice).toEqual({
-      kind: 'character',
-      key: 'ch-0001',
-      fragmentId: 'ch-0001',
-      name: 'ch-0001',
-      present: true,
-      set: [
-        { field: 'Currently', value: 'Catching breath; dust clinging to boots' },
-        { field: 'attire', value: 'tattered travel cloak' },
-        { field: 'injury', value: '' },
-        { field: 'gear', value: 'holding brass lantern' },
-      ],
-      add: [
-        { id: liveStateItemId('Knows', 'The tower gate was unlatched from within'), field: 'Knows', text: 'The tower gate was unlatched from within' },
-        { id: liveStateItemId('Secrets', 'Carrying the brass key'), field: 'Secrets', text: 'Carrying the brass key' },
-      ],
-      update: [],
-    })
-    expect(tower).toMatchObject({
-      kind: 'entity',
-      key: 'old_tower',
-      name: 'Old Tower',
-      category: 'location',
-      present: true,
-      set: [
-        { field: 'Currently', value: 'Cold draft whistling through the iron bars' },
-        { field: 'gate', value: 'unlatched' },
-      ],
-      add: [{ field: 'Notes', text: 'Pre-war construction' }],
-    })
-
-    // Timeline events fallback when events is empty
-    const timeline = timelineEventsFor([], collector.continuityProjection.scene, collector.summaryUpdate)
-    expect(timeline).toHaveLength(1)
-    expect(timeline[0].event).toBe(collector.summaryUpdate)
-    expect(timeline[0].position).toBe('after')
-  })
-})
-
-describe('3-beat staged pipeline tools', () => {
-  beforeEach(() => vi.mocked(getFragment).mockResolvedValue(null))
-
-  it('reportObservation delivers resolved fragments with numbered sentences and grounds contradictions', async () => {
-    const prose = mockFragment({
-      id: 'pr-0001',
-      type: 'prose',
-      content: 'The old knight carried a silver sword. He opened the north gate alone.',
-    })
-    const record = mockFragment({
-      id: 'ch-0001',
-      type: 'character',
-      name: 'Old Knight',
-      content: 'The old knight carries a rusty spear. He refuses to guard the gate.',
-    })
-    vi.mocked(getFragment).mockImplementation(async (_dir, _story, id) => {
-      if (id === 'pr-0001') return prose
-      if (id === 'ch-0001') return record
-      return null
-    })
-
-    const collector = createEmptyCollector()
-    const numberedFragmentIds = new Set<string>()
-    const tools = createAnalysisTools(collector, {
-      dataDir: '/tmp',
-      storyId: 'story-test',
-      proseFragmentId: 'pr-0001',
-      numberedFragmentIds,
-    })
-
-    const result = await tools.reportObservation.execute({
-      summary: 'The old knight carried his silver sword and opened the north gate alone.',
-      scene: { transition: 'advance', evidenceSegments: [2] },
-      mentions: [{ fragmentId: 'ch-0001', text: 'old knight' }],
-      candidateFragmentIds: ['ch-0001'],
-      contradictions: [
-        {
-          description: 'The knight has a silver sword, not a rusty spear.',
-          sourceSegments: [1],
-          conflictingEvidence: [{ fragmentId: 'ch-0001', segments: [1] }],
-        },
-        {
-          description: 'Invalid contradiction citing non-existent sentence.',
-          sourceSegments: [99],
-          conflictingEvidence: [{ fragmentId: 'ch-0001', segments: [1] }],
-        },
-      ],
-    }, executionContext)
-
-    expect(result.ok).toBe(true)
-    expect(result.mentionCount).toBe(1)
-    expect(result.contradictionCount).toBe(1)
-    expect(result.skippedContradictions).toHaveLength(1)
-    expect(result.skippedContradictions[0].reason).toContain('99')
-
-    expect(result.resolvedFragments).toHaveLength(1)
-    expect(result.resolvedFragments[0].id).toBe('ch-0001')
-    expect(result.resolvedFragments[0].content).toContain('[1] The old knight carries a rusty spear.')
-    expect(numberedFragmentIds.has('ch-0001')).toBe(true)
-
-    expect(collector.summaryUpdate).toBe('The old knight carried his silver sword and opened the north gate alone.')
-    expect(collector.contradictions).toHaveLength(1)
-    expect(collector.contradictions[0].description).toBe('The knight has a silver sword, not a rusty spear.')
-    expect(collector.contradictions[0].sourceSegments).toEqual([1])
-  })
-
-  it('reportObservation keeps one mention per record and never accepts prose as a candidate', async () => {
-    const prose = mockFragment({
-      id: 'pr-0001',
-      type: 'prose',
-      content: 'The old knight drew his sword. The old knight opened the gate.',
-    })
-    const record = mockFragment({ id: 'ch-0001', type: 'character', name: 'Old Knight', content: 'A knight.' })
-    vi.mocked(getFragment).mockImplementation(async (_dir, _story, id) => {
-      if (id === 'pr-0001') return prose
-      if (id === 'ch-0001') return record
-      return null
-    })
-
-    const collector = createEmptyCollector()
-    const tools = createAnalysisTools(collector, {
-      dataDir: '/tmp',
-      storyId: 'story-test',
-      proseFragmentId: 'pr-0001',
-      numberedFragmentIds: new Set<string>(),
-    })
-
-    const result = await tools.reportObservation.execute({
-      summary: 'The old knight drew his sword and opened the gate.',
-      mentions: [
-        { fragmentId: 'ch-0001', text: 'old knight' },
-        { fragmentId: 'ch-0001' },
-        { fragmentId: 'ch-0001', text: 'Old Knight' },
-        { fragmentId: 'ch-0001', text: 'his sword' },
-      ],
-      candidateFragmentIds: ['pr-0001', 'ch-0001', 'ch-0001'],
-    }, executionContext)
-
-    expect(result.ok).toBe(true)
-    expect(collector.mentions).toEqual([
-      { fragmentId: 'ch-0001', text: 'old knight' },
-      { fragmentId: 'ch-0001', text: 'his sword' },
-    ])
-    expect(collector.candidateFragmentIds).toEqual(['ch-0001'])
-  })
-
-  it('keeps only new record names the prose uses and the catalog lacks', async () => {
-    const prose = mockFragment({ id: 'pr-0001', type: 'prose', content: 'Alice rode to Valdris past the Salt Gate.' })
-    const alice = mockFragment({ id: 'ch-0001', type: 'character', name: 'Alice' })
-    vi.mocked(getFragment).mockImplementation(async (_dir, _story, id) => (
-      id === 'pr-0001' ? prose : id === 'ch-0001' ? alice : null
-    ))
-    const collector = createEmptyCollector()
-    const tools = createAnalysisTools(collector, {
-      dataDir: '/tmp',
-      storyId: 'story-test',
-      proseFragmentId: 'pr-0001',
-      numberedFragmentIds: new Set<string>(),
-    })
-
-    const result = await tools.reportObservation.execute({
-      summary: 'Alice rode to Valdris.',
-      mentions: [{ fragmentId: 'ch-0001', text: 'Alice' }],
-      newRecordNames: ['Valdris', 'salt gate', 'Alice', 'Mirewood'],
-    }, executionContext)
-
-    expect(result.ok).toBe(true)
-    expect(collector.newRecordNames).toEqual(['Valdris', 'Salt Gate'])
-  })
-
-  it('keeps an observation whose optional scene claim is malformed', () => {
-    const parsed = reportObservationInputSchema.parse({
-      summary: 'Night fell over the waiting ship.',
-      scene: {
-        transition: 'advance',
-        time: { label: 'night', certainty: 'approximate', calendar: '' },
-        elapsed: { label: 'hours', minimumSeconds: 7200, maximumSeconds: 60 },
-        evidenceSegments: [1],
-      },
-    })
-
-    expect(parsed.summary).toBe('Night fell over the waiting ship.')
-    expect(parsed.scene.time).toEqual({ label: 'night', certainty: 'approximate' })
-    expect(parsed.scene.elapsed).toBeUndefined()
-  })
-
-  it('separates live continuity from validated record maintenance', async () => {
-    const prose = mockFragment({
-      id: 'pr-0001',
-      type: 'prose',
-      content: 'The old knight carried a silver sword. He opened the north gate alone.',
-    })
-    const record = mockFragment({
-      id: 'ch-0001',
-      type: 'character',
-      name: 'Old Knight',
-      content: 'The old knight carries a rusty spear. He refuses to guard the gate.',
-    })
-    vi.mocked(getFragment).mockImplementation(async (_dir, _story, id) => {
-      if (id === 'pr-0001') return prose
-      if (id === 'ch-0001') return record
-      return null
-    })
-
-    const collector = createEmptyCollector()
-    const numberedFragmentIds = new Set<string>(['ch-0001'])
-    const tools = createAnalysisTools(collector, {
-      dataDir: '/tmp',
-      storyId: 'story-test',
-      proseFragmentId: 'pr-0001',
-      numberedFragmentIds,
-    })
-
-    const continuityResult = await tools.reportContinuity.execute({
-      characters: [
-        {
-          character: 'ch-0001',
-          set: [
-            { field: 'Currently', value: 'Standing at the threshold' },
-            { field: 'Appearance', value: 'worn chainmail' },
-            { field: 'weapon', value: 'silver sword' },
-          ],
-          add: [{ field: 'Knows', text: 'The gate mechanism is undamaged' }],
-        },
-      ],
-      entities: [],
-      threads: ['Why was the gate unlocked?'],
-      resolvedThreads: [],
-    }, executionContext)
-
-    const maintenanceResult = await tools.reportMaintenance.execute({
-      evidenceSegments: [1],
-      corrections: [
-        {
-          fragmentId: 'ch-0001',
-          field: 'content',
-          segment: 1,
-          newText: 'The old knight carries a silver sword.',
-          reason: 'Prose establishes the knight carries a silver sword.',
-        },
-      ],
-      newRecords: [
-        {
-          type: 'knowledge',
-          name: 'North Gate Lore',
-          content: 'The north gate has stood since the first dynasty.',
-        },
-      ],
-    }, executionContext)
-
-    expect(continuityResult.ok).toBe(true)
-    expect(continuityResult.characterCount).toBe(1)
-    expect(continuityResult.threadCount).toBe(1)
-    expect(maintenanceResult.proposalCount).toBe(2)
-    expect(collector.continuityProjection.liveStates?.map((report) => report.key)).toEqual(['ch-0001'])
-
-    expect(collector.fragmentChangeProposals).toHaveLength(2)
-    const correctionProposal = collector.fragmentChangeProposals.find(p => p.proposalKind === 'correction')
-    expect(correctionProposal).toBeDefined()
-    expect(correctionProposal?.operations[0]).toEqual(expect.objectContaining({
-      action: 'replace_text',
-      fragmentId: 'ch-0001',
-      oldText: 'The old knight carries a rusty spear.',
-      newText: 'The old knight carries a silver sword.',
-    }))
-
-    const newRecordProposal = collector.fragmentChangeProposals.find(p => p.proposalKind === 'new-fragment')
-    expect(newRecordProposal).toBeDefined()
-    expect(newRecordProposal?.operations[0]).toEqual(expect.objectContaining({
-      action: 'create_fragment',
-      type: 'knowledge',
-      name: 'North Gate Lore',
-    }))
-  })
-
-  it('ends numbered entries on their owner and records who learned a revealed secret', async () => {
-    const victoria = mockFragment({ id: 'ch-0001', type: 'character', name: 'Victoria', content: 'The sovereign.' })
-    const thorne = mockFragment({ id: 'ch-0002', type: 'character', name: 'Aris Thorne', content: 'A researcher.' })
-    vi.mocked(getFragment).mockImplementation(async (_dir, _story, id) => (
-      id === 'ch-0001' ? victoria : id === 'ch-0002' ? thorne : null
-    ))
-    const secretId = liveStateItemId('Secrets', 'craves the ruin of her status')
-    const beliefId = liveStateItemId('Knows', 'the baseline is only a sample')
-    const collector = createEmptyCollector()
-    const tools = createAnalysisTools(collector, {
-      dataDir: '/tmp',
-      storyId: 'story-test',
-      continuityKeys: {
-        items: [
-          { index: 1, kind: 'character', subjectKey: 'ch-0001', subjectName: 'Victoria', id: secretId, field: 'Secrets', text: 'craves the ruin of her status' },
-          { index: 2, kind: 'character', subjectKey: 'ch-0002', subjectName: 'Aris Thorne', id: beliefId, field: 'Knows', text: 'the baseline is only a sample' },
-        ],
-      },
-    })
-
-    const result = await tools.reportContinuity.execute({
-      characters: [
-        { character: 'ch-0002', set: [{ field: 'Currently', value: 'kneeling by the dais' }] },
-      ],
-      // Only Thorne is present; the revealed secret is Victoria's.
-      update: [
-        { item: 1, happened: 'revealed', to: ['Aris Thorne'] },
-        { item: 2, happened: 'changed', now: 'the baseline is the source' },
-        { item: 9, happened: 'resolved' },
-      ],
-      entities: [],
-      threads: [],
-      resolvedThreads: [],
-    }, executionContext)
-
-    expect(result.ok).toBe(true)
-    expect(collector.continuityProjection.liveStates).toEqual([
-      expect.objectContaining({
-        key: 'ch-0002',
-        present: true,
-        set: [{ field: 'Currently', value: 'kneeling by the dais' }],
-        update: [{
-          id: beliefId,
-          happened: 'changed',
-          now: { id: liveStateItemId('Knows', 'the baseline is the source'), text: 'the baseline is the source' },
-        }],
-      }),
-      expect.objectContaining({
-        key: 'ch-0001',
-        name: 'Victoria',
-        present: false,
-        update: [{ id: secretId, happened: 'revealed', to: ['ch-0002'] }],
-      }),
-    ])
-    expect(result.skippedContinuity).toEqual([expect.objectContaining({ kind: 'item', key: '9' })])
-  })
-
-  it('treats compact threads as a foreground snapshot and resolves existing keys explicitly', async () => {
-    const collector = createEmptyCollector()
-    const tools = createAnalysisTools(collector, {
-      dataDir: '/tmp',
-      storyId: 'story-test',
-      continuityKeys: {
-        thread: [
-          { index: 1, key: 'who_unlocked_the_gate', label: 'Who unlocked the gate?' },
-          { index: 2, key: 'where_is_the_map', label: 'Where is the map?' },
-          { index: 3, key: 'why_the_bells_rang', label: 'Why did the bells ring?' },
-        ],
-      },
-    })
-
-    const result = await tools.reportContinuity.execute({
-      characters: [],
-      entities: [],
-      threads: ['who_unlocked_the_gate'],
-      resolvedThreads: ['where_is_the_map'],
-    }, executionContext)
-
-    expect(result.ok).toBe(true)
-    expect(collector.continuityProjection.threadOperations).toEqual(expect.arrayContaining([
-      expect.objectContaining({ threadKey: 'who_unlocked_the_gate', action: 'advance' }),
-      expect.objectContaining({ threadKey: 'where_is_the_map', action: 'resolve' }),
-    ]))
-    expect(collector.continuityProjection.threadFocus).toEqual(expect.arrayContaining([
-      { threadKey: 'who_unlocked_the_gate', visibility: 'foreground' },
-      { threadKey: 'why_the_bells_rang', visibility: 'dormant' },
-    ]))
-    expect(collector.continuityProjection.threadFocus).not.toContainEqual(
-      { threadKey: 'where_is_the_map', visibility: 'dormant' },
-    )
-  })
-
-  it('reportContinuity rejects corrections against records not shown numbered', async () => {
-    const prose = mockFragment({
-      id: 'pr-0001',
-      type: 'prose',
-      content: 'The old knight carried a silver sword.',
-    })
-    const unnumberedRecord = mockFragment({
-      id: 'ch-9999',
-      type: 'character',
-      name: 'Mystery Knight',
-      content: 'A mysterious knight.',
-    })
-    vi.mocked(getFragment).mockImplementation(async (_dir, _story, id) => {
-      if (id === 'pr-0001') return prose
-      if (id === 'ch-9999') return unnumberedRecord
-      return null
-    })
-
-    const collector = createEmptyCollector()
-    const numberedFragmentIds = new Set<string>() // ch-9999 is NOT in numberedFragmentIds
-    const tools = createAnalysisTools(collector, {
-      dataDir: '/tmp',
-      storyId: 'story-test',
-      proseFragmentId: 'pr-0001',
-      numberedFragmentIds,
-    })
-
-    const result = await tools.reportMaintenance.execute({
-      evidenceSegments: [1],
-      corrections: [
-        {
-          fragmentId: 'ch-9999',
-          field: 'content',
-          segment: 1,
-          newText: 'An identified knight.',
-        },
-      ],
-    }, executionContext)
-
-    expect(result.ok).toBe(true)
-    expect(result.proposalCount).toBe(0)
-    expect(result.skippedProposals).toHaveLength(1)
+    expect(result).toMatchObject({ proposalCount: 0, queuedOperationCount: 0 })
     expect(result.skippedProposals[0].reason).toContain('has not been shown with numbered sentences')
   })
 
-  it('validates shared maintenance evidence once for mixed proposal work', async () => {
-    const prose = mockFragment({
-      id: 'pr-0001',
-      type: 'prose',
-      content: 'The old knight carried a silver sword.',
-    })
-    vi.mocked(getFragment).mockImplementation(async (_dir, _story, id) => (
-      id === 'pr-0001' ? prose : null
-    ))
-
-    const collector = createEmptyCollector()
-    const tools = createAnalysisTools(collector, {
-      dataDir: '/tmp',
-      storyId: 'story-test',
-      proseFragmentId: 'pr-0001',
-      numberedFragmentIds: new Set(['ch-0001']),
-    })
-
-    const result = await tools.reportMaintenance.execute({
+  it('validates shared evidence once for mixed proposal work', async () => {
+    const { collector, tools } = maintenanceTools()
+    const result = await report(tools.reportMaintenance, {
       evidenceSegments: [99],
-      corrections: [{
-        fragmentId: 'ch-0001',
-        field: 'content',
-        segment: 1,
-        newText: 'The old knight carries a silver sword.',
-      }],
-      newRecords: [{
-        type: 'knowledge',
-        name: 'North Gate Lore',
-        content: 'The north gate has stood since the first dynasty.',
-      }],
-    }, executionContext)
-
-    expect(result.invalid).toBe(1)
-    expect(result.queuedOperationCount).toBe(0)
-    expect(result.skippedProposals).toHaveLength(1)
-    expect(result.skippedProposals[0].note).toContain('Cited sentence 99 does not exist')
+      corrections: [{ fragmentId: record.id, segment: 1, newText: 'Alice resigned.' }],
+      newRecords: [archive],
+    })
+    expect(result).toMatchObject({ invalid: 1, queuedOperationCount: 0 })
+    expect(result.skippedProposals).toEqual([expect.objectContaining({ note: expect.stringContaining('Cited sentence 99 does not exist') })])
     expect(collector.fragmentChangeProposals).toEqual([])
     expect(getFragment).toHaveBeenCalledTimes(1)
   })
 
-  it('reportDirections stores creative narrative options', async () => {
-    const collector = createEmptyCollector()
-    const tools = createAnalysisTools(collector)
-
-    const result = await tools.reportDirections.execute({
-      directions: [
-        { title: 'Press On', description: 'Cross the open courtyard.', instruction: 'Describe the perilous crossing.' },
-        { title: 'Seek Cover', description: 'Duck into the guardhouse.', instruction: 'Investigate the abandoned post.' },
-        { title: 'Call Out', description: 'Signal to the watchtower.', instruction: 'Shout a challenge to the parapet.' },
-      ],
-    }, executionContext)
-
-    expect(result.ok).toBe(true)
-    expect(result.directionCount).toBe(3)
-    expect(collector.directions).toHaveLength(3)
-    expect(collector.directions[0].title).toBe('Press On')
+  it('queues corrections and new records as separate proposals', async () => {
+    const { collector, tools } = maintenanceTools()
+    const result = await report(tools.reportMaintenance, {
+      evidenceSegments: [1, 2],
+      corrections: [{ fragmentId: record.id, segment: 1, newText: 'Alice resigned from the guard.' }],
+      newRecords: [archive],
+    })
+    expect(result).toMatchObject({ proposalCount: 2, queuedOperationCount: 2 })
+    expect(collector.fragmentChangeProposals.map((proposal) => proposal.proposalKind)).toEqual(['correction', 'new-fragment'])
+    expect(collector.fragmentChangeProposals[1].operations[0]).toMatchObject({
+      action: 'create_fragment', type: 'knowledge', name: 'Lantern Archive',
+    })
   })
 
-  describe('forgiving schema parsing & official Gemma template compliance', () => {
-    it('produces official JSON Schemas with 0 anyOf, 0 oneOf, and 0 type: null', () => {
-      const schemas = [
-        { name: 'reportObservation', schema: reportObservationInputSchema },
-        { name: 'reportContinuity', schema: reportContinuityInputSchema },
-        { name: 'reportMaintenance', schema: reportMaintenanceInputSchema },
-        { name: 'reportDirections', schema: reportDirectionsInputSchema },
-      ]
+  it('holds a repeated new record for review instead of auto-applying it twice', async () => {
+    const { collector, tools } = maintenanceTools()
+    await report(tools.reportMaintenance, { evidenceSegments: [2], newRecords: [archive] })
+    await report(tools.reportMaintenance, { evidenceSegments: [2], newRecords: [archive] })
+    expect(collector.fragmentChangeProposals).toHaveLength(2)
+    expect(collector.fragmentChangeProposals.every((proposal) => proposal.autoApplySafe === false)).toBe(true)
+  })
+})
 
-      for (const { name, schema } of schemas) {
-        const jsonSchemaObj = z.toJSONSchema(schema)
-        const jsonStr = JSON.stringify(jsonSchemaObj)
-        const anyOfMatches = jsonStr.match(/"anyOf"/g) ?? []
-        const oneOfMatches = jsonStr.match(/"oneOf"/g) ?? []
-        const nullTypeMatches = jsonStr.match(/"type":\s*"null"/g) ?? []
+describe('report schemas', () => {
+  it('produce JSON Schemas with no anyOf, oneOf, or null type', () => {
+    for (const [name, schema] of [['reportPassage', reportPassageInputSchema], ['reportMaintenance', reportMaintenanceInputSchema]] as const) {
+      const json = JSON.stringify(z.toJSONSchema(schema))
+      expect(json.match(/"anyOf"/g) ?? [], `${name} has anyOf`).toHaveLength(0)
+      expect(json.match(/"oneOf"/g) ?? [], `${name} has oneOf`).toHaveLength(0)
+      expect(json.match(/"type":\s*"null"/g) ?? [], `${name} has type: "null"`).toHaveLength(0)
+    }
+  })
 
-        expect(anyOfMatches.length, `${name} has anyOf`).toBe(0)
-        expect(oneOfMatches.length, `${name} has oneOf`).toBe(0)
-        expect(nullTypeMatches.length, `${name} has type: "null"`).toBe(0)
-      }
+  it('emit the passage report in the order each part builds on the last', () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const passage = z.toJSONSchema(reportPassageInputSchema) as any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const maintenance = z.toJSONSchema(reportMaintenanceInputSchema) as any
+    expect(Object.keys(passage.properties)).toEqual([
+      'summary', 'events', 'scene', 'mentions', 'contradictions', 'newRecordNames',
+      'present', 'characters', 'entities', 'update', 'threads', 'resolvedThreads', 'directions',
+    ])
+    expect(passage.required).toEqual(Object.keys(passage.properties))
+    expect(passage.properties.characters.items.required).toContain('character')
+    expect(passage.properties.entities.items.required).toContain('entity')
+    expect(maintenance.required).toEqual(['evidenceSegments', 'corrections', 'newRecords'])
+  })
+
+  it('forgive a single object or empty value where a list belongs', () => {
+    const passage = reportPassageInputSchema.parse({
+      summary: 'A speech was given.',
+      scene: { transition: 'advance' },
+      mentions: '',
+      contradictions: '',
+      characters: [
+        { character: 'Victoria', set: { field: 'Currently', value: 'standing' }, add: '' },
+        { character: 'Hiddema', set: null },
+      ],
+      update: [{ item: '[2]', happened: 'resolved' }, { item: 'x', happened: 'resolved' }],
+      entities: '',
+      threads: 'Who poisoned the king?',
     })
+    expect(passage.mentions).toEqual([])
+    expect(passage.contradictions).toEqual([])
+    expect(passage.characters[0].set).toEqual([{ field: 'Currently', value: 'standing' }])
+    expect(passage.characters[0].add).toEqual([])
+    expect(passage.characters[1].set).toEqual([])
+    expect(passage.update).toEqual([{ item: 2, happened: 'resolved' }])
+    expect(passage.entities).toEqual([])
+    expect(passage.threads).toEqual(['Who poisoned the king?'])
 
-    it('emits bounded report identities and explicit top-level arrays', () => {
-      const continuity = z.toJSONSchema(reportContinuityInputSchema) as any
-      const maintenance = z.toJSONSchema(reportMaintenanceInputSchema) as any
-      const observation = z.toJSONSchema(reportObservationInputSchema) as any
+    expect(reportMaintenanceInputSchema.parse({ evidenceSegments: '', corrections: '', newRecords: null }))
+      .toEqual({ evidenceSegments: [], corrections: [], newRecords: [] })
+    expect(reportMaintenanceInputSchema.parse({ evidenceSegments: 4 }).evidenceSegments).toEqual([4])
+    expect(reportMaintenanceInputSchema.parse({
+      corrections: [{ fragmentId: 'ch-0001', segment: '2', newText: 'Updated content text.' }],
+    }).corrections[0].segment).toBe(2)
+  })
 
-      expect(continuity.required).toEqual(['present', 'characters', 'entities', 'update', 'threads', 'resolvedThreads'])
-      expect(continuity.properties.characters.items.required).toContain('character')
-      expect(continuity.properties.entities.items.required).toContain('entity')
-      expect(maintenance.required).toEqual(['evidenceSegments', 'corrections', 'newRecords'])
-      expect(observation.required).toEqual([
-        'summary',
-        'events',
-        'scene',
-        'mentions',
-        'candidateFragmentIds',
-        'contradictions',
-        'newRecordNames',
-      ])
-    })
-
-    it('forgives a single object or empty value where a list of changes belongs', () => {
-      const result = reportContinuityInputSchema.safeParse({
-        characters: [
-          { character: 'Victoria', set: { field: 'Currently', value: 'standing' }, add: '' },
-          { character: 'Hiddema', set: null },
-        ],
-        update: [{ item: '[2]', happened: 'resolved' }, { item: 'x', happened: 'resolved' }],
-        entities: '',
-        threads: null,
-      })
-      expect(result.success).toBe(true)
-      if (result.success) {
-        expect(result.data.characters[0].set).toEqual([{ field: 'Currently', value: 'standing' }])
-        expect(result.data.characters[0].add).toEqual([])
-        expect(result.data.characters[1].set).toEqual([])
-        expect(result.data.update).toEqual([{ item: 2, happened: 'resolved' }])
-        expect(result.data.entities).toEqual([])
-        expect(result.data.threads).toEqual([])
-      }
-
-      const maintenance = reportMaintenanceInputSchema.parse({
-        evidenceSegments: '',
-        corrections: '',
-        newRecords: null,
-      })
-      expect(maintenance).toEqual({ evidenceSegments: [], corrections: [], newRecords: [] })
-    })
-
-    it('coerces single string or number inputs into arrays', () => {
-      const result = reportContinuityInputSchema.safeParse({ threads: 'Who poisoned the king?' })
-      expect(result.success).toBe(true)
-      if (result.success) {
-        expect(result.data.threads).toEqual(['Who poisoned the king?'])
-      }
-      expect(reportMaintenanceInputSchema.parse({ evidenceSegments: 4 }).evidenceSegments).toEqual([4])
-    })
-
-    it('coerces candidateFragmentIds, mentions, and contradictions in reportObservation', () => {
-      const result = reportObservationInputSchema.safeParse({
-        summary: 'A speech was given.',
-        scene: { transition: 'advance' },
-        mentions: '',
-        candidateFragmentIds: 'ch-0001',
-        contradictions: '',
-      })
-      expect(result.success).toBe(true)
-      if (result.success) {
-        expect(result.data.mentions).toEqual([])
-        expect(result.data.candidateFragmentIds).toEqual(['ch-0001'])
-        expect(result.data.contradictions).toEqual([])
-      }
-    })
-
-    it('coerces string segment numbers in correctionProposalItemSchema', () => {
-      const result = reportMaintenanceInputSchema.safeParse({
+  it('drop a malformed optional scene claim and keep the rest', () => {
+    const parsed = reportPassageInputSchema.parse({
+      summary: 'Night fell over the waiting ship.',
+      scene: {
+        transition: 'advance',
+        time: { label: '03:14 at night', certainty: 'approximate', calendar: '', earliest: '03:14' },
+        elapsed: { label: 'hours', minimumSeconds: 7200, maximumSeconds: 60 },
         evidenceSegments: [1],
-        corrections: [
-          {
-            fragmentId: 'ch-0001',
-            segment: '2',
-            newText: 'Updated content text.',
-          },
-        ],
-      })
-      expect(result.success).toBe(true)
-      if (result.success) {
-        expect(result.data.corrections[0].segment).toBe(2)
-      }
+      },
     })
+    expect(parsed.summary).toBe('Night fell over the waiting ship.')
+    expect(parsed.scene.time).toEqual({ label: '03:14 at night', certainty: 'approximate' })
+    expect(parsed.scene.elapsed).toBeUndefined()
   })
 })
 
@@ -1291,8 +726,7 @@ describe('forgiving array per-item forgiveness', () => {
 
   it('still fails a min-required array when every entry is dropped', () => {
     const schema = forgivingArray(mentionInputSchema, { min: 1, max: 24 })
-    const result = schema.safeParse([{ fragmentId: 'zzz' }, { fragmentId: 'yyy' }])
-    expect(result.success).toBe(false)
+    expect(schema.safeParse([{ fragmentId: 'zzz' }, { fragmentId: 'yyy' }]).success).toBe(false)
   })
 
   it('keeps a min-required array that still has one valid entry', () => {
@@ -1310,15 +744,6 @@ describe('forgiving array per-item forgiveness', () => {
     expect(result.success).toBe(true)
     if (result.success) {
       expect(result.data).toEqual([1, 2, 3])
-    }
-  })
-
-  it('clamps an over-long string entry and trims the array', () => {
-    const schema = forgivingStringArray(10, { max: 2 })
-    const result = schema.safeParse(['short', 'a-very-long-entry-that-exceeds-the-cap', 'third'])
-    expect(result.success).toBe(true)
-    if (result.success) {
-      expect(result.data).toEqual(['short', 'a-very-lon'])
     }
   })
 })

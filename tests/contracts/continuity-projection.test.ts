@@ -14,27 +14,26 @@ describe('continuity projection contract', () => {
     expect(usesCanonicalType).toBe(true)
 
     const projection: ContinuityProjection = {
-      version: 3,
+      version: 4,
       scene: { transition: 'continue', line: 'present' },
-      stateOperations: [],
       threadOperations: [],
       threadFocus: [],
-      knowledgeOperations: [],
+      liveStates: [],
     }
-    expect(projection.version).toBe(3)
+    expect(projection.version).toBe(4)
   })
 
   it('accepts only canonical persisted projections', () => {
     const projection: ContinuityProjection = {
-      version: 3,
+      version: 4,
       scene: { transition: 'enter-flashback', line: 'flashback' },
-      stateOperations: [],
       threadOperations: [],
       threadFocus: [],
-      knowledgeOperations: [],
+      liveStates: [],
     }
     expect(ContinuityProjectionSchema.safeParse(projection).success).toBe(true)
-    expect(ContinuityProjectionSchema.safeParse({ ...projection, version: 1 }).success).toBe(false)
+    expect(ContinuityProjectionSchema.safeParse({ ...projection, version: 3 }).success).toBe(false)
+    expect(ContinuityProjectionSchema.safeParse({ ...projection, stateOperations: [] }).success).toBe(false)
     expect(ContinuityProjectionSchema.safeParse({ ...projection, extra: true }).success).toBe(false)
     expect(ContinuityProjectionSchema.safeParse({
       ...projection,
@@ -58,12 +57,10 @@ describe('continuity projection contract', () => {
   it('accepts live-state reports that set fields, add entries, and end them', () => {
     const secretId = liveStateItemId('Secrets', 'carries the map')
     const projection: ContinuityProjection = {
-      version: 3,
+      version: 4,
       scene: { transition: 'continue', line: 'present' },
-      stateOperations: [],
       threadOperations: [],
       threadFocus: [],
-      knowledgeOperations: [],
       liveStates: [{
         kind: 'character',
         key: 'ch-0001',

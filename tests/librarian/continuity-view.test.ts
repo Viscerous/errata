@@ -7,12 +7,13 @@ import {
   continuityRegistry,
   projectContinuityView,
   renderContinuity,
-  renderContinuityRegistry,
 } from '@/server/librarian/continuity-view'
 import {
   createTempDir,
-  makeCharacterKnowledge,
   makeContinuityView,
+  makeLiveState,
+  makeLiveStateField,
+  makeLiveStateItem,
   makeLiveThread,
   makeTestSettings,
 } from '../setup'
@@ -75,6 +76,28 @@ function analysis(fragmentId: string, position: number): LibrarianAnalysis {
   }
 }
 
+/** A stored projection; the parts a test does not state are empty. */
+function projection(overrides: Partial<ContinuityProjection> = {}): ContinuityProjection {
+  return {
+    version: 4,
+    scene: { transition: 'continue', line: 'present' },
+    threadOperations: [],
+    threadFocus: [],
+    liveStates: [],
+    ...overrides,
+  }
+}
+
+const knows = (text: string) => ({ id: liveStateItemId('Knows', text), field: 'Knows', text })
+
+/** Alice in the scene, somewhere. */
+function aliceAt(where: string, changes: Partial<LiveStateReport> = {}): LiveStateReport {
+  return {
+    kind: 'character', key: 'ch-0001', fragmentId: 'ch-0001', name: 'Alice', present: true,
+    set: [{ field: 'Where', value: where }], add: [], update: [], ...changes,
+  }
+}
+
 describe('continuity view', () => {
   let dataDir: string
   let cleanup: () => Promise<void>
@@ -104,9 +127,7 @@ describe('continuity view', () => {
       ended: [],
     }))
     const ledger: ContinuityLedger = {
-      currentState: [],
       liveThreads: [],
-      characterKnowledge: [],
       liveStates,
       staleProjectionCount: 0,
     }
@@ -153,16 +174,7 @@ describe('continuity view', () => {
     await saveAnalysis(dataDir, story.id, {
       ...analysis('pr-0001', 1),
       sourceRevision: analysisSourceRevision(passage),
-      continuityProjection: {
-        version: 3,
-        scene: { transition: 'continue', line: 'present' },
-        stateOperations: [{
-          stateKey: 'alice_location', action: 'set',
-          subject: { key: 'alice', label: 'Alice' }, facet: 'location', value: 'great hall',
-          certainty: 'explicit', scope: 'cross-scene', evidenceSegments: [1], evidenceText: passage.content,
-        }],
-        threadOperations: [], threadFocus: [], knowledgeOperations: [],
-      },
+      continuityProjection: projection({ liveStates: [aliceAt('great hall')] }),
     })
     await saveAnalysis(dataDir, story.id, {
       ...analysis('pr-0001', 2),
@@ -173,7 +185,7 @@ describe('continuity view', () => {
       dataDir, storyId: story.id, activeProseFragments: [passage],
     })
 
-    expect(view?.currentState).toMatchObject([{ stateKey: 'alice_location', value: 'great hall' }])
+    expect(view?.liveStates?.[0].fields).toMatchObject([{ field: 'Where', value: 'great hall' }])
   })
 
   it('keeps state from a passage that never determined its scene frame', async () => {
@@ -189,25 +201,12 @@ describe('continuity view', () => {
     await saveAnalysis(dataDir, story.id, {
       ...analysis('pr-0001', 1),
       sourceRevision: analysisSourceRevision(passage),
-      continuityProjection: {
-        version: 3,
+      continuityProjection: projection({
         // The schema default. Making no claim about time is not a claim to have
         // stepped out of the present, so the state it reported still counts.
         scene: { transition: 'uncertain', line: 'uncertain' },
-        stateOperations: [{
-          stateKey: 'alice_location',
-          action: 'set',
-          subject: { key: 'alice', label: 'Alice' },
-          facet: 'location',
-          certainty: 'explicit',
-          scope: 'cross-scene',
-          value: 'the great hall',
-          evidenceSegments: [1], evidenceText: 'Prose 1',
-        }],
-        threadOperations: [],
-        threadFocus: [],
-        knowledgeOperations: [],
-      },
+        liveStates: [aliceAt('the great hall')],
+      }),
     })
 
     const view = await buildContinuityView({
@@ -216,7 +215,7 @@ describe('continuity view', () => {
       activeProseFragments: [passage],
     })
 
-    expect(view?.currentState).toMatchObject([{ stateKey: 'alice_location', value: 'the great hall' }])
+    expect(view?.liveStates?.[0].fields).toMatchObject([{ field: 'Where', value: 'the great hall' }])
     // An undetermined frame is not worth a line in the Writer's context either.
     expect(view?.currentScene).toMatchObject({ line: 'present' })
     const rendered = renderContinuity({ continuityView: view }, 'generation.writer')!
@@ -236,24 +235,9 @@ describe('continuity view', () => {
     await saveAnalysis(dataDir, story.id, {
       ...analysis('pr-0001', 1),
       sourceRevision: analysisSourceRevision(passage),
-      continuityProjection: {
-        version: 3,
-        // What the removed `concurrent` relation was being used to say.
+      continuityProjection: projection({
         scene: { transition: 'continue', line: 'present', time: { label: 'during the First Address', certainty: 'exact' } },
-        stateOperations: [{
-          stateKey: 'alice_location',
-          action: 'set',
-          subject: { key: 'alice', label: 'Alice' },
-          facet: 'location',
-          certainty: 'explicit',
-          scope: 'cross-scene',
-          value: 'the rail',
-          evidenceSegments: [1], evidenceText: 'Prose 1',
-        }],
-        threadOperations: [],
-        threadFocus: [],
-        knowledgeOperations: [],
-      },
+      }),
     })
 
     const view = await buildContinuityView({
@@ -263,7 +247,6 @@ describe('continuity view', () => {
     })
     const rendered = renderContinuity({ continuityView: view }, 'generation.writer')!
 
-    // The occasion is the useful part; `forward` is not worth naming beside it.
     expect(rendered).toContain('Current scene frame')
     expect(rendered).toContain('- Time: during the First Address (exact)')
   })
@@ -289,29 +272,15 @@ describe('continuity view', () => {
       record.sourceRevision = analysisSourceRevision(
         (await getFragment(dataDir, story.id, fragmentId))!,
       )
-      record.continuityProjection = {
-        version: 3,
-        scene: { transition: 'continue', line: 'present' },
-        stateOperations: [{
-          stateKey: `state_${position}`,
-          action: 'set',
-          subject: { key: `subject_${position}`, label: `Subject ${position}` },
-          facet: 'status',
-          certainty: 'explicit',
-          scope: 'cross-scene',
-          value: `Value ${position}`,
-          evidenceSegments: [1], evidenceText: `Prose ${position}`,
-        }],
-        threadOperations: [],
-        threadFocus: [],
-        knowledgeOperations: [],
-      }
+      record.continuityProjection = projection({
+        threadOperations: [{ threadKey: `thread_${position}`, action: 'open', label: `Thread ${position}` }],
+      })
       await saveAnalysis(dataDir, story.id, record)
       passages.push((await getFragment(dataDir, story.id, fragmentId))!)
     }
 
     const first = await buildContinuityView({ dataDir, storyId: story.id, activeProseFragments: passages })
-    expect(first?.currentState).toHaveLength(3)
+    expect(first?.liveThreads).toHaveLength(3)
 
     // Delete the analysis files outright. A second build with a changed prose
     // set must still fold them, which is only possible from the memo.
@@ -325,10 +294,10 @@ describe('continuity view', () => {
       activeProseFragments: passages.slice(0, 2),
     })
 
-    expect(second?.currentState.map((entry) => entry.stateKey)).toEqual(['state_1', 'state_2'])
+    expect(second?.liveThreads.map((thread) => thread.threadKey)).toEqual(['thread_1', 'thread_2'])
   })
 
-  it('folds keyed state, thread focus, temporal frames, and character knowledge while rejecting stale sources', async () => {
+  it('folds live state, thread focus, and temporal frames while rejecting stale sources', async () => {
     const story = makeStory()
     await createStory(dataDir, story)
     const passages: Fragment[] = []
@@ -346,105 +315,33 @@ describe('continuity view', () => {
     await saveAnalysis(dataDir, story.id, {
       ...analysis('pr-0001', 1),
       sourceRevision: analysisSourceRevision(passages[0]),
-      continuityProjection: {
-        version: 3,
-        scene: { transition: 'continue', line: 'present' },
-        stateOperations: [{
-          stateKey: 'alice.location',
-          action: 'set',
-          subject: { key: 'alice', label: 'Alice' },
-          facet: 'location',
-          certainty: 'explicit',
-          scope: 'cross-scene',
-          value: 'north gate',
-          evidenceSegments: [1], evidenceText: 'Passage 1',
-        }],
-        threadOperations: [{
-          threadKey: 'missing-key',
-          action: 'open',
-          label: 'The missing key',
-          relatedFragmentIds: ['ch-0001'],
-          evidenceSegments: [1], evidenceText: 'Passage 1',
-        }],
+      continuityProjection: projection({
+        liveStates: [aliceAt('north gate', { add: [knows('The key is missing.')] })],
+        threadOperations: [{ threadKey: 'missing-key', action: 'open', label: 'The missing key' }],
         threadFocus: [{ threadKey: 'missing-key', visibility: 'foreground' }],
-        knowledgeOperations: [{
-          characterId: 'ch-0001',
-          knowledgeKey: 'key.missing',
-          action: 'learn',
-          fact: 'The key is missing.',
-          acquisition: 'witnessed',
-          evidenceSegments: [1], evidenceText: 'Passage 1',
-        }],
-      },
+      }),
     })
     await saveAnalysis(dataDir, story.id, {
       ...analysis('pr-0002', 2),
       sourceRevision: analysisSourceRevision(passages[1]),
-      continuityProjection: {
-        version: 3,
-        scene: { transition: 'continue', line: 'present' },
-        stateOperations: [{
-          stateKey: 'alice.location',
-          action: 'set',
-          subject: { key: 'alice', label: 'Alice' },
-          facet: 'location',
-          certainty: 'explicit',
-          scope: 'cross-scene',
-          value: 'great hall',
-          evidenceSegments: [1], evidenceText: 'Passage 2',
-        }],
-        threadOperations: [{
-          threadKey: 'missing-key',
-          action: 'advance',
-          note: 'The search reached the great hall.',
-          relatedFragmentIds: [],
-          evidenceSegments: [1], evidenceText: 'Passage 2',
-        }],
-        threadFocus: [],
-        knowledgeOperations: [],
-      },
+      continuityProjection: projection({
+        liveStates: [aliceAt('great hall')],
+        threadOperations: [{ threadKey: 'missing-key', action: 'advance' }],
+      }),
     })
     await saveAnalysis(dataDir, story.id, {
       ...analysis('pr-0003', 3),
       sourceRevision: analysisSourceRevision(passages[2]),
-      continuityProjection: {
-        version: 3,
+      continuityProjection: projection({
         scene: { transition: 'enter-flashback', line: 'flashback', time: { label: 'years earlier', certainty: 'approximate' }, evidenceSegments: [1], evidenceText: 'Passage 3' },
-        stateOperations: [{
-          stateKey: 'alice.location',
-          action: 'set',
-          subject: { key: 'alice', label: 'Alice' },
-          facet: 'location',
-          certainty: 'explicit',
-          scope: 'cross-scene',
-          value: 'childhood village',
-          evidenceSegments: [1], evidenceText: 'Passage 3',
-        }],
-        threadOperations: [],
+        liveStates: [aliceAt('childhood village')],
         threadFocus: [{ threadKey: 'missing-key', visibility: 'background' }],
-        knowledgeOperations: [],
-      },
+      }),
     })
     await saveAnalysis(dataDir, story.id, {
       ...analysis('pr-0004', 4),
       sourceRevision: { ...analysisSourceRevision(passages[3]), contentHash: 'stale' },
-      continuityProjection: {
-        version: 3,
-        scene: { transition: 'continue', line: 'present' },
-        stateOperations: [{
-          stateKey: 'alice.location',
-          action: 'set',
-          subject: { key: 'alice', label: 'Alice' },
-          facet: 'location',
-          certainty: 'explicit',
-          scope: 'cross-scene',
-          value: 'incorrect place',
-          evidenceSegments: [1], evidenceText: 'Passage 4',
-        }],
-        threadOperations: [],
-        threadFocus: [],
-        knowledgeOperations: [],
-      },
+      continuityProjection: projection({ liveStates: [aliceAt('incorrect place')] }),
     })
 
     const view = await buildContinuityView({
@@ -453,36 +350,24 @@ describe('continuity view', () => {
       activeProseFragments: passages,
     })
 
-    // Keys are normalized on the fold, so projections stored under the earlier
-    // dotted/hyphenated spellings still resolve to one identity.
-    expect(view?.currentState).toMatchObject([{ stateKey: 'alice_location', value: 'childhood village' }])
-    expect(view?.liveThreads).toMatchObject([{
-      threadKey: 'missing_key',
-      visibility: 'background',
-      note: 'The search reached the great hall.',
-    }])
-    expect(view?.characterKnowledge).toMatchObject([{
-      characterId: 'ch-0001',
-      knowledgeKey: 'key_missing',
-      fact: 'The key is missing.',
-    }])
+    // Keys are normalized on the fold, so a hyphenated spelling resolves to one identity.
+    expect(view?.liveThreads).toMatchObject([{ threadKey: 'missing_key', visibility: 'background' }])
     expect(view?.currentScene).toMatchObject({ line: 'flashback', time: { label: 'years earlier' } })
     expect(view?.staleProjectionCount).toBe(1)
 
     const rendered = renderContinuity(
-      { continuityView: view, stickyCharacters: [{ id: 'ch-0001', name: 'Alice' }] },
+      { continuityView: view, stickyCharacters: [{ id: 'ch-0001' }] },
       'generation.writer',
     )!
-    expect(rendered).toContain('Alice — location: childhood village')
+    expect(rendered).toContain('**Alice**')
+    expect(rendered).toContain('- Where: childhood village')
+    // What Alice knew is lasting, so the flashback still carries it.
+    expect(rendered).toContain('The key is missing.')
     expect(rendered).toContain('[background] The missing key')
     expect(rendered).toContain('not tasks, promised beats')
-    expect(rendered).toContain('Alice knows or believes:')
-    expect(rendered).not.toContain('ch-0001 knows or believes:')
-    expect(rendered).toContain('The key is missing.')
-    expect(rendered).not.toContain('Present:')
-    expect(rendered).not.toContain('Direct witnesses:')
+    expect(rendered).not.toContain('ch-0001')
     expect(rendered).not.toContain('incorrect place')
-    expect(rendered).not.toContain('Alice — location: great hall')
+    expect(rendered).not.toContain('great hall')
   })
 
   // Eight of twenty-three Timeline 10 analyses reported no focus at all. Taking
@@ -506,32 +391,15 @@ describe('continuity view', () => {
     await saveAnalysis(dataDir, story.id, {
       ...analysis('pr-0001', 1),
       sourceRevision: analysisSourceRevision(passages[0]),
-      continuityProjection: {
-        version: 3,
-        scene: { transition: 'continue', line: 'present' },
-        stateOperations: [],
-        threadOperations: [{
-          threadKey: 'the_missing_key',
-          action: 'open',
-          label: 'The missing key',
-          relatedFragmentIds: [],
-          evidenceSegments: [1], evidenceText: 'Passage 1',
-        }],
+      continuityProjection: projection({
+        threadOperations: [{ threadKey: 'the_missing_key', action: 'open', label: 'The missing key' }],
         threadFocus: [{ threadKey: 'the_missing_key', visibility: 'foreground' }],
-        knowledgeOperations: [],
-      },
+      }),
     })
     await saveAnalysis(dataDir, story.id, {
       ...analysis('pr-0002', 2),
       sourceRevision: analysisSourceRevision(passages[1]),
-      continuityProjection: {
-        version: 3,
-        scene: { transition: 'continue', line: 'present' },
-        stateOperations: [],
-        threadOperations: [],
-        threadFocus: [],
-        knowledgeOperations: [],
-      },
+      continuityProjection: projection(),
     })
 
     const view = await buildContinuityView({ dataDir, storyId: story.id, activeProseFragments: passages })
@@ -551,24 +419,16 @@ describe('continuity view', () => {
 
     await saveAnalysis(dataDir, story.id, {
       ...analysis(passages[0].id, 1), sourceRevision: analysisSourceRevision(passages[0]),
-      continuityProjection: {
-        version: 3, scene: { transition: 'continue', line: 'present' }, stateOperations: [],
-        threadOperations: [{
-          threadKey: 'the_missing_key', action: 'open', label: 'The missing key',
-          relatedFragmentIds: [], evidenceSegments: [1], evidenceText: passages[0].content,
-        }],
+      continuityProjection: projection({
+        threadOperations: [{ threadKey: 'the_missing_key', action: 'open', label: 'The missing key' }],
         threadFocus: [{ threadKey: 'the_missing_key', visibility: 'foreground' }],
-        knowledgeOperations: [],
-      },
+      }),
     })
     await saveAnalysis(dataDir, story.id, {
       ...analysis(passages[1].id, 2), sourceRevision: analysisSourceRevision(passages[1]),
-      continuityProjection: {
-        version: 3, scene: { transition: 'continue', line: 'present' }, stateOperations: [],
-        threadOperations: [],
+      continuityProjection: projection({
         threadFocus: [{ threadKey: 'the_missing_key', visibility: 'dormant' }],
-        knowledgeOperations: [],
-      },
+      }),
     })
 
     const view = await buildContinuityView({ dataDir, storyId: story.id, activeProseFragments: passages })
@@ -577,8 +437,8 @@ describe('continuity view', () => {
   })
 
   // Threads leave the live list only when resolved, so an uncapped list grows
-  // for the life of the story — and it remains available in the analysis
-  // tool schema, where every key costs budget on a small model.
+  // for the life of the story — and every key rendered costs budget on the
+  // analyst that reads it.
   it('caps the dormant thread tail without evicting a thread the latest passage still has in view', async () => {
     const story = makeStory()
     await createStory(dataDir, story)
@@ -588,22 +448,15 @@ describe('continuity view', () => {
     await saveAnalysis(dataDir, story.id, {
       ...analysis('pr-0001', 1),
       sourceRevision: analysisSourceRevision(passage),
-      continuityProjection: {
-        version: 3,
-        scene: { transition: 'continue', line: 'present' },
-        stateOperations: [],
+      continuityProjection: projection({
         threadOperations: Array.from({ length: 40 }, (_, i) => ({
           threadKey: `thread_${String(i).padStart(2, '0')}`,
           action: 'open' as const,
           label: `Thread ${i}`,
-          relatedFragmentIds: [],
-          evidenceSegments: [1],
-          evidenceText: 'Passage 1',
         })),
         // The oldest thread is still in view, so it must survive the cap.
         threadFocus: [{ threadKey: 'thread_00', visibility: 'foreground' }],
-        knowledgeOperations: [],
-      },
+      }),
     })
 
     const ledger = await buildContinuityLedger({ dataDir, storyId: story.id, activeProseFragments: [passage] })
@@ -615,68 +468,14 @@ describe('continuity view', () => {
     // The retained dormant threads are the most recently updated ones.
     expect(view!.liveThreads.map((thread) => thread.threadKey)).toContain('thread_39')
     expect(view!.liveThreads.map((thread) => thread.threadKey)).not.toContain('thread_01')
+    // The analyst may still address every live thread by key.
+    expect(continuityRegistry({ continuityLedger: ledger, continuityView: view }).thread).toHaveLength(40)
   })
 
-  it('retains every live state identity while bounding values in prompt projections', async () => {
+  it('folds the scene frame through overlays, returns, and elapsed time', async () => {
     const story = makeStory()
     await createStory(dataDir, story)
-    const passage = makeFragment({ id: 'pr-0001', type: 'prose', order: 1, content: 'Passage 1' })
-    await createFragment(dataDir, story.id, passage)
-
-    await saveAnalysis(dataDir, story.id, {
-      ...analysis('pr-0001', 1),
-      sourceRevision: analysisSourceRevision(passage),
-      continuityProjection: {
-        version: 3,
-        scene: { transition: 'continue', line: 'present' },
-        stateOperations: Array.from({ length: 40 }, (_, index) => ({
-          stateKey: `state_${String(index).padStart(2, '0')}`,
-          action: 'set' as const,
-          subject: { key: `subject_${index}`, label: `Subject ${index}` },
-          facet: 'status',
-          certainty: 'explicit',
-          scope: 'cross-scene',
-          value: `Value ${index}`,
-          evidenceSegments: [1],
-          evidenceText: 'Passage 1',
-        })),
-        threadOperations: [],
-        threadFocus: [],
-        knowledgeOperations: [],
-      },
-    })
-
-    const ledger = await buildContinuityLedger({ dataDir, storyId: story.id, activeProseFragments: [passage] })
-    const view = await buildContinuityView({ dataDir, storyId: story.id, activeProseFragments: [passage] })
-    const registry = continuityRegistry({ continuityLedger: ledger, continuityView: view })
-
-    expect(ledger!.currentState).toHaveLength(40)
-    expect(view!.currentState).toHaveLength(24)
-    expect(view!.currentState[0].stateKey).toBe('state_16')
-    expect(registry.state).toHaveLength(40)
-    expect(registry.state[0]).toMatchObject({ index: 1, key: 'state_00', label: 'Subject 0 — status' })
-    expect(registry.state[0].detail).toBeUndefined()
-    expect(registry.state[39]).toMatchObject({ index: 40, key: 'state_39', detail: 'Value 39' })
-
-    const analyze = renderContinuityRegistry(
-      { continuityLedger: ledger, continuityView: view },
-      false,
-    )
-    const writer = renderContinuity(
-      { continuityLedger: ledger, continuityView: view },
-      'generation.writer',
-    )!
-    expect(analyze).toContain('[1] state_00 | Subject 0 — status')
-    expect(analyze).not.toContain('Subject 0 — status | Value 0')
-    expect(analyze).toContain('[40] state_39 | Subject 39 — status | Value 39')
-    expect(writer).not.toContain('Subject 0 — status: Value 0')
-    expect(writer).toContain('Subject 39 — status: Value 39')
-  })
-
-  it('folds scene lifecycle, temporal overlays, returns, and conservative expiry', async () => {
-    const story = makeStory()
-    await createStory(dataDir, story)
-    const passages = Array.from({ length: 6 }, (_, index) => makeFragment({
+    const passages = Array.from({ length: 4 }, (_, index) => makeFragment({
       id: `pr-scene-${index + 1}`,
       type: 'prose',
       order: index + 1,
@@ -684,126 +483,38 @@ describe('continuity view', () => {
     }))
     for (const passage of passages) await createFragment(dataDir, story.id, passage)
 
-    const emptyLanes = { threadOperations: [], threadFocus: [], knowledgeOperations: [] }
-    await saveAnalysis(dataDir, story.id, {
-      ...analysis(passages[0].id, 1),
-      sourceRevision: analysisSourceRevision(passages[0]),
-      continuityProjection: {
-        version: 3,
-        scene: {
-          transition: 'cut',
-          line: 'present',
-          time: {
-            label: '10:00', certainty: 'exact',
-            earliest: '2026-01-01T10:00:00.000Z', latest: '2026-01-01T10:00:00.000Z',
-          },
-        },
-        stateOperations: [
-          {
-            stateKey: 'courtyard_weather', action: 'set',
-            subject: { key: 'courtyard', label: 'Courtyard' }, facet: 'weather', value: 'steady rain',
-            certainty: 'explicit',
-            scope: 'scene', evidenceSegments: [1], evidenceText: passages[0].content,
-          },
-          {
-            stateKey: 'alice_injury', action: 'set',
-            subject: { key: 'alice', label: 'Alice' }, facet: 'injury', value: 'sprained wrist',
-            certainty: 'explicit',
-            scope: 'cross-scene', evidenceSegments: [1], evidenceText: passages[0].content,
-          },
-          {
-            stateKey: 'alice_invisibility', action: 'set',
-            subject: { key: 'alice', label: 'Alice' }, facet: 'visibility', value: 'invisible',
-            certainty: 'explicit',
-            scope: 'cross-scene',
-            until: {
-              label: '10:30', certainty: 'exact',
-              earliest: '2026-01-01T10:30:00.000Z', latest: '2026-01-01T10:30:00.000Z',
-            },
-            evidenceSegments: [1], evidenceText: passages[0].content,
-          },
-        ],
-        ...emptyLanes,
+    const scenes: ContinuityProjection['scene'][] = [
+      {
+        transition: 'cut', line: 'present',
+        location: { key: 'courtyard', label: 'Courtyard' },
+        time: { label: '10:00', certainty: 'exact', earliest: '2026-01-01T10:00:00.000Z', latest: '2026-01-01T10:00:00.000Z' },
       },
-    })
-    await saveAnalysis(dataDir, story.id, {
-      ...analysis(passages[1].id, 2), sourceRevision: analysisSourceRevision(passages[1]),
-      continuityProjection: {
-        version: 3,
-        scene: {
-          transition: 'advance', line: 'present',
-          elapsed: { label: 'twenty minutes', minimumSeconds: 1200, maximumSeconds: 1200 },
-        },
-        stateOperations: [], ...emptyLanes,
-      },
-    })
-    await saveAnalysis(dataDir, story.id, {
-      ...analysis(passages[2].id, 3), sourceRevision: analysisSourceRevision(passages[2]),
-      continuityProjection: {
-        version: 3,
-        scene: { transition: 'enter-flashback', line: 'flashback' },
-        stateOperations: [{
-          stateKey: 'alice_location', action: 'set',
-          subject: { key: 'alice', label: 'Alice' }, facet: 'location', value: 'childhood village',
-          certainty: 'explicit',
-          scope: 'scene', evidenceSegments: [1], evidenceText: passages[2].content,
-        }],
-        ...emptyLanes,
-      },
-    })
-    await saveAnalysis(dataDir, story.id, {
-      ...analysis(passages[3].id, 4), sourceRevision: analysisSourceRevision(passages[3]),
-      continuityProjection: {
-        version: 3,
-        scene: { transition: 'return', line: 'present' },
-        stateOperations: [], ...emptyLanes,
-      },
-    })
-    await saveAnalysis(dataDir, story.id, {
-      ...analysis(passages[4].id, 5), sourceRevision: analysisSourceRevision(passages[4]),
-      continuityProjection: {
-        version: 3,
-        scene: {
-          transition: 'advance', line: 'present',
-          elapsed: { label: 'eleven minutes', minimumSeconds: 660, maximumSeconds: 660 },
-        },
-        stateOperations: [], ...emptyLanes,
-      },
-    })
-    await saveAnalysis(dataDir, story.id, {
-      ...analysis(passages[5].id, 6), sourceRevision: analysisSourceRevision(passages[5]),
-      continuityProjection: {
-        version: 3,
-        scene: { transition: 'cut', line: 'present' },
-        stateOperations: [], ...emptyLanes,
-      },
-    })
+      { transition: 'advance', line: 'present', elapsed: { label: 'twenty minutes', minimumSeconds: 1200, maximumSeconds: 1200 } },
+      { transition: 'enter-flashback', line: 'flashback', location: { key: 'village', label: 'Childhood village' } },
+      { transition: 'return', line: 'present' },
+    ]
+    for (const [index, scene] of scenes.entries()) {
+      await saveAnalysis(dataDir, story.id, {
+        ...analysis(passages[index].id, index + 1),
+        sourceRevision: analysisSourceRevision(passages[index]),
+        continuityProjection: projection({ scene }),
+      })
+    }
+    const frameAfter = async (count: number) => (await buildContinuityView({
+      dataDir, storyId: story.id, activeProseFragments: passages.slice(0, count),
+    }))?.currentScene
 
-    const duringFlashback = await buildContinuityView({
-      dataDir, storyId: story.id, activeProseFragments: passages.slice(0, 3),
+    expect(await frameAfter(2)).toMatchObject({
+      line: 'present',
+      location: { label: 'Courtyard' },
+      time: { label: 'twenty minutes after 10:00', earliest: '2026-01-01T10:20:00.000Z', certainty: 'exact' },
     })
-    expect(duringFlashback?.currentScene?.line).toBe('flashback')
-    expect(duringFlashback?.currentState.map((entry) => entry.stateKey)).toEqual(['alice_location'])
-
-    const afterReturn = await buildContinuityView({
-      dataDir, storyId: story.id, activeProseFragments: passages.slice(0, 4),
+    expect(await frameAfter(3)).toMatchObject({ line: 'flashback', location: { label: 'Childhood village' } })
+    expect(await frameAfter(4)).toMatchObject({
+      line: 'present',
+      location: { label: 'Courtyard' },
+      time: { label: 'twenty minutes after 10:00' },
     })
-    expect(afterReturn?.currentScene?.line).toBe('present')
-    expect(afterReturn?.currentState.map((entry) => entry.stateKey)).toEqual([
-      'courtyard_weather', 'alice_injury', 'alice_invisibility',
-    ])
-
-    const afterExpiry = await buildContinuityView({
-      dataDir, storyId: story.id, activeProseFragments: passages.slice(0, 5),
-    })
-    expect(afterExpiry?.currentState.map((entry) => entry.stateKey)).toEqual([
-      'courtyard_weather', 'alice_injury',
-    ])
-
-    const afterCut = await buildContinuityView({
-      dataDir, storyId: story.id, activeProseFragments: passages,
-    })
-    expect(afterCut?.currentState.map((entry) => entry.stateKey)).toEqual(['alice_injury'])
   })
 
   /**
@@ -820,20 +531,10 @@ describe('continuity view', () => {
     await saveAnalysis(dataDir, story.id, {
       ...analysis('pr-0001', 1),
       sourceRevision: analysisSourceRevision(passage),
-      continuityProjection: {
-        version: 3,
-        scene: { transition: 'continue', line: 'present' },
-        stateOperations: [],
-        threadOperations: [{
-          threadKey: 'who_sent_the_letter',
-          action: 'open',
-          relatedFragmentIds: [],
-          evidenceSegments: [1],
-          evidenceText: 'Passage 1',
-        }],
+      continuityProjection: projection({
+        threadOperations: [{ threadKey: 'who_sent_the_letter', action: 'open' }],
         threadFocus: [{ threadKey: 'who_sent_the_letter', visibility: 'foreground' }],
-        knowledgeOperations: [],
-      },
+      }),
     })
 
     const view = await buildContinuityView({ dataDir, storyId: story.id, activeProseFragments: [passage] })
@@ -846,34 +547,28 @@ describe('continuity view', () => {
     })
     // The rendered block must never put a raw snake_case key in front of the author.
     expect(renderContinuity({ continuityView: view }, 'generation.writer'))
-      .not.toContain('who_sent_the_letter |')
+      .not.toContain('who_sent_the_letter')
   })
 })
 
 /**
  * One entry point, and the reader's identity picks the presentation. These cases
  * are the presentation table read back as behaviour: the same records rendered
- * five incompatible ways, and no caller in a position to choose the wrong one.
+ * incompatible ways, and no caller in a position to choose the wrong one.
  */
 describe('renderContinuity', () => {
   const view = makeContinuityView({
     liveThreads: [
       makeLiveThread({ threadKey: 'the_open_wound', label: 'The open wound' }),
-      makeLiveThread({
-        threadKey: 'who_sent_the_letter',
-        label: 'Who sent the letter',
-        note: 'Never followed up.',
-        visibility: 'dormant',
-      }),
+      makeLiveThread({ threadKey: 'who_sent_the_letter', label: 'Who sent the letter', visibility: 'dormant' }),
     ],
-    characterKnowledge: [
-      makeCharacterKnowledge({ knowledgeKey: 'key_missing', fact: 'The key is missing.' }),
-      makeCharacterKnowledge({
-        characterId: 'ch-0002',
-        knowledgeKey: 'hero_lied',
-        fact: 'The hero lied about the key.',
-        acquisition: 'told',
+    liveStates: [
+      makeLiveState({
+        key: 'villain', fragmentId: undefined, name: 'Villain', present: true,
+        fields: [makeLiveStateField('Where', 'the north tower')],
       }),
+      makeLiveState({ name: 'Zinozi', items: [makeLiveStateItem('Knows', 'The key is missing.')] }),
+      makeLiveState({ fragmentId: 'ch-0002', name: 'Mara', items: [makeLiveStateItem('Knows', 'The hero lied about the key.')] }),
     ],
   })
 
@@ -883,6 +578,7 @@ describe('renderContinuity', () => {
       'generation.prewriter',
       'directions.suggest',
       'librarian.analyze',
+      'librarian.chat',
       'librarian.refine',
       'librarian.optimize-character',
     ] as const) {
@@ -901,15 +597,17 @@ describe('renderContinuity', () => {
       }
     })
 
-    it('scopes awareness to the pinned and recently active cast', () => {
+    it('shows the scene and, of those elsewhere, the pinned and recently active cast', () => {
       const rendered = renderContinuity({
         continuityView: view,
-        stickyCharacters: [{ id: 'ch-0001', name: 'Zinozi' }],
+        stickyCharacters: [{ id: 'ch-0001' }],
       }, 'generation.writer')!
-      expect(rendered).toContain('Zinozi knows or believes:')
-      expect(rendered).not.toContain('ch-0001 knows or believes:')
+      expect(rendered).toContain('**Villain**')
+      expect(rendered).toContain('the north tower')
+      expect(rendered).toContain('**Zinozi** — not in the current scene')
       expect(rendered).toContain('The key is missing.')
-      expect(rendered).not.toContain('The hero lied')
+      expect(rendered).not.toContain('Mara')
+      expect(rendered).not.toContain('ch-0001')
     })
   })
 
@@ -917,11 +615,9 @@ describe('renderContinuity', () => {
     it('scopes generic refinement to its target-related and active cast', () => {
       const rendered = renderContinuity({
         continuityView: view,
-        stickyCharacters: [{ id: 'ch-0001', name: 'Zinozi' }],
-        targetFragment: { id: 'ch-0002', type: 'character', name: 'Mara' },
+        stickyCharacters: [{ id: 'ch-0001' }],
+        targetFragment: { id: 'ch-0002', type: 'character' },
       }, 'librarian.refine')!
-      expect(rendered).toContain('Mara knows or believes:')
-      expect(rendered).toContain('Zinozi knows or believes:')
       expect(rendered).toContain('The hero lied')
       expect(rendered).toContain('The key is missing.')
       expect(rendered).toContain('Respect it as evidence while editing')
@@ -934,10 +630,8 @@ describe('renderContinuity', () => {
     it('includes characters referenced by a non-character refinement target', () => {
       const rendered = renderContinuity({
         continuityView: view,
-        targetFragment: { id: 'kn-0001', type: 'knowledge', name: 'The Key', refs: ['ch-0002'] },
-        characterCatalog: [{ id: 'ch-0002', name: 'Mara' }],
+        targetFragment: { id: 'kn-0001', type: 'knowledge', refs: ['ch-0002'] },
       }, 'librarian.refine')!
-      expect(rendered).toContain('Mara knows or believes:')
       expect(rendered).toContain('The hero lied')
       expect(rendered).not.toContain('The key is missing.')
     })
@@ -945,49 +639,11 @@ describe('renderContinuity', () => {
     it('scopes character optimization to its target regardless of pinning or recency', () => {
       const rendered = renderContinuity({
         continuityView: view,
-        targetFragment: { id: 'ch-0002', type: 'character', name: 'Mara' },
+        targetFragment: { id: 'ch-0002', type: 'character' },
       }, 'librarian.optimize-character')!
-      expect(rendered).toContain('Mara knows or believes:')
       expect(rendered).toContain('The hero lied')
       expect(rendered).not.toContain('The key is missing.')
       expect(rendered).toContain('Respect it as evidence while editing')
-    })
-
-    it('distinguishes unavailable and duplicate character names without leaking IDs', () => {
-      const rendered = renderContinuity({
-        continuityView: {
-          ...view,
-          characterKnowledge: [
-            ...view.characterKnowledge,
-            makeCharacterKnowledge({
-              characterId: 'ch-missing1',
-              knowledgeKey: 'missing_fact_1',
-              fact: 'One unavailable character knows the path.',
-            }),
-            makeCharacterKnowledge({
-              characterId: 'ch-missing2',
-              knowledgeKey: 'missing_fact_2',
-              fact: 'Another unavailable character knows the password.',
-            }),
-          ],
-        },
-        stickyCharacters: [
-          { id: 'ch-0001', name: 'Mara' },
-          { id: 'ch-0002', name: 'mara' },
-          { id: 'ch-missing1' },
-          { id: 'ch-missing2' },
-        ],
-      }, 'generation.writer')!
-      // Both folded characters resolve to the same case-insensitive name, so
-      // neither receives an ambiguous identical heading.
-      expect(rendered).toContain('Mara (character 1) knows or believes:')
-      expect(rendered).toContain('mara (character 2) knows or believes:')
-      expect(rendered).toContain('Unavailable character 1 knows or believes:')
-      expect(rendered).toContain('Unavailable character 2 knows or believes:')
-      expect(rendered).not.toContain('ch-0001')
-      expect(rendered).not.toContain('ch-0002')
-      expect(rendered).not.toContain('ch-missing1')
-      expect(rendered).not.toContain('ch-missing2')
     })
   })
 
@@ -995,7 +651,7 @@ describe('renderContinuity', () => {
     it('offers every thread as latent material', () => {
       const rendered = renderContinuity({ continuityView: view }, 'directions.suggest')!
       expect(rendered).toContain('The open wound')
-      expect(rendered).toContain('Who sent the letter — Never followed up.')
+      expect(rendered).toContain('[dormant] Who sent the letter')
       expect(rendered).toContain('has simply gone quiet, not been resolved')
       expect(rendered).toContain('None of them is owed an answer')
       // The constraint framing is the opposite instruction; both at once is noise.
@@ -1003,40 +659,42 @@ describe('renderContinuity', () => {
     })
   })
 
-  describe('the librarian, which writes the records back', () => {
-    it('exposes the keys, and scopes knowledge to this passage rather than the cast', () => {
-      const rendered = renderContinuity({
-        continuityView: view,
-        // Pinned characters are deliberately not the analyst's scope: pinning is
-        // standing author intent, not evidence the new passage is about them.
-        stickyCharacters: [{ id: 'ch-0001' }],
-        attentionCandidateIds: ['ch-0002'],
-        characterCatalog: [{ id: 'ch-0002', name: 'Mara' }],
-      }, 'librarian.chat')!
-      expect(rendered).toContain('who_sent_the_letter |')
-      // Every lane reads `[n] key | label | detail`, so an operation can cite n.
-      expect(rendered).toMatch(/\[\d+\] hero_lied \| .* \| known by Mara \(ch-0002\)/)
-      expect(rendered).toContain('the knower, not necessarily the person or thing described')
-      expect(rendered).not.toContain('key_missing')
+  describe('the librarian', () => {
+    it('reads the whole ledger in chat, including everyone elsewhere and quiet threads', () => {
+      const rendered = renderContinuity({ continuityView: view }, 'librarian.chat')!
+      expect(rendered).toContain('the whole ledger')
+      expect(rendered).toContain('The key is missing.')
+      expect(rendered).toContain('The hero lied')
+      expect(rendered).toContain('[dormant] Who sent the letter')
+    })
+
+    it('shows the analyst the keys and numbers it reports against', () => {
+      const source = { continuityView: view, stickyCharacters: [{ id: 'ch-0001' }] }
+      const rendered = renderContinuity(source, 'librarian.analyze')!
+      expect(rendered).toContain('[the_open_wound] The open wound')
+      expect(rendered).toContain('**Zinozi** (`ch-0001`)')
+      expect(rendered).toContain('  - [1] The key is missing.')
+      expect(continuityRegistry(source).items).toEqual([
+        expect.objectContaining({ index: 1, subjectKey: 'ch-0001', text: 'The key is missing.' }),
+      ])
     })
   })
 
   describe('character chat, which is the character', () => {
     const source = { continuityView: view, character: { id: 'ch-0001' } }
 
-    it('gives one character their own facts and how they came by them', () => {
+    it('gives one character their own state', () => {
       const rendered = renderContinuity(source, 'character-chat.chat')!
-      expect(rendered).toContain('The key is missing. (witnessed)')
+      expect(rendered).toContain('The key is missing.')
       expect(rendered).not.toContain('The hero lied')
     })
 
     // A character handed the authorial records answers from offstage facts, which
     // is the one failure this presentation exists to prevent.
-    it('withholds the durable state, open threads, and keys that belong to the author', () => {
+    it('withholds other characters, open threads, and keys that belong to the author', () => {
       const rendered = renderContinuity(source, 'character-chat.chat')!
       expect(rendered).not.toContain('north tower')
       expect(rendered).not.toContain('Who sent the letter')
-      expect(rendered).not.toContain('key_missing')
       expect(rendered).not.toContain('ch-0001')
     })
 
@@ -1073,21 +731,13 @@ describe('renderContinuity', () => {
       await cleanup()
     })
 
-    async function passage(order: number, projection: Partial<ContinuityProjection> = {}): Promise<Fragment> {
+    async function passage(order: number, overrides: Partial<ContinuityProjection> = {}): Promise<Fragment> {
       const fragment = makeFragment({ id: `pr-000${order}`, type: 'prose', order, content: `Passage ${order}` })
       await createFragment(dataDir, story.id, fragment)
       await saveAnalysis(dataDir, story.id, {
         ...analysis(fragment.id, order),
         sourceRevision: analysisSourceRevision(fragment),
-        continuityProjection: {
-          version: 3,
-          scene: { transition: 'continue', line: 'present' },
-          stateOperations: [],
-          threadOperations: [],
-          threadFocus: [],
-          knowledgeOperations: [],
-          ...projection,
-        },
+        continuityProjection: projection(overrides),
       })
       return fragment
     }
@@ -1203,8 +853,8 @@ describe('renderContinuity', () => {
       const writer = renderContinuity({ continuityView: view }, 'generation.writer')!
       expect(writer).toContain('alone at the gate')
       expect(writer).not.toContain('red coat')
-      const scoped = renderContinuity({ continuityView: view, recentCharacters: [{ id: 'ch-0001', name: 'Alice' }] }, 'generation.writer')!
-      expect(scoped).toContain('**Alice** (`ch-0001`) — not in the current scene')
+      const scoped = renderContinuity({ continuityView: view, recentCharacters: [{ id: 'ch-0001' }] }, 'generation.writer')!
+      expect(scoped).toContain('**Alice** — not in the current scene')
       expect(scoped).toContain('- Appearance: red coat')
     })
 

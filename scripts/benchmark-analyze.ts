@@ -4,7 +4,7 @@
  * behaviour can be compared without mutating the author's data.
  *
  *   bun run benchmark:analyze -- --story=story-id --fragment=pr-id \
- *     --model="Model name" --runs=3 --label=staged
+ *     --model="Model name" --runs=3 --label=baseline
  *
  * --branch=<id> analyzes against that timeline, --thinking=on|off overrides the
  * story's reasoning setting, --max-run-ms aborts a sample that never ends (a
@@ -12,7 +12,6 @@
  * --capture=<dir> writes each raw completion stream to its own file there.
  * --rebuild-chain first re-analyzes every earlier passage in order, once, so the
  * samples run against a ledger the current code built rather than stored analyses.
- * --mode=single|staged selects the analyze experiment (ERRATA_ANALYZE_MODE).
  */
 import { createWriteStream } from 'node:fs'
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
@@ -254,8 +253,6 @@ async function captureCompletionStreams(dir: string, label: string): Promise<voi
 }
 
 const options = parseArgs(process.argv.slice(2))
-const modeArg = process.argv.find((arg) => arg.startsWith('--mode='))?.slice('--mode='.length)
-if (modeArg) process.env.ERRATA_ANALYZE_MODE = modeArg
 if (options.captureDir) await captureCompletionStreams(options.captureDir, options.label)
 const samples: Sample[] = []
 registerLibrarianAgents()

@@ -45,24 +45,12 @@ export async function listRoutableMemoryFragments(
 
 export function observationFragmentCandidates(params: {
   mentionedFragmentIds: string[]
-  candidateFragmentIds: string[]
 }): FragmentCandidate[] {
-  const out: FragmentCandidate[] = []
-  for (const fragmentId of params.mentionedFragmentIds) {
-    out.push({
-      fragmentId,
-      source: 'current-observation',
-      reason: 'The Analyze observation reported a mention.',
-    })
-  }
-  for (const fragmentId of params.candidateFragmentIds) {
-    out.push({
-      fragmentId,
-      source: 'current-observation',
-      reason: 'The online analysis requested full memory context.',
-    })
-  }
-  return out
+  return params.mentionedFragmentIds.map((fragmentId) => ({
+    fragmentId,
+    source: 'current-observation',
+    reason: 'The passage report mentioned it.',
+  }))
 }
 
 export function writerProvenanceFragmentCandidates(

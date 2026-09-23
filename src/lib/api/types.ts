@@ -76,15 +76,11 @@ export type {
   ContinuityLedger,
   ContinuityProjection,
   ContinuityView,
-  KnowledgeOperation,
   NarrativeDuration,
   NarrativeTime,
   SceneLocation,
   SceneTransitionKind,
   SceneUpdate,
-  StateOperation,
-  StateScope,
-  StateSubject,
   ThreadFocus,
   ThreadOperation,
 } from '@/contracts/continuity'
@@ -319,9 +315,9 @@ export interface BlockPreviewResponse {
     estimatedTokens: number
     enabled: boolean
   }>
-  /** Per-request tool surfaces for agents whose tool loop is staged. */
+  /** Per-request tool surfaces for agents that answer in several requests. */
   toolStages: Array<{
-    id: 'primary' | 'inspection'
+    id: 'passage' | 'maintenance'
     label: string
     description: string
     conditional: boolean

@@ -46,6 +46,7 @@ import {
   writerProvenanceFragmentCandidates,
 } from './candidates'
 import { renderContinuity, type ContinuityReader } from './continuity-view'
+import { MAINTENANCE_REPORT_TOOL, PASSAGE_REPORT_TOOL } from './analysis-tools'
 
 function continuityBlock(
   ctx: AgentBlockContext,
@@ -64,8 +65,8 @@ function continuityBlock(
 }
 
 /**
- * A full sheet whose body is sentence-numbered, so `proposeRecordCorrections`
- * can name the assertion it is replacing. Asking the model to reproduce the
+ * A full sheet whose body is sentence-numbered, so a record correction can
+ * name the assertion it is replacing. Asking the model to reproduce the
  * target text instead is what stops a correction staying local; here the target
  * is addressable, and the server resolves the exact span.
  */
@@ -84,14 +85,13 @@ export function buildAnalyzeSystemPrompt(opts?: {
   const hasTool = (toolName: string): boolean => enabledTools
     ? enabledTools.has(toolName)
     : !disabledTools.has(toolName)
-  const hasReportTool = ['reportObservation', 'reportAnalysis', 'reportContinuity', 'reportMaintenance', 'reportDirections']
-    .some(hasTool)
+  const hasReportTool = [PASSAGE_REPORT_TOOL, MAINTENANCE_REPORT_TOOL].some(hasTool)
 
   return `
 Analyze the new prose against the supplied story context and keep its durable records accurate.
 
 ${hasReportTool
-    ? `This request has one reporting task. Deliver its report exactly once, in the form the task asks for, then stop. Do not write a markdown summary or conversational response, plan a later task, or repeat work supplied in a completed-stage handoff.
+    ? `This request has one reporting task. Deliver its report exactly once, in the form the task asks for, then stop. Do not write a markdown summary or conversational response, plan a later task, or repeat work supplied in a handoff.
 
 Ground claims in the numbered prose and supplied records. Prefer omission over invention. Field meanings and bounds are defined by the report's form.`
     : 'Review the prose against the supplied context without inventing a replacement reporting tool.'}

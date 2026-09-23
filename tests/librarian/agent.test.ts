@@ -102,12 +102,44 @@ function makeFragment(
   }
 }
 
+type TestTool = {
+  execute: (args: unknown) => Promise<unknown>
+  inputSchema?: { validate?: (value: unknown) => Promise<{ success: boolean; value?: unknown; error?: unknown }> | { success: boolean; value?: unknown; error?: unknown } }
+}
+
+/** The events the SDK streams for one tool call: validated as it validates, then executed. */
+async function* toolCallEvents(
+  tools: Record<string, TestTool>,
+  toolName: string,
+  input: Record<string, unknown>,
+  toolCallId = `call-${toolName}`,
+) {
+  yield { type: 'tool-call' as const, toolCallId, toolName, input }
+  const validation = await tools[toolName].inputSchema?.validate?.(input)
+  if (validation && !validation.success) {
+    yield { type: 'tool-error' as const, toolCallId, toolName, error: validation.error }
+    return
+  }
+  yield { type: 'tool-result' as const, toolCallId, toolName, output: await tools[toolName].execute(validation?.value ?? input) }
+}
+
+const PASSAGE_KEYS = [
+  'summary', 'events', 'scene', 'mentions', 'contradictions', 'newRecordNames',
+  'present', 'characters', 'entities', 'update', 'threads', 'resolvedThreads', 'directions',
+]
+
+/** Fixture findings, keyed by what they report, merged into one passage report. */
+function passageInput(findings: Array<Record<string, unknown>>): Record<string, unknown> {
+  const merged = Object.assign({}, ...findings)
+  return Object.fromEntries(PASSAGE_KEYS.filter((key) => key in merged).map((key) => [key, merged[key]]))
+}
+
 /**
  * Creates a mock stream response that yields tool-call events.
  * The tool execute functions from the real analysis tools will run.
  */
 function mockStreamWithToolCalls(toolCalls: Array<{ toolName: string; args: Record<string, unknown> }>) {
-  mockAgentStream.mockImplementation(async (streamArgs: unknown, tools: Record<string, { execute: (args: unknown) => Promise<unknown> }>) => {
+  mockAgentStream.mockImplementation(async (streamArgs: unknown, tools: Record<string, TestTool>) => {
     return {
       fullStream: (async function* () {
         const prompt = typeof streamArgs === 'object' && streamArgs !== null
@@ -115,9 +147,8 @@ function mockStreamWithToolCalls(toolCalls: Array<{ toolName: string; args: Reco
           ? (streamArgs as { prompt: string }).prompt
           : ''
 
-        // Older fixture data describes the semantic findings rather than the
-        // isolated request that carries them. Translate it onto the exact active
-        // production report so every test exercises the staged path.
+        // Fixture data describes the semantic findings rather than the request
+        // that carries them. Translate it onto the active production report.
         if (prompt.includes('Call reportMaintenance exactly once')) {
           const correctionCalls = toolCalls.filter((call) => call.toolName === 'proposeRecordCorrections')
           const newRecordCalls = toolCalls.filter((call) => call.toolName === 'proposeNewRecords')
@@ -133,83 +164,46 @@ function mockStreamWithToolCalls(toolCalls: Array<{ toolName: string; args: Reco
               Array.isArray(call.args.newFragments) ? call.args.newFragments : []
             )),
           }
-          const id = 'call-maintenance'
-          yield { type: 'tool-call' as const, toolCallId: id, toolName: 'reportMaintenance', input }
-          const output = await tools.reportMaintenance.execute(input)
-          yield { type: 'tool-result' as const, toolCallId: id, toolName: 'reportMaintenance', output }
+          yield* toolCallEvents(tools, 'reportMaintenance', input)
           yield { type: 'finish' as const, finishReason: 'stop' }
           return
         }
 
-        const lastArgs = (names: string[]) => [...toolCalls]
-          .reverse()
-          .find((call) => names.includes(call.toolName))?.args ?? {}
-        const legacy = lastArgs(['reportObservation', 'reportAnalysis'])
-        let toolName: string
-        let input: Record<string, unknown>
-        if (prompt.includes('Call reportObservation exactly once')) {
-          toolName = 'reportObservation'
-          input = { ...legacy }
-        } else if (prompt.includes('Call reportContinuity exactly once')) {
-          const continuity = lastArgs(['reportContinuity', 'reportAnalysis'])
-          toolName = 'reportContinuity'
-          input = {
-            characters: continuity.characters ?? [],
-            entities: continuity.entities ?? [],
-            threads: continuity.threads ?? [],
-            resolvedThreads: continuity.resolvedThreads ?? [],
-          }
-        } else if (prompt.includes('Call reportDirections exactly once')) {
-          const directions = lastArgs(['reportDirections', 'reportAnalysis'])
-          toolName = 'reportDirections'
-          input = { directions: directions.directions ?? [] }
-        } else {
-          toolName = 'reportAnalysis'
-          input = legacy
-        }
-        const id = `call-${toolName}`
-        yield { type: 'tool-call' as const, toolCallId: id, toolName, input }
-        const output = await tools[toolName].execute(input)
-        yield { type: 'tool-result' as const, toolCallId: id, toolName, output }
+        if (!prompt.includes('Call reportPassage exactly once')) throw new Error(`Unexpected Analyze prompt: ${prompt}`)
+        const last = (name: string) => [...toolCalls].reverse().find((call) => call.toolName === name)?.args ?? {}
+        const input = passageInput([last('reportPassage'), last('reportContinuity'), last('reportDirections')])
+        yield* toolCallEvents(tools, 'reportPassage', input)
         yield { type: 'finish' as const, finishReason: 'stop' }
       })(),
     }
   })
 }
 
-function isolatedAnalyzeCall(
+/** The passage report a test's findings make up, for the request that asks for it. */
+function passageCall(
   prompt: string | undefined,
-  inputs: {
+  findings: {
     observation: Record<string, unknown>
     continuity?: Record<string, unknown>
     directions?: Record<string, unknown>
   },
 ): { toolName: string; input: Record<string, unknown> } {
-  if (prompt?.includes('Call reportObservation exactly once')) {
-    return { toolName: 'reportObservation', input: inputs.observation }
+  if (!prompt?.includes('Call reportPassage exactly once')) {
+    throw new Error(`Unexpected Analyze stage prompt: ${prompt ?? '(missing)'}`)
   }
-  if (prompt?.includes('Call reportContinuity exactly once')) {
-    return {
-      toolName: 'reportContinuity',
-      input: inputs.continuity ?? { characters: [], entities: [], threads: [], resolvedThreads: [] },
-    }
+  return {
+    toolName: 'reportPassage',
+    input: passageInput([findings.observation, findings.continuity ?? {}, findings.directions ?? {}]),
   }
-  if (prompt?.includes('Call reportDirections exactly once') && inputs.directions) {
-    return { toolName: 'reportDirections', input: inputs.directions }
-  }
-  throw new Error(`Unexpected Analyze stage prompt: ${prompt ?? '(missing)'}`)
 }
 
 function singleToolStream(
-  tools: Record<string, { execute: (args: unknown) => Promise<unknown> }>,
+  tools: Record<string, TestTool>,
   call: { toolName: string; input: Record<string, unknown> },
 ) {
   return {
     fullStream: (async function* () {
-      const id = `call-${call.toolName}`
-      yield { type: 'tool-call' as const, toolCallId: id, toolName: call.toolName, input: call.input }
-      const output = await tools[call.toolName].execute(call.input)
-      yield { type: 'tool-result' as const, toolCallId: id, toolName: call.toolName, output }
+      yield* toolCallEvents(tools, call.toolName, call.input)
       yield { type: 'finish' as const, finishReason: 'stop' }
     })(),
   }
@@ -313,13 +307,7 @@ describe('librarian agent', () => {
     ) => {
       expect(opts?.instructions).toContain('CUSTOM PREPEND')
       expect(opts?.instructions).toContain('Never drop custom system fragments.')
-      if (tools.proposeRecordCorrections) {
-        expect(opts?.instructions).toContain('optional record-maintenance proposals')
-        expect(opts?.instructions).not.toContain('**proposeRecordCorrections**')
-        expect(tools.proposeNewRecords.description).toContain('Allowed type values: character, knowledge, location')
-      }
-
-      return singleToolStream(tools, isolatedAnalyzeCall(args.prompt, {
+      return singleToolStream(tools, passageCall(args.prompt, {
         observation: { summary: 'They crossed a market.' },
       }))
     })
@@ -336,7 +324,7 @@ describe('librarian agent', () => {
     await setupProseChain(dataDir, storyId, ['pr-0001'])
 
     mockStreamWithToolCalls([
-      { toolName: 'reportAnalysis', args: { summary: 'The hero ventured into the dark forest.' } },
+      { toolName: 'reportPassage', args: { summary: 'The hero ventured into the dark forest.' } },
     ])
 
     const result = await runLibrarian(dataDir, storyId, 'pr-0001')
@@ -352,7 +340,7 @@ describe('librarian agent', () => {
     expect(await listFragments(dataDir, storyId, 'summary')).toHaveLength(0)
   })
 
-  it('runs observation and continuity as isolated requests with a compact handoff', async () => {
+  it('answers the passage in one request', async () => {
     await createStory(dataDir, makeStory())
     await createFragment(dataDir, storyId, makeFragment({
       id: 'ch-0001',
@@ -369,20 +357,16 @@ describe('librarian agent', () => {
     const prompts: string[] = []
     mockAgentStream.mockImplementation(async (
       args: { prompt?: string },
-      tools: Record<string, { execute: (input: Record<string, unknown>) => Promise<unknown> }>,
+      tools: Record<string, TestTool>,
       opts?: { onStepFinish?: (event: Record<string, unknown>) => Promise<void> | void },
     ) => {
       const requestIndex = prompts.length
       prompts.push(args.prompt ?? '')
       return {
         fullStream: (async function* () {
-          const toolName = requestIndex === 0 ? 'reportObservation' : 'reportContinuity'
-          const input = requestIndex === 0
-            ? { summary: 'The empty gate swung open in the wind.', mentions: [], candidateFragmentIds: [], contradictions: [] }
-            : { characters: [], entities: [], threads: [], resolvedThreads: [] }
-          const id = `stage-${requestIndex}`
-          yield { type: 'tool-call' as const, toolCallId: id, toolName, input }
-          yield { type: 'tool-result' as const, toolCallId: id, toolName, output: await tools[toolName].execute(input) }
+          const toolName = 'reportPassage'
+          const input = { summary: 'The empty gate swung open in the wind.' }
+          yield* toolCallEvents(tools, toolName, input, `stage-${requestIndex}`)
           await opts?.onStepFinish?.({
             stepNumber: 0,
             finishReason: 'tool-calls',
@@ -397,15 +381,11 @@ describe('librarian agent', () => {
     const result = await runLibrarian(dataDir, storyId, 'pr-0001')
 
     expect(result.summaryUpdate).toContain('empty gate')
-    expect(prompts).toHaveLength(2)
+    expect(prompts).toHaveLength(1)
     expect(prompts[0]).toContain('## Fragment Catalog')
-    expect(prompts[0]).toContain('Perform only the observation task')
-    expect(prompts[1]).not.toContain('## Fragment Catalog')
-    expect(prompts[1]).toContain('Perform only the continuity task')
-    expect(prompts[1]).toContain('The observation request has completed')
+    expect(prompts[0]).toContain('Perform only the passage-analysis task')
     expect(result.passes?.find((pass) => pass.name === 'analyze')?.diagnostics?.stepUsage).toEqual([
-      expect.objectContaining({ stepNumber: 0, stage: 'observation', modelId: 'test-stage-0' }),
-      expect.objectContaining({ stepNumber: 1, stage: 'continuity', modelId: 'test-stage-1' }),
+      expect.objectContaining({ stepNumber: 0, stage: 'passage', modelId: 'test-stage-0' }),
     ])
   })
 
@@ -418,7 +398,7 @@ describe('librarian agent', () => {
     await setupProseChain(dataDir, storyId, ['pr-0001'])
 
     mockStreamWithToolCalls([
-      { toolName: 'reportAnalysis', args: { summary: 'The hero ventured into the dark forest.' } },
+      { toolName: 'reportPassage', args: { summary: 'The hero ventured into the dark forest.' } },
     ])
 
     const analysis = await runLibrarian(dataDir, storyId, 'pr-0001')
@@ -444,8 +424,8 @@ describe('librarian agent', () => {
     await setupProseChain(dataDir, storyId, ['pr-0001'])
 
     mockStreamWithToolCalls([
-      { toolName: 'reportAnalysis', args: { summary: 'Alice drew her sword.' } },
-      { toolName: 'reportAnalysis', args: { summary: 'Alice drew her sword.', mentions: [{ fragmentId: 'ch-0001', text: 'Alice' }] } },
+      { toolName: 'reportPassage', args: { summary: 'Alice drew her sword.' } },
+      { toolName: 'reportPassage', args: { summary: 'Alice drew her sword.', mentions: [{ fragmentId: 'ch-0001', text: 'Alice' }] } },
     ])
 
     const analysis = await runLibrarian(dataDir, storyId, 'pr-0001')
@@ -489,7 +469,7 @@ describe('librarian agent', () => {
       tools: Record<string, { execute: (args: unknown) => Promise<unknown> }>,
     ) => {
       if (!capturedPrompt && args.prompt) capturedPrompt = args.prompt
-      return singleToolStream(tools, isolatedAnalyzeCall(args.prompt, {
+      return singleToolStream(tools, passageCall(args.prompt, {
         observation: { summary: 'Alice fought bravely.' },
       }))
     })
@@ -531,20 +511,16 @@ describe('librarian agent', () => {
       fullStream: (async function* () {
         let toolName: string
         let input: Record<string, unknown>
-        if (args.prompt?.includes('Call reportObservation exactly once')) {
-          toolName = 'reportObservation'
+        if (args.prompt?.includes('Call reportPassage exactly once')) {
+          toolName = 'reportPassage'
           input = {
             summary: 'Alice resigned from command at dawn.',
-            candidateFragmentIds: ['ch-0001'],
             contradictions: [{
               description: 'The record says Alice commands the gate; she resigned.',
               sourceSegments: [1],
               conflictingEvidence: [{ fragmentId: 'ch-0001', segments: [1] }],
             }],
           }
-        } else if (args.prompt?.includes('Call reportContinuity exactly once')) {
-          toolName = 'reportContinuity'
-          input = { characters: [], entities: [], threads: [], resolvedThreads: [] }
         } else {
           toolName = 'reportMaintenance'
           maintenancePrompt = args.prompt ?? ''
@@ -559,9 +535,7 @@ describe('librarian agent', () => {
             newRecords: [],
           }
         }
-        yield { type: 'tool-call' as const, toolCallId: toolName, toolName, input }
-        const output = await tools[toolName].execute(input)
-        yield { type: 'tool-result' as const, toolCallId: toolName, toolName, output }
+        yield* toolCallEvents(tools, toolName, input)
         yield { type: 'finish' as const, finishReason: 'stop' }
       })(),
     }))
@@ -592,8 +566,8 @@ describe('librarian agent', () => {
     await setupProseChain(dataDir, storyId, ['pr-0001'])
 
     mockStreamWithToolCalls([
-      { toolName: 'reportAnalysis', args: { summary: 'Alice confronted a dragon.' } },
-      { toolName: 'reportAnalysis', args: { summary: 'Alice confronted a dragon.', mentions: [{ fragmentId: 'ch-0001', text: 'Alice' }] } },
+      { toolName: 'reportPassage', args: { summary: 'Alice confronted a dragon.' } },
+      { toolName: 'reportPassage', args: { summary: 'Alice confronted a dragon.', mentions: [{ fragmentId: 'ch-0001', text: 'Alice' }] } },
     ])
 
     const analysis = await runLibrarian(dataDir, storyId, 'pr-0001')
@@ -619,9 +593,9 @@ describe('librarian agent', () => {
     await setupProseChain(dataDir, storyId, ['pr-0001'])
 
     mockStreamWithToolCalls([
-      { toolName: 'reportAnalysis', args: { summary: 'A forbidden book pulsed on the altar.' } },
+      { toolName: 'reportPassage', args: { summary: 'A forbidden book pulsed on the altar.' } },
       {
-        toolName: 'reportAnalysis',
+        toolName: 'reportPassage',
         args: {
           summary: 'A forbidden book pulsed on the altar.',
           mentions: [
@@ -673,8 +647,8 @@ describe('librarian agent', () => {
     await setupProseChain(dataDir, storyId, ['pr-0001'])
 
     mockStreamWithToolCalls([
-      { toolName: 'reportAnalysis', args: { summary: 'They entered an underground market.' } },
-      { toolName: 'reportAnalysis', args: { summary: 'They entered an underground market.', mentions: [{ fragmentId: 'loc-0001', text: 'Ash Market' }] } },
+      { toolName: 'reportPassage', args: { summary: 'They entered an underground market.' } },
+      { toolName: 'reportPassage', args: { summary: 'They entered an underground market.', mentions: [{ fragmentId: 'loc-0001', text: 'Ash Market' }] } },
     ])
 
     const analysis = await runLibrarian(dataDir, storyId, 'pr-0001')
@@ -688,7 +662,7 @@ describe('librarian agent', () => {
     expect(state.recentMentions['loc-0001']).toEqual(['pr-0001'])
   })
 
-  it('runs directions in an isolated Analyze request when enabled', async () => {
+  it('reports directions within the passage report when enabled', async () => {
     await createStory(dataDir, makeStory({ settings: { disableLibrarianDirections: false } }))
     await createFragment(dataDir, storyId, makeFragment({
       id: 'pr-0001',
@@ -706,7 +680,7 @@ describe('librarian agent', () => {
     mockAgentStream.mockImplementation(async (
       args: { prompt?: string },
       tools: Record<string, { execute: (args: unknown) => Promise<unknown> }>,
-    ) => singleToolStream(tools, isolatedAnalyzeCall(args.prompt, {
+    ) => singleToolStream(tools, passageCall(args.prompt, {
       observation: { summary: 'The road reached a quiet city gate.' },
       directions: { directions },
     })))
@@ -715,7 +689,7 @@ describe('librarian agent', () => {
 
     const analyzePass = analysis.passes?.find((pass) => pass.name === 'analyze')
     expect(analyzePass?.status).toBe('complete')
-    expect(analyzePass?.diagnostics?.reportToolCallCount).toBe(3)
+    expect(analyzePass?.diagnostics?.reportToolCallCount).toBe(1)
     expect(analysis.directions).toEqual(directions)
     expect(analysis.analyzeLanes?.directions).toEqual({ requirement: 'required', completion: 'complete' })
   })
@@ -726,7 +700,7 @@ describe('librarian agent', () => {
     await setupProseChain(dataDir, storyId, ['pr-0001'])
 
     mockStreamWithToolCalls([
-      { toolName: 'reportAnalysis', args: { summary: 'The hero reached the gate.' } },
+      { toolName: 'reportPassage', args: { summary: 'The hero reached the gate.' } },
     ])
 
     await expect(runLibrarian(dataDir, storyId, 'pr-0001')).rejects.toThrow(
@@ -759,9 +733,15 @@ describe('librarian agent', () => {
     expect(result.suggestions).toEqual(directions)
   })
 
-  it('saves a valid observation when a later Analyze step fails', async () => {
+  it('saves a valid passage report when record maintenance fails', async () => {
     await createStory(dataDir, makeStory())
-    await createFragment(dataDir, storyId, makeFragment({ id: 'pr-0001' }))
+    await createFragment(dataDir, storyId, makeFragment({
+      id: 'ch-0001',
+      type: 'character',
+      name: 'Alice',
+      content: 'Alice commands the north gate.',
+    }))
+    await createFragment(dataDir, storyId, makeFragment({ id: 'pr-0001', content: 'Alice resigned at dawn.' }))
     await setupProseChain(dataDir, storyId, ['pr-0001'])
 
     mockAgentStream.mockImplementation(async (
@@ -769,15 +749,13 @@ describe('librarian agent', () => {
       tools: Record<string, { execute: (args: unknown) => Promise<unknown> }>,
       opts?: { onStepFinish?: (event: Record<string, unknown>) => Promise<void> | void },
     ) => {
-      if (args.prompt?.includes('Call reportObservation exactly once')) {
-        const call = isolatedAnalyzeCall(args.prompt, {
-          observation: { summary: 'The hero reached the gate.' },
+      if (args.prompt?.includes('Call reportPassage exactly once')) {
+        const call = passageCall(args.prompt, {
+          observation: { summary: 'The hero reached the gate.', contradictions: [groundedContradiction('ch-0001')] },
         })
         return {
           fullStream: (async function* () {
-            const id = 'call-observe'
-            yield { type: 'tool-call' as const, toolCallId: id, toolName: call.toolName, input: call.input }
-            yield { type: 'tool-result' as const, toolCallId: id, toolName: call.toolName, output: await tools[call.toolName].execute(call.input) }
+            yield* toolCallEvents(tools, call.toolName, call.input)
             await opts?.onStepFinish?.({
               stepNumber: 0,
               finishReason: 'tool-calls',
@@ -803,9 +781,9 @@ describe('librarian agent', () => {
       completedStepCount: 1,
       inputTokens: 321,
       outputTokens: 123,
-       stepUsage: [{
-         stepNumber: 0,
-         stage: 'observation',
+      stepUsage: [{
+        stepNumber: 0,
+        stage: 'passage',
          finishReason: 'tool-calls',
         modelId: 'test-model',
         inputTokens: 321,
@@ -831,7 +809,7 @@ describe('librarian agent', () => {
     mockAgentStream.mockImplementation(async (
       args: { prompt?: string },
       tools: Record<string, { execute: (args: unknown) => Promise<unknown> }>,
-    ) => singleToolStream(tools, isolatedAnalyzeCall(args.prompt, {
+    ) => singleToolStream(tools, passageCall(args.prompt, {
       observation: {
         summary: 'Alice crossed the north hall.',
         mentions: [{ fragmentId: 'ch-0001', text: 'Alice' }],
@@ -862,7 +840,7 @@ describe('librarian agent', () => {
     expect((await getFragment(dataDir, storyId, 'pr-0001'))?.meta.annotations).toHaveLength(1)
   })
 
-  it('uses candidate fragments for memory context without recording mention annotations', async () => {
+  it('runs record maintenance on a grounded contradiction without recording mention annotations', async () => {
     await createStory(dataDir, makeStory())
     await createFragment(dataDir, storyId, makeFragment({
       id: 'ch-0001',
@@ -879,10 +857,9 @@ describe('librarian agent', () => {
 
     mockStreamWithToolCalls([
       {
-        toolName: 'reportAnalysis',
+        toolName: 'reportPassage',
         args: {
           summary: 'The corrected roster establishes that Alice was never captain of the guard.',
-          candidateFragmentIds: ['ch-0001'],
           contradictions: [groundedContradiction('ch-0001')],
         },
       },
@@ -903,7 +880,7 @@ describe('librarian agent', () => {
 
     const analysis = await runLibrarian(dataDir, storyId, 'pr-0001')
     expect(analysis.mentions).toEqual([])
-    expect(analysis.candidateFragmentIds).toEqual(['ch-0001'])
+    expect(analysis.candidateFragmentIds).toEqual([])
     expect(analysis.fragmentChangeProposals).toHaveLength(1)
 
     const analyzePass = analysis.passes?.find((pass) => pass.name === 'analyze')
@@ -931,7 +908,7 @@ describe('librarian agent', () => {
     }))
     await setupProseChain(dataDir, storyId, ['pr-0001'])
     mockStreamWithToolCalls([
-      { toolName: 'reportAnalysis', args: { summary: 'Alice checked the gate.' } },
+      { toolName: 'reportPassage', args: { summary: 'Alice checked the gate.' } },
     ])
 
     const controller = new AbortController()
@@ -958,7 +935,7 @@ describe('librarian agent', () => {
 
     mockStreamWithToolCalls([
       {
-        toolName: 'reportAnalysis',
+        toolName: 'reportPassage',
         args: {
           summary: 'Alice resigned.',
           candidateFragmentIds: ['ch-0001'],
@@ -1025,7 +1002,7 @@ describe('librarian agent', () => {
     mockAgentStream.mockImplementation(async (
       args: { prompt?: string },
       tools: Record<string, { execute: (args: unknown) => Promise<unknown> }>,
-    ) => singleToolStream(tools, isolatedAnalyzeCall(args.prompt, {
+    ) => singleToolStream(tools, passageCall(args.prompt, {
       observation: { summary: 'The guard captain resigned.' },
     })))
 
@@ -1061,7 +1038,7 @@ describe('librarian agent', () => {
     await setupProseChain(dataDir, storyId, ['pr-0001'])
 
     mockStreamWithToolCalls([
-      { toolName: 'reportAnalysis', args: { summary: 'An oath quieted the room.' } },
+      { toolName: 'reportPassage', args: { summary: 'An oath quieted the room.' } },
     ])
 
     const analysis = await runLibrarian(dataDir, storyId, 'pr-0001')
@@ -1069,10 +1046,7 @@ describe('librarian agent', () => {
 
     expect(analysis.candidateFragmentIds).toEqual(['kn-0001'])
     expect(analyzePass?.diagnostics?.attentionCandidateIds).toEqual(['kn-0001'])
-    expect(analyzePass?.diagnostics?.toolNames).toContain('reportAnalysis')
-    expect(analyzePass?.diagnostics?.toolNames).not.toContain('proposeRecordCorrections')
-    expect(analyzePass?.diagnostics?.toolNames).not.toContain('proposeNewRecords')
-    expect(analyzePass?.diagnostics?.toolNames).not.toContain('readFragments')
+    expect(analyzePass?.diagnostics?.toolNames).toEqual(['reportPassage'])
   })
 
   it('does not block online analysis on a synchronous router fallback', async () => {
@@ -1093,7 +1067,7 @@ describe('librarian agent', () => {
     mockAgentStream.mockImplementation(async (
       args: { prompt?: string },
       tools: Record<string, { execute: (args: unknown) => Promise<unknown> }>,
-    ) => singleToolStream(tools, isolatedAnalyzeCall(args.prompt, {
+    ) => singleToolStream(tools, passageCall(args.prompt, {
       observation: { summary: 'A masked figure abdicated.' },
     })))
 
@@ -1124,15 +1098,15 @@ describe('librarian agent', () => {
 
     // First run
     mockStreamWithToolCalls([
-      { toolName: 'reportAnalysis', args: { summary: 'Alice entered the castle.' } },
-      { toolName: 'reportAnalysis', args: { summary: 'Alice entered the castle.', mentions: [{ fragmentId: 'ch-0001', text: 'Alice' }] } },
+      { toolName: 'reportPassage', args: { summary: 'Alice entered the castle.' } },
+      { toolName: 'reportPassage', args: { summary: 'Alice entered the castle.', mentions: [{ fragmentId: 'ch-0001', text: 'Alice' }] } },
     ])
     await runLibrarian(dataDir, storyId, 'pr-0001')
 
     // Second run
     mockStreamWithToolCalls([
-      { toolName: 'reportAnalysis', args: { summary: 'Alice found the treasure room.' } },
-      { toolName: 'reportAnalysis', args: { summary: 'Alice found the treasure room.', mentions: [{ fragmentId: 'ch-0001', text: 'Alice' }] } },
+      { toolName: 'reportPassage', args: { summary: 'Alice found the treasure room.' } },
+      { toolName: 'reportPassage', args: { summary: 'Alice found the treasure room.', mentions: [{ fragmentId: 'ch-0001', text: 'Alice' }] } },
     ])
     await runLibrarian(dataDir, storyId, 'pr-0002')
 
@@ -1161,14 +1135,14 @@ describe('librarian agent', () => {
     await setupProseChain(dataDir, storyId, ['pr-0001'])
 
     mockStreamWithToolCalls([
-      { toolName: 'reportAnalysis', args: { summary: 'Alice entered the castle.' } },
-      { toolName: 'reportAnalysis', args: { summary: 'Alice entered the castle.', mentions: [{ fragmentId: 'ch-0001', text: 'Alice' }] } },
+      { toolName: 'reportPassage', args: { summary: 'Alice entered the castle.' } },
+      { toolName: 'reportPassage', args: { summary: 'Alice entered the castle.', mentions: [{ fragmentId: 'ch-0001', text: 'Alice' }] } },
     ])
     await runLibrarian(dataDir, storyId, 'pr-0001')
 
     mockStreamWithToolCalls([
-      { toolName: 'reportAnalysis', args: { summary: 'Bob entered the castle.' } },
-      { toolName: 'reportAnalysis', args: { summary: 'Bob entered the castle.', mentions: [{ fragmentId: 'ch-0002', text: 'Bob' }] } },
+      { toolName: 'reportPassage', args: { summary: 'Bob entered the castle.' } },
+      { toolName: 'reportPassage', args: { summary: 'Bob entered the castle.', mentions: [{ fragmentId: 'ch-0002', text: 'Bob' }] } },
     ])
     await runLibrarian(dataDir, storyId, 'pr-0001')
 
@@ -1177,7 +1151,7 @@ describe('librarian agent', () => {
     expect(state.recentMentions['ch-0002']).toEqual(['pr-0001'])
 
     mockStreamWithToolCalls([
-      { toolName: 'reportAnalysis', args: { summary: 'The castle was empty.' } },
+      { toolName: 'reportPassage', args: { summary: 'The castle was empty.' } },
     ])
     await runLibrarian(dataDir, storyId, 'pr-0001')
 
@@ -1201,9 +1175,9 @@ describe('librarian agent', () => {
     await setupProseChain(dataDir, storyId, ['pr-0001'])
 
     mockStreamWithToolCalls([
-      { toolName: 'reportAnalysis', args: { summary: 'Alice stared at the stranger.' } },
+      { toolName: 'reportPassage', args: { summary: 'Alice stared at the stranger.' } },
       {
-        toolName: 'reportAnalysis',
+        toolName: 'reportPassage',
         args: {
           summary: 'Alice stared at the stranger.',
           contradictions: [{
@@ -1231,7 +1205,7 @@ describe('librarian agent', () => {
 
     mockStreamWithToolCalls([
       {
-        toolName: 'reportAnalysis',
+        toolName: 'reportPassage',
         args: {
           summary: 'An ancient city called Valdris was revealed.',
           newRecordNames: ['Valdris'],
@@ -1279,7 +1253,7 @@ describe('librarian agent', () => {
 
     mockStreamWithToolCalls([
       {
-        toolName: 'reportAnalysis',
+        toolName: 'reportPassage',
         args: {
           summary: 'Valdris appears in old records.',
           newRecordNames: ['Valdris'],
@@ -1310,7 +1284,7 @@ describe('librarian agent', () => {
 
     mockStreamWithToolCalls([
       {
-        toolName: 'reportAnalysis',
+        toolName: 'reportPassage',
         args: {
           summary: 'A recovered charter corrects the old account of Valdris.',
           candidateFragmentIds: [createdId!],
@@ -1366,7 +1340,7 @@ describe('librarian agent', () => {
 
     mockStreamWithToolCalls([
       {
-        toolName: 'reportAnalysis',
+        toolName: 'reportPassage',
         args: {
           summary: 'The archive corrects the old classification of Valdris.',
           candidateFragmentIds: ['kn-0001'],
@@ -1419,7 +1393,7 @@ describe('librarian agent', () => {
 
     mockStreamWithToolCalls([
       {
-        toolName: 'reportAnalysis',
+        toolName: 'reportPassage',
         args: {
           summary: 'The personnel ledger corrects Alice\'s guard record.',
           candidateFragmentIds: ['ch-0001'],
@@ -1478,7 +1452,7 @@ describe('librarian agent', () => {
 
     mockStreamWithToolCalls([
       {
-        toolName: 'reportAnalysis',
+        toolName: 'reportPassage',
         args: {
           summary: 'Marcus Thorne began shaking.',
           mentions: [
@@ -1535,7 +1509,7 @@ describe('librarian agent', () => {
 
     mockStreamWithToolCalls([
       {
-        toolName: 'reportAnalysis',
+        toolName: 'reportPassage',
         args: {
           summary: 'The personnel ledger corrects Alice\'s guard record.',
           candidateFragmentIds: ['ch-0001'],
@@ -1594,7 +1568,7 @@ describe('librarian agent', () => {
 
     mockStreamWithToolCalls([
       {
-        toolName: 'reportAnalysis',
+        toolName: 'reportPassage',
         args: {
           summary: 'The personnel ledger corrects Alice\'s guard record.',
           candidateFragmentIds: ['ch-0001'],
@@ -1666,7 +1640,7 @@ describe('librarian agent', () => {
     // replacements to the same source span.
     mockStreamWithToolCalls([
       {
-        toolName: 'reportAnalysis',
+        toolName: 'reportPassage',
         args: {
           summary: 'The personnel ledger corrects Alice\'s guard record.',
           candidateFragmentIds: ['ch-0001'],
@@ -1729,7 +1703,7 @@ describe('librarian agent', () => {
 
     mockStreamWithToolCalls([
       {
-        toolName: 'reportAnalysis',
+        toolName: 'reportPassage',
         args: {
           summary: 'Alice left the gate and took command.',
           candidateFragmentIds: ['ch-0001'],
@@ -1757,9 +1731,9 @@ describe('librarian agent', () => {
     await setupProseChain(dataDir, storyId, ['pr-0001'])
 
     mockStreamWithToolCalls([
-      { toolName: 'reportAnalysis', args: { summary: 'The hero defeated the dragon and the village celebrated.' } },
+      { toolName: 'reportPassage', args: { summary: 'The hero defeated the dragon and the village celebrated.' } },
       {
-        toolName: 'reportAnalysis',
+        toolName: 'reportPassage',
         args: {
           summary: 'The hero defeated the dragon and the village celebrated.',
           events: ['Hero defeated the dragon', 'Village celebration'],
@@ -1787,11 +1761,11 @@ describe('librarian agent', () => {
     await createFragment(dataDir, storyId, makeFragment({ id: 'pr-0002', content: 'Bob arrives.' }))
     await setupProseChain(dataDir, storyId, ['pr-0001', 'pr-0002'])
 
-    mockStreamWithToolCalls([{ toolName: 'reportAnalysis', args: { summary: 'S', events: ['Alice waits'] } }])
+    mockStreamWithToolCalls([{ toolName: 'reportPassage', args: { summary: 'S', events: ['Alice waits'] } }])
     await runLibrarian(dataDir, storyId, 'pr-0001')
-    mockStreamWithToolCalls([{ toolName: 'reportAnalysis', args: { summary: 'S', events: ['Bob arrives'] } }])
+    mockStreamWithToolCalls([{ toolName: 'reportPassage', args: { summary: 'S', events: ['Bob arrives'] } }])
     await runLibrarian(dataDir, storyId, 'pr-0002')
-    mockStreamWithToolCalls([{ toolName: 'reportAnalysis', args: { summary: 'S', events: ['Alice waits at the gate'] } }])
+    mockStreamWithToolCalls([{ toolName: 'reportPassage', args: { summary: 'S', events: ['Alice waits at the gate'] } }])
     await runLibrarian(dataDir, storyId, 'pr-0001')
 
     const state = await getState(dataDir, storyId)
@@ -1807,7 +1781,7 @@ describe('librarian agent', () => {
     await setupProseChain(dataDir, storyId, ['pr-0001'])
 
     mockStreamWithToolCalls([
-      { toolName: 'reportAnalysis', args: { summary: 'Something happened.' } },
+      { toolName: 'reportPassage', args: { summary: 'Something happened.' } },
     ])
 
     const analysis = await runLibrarian(dataDir, storyId, 'pr-0001')
@@ -1857,7 +1831,7 @@ describe('librarian agent', () => {
     )
   })
 
-  it('rejects free text that does not complete the required observation lane', async () => {
+  it('rejects free text that does not complete the passage report', async () => {
     await createStory(dataDir, makeStory())
     await createFragment(dataDir, storyId, makeFragment({ id: 'pr-0001' }))
     await setupProseChain(dataDir, storyId, ['pr-0001'])
@@ -1873,19 +1847,19 @@ describe('librarian agent', () => {
     })
 
     await expect(runLibrarian(dataDir, storyId, 'pr-0001')).rejects.toThrow(
-      'without completing the required observation lane',
+      'without completing the passage report',
     )
     expect(await listAnalyses(dataDir, storyId)).toHaveLength(0)
   })
 
-  it('requires reportAnalysis to provide its own summary', async () => {
+  it('requires the passage report to provide its own summary', async () => {
     await createStory(dataDir, makeStory())
     await createFragment(dataDir, storyId, makeFragment({ id: 'pr-0001' }))
     await setupProseChain(dataDir, storyId, ['pr-0001'])
 
     mockStreamWithToolCalls([
       {
-        toolName: 'reportAnalysis',
+        toolName: 'reportPassage',
         args: {
           summary: ' ',
           events: ['Alice entered the vault'],
@@ -1894,7 +1868,7 @@ describe('librarian agent', () => {
     ])
 
     await expect(runLibrarian(dataDir, storyId, 'pr-0001')).rejects.toThrow(
-      'without completing the required observation lane',
+      'without completing the passage report',
     )
     expect(await listAnalyses(dataDir, storyId)).toHaveLength(0)
   })
@@ -1905,7 +1879,7 @@ describe('librarian agent', () => {
     await setupProseChain(dataDir, storyId, ['pr-0001'])
 
     mockStreamWithToolCalls([
-      { toolName: 'reportAnalysis', args: { summary: 'Prompt check.' } },
+      { toolName: 'reportPassage', args: { summary: 'Prompt check.' } },
     ])
 
     await runLibrarian(dataDir, storyId, 'pr-0001')
@@ -1921,7 +1895,7 @@ describe('librarian agent', () => {
     await setupProseChain(dataDir, storyId, ['pr-0001', 'pr-0002'])
 
     mockStreamWithToolCalls([
-      { toolName: 'reportAnalysis', args: { summary: 'Backfilled passage.' } },
+      { toolName: 'reportPassage', args: { summary: 'Backfilled passage.' } },
     ])
 
     const job = await createBackfillJob(dataDir, storyId, {

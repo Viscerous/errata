@@ -132,12 +132,10 @@ export class LiveStateFold {
   }
 
   /**
-   * A passage's reports double as its roster: reported subjects are present and
-   * everyone else is not, which also ends their moment. A passage without
-   * reports says nothing about presence.
+   * A passage's reports double as its roster: subjects reported present are in
+   * the scene and everyone else is not, which also ends their moment.
    */
-  applyReports(reports: LiveStateReport[] | undefined, source: LiveStateSource): void {
-    if (!reports) return
+  applyReports(reports: LiveStateReport[], source: LiveStateSource): void {
     const reported = new Set(reports.filter((report) => report.present).map((report) => subjectMapKey(report.kind, report.key)))
     for (const [key, subject] of this.frame.subjects) {
       if (reported.has(key)) continue

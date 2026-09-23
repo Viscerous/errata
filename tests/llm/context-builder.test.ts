@@ -702,31 +702,24 @@ describe('context-builder', () => {
       summaryUpdate: '',
       mentions: [], contradictions: [], fragmentChangeProposals: [], timelineEvents: [],
       continuityProjection: {
-        version: 3,
+        version: 4,
         scene: { transition: 'continue', line: 'present' },
-        stateOperations: Array.from({ length: 30 }, (_, index) => ({
-          stateKey: `condition_${index}`,
-          action: 'set' as const,
-          subject: { key: `condition_subject_${index}`, label: `Condition ${index}` },
-          facet: 'status',
-          certainty: 'explicit',
-          scope: 'cross-scene',
-          value: `Value ${index}`,
-          evidenceSegments: [1],
-          evidenceText: 'Passage 1',
+        threadOperations: Array.from({ length: 30 }, (_, index) => ({
+          threadKey: `question_${index}`,
+          action: 'open' as const,
+          label: `Question ${index}`,
         })),
-        threadOperations: [],
         threadFocus: [],
-        knowledgeOperations: [],
+        liveStates: [],
       },
     })
 
     const state = await buildContextState(dataDir, story.id, 'Continue')
 
-    expect(state.continuityLedger?.currentState).toHaveLength(30)
-    expect(state.continuityView?.currentState).toHaveLength(24)
-    expect(state.continuityLedger?.currentState[0].stateKey).toBe('condition_0')
-    expect(state.continuityView?.currentState[0].stateKey).toBe('condition_6')
+    expect(state.continuityLedger?.liveThreads).toHaveLength(30)
+    expect(state.continuityView?.liveThreads).toHaveLength(24)
+    expect(state.continuityLedger?.liveThreads[0].threadKey).toBe('question_0')
+    expect(state.continuityView?.liveThreads[0].threadKey).toBe('question_6')
   })
 
   it('excludes unscoped authored summaries from target-relative context', async () => {

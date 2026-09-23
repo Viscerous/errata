@@ -138,18 +138,13 @@ describe('compileAgentContext', () => {
 
   it('builds default prompt from the same disabled tools config', async () => {
     const tools = {
-      reportAnalysis: tool({
-        description: 'Report analysis',
+      reportPassage: tool({
+        description: 'Report the passage',
         inputSchema: z.object({}),
         execute: async () => ({ ok: true }),
       }),
-      proposeRecordCorrections: tool({
-        description: 'Propose record corrections',
-        inputSchema: z.object({}),
-        execute: async () => ({ ok: true }),
-      }),
-      proposeNewRecords: tool({
-        description: 'Propose new records',
+      reportMaintenance: tool({
+        description: 'Report record maintenance',
         inputSchema: z.object({}),
         execute: async () => ({ ok: true }),
       }),
@@ -158,13 +153,13 @@ describe('compileAgentContext', () => {
       customBlocks: [],
       overrides: {},
       blockOrder: [],
-      disabledTools: ['proposeRecordCorrections', 'proposeNewRecords'],
+      disabledTools: ['reportMaintenance'],
     })
 
     const result = await compileAgentContext(dataDir, STORY_ID, 'librarian.analyze', makeContext(), tools)
     const instructions = result.blocks.find((block) => block.id === 'instructions')!
 
-    expect(Object.keys(result.tools)).toEqual(['reportAnalysis'])
+    expect(Object.keys(result.tools)).toEqual(['reportPassage'])
     expect(instructions.content).toContain('This request has one reporting task.')
     expect(instructions.content).toContain('Deliver its report exactly once, in the form the task asks for, then stop.')
     expect(instructions.content).not.toContain('record-maintenance')

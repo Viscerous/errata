@@ -1,7 +1,9 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import {
-  makeCharacterKnowledge,
   makeContinuityView,
+  makeLiveState,
+  makeLiveStateField,
+  makeLiveStateItem,
   makeLiveThread,
   makeTestSettings,
 } from '../setup'
@@ -160,37 +162,18 @@ describe('Librarian Analyze Blocks', () => {
     expect(catalog!.content).toContain('Hero')
   })
 
-  it('gives analyze the keyed continuity registry including dormant threads', () => {
+  it('gives analyze the keyed continuity including dormant threads', () => {
     const def = agentBlockRegistry.get('librarian.analyze')!
     const blocks = def.createDefaultBlocks(makeBaseContext({
-      continuityView: {
-        currentState: [{
-          sourceFragmentId: 'pr-0001',
-          analysisId: 'la-1',
-          narrativePosition: 1,
-          stateKey: 'alice.location',
-          subject: { key: 'alice', label: 'Alice' },
-          facet: 'location',
-          certainty: 'explicit',
-          value: 'north gate',
-          scope: 'cross-scene',
-        }],
-        liveThreads: [{
-          sourceFragmentId: 'pr-0001',
-          analysisId: 'la-1',
-          narrativePosition: 1,
-          threadKey: 'missing-key',
-          label: 'The missing key',
-          relatedFragmentIds: [],
-          visibility: 'dormant',
-        }],
-        characterKnowledge: [],
-        staleProjectionCount: 0,
-      },
+      continuityView: makeContinuityView({
+        liveStates: [makeLiveState({ present: true, fields: [makeLiveStateField('Where', 'north gate')] })],
+        liveThreads: [makeLiveThread({ threadKey: 'missing-key', label: 'The missing key', visibility: 'dormant' })],
+      }),
     }))
 
     const memory = blocks.find((block) => block.id === 'continuity-memory')
-    expect(memory?.content).toContain('Alice — location: north gate')
+    expect(memory?.content).toContain('**Alice** (`ch-0001`)')
+    expect(memory?.content).toContain('- Where: north gate')
     expect(memory?.content).toContain('[dormant] [missing-key] The missing key')
   })
 
@@ -499,20 +482,21 @@ describe('Librarian Refine Blocks', () => {
     expect(prose!.content).not.toMatch(/\n{3,}/)
   })
 
-  it('includes folded continuity and scopes character knowledge to its target', () => {
+  it('includes folded continuity and scopes characters elsewhere to its target', () => {
     const target = makeFragment({ id: 'ch-target', type: 'character', name: 'Mara' })
     const blocks = agentBlockRegistry.get('librarian.refine')!.createDefaultBlocks(makeBaseContext({
       targetFragment: target,
       continuityView: makeContinuityView({
-        characterKnowledge: [makeCharacterKnowledge({
-          characterId: target.id,
-          fact: 'Mara knows the gate is watched.',
+        liveStates: [makeLiveState({
+          fragmentId: target.id,
+          name: 'Mara',
+          items: [makeLiveStateItem('Knows', 'The gate is watched.')],
         })],
       }),
     }))
     const continuity = blocks.find((block) => block.id === 'continuity-observations')!
-    expect(continuity.content).toContain('Mara knows or believes:')
-    expect(continuity.content).toContain('Mara knows the gate is watched.')
+    expect(continuity.content).toContain('**Mara** — not in the current scene')
+    expect(continuity.content).toContain('The gate is watched.')
     expect(continuity.content).toContain('Respect it as evidence while editing')
   })
 
@@ -550,19 +534,8 @@ describe('Librarian Refine Blocks', () => {
 // that decides what a passage does must render it rather than silently drop it.
 describe('Continuity reaches the agents that decide what happens next', () => {
   const viewFixture = makeContinuityView({
-    currentState: [{
-      sourceFragmentId: 'pr-0001',
-      analysisId: 'la-1',
-      narrativePosition: 1,
-      stateKey: 'alice_location',
-      subject: { key: 'alice', label: 'Alice' },
-      facet: 'location',
-      certainty: 'explicit',
-      value: 'north gate',
-      scope: 'cross-scene',
-    }],
+    liveStates: [makeLiveState({ present: true, fields: [makeLiveStateField('Where', 'north gate')] })],
     liveThreads: [],
-    characterKnowledge: [],
   })
 
   it('renders a continuity block for the writer, the planner, and directions', () => {
@@ -571,7 +544,7 @@ describe('Continuity reaches the agents that decide what happens next', () => {
       const blocks = def.createDefaultBlocks(makeBaseContext({ continuityView: viewFixture }))
       const block = blocks.find((b) => b.id === 'continuity-observations')
       expect(block, `${agentName} should render continuity`).toBeDefined()
-      expect(block!.content).toContain('Alice — location: north gate')
+      expect(block!.content).toContain('- Where: north gate')
     }
   })
 
@@ -586,9 +559,10 @@ describe('Continuity reaches the agents that decide what happens next', () => {
   it('presents character names rather than internal IDs to every authorial generator', () => {
     const zinozi = makeFragment({ id: 'ch-zinozi', type: 'character', name: 'Zinozi' })
     const continuityView = makeContinuityView({
-      characterKnowledge: [makeCharacterKnowledge({
-        characterId: zinozi.id,
-        fact: 'Zinozi knows the bell was moved.',
+      liveStates: [makeLiveState({
+        fragmentId: zinozi.id,
+        name: 'Zinozi',
+        items: [makeLiveStateItem('Knows', 'The bell was moved.')],
       })],
     })
 
@@ -596,8 +570,9 @@ describe('Continuity reaches the agents that decide what happens next', () => {
       const continuity = agentBlockRegistry.get(agentName)!
         .createDefaultBlocks(makeBaseContext({ continuityView, stickyCharacters: [zinozi] }))
         .find((block) => block.id === 'continuity-observations')!
-      expect(continuity.content, agentName).toContain('Zinozi knows or believes:')
-      expect(continuity.content, agentName).not.toContain('ch-zinozi knows or believes:')
+      expect(continuity.content, agentName).toContain('**Zinozi**')
+      expect(continuity.content, agentName).toContain('The bell was moved.')
+      expect(continuity.content, agentName).not.toContain('ch-zinozi')
     }
   })
 })
@@ -608,20 +583,20 @@ describe('Librarian Analyze Prompt', () => {
     expect(prompt).toContain('Analyze the new prose against the supplied story context')
     expect(prompt).toContain('one reporting task')
     expect(prompt).toContain('Deliver its report exactly once')
-    expect(prompt).not.toContain('reportAnalysis')
-    expect(prompt).not.toContain('reportDirections')
+    expect(prompt).not.toContain('reportPassage')
+    expect(prompt).not.toContain('reportMaintenance')
   })
 
   it('keeps unavailable stages out of the invariant prompt', () => {
     const noOptionalTools = buildAnalyzeSystemPrompt({
-      disabledTools: ['reportMaintenance', 'reportDirections'],
+      disabledTools: ['reportMaintenance'],
     })
     expect(noOptionalTools).toContain('one reporting task')
     expect(noOptionalTools).not.toContain('reportMaintenance')
 
     const noReport = buildAnalyzeSystemPrompt({ enabledTools: [] })
     expect(noReport).toContain('without inventing a replacement reporting tool')
-    expect(noReport).not.toContain('reportAnalysis')
+    expect(noReport).not.toContain('reportPassage')
     expect(noReport).not.toContain('next directions')
   })
 
@@ -696,15 +671,16 @@ describe('Librarian Optimize Character Blocks', () => {
     const blocks = agentBlockRegistry.get('librarian.optimize-character')!.createDefaultBlocks(makeBaseContext({
       targetFragment: target,
       continuityView: makeContinuityView({
-        characterKnowledge: [makeCharacterKnowledge({
-          characterId: target.id,
-          fact: 'Mara knows the gate is watched.',
+        liveStates: [makeLiveState({
+          fragmentId: target.id,
+          name: 'Mara',
+          items: [makeLiveStateItem('Knows', 'The gate is watched.')],
         })],
       }),
     }))
     const continuity = blocks.find((block) => block.id === 'continuity-observations')!
-    expect(continuity.content).toContain('Mara knows or believes:')
-    expect(continuity.content).toContain('Mara knows the gate is watched.')
+    expect(continuity.content).toContain('**Mara** — not in the current scene')
+    expect(continuity.content).toContain('The gate is watched.')
     expect(continuity.content).toContain('Respect it as evidence while editing')
   })
 })
@@ -842,8 +818,7 @@ describe('Directions Blocks', () => {
   // raised and let go is its richest source of a next move.
   it('offers dormant threads as candidates where the writer is not shown them', () => {
     const dormantView = makeContinuityView({
-      currentState: [],
-      characterKnowledge: [],
+      liveStates: [],
       liveThreads: [makeLiveThread({
         threadKey: 'who_sent_the_letter',
         label: 'Who sent the letter',
@@ -1062,18 +1037,10 @@ describe('Character Chat Blocks', () => {
   describe('awareness boundary', () => {
     const hero = makeFragment({ id: 'ch-hero01', type: 'character', name: 'Hero', content: 'A brave hero.' })
     const knowledgeView = makeContinuityView({
-      characterKnowledge: [
-        makeCharacterKnowledge({
-          characterId: 'ch-hero01',
-          knowledgeKey: 'key_missing',
-          fact: 'The key is missing.',
-        }),
-        makeCharacterKnowledge({
-          characterId: 'ch-other1',
-          knowledgeKey: 'hero_lied',
-          fact: 'The hero lied about the key.',
-          acquisition: 'told',
-        }),
+      liveStates: [
+        makeLiveState({ key: 'villain', fragmentId: undefined, name: 'Villain', present: true, fields: [makeLiveStateField('Where', 'the north tower')] }),
+        makeLiveState({ fragmentId: 'ch-hero01', name: 'Hero', items: [makeLiveStateItem('Knows', 'The key is missing.')] }),
+        makeLiveState({ fragmentId: 'ch-other1', name: 'Other', items: [makeLiveStateItem('Knows', 'The hero lied about the key.')] }),
       ],
     })
 
@@ -1082,11 +1049,11 @@ describe('Character Chat Blocks', () => {
         .createDefaultBlocks(makeBaseContext({ character: hero, continuityView: knowledgeView }))
       const awareness = blocks.find(b => b.id === 'character-awareness')!
       expect(awareness).toBeDefined()
-      expect(awareness.content).toContain('The key is missing. (witnessed)')
+      expect(awareness.content).toContain('The key is missing.')
       // Another character's knowledge is not this one's.
       expect(awareness.content).not.toContain('The hero lied')
-      // Durable state and open threads are authorial records; a character given
-      // them starts acting on offstage facts.
+      // Other characters' state and open threads are authorial records; a
+      // character given them starts acting on offstage facts.
       expect(awareness.content).not.toContain('north tower')
       expect(awareness.content).not.toContain('Who sent the letter')
       // The boundary has to be stated, not implied by omission.

@@ -66,15 +66,14 @@ An analysis can contain:
 - narrative position and temporal frame;
 - exact fragment mentions;
 - a retrospective level-0 summary contribution;
-- keyed durable-state operations;
-- thread lifecycle operations;
-- explicit character-knowledge changes;
+- live-state reports for the characters and entities the passage involves;
+- the thread snapshot and what the passage resolved;
 - contradictions and record-maintenance proposals.
 
-The observation lane is required. Record maintenance is conditional. Automatic
+The passage report is required. Record maintenance is conditional. Automatic
 directions are required only when enabled and are entirely absent when disabled;
-manual direction requests remain independent. A valid observation is durable
-even if a later required lane fails.
+manual direction requests remain independent. A valid passage report is durable
+even if record maintenance or its directions do not complete.
 
 Legacy free-text observation fields can remain visible on stored analyses, but
 they do not become a second Writer-facing memory authority.
@@ -82,8 +81,8 @@ they do not become a second Writer-facing memory authority.
 ## Continuity fold
 
 The continuity view is a deterministic fold over source-current projections on
-the active branch. It contains current durable state, relevant unresolved
-continuity, explicit character knowledge, and the active temporal frame.
+the active branch. It contains each subject's live state, relevant unresolved
+continuity, and the active temporal frame.
 
 The fold is a cache, not canon. It never incorporates pending suggestions,
 contradictions, or speculative directions. Recent raw prose is not repeated as
@@ -179,9 +178,9 @@ character knowledge, or canon.
 ## Contract principles
 
 - Ask models to identify server-owned material rather than reproduce it. Use
-  segment references and registry choices where possible.
+  segment references and the numbers shown beside items where possible.
 - Keep stable keys structural. Free-form near-synonyms must not silently fork
-  current state or knowledge identity.
+  a thread or a live-state item.
 - Scope record corrections to the assertion being corrected. Structural shape
   limits complement size limits.
 - Interpret tool outcomes from their payload. A returned refusal is not a
@@ -199,7 +198,8 @@ character knowledge, or canon.
   the exact term used in prose.
 - First-use retrieval can still expose only a catalog row when a concept depends
   on an unpromoted companion record.
-- State, thread, and knowledge classification remains model-semantic work.
+- Which field a statement belongs to, and whether a thread is new, remains
+  model-semantic work.
 - Continuity and summary budgeting reduce context growth but cannot guarantee
   that every relevant authored record was retrieved.
 

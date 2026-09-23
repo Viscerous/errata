@@ -10,7 +10,7 @@ import { createActivitySSE } from '../agents/activity-stream'
 import { encodeStream } from './encode-stream'
 import { compileBlocks, expandMessagesFragmentTags } from '../llm/context-builder'
 import { describeToolSurface } from '../llm/tool-surface'
-import { describeAnalyzeToolStages } from '../librarian/analyze-stages'
+import { buildAnalyzeStagePlan } from '../librarian/analyze-stages'
 import { getModel } from '../llm/client'
 import { getProvider } from '../config/storage'
 import { advertisedModelContextWindow } from '../config/model-capabilities'
@@ -272,14 +272,15 @@ export function agentBlockRoutes(dataDir: string) {
         tools.filter((tool) => tool.enabled).map((tool) => [tool.name, tool]),
       )
       const toolStages = params.agentName === 'librarian.analyze'
-        ? describeAnalyzeToolStages([...enabledToolSurfaces.keys()]).map((stage) => {
-            const stageToolCharacters = stage.toolNames.reduce(
-              (sum, name) => sum + (enabledToolSurfaces.get(name)?.characters ?? 0),
-              0,
-            )
+        ? buildAnalyzeStagePlan([...enabledToolSurfaces.keys()]).map((stage) => {
+            const stageToolCharacters = enabledToolSurfaces.get(stage.toolName)?.characters ?? 0
             const stageCharacters = messageCharacters + stageToolCharacters
             return {
-              ...stage,
+              id: stage.id,
+              label: stage.label,
+              description: stage.description,
+              conditional: stage.conditional,
+              toolNames: [stage.toolName],
               toolCharacters: stageToolCharacters,
               estimatedCharacters: stageCharacters,
               estimatedTokens: Math.ceil(stageCharacters / 4),

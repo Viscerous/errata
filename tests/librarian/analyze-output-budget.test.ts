@@ -1,25 +1,18 @@
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod/v4'
-import {
-  reportContinuityInputSchema,
-  reportDirectionsInputSchema,
-  reportMaintenanceInputSchema,
-  reportObservationInputSchema,
-} from '@/server/librarian/analysis-tools'
+import { reportMaintenanceInputSchema, reportPassageInputSchema } from '@/server/librarian/analysis-tools'
 import { maxSerializedChars, toolCallOutputCap } from '@/server/llm/output-budget'
 import { DEFAULT_REASONING_ALLOWANCE } from '@/contracts/providers'
 
-// Each budget is roughly an order of magnitude above a typical call, so a
+// Each budget is roughly an order of magnitude above a typical report, so a
 // legitimate dense passage fits while a runaway report stays bounded.
-const STAGE_BUDGETS = [
-  ['reportObservation', reportObservationInputSchema, 14_000],
-  ['reportContinuity', reportContinuityInputSchema, 30_000],
+const REPORT_BUDGETS = [
+  ['reportPassage', reportPassageInputSchema, 44_000],
   ['reportMaintenance', reportMaintenanceInputSchema, 20_000],
-  ['reportDirections', reportDirectionsInputSchema, 4_000],
 ] as const
 
-describe('analyze stage output budgets', () => {
-  it.each(STAGE_BUDGETS)('%s admits at most its budget of serialized output', (_name, schema, budget) => {
+describe('analyze report output budgets', () => {
+  it.each(REPORT_BUDGETS)('%s admits at most its budget of serialized output', (_name, schema, budget) => {
     expect(maxSerializedChars(z.toJSONSchema(schema))).toBeLessThanOrEqual(budget)
   })
 })

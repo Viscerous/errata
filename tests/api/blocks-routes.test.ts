@@ -62,18 +62,16 @@ describe('Context previews preserve agent access boundaries', () => {
     expect(preview.tools).toEqual([])
   })
 
-  it('shows the real staged Librarian Analyze tool surfaces', async () => {
+  it('shows the real Librarian Analyze request surfaces', async () => {
     const storyId = await createStory()
     const preview = await (await api(`/stories/${storyId}/agent-blocks/librarian.analyze/preview`)).json()
 
-    expect(preview.toolStages.map((stage: { id: string }) => stage.id))
-      .toEqual(['observation', 'continuity', 'directions'])
-    const observation = preview.toolStages.find((stage: { id: string }) => stage.id === 'observation')
-    const continuity = preview.toolStages.find((stage: { id: string }) => stage.id === 'continuity')
-    const directions = preview.toolStages.find((stage: { id: string }) => stage.id === 'directions')
-    expect(observation.toolNames).toContain('reportObservation')
-    expect(continuity.toolNames).toContain('reportContinuity')
-    expect(directions.toolNames).toContain('reportDirections')
+    expect(preview.toolStages.map((stage: { id: string; toolNames: string[]; conditional: boolean }) => (
+      [stage.id, stage.toolNames, stage.conditional]
+    ))).toEqual([
+      ['passage', ['reportPassage'], false],
+      ['maintenance', ['reportMaintenance'], true],
+    ])
   })
 
   it('shows the exact read-only Story Setup tool surface', async () => {

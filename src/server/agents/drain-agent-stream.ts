@@ -49,7 +49,7 @@ function readableStreamError(value: unknown, fallback = 'Agent stream failed'): 
   if (compact.length <= 500) return compact
   // Tool input validation errors echo the whole rejected payload and only then
   // say what was wrong with it, so keeping the head alone reliably discards the
-  // diagnosis: a rejected reportAnalysis reads as a truncated copy of its own
+  // diagnosis: a rejected report reads as a truncated copy of its own
   // arguments. Keep both ends and elide the middle instead.
   return `${compact.slice(0, 240)} ...[elided]... ${compact.slice(-240)}`
 }

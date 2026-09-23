@@ -148,14 +148,14 @@ describe('activity-stream', () => {
         { type: 'reasoning', text: 'Let' },
         { type: 'reasoning', text: ' me' },
         { type: 'reasoning', text: ' think' },
-        { type: 'tool-call', id: 'c1', toolName: 'reportAnalysis', args: {} },
+        { type: 'tool-call', id: 'c1', toolName: 'reportPassage', args: {} },
         { type: 'text', text: 'Done' },
         { type: 'text', text: '.' },
       ] as ActivityStreamEvent[]) appendToStoredTrace(trace, event)
 
       expect(trace).toEqual([
         { type: 'reasoning', text: 'Let me think' },
-        { type: 'tool-call', id: 'c1', toolName: 'reportAnalysis', args: {} },
+        { type: 'tool-call', id: 'c1', toolName: 'reportPassage', args: {} },
         { type: 'text', text: 'Done.' },
       ])
     })

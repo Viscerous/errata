@@ -16,12 +16,13 @@ import type { ContextSelectionSource, FragmentSignal } from '../llm/context-sele
 import { buildAnalyzeContext } from './blocks'
 import { continuityRegistry } from './continuity-view'
 import {
+  MAINTENANCE_REPORT_TOOL,
+  createAnalysisTools,
   createEmptyCollector,
-  createLibrarianOnlineTools,
+  needsRecordMaintenance,
   type AnalysisCollector,
 } from './analysis-tools'
-import { buildAnalyzeStagePlan, buildSinglePassPlan, type AnalyzeStageId } from './analyze-stages'
-import { PASSAGE_REPORT_TOOL, createPassageReportTool } from './passage-report'
+import { buildAnalyzeStagePlan, type AnalyzeStageId } from './analyze-stages'
 import {
   type FragmentCandidate,
   fragmentCandidateIds,
@@ -193,16 +194,14 @@ async function withAnalyzeStagePrompt(
   handoff?: string,
   relevantFragmentIds: ReadonlySet<string> = new Set(),
 ): Promise<RunCompiledPassArgs['compiled']> {
-  const compactBuiltinIds = new Set(['story-summary', 'continuity-memory', 'prose-new'])
+  const compactBuiltinIds = new Set(['story-summary', 'prose-new'])
   const blocks = compiled.blocks.filter((block) => {
+    if (stage === 'passage' || block.role === 'system' || block.source !== 'builtin') return true
     // Maintenance edits authored records; live state is not something it may
-    // change, and showing it invites writing scene beats into canon.
-    if (stage === 'maintenance' && block.id === 'continuity-memory') return false
-    if (stage === 'observation' || stage === 'passage' || block.role === 'system' || block.source !== 'builtin') return true
+    // change, and showing it invites writing scene beats into canon. Of the
+    // records, it sees the ones the passage report cited.
     if (compactBuiltinIds.has(block.id)) return true
-    const ids = block.fragmentContext?.fragmentIds ?? []
-    return (stage === 'continuity' || stage === 'maintenance')
-      && ids.some((id) => relevantFragmentIds.has(id))
+    return (block.fragmentContext?.fragmentIds ?? []).some((id) => relevantFragmentIds.has(id))
   })
   blocks.push({
     id: `analyze-stage-${stage}`,
@@ -246,44 +245,17 @@ function successfulToolCall(
   ))
 }
 
-function continuityHandoff(collector: AnalysisCollector): string {
-  return [
-    'The observation request has completed. Treat this compact handoff as its result:',
-    JSON.stringify({
-      summary: collector.summaryUpdate,
-      scene: collector.continuityProjection.scene,
-      mentions: collector.mentions,
-      candidateFragmentIds: collector.candidateFragmentIds,
-      contradictions: collector.contradictions,
-    }),
-  ].join('\n')
-}
-
-function maintenanceHandoff(collector: AnalysisCollector, observationResult?: unknown): string {
-  const result = observationResult && typeof observationResult === 'object'
-    ? observationResult as Record<string, unknown>
+function maintenanceHandoff(collector: AnalysisCollector, passageResult?: unknown): string {
+  const result = passageResult && typeof passageResult === 'object'
+    ? passageResult as Record<string, unknown>
     : undefined
   return [
-    'Observation found durable-record work. Review only the cited evidence and supplied numbered records:',
+    'The passage report found durable-record work. Review only the cited evidence and supplied numbered records:',
     JSON.stringify({
       summary: collector.summaryUpdate,
-      candidateFragmentIds: collector.candidateFragmentIds,
       contradictions: collector.contradictions,
       newRecordNames: collector.newRecordNames,
       resolvedFragments: result?.resolvedFragments,
-    }),
-  ].join('\n')
-}
-
-function directionsHandoff(collector: AnalysisCollector): string {
-  return [
-    'The observation and continuity requests have completed. Base directions on this compact handoff:',
-    JSON.stringify({
-      summary: collector.summaryUpdate,
-      scene: collector.continuityProjection.scene,
-      liveStates: collector.continuityProjection.liveStates,
-      threadOperations: collector.continuityProjection.threadOperations,
-      threadFocus: collector.continuityProjection.threadFocus,
     }),
   ].join('\n')
 }
@@ -457,14 +429,14 @@ async function runOnlineAnalyzePass(
     // numbered records. The shared ledger suppresses duplicate reads within the
     // adaptive tool loop without forcing a second model invocation.
     const numberedFragmentIds = new Set<string>()
-    const tools = createLibrarianOnlineTools(collector, {
+    const tools = createAnalysisTools(collector, {
       dataDir,
       storyId,
       proseFragmentId: fragment.id,
       disableDirections,
       disableSuggestions,
       numberedFragmentIds,
-      continuityKeys: continuityRegistry(context),
+      registry: continuityRegistry(context),
       customFragmentTypes: story.settings.customFragmentTypes,
       onProgress: (progress) => emit({ type: 'analysis-progress', progress }),
     })
@@ -488,7 +460,7 @@ async function runOnlineAnalyzePass(
       type: 'analysis-progress',
       progress: {
         fragmentId: fragment.id,
-        stage: 'observation',
+        stage: 'passage',
         summaryUpdate: '',
         continuityProjection: collector.continuityProjection,
         mentions: [],
@@ -499,41 +471,21 @@ async function runOnlineAnalyzePass(
       },
     })
 
-    const availableToolNames = Object.keys(compiled.tools)
-    // Experiment: ERRATA_ANALYZE_MODE=single answers the passage in one report.
-    const singlePass = process.env.ERRATA_ANALYZE_MODE === 'single'
-      && Boolean(compiled.tools.reportObservation && compiled.tools.reportContinuity)
-    const passageIncludesDirections = singlePass && Boolean(compiled.tools.reportDirections)
-    if (singlePass) {
-      compiled.tools = {
-        ...compiled.tools,
-        [PASSAGE_REPORT_TOOL]: createPassageReportTool(compiled.tools, passageIncludesDirections),
-      }
-    }
-    const stages = singlePass
-      ? buildSinglePassPlan(PASSAGE_REPORT_TOOL, availableToolNames)
-      : buildAnalyzeStagePlan(availableToolNames)
-    if (stages.length === 0) throw new Error('Analyze has no enabled observation report tool')
+    const stages = buildAnalyzeStagePlan(Object.keys(compiled.tools))
+    if (stages.length === 0) throw new Error('Analyze has no enabled passage report tool')
 
-    let observationToolOutput: unknown
+    let passageToolOutput: unknown
     let fullText = ''
     let finishReason = 'unknown'
     let stepCount = 0
     const completedStageIds = new Set<string>()
     for (const stage of stages) {
-      // Only evidence opens record maintenance: a contradiction citing both the
-      // record and the prose, or a new name the prose uses and the catalog lacks.
-      // Naming a record as a candidate is a claim, not evidence; a lasting change
-      // that contradicts nothing belongs in live state until the author promotes it.
-      const maintenanceNeeded = collector.contradictions.length > 0
-        || collector.newRecordNames.length > 0
-      if (stage.id === 'maintenance' && !maintenanceNeeded) {
+      if (stage.id === 'maintenance' && !needsRecordMaintenance(collector)) {
         completedStageIds.add(stage.id)
         continue
       }
       const relevantFragmentIds = new Set([
         ...collector.mentions.map((mention) => mention.fragmentId),
-        ...collector.candidateFragmentIds,
         ...collector.contradictions.flatMap((contradiction) => contradiction.fragmentIds),
       ])
       const stageTool = compiled.tools[stage.toolName]
@@ -546,14 +498,10 @@ async function runOnlineAnalyzePass(
         storyId,
         stage.id,
         structured ? `${stage.structuredDirective}\n\n${structuredOutputForm(stageTool)}` : stage.directive,
-        stage.id === 'continuity'
-          ? continuityHandoff(collector)
-          : stage.id === 'maintenance'
-            ? maintenanceHandoff(collector, observationToolOutput)
-            : stage.id === 'directions' ? directionsHandoff(collector) : undefined,
+        stage.id === 'maintenance' ? maintenanceHandoff(collector, passageToolOutput) : undefined,
         relevantFragmentIds,
       )
-      requestLogger.debug('Calling isolated analyze stage', {
+      requestLogger.debug('Calling analyze stage', {
         stage: stage.id,
         toolName: stage.toolName,
       })
@@ -606,15 +554,8 @@ async function runOnlineAnalyzePass(
       stepCount += stageResult.stepCount
 
       const expectedCall = successfulToolCall(stageResult.toolCalls, stage.toolName)
-      if (stage.id === 'observation') {
-        observationToolOutput = expectedCall?.result
-      }
-      if (stage.id === 'passage') {
-        observationToolOutput = (expectedCall?.result as { reportObservation?: unknown } | undefined)?.reportObservation
-      }
-      const stageComplete = Boolean(expectedCall)
-        || ((stage.id === 'directions' || stage.id === 'passage') && collector.directions.length > 0)
-      if (!stageComplete) {
+      if (stage.id === 'passage') passageToolOutput = expectedCall?.result
+      if (!expectedCall) {
         const detail = stageResult.toolErrors.map((item) => item.error).join('; ')
         throw new AnalyzeStageIncompleteError(`${stage.id} stage did not complete ${stage.toolName}${detail ? `: ${detail}` : ''}`)
       }
@@ -623,12 +564,10 @@ async function runOnlineAnalyzePass(
     }
 
     const toolCallNames = completedToolCalls.map((call) => call.toolName)
-    const directionsRequired = stages.some((stage) => stage.id === 'directions') || passageIncludesDirections
     const workflowComplete = stages.every((stage) => completedStageIds.has(stage.id))
-      && (!directionsRequired || collector.directions.length > 0)
-    const proposalToolNames = new Set(['reportMaintenance'])
+      && (disableDirections || collector.directions.length > 0)
     const proposalToolResults = completedToolCalls
-      .filter((call) => proposalToolNames.has(call.toolName))
+      .filter((call) => call.toolName === MAINTENANCE_REPORT_TOOL)
       .map((call) => call.result)
     const stepUsage = completedStepUsageDiagnostics(completedStageUsages)
     const durationMs = Date.now() - startTime
@@ -641,10 +580,7 @@ async function runOnlineAnalyzePass(
       outputTokens: completedOutputTokens,
       sampling,
       stepUsage,
-      reportToolCallCount: toolCallNames.filter((name) => (
-        name === 'reportAnalysis' || name === 'reportObservation' || name === 'reportContinuity'
-        || name === 'reportMaintenance' || name === 'reportDirections'
-      )).length,
+      reportToolCallCount: toolCallNames.filter((name) => stages.some((stage) => stage.toolName === name)).length,
       proposalToolCallCount: proposalToolResults.length,
       proposalToolFailureCount: proposalToolResults.filter((result) => (
         booleanToolResultField(result, 'ok') === false || numericToolResultField(result, 'invalid') > 0
@@ -762,7 +698,7 @@ export async function runLibrarianPipeline(input: LibrarianPipelineInput): Promi
     if (analyzeOutcome.error instanceof Error && !(analyzeOutcome.error instanceof AnalyzeStageIncompleteError)) {
       throw analyzeOutcome.error
     }
-    throw new Error('Analyze ended without completing the required observation lane')
+    throw new Error('Analyze ended without completing the passage report')
   }
 
   const analyzeLanes = analyzeLaneStatus({
@@ -775,16 +711,13 @@ export async function runLibrarianPipeline(input: LibrarianPipelineInput): Promi
   if (analyzeLanes.directions.completion === 'incomplete') {
     completionError = 'Analyze ended without completing automatic directions required by the story setting'
   } else if (analyzeOutcome.error instanceof Error) {
-    completionError = analyzeOutcome.pass.error ?? 'Analyze stopped after completing its observation lane'
+    completionError = analyzeOutcome.pass.error ?? 'Analyze stopped after completing its passage report'
   } else if (passFailed) {
     completionError = analyzeOutcome.pass.error ?? 'Analyze stopped without successfully finishing'
   }
 
   const mentionedFragmentIds = [...new Set(collector.mentions.map(m => m.fragmentId))]
-  const observationCandidates = observationFragmentCandidates({
-    mentionedFragmentIds,
-    candidateFragmentIds: collector.candidateFragmentIds,
-  })
+  const observationCandidates = observationFragmentCandidates({ mentionedFragmentIds })
   const candidateFragments = mergeFragmentCandidates(
     unmergeCandidates(initial.candidates),
     observationCandidates,

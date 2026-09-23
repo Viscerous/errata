@@ -115,12 +115,11 @@ describe('librarian storage', () => {
       await mkdir(dir, { recursive: true })
       const analysis = makeAnalysis({ id: 'analysis-invalid-read' }) as unknown as Record<string, unknown>
       analysis.continuityProjection = {
-        version: 3,
+        version: 4,
         scene: { transition: 'enter-flashback', line: 'present' },
-        stateOperations: [],
         threadOperations: [],
         threadFocus: [],
-        knowledgeOperations: [],
+        liveStates: [],
       }
       await writeFile(join(dir, 'analysis-invalid-read.json'), JSON.stringify(analysis), 'utf-8')
 
@@ -227,12 +226,11 @@ describe('librarian storage', () => {
       })
       const prose = (await getFragment(dataDir, storyId, 'pr-stale'))!
       const projection = {
-        version: 3 as const,
+        version: 4 as const,
         scene: { transition: 'continue' as const, line: 'present' as const },
-        stateOperations: [],
         threadOperations: [],
         threadFocus: [],
-        knowledgeOperations: [],
+        liveStates: [],
       }
       await saveAnalysis(dataDir, storyId, makeAnalysis({
         id: 'analysis-fresh',
@@ -272,9 +270,8 @@ describe('librarian storage', () => {
 
     it('indexes the latest analysis and latest completed projection independently', async () => {
       const projection = {
-        version: 3 as const,
-        scene: { transition: 'continue' as const },
-        stateOperations: [], threadOperations: [], threadFocus: [], knowledgeOperations: [],
+        version: 4 as const,
+        scene: { transition: 'continue' as const }, threadOperations: [], threadFocus: [], liveStates: [],
       }
       await saveAnalysis(dataDir, storyId, makeAnalysis({
         id: 'analysis-complete', fragmentId: 'pr-0001',
@@ -308,9 +305,8 @@ describe('librarian storage', () => {
 
     it('rebuilds an obsolete index into the current dual-pointer shape', async () => {
       const projection = {
-        version: 3 as const,
-        scene: { transition: 'continue' as const },
-        stateOperations: [], threadOperations: [], threadFocus: [], knowledgeOperations: [],
+        version: 4 as const,
+        scene: { transition: 'continue' as const }, threadOperations: [], threadFocus: [], liveStates: [],
       }
       await saveAnalysis(dataDir, storyId, makeAnalysis({
         id: 'analysis-complete', continuityProjection: projection,
@@ -329,9 +325,8 @@ describe('librarian storage', () => {
 
     it('promotes both index pointers when the latest completed analysis is deleted', async () => {
       const projection = {
-        version: 3 as const,
-        scene: { transition: 'continue' as const },
-        stateOperations: [], threadOperations: [], threadFocus: [], knowledgeOperations: [],
+        version: 4 as const,
+        scene: { transition: 'continue' as const }, threadOperations: [], threadFocus: [], liveStates: [],
       }
       await saveAnalysis(dataDir, storyId, makeAnalysis({
         id: 'analysis-older', fragmentId: 'pr-0001',

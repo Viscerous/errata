@@ -5,11 +5,13 @@ import { afterEach } from 'vitest'
 import { z } from 'zod'
 import { StoryMetaSchema, type StoryMeta } from '@/contracts/story'
 import { GlobalConfigSchema, type GlobalConfig } from '../src/server/config/schema'
-import type {
-  CharacterKnowledgeEntry,
-  ContinuityView,
-  LiveThreadEntry,
-} from '../src/server/librarian/continuity-view'
+import type { ContinuityView, LiveThreadEntry } from '../src/server/librarian/continuity-view'
+import {
+  liveStateItemId,
+  type FoldedLiveState,
+  type FoldedLiveStateField,
+  type FoldedLiveStateItem,
+} from '@/contracts/live-state'
 
 type StorySettings = StoryMeta['settings']
 
@@ -25,37 +27,23 @@ export function makeTestSettings(overrides?: Partial<StorySettings>): StorySetti
   }
 }
 
+const THROWAWAY_SOURCE = { sourceFragmentId: 'pr-0001', analysisId: 'la-1', narrativePosition: 1 }
+
 /**
  * A folded continuity view built in memory, for tests about how it *renders*
  * rather than how it is folded. Entries carry throwaway provenance so a caller
  * only has to state the part it is asserting on.
  */
 export function makeContinuityView(overrides: Partial<ContinuityView> = {}): ContinuityView {
-  const source = { sourceFragmentId: 'pr-0001', analysisId: 'la-1', narrativePosition: 1 }
   return {
-    currentState: [{
-      ...source,
-      stateKey: 'villain_location',
-      subject: { key: 'villain', label: 'Villain' },
-      facet: 'location',
-      certainty: 'explicit',
-      value: 'the north tower',
-      scope: 'cross-scene',
-    }],
-    liveThreads: [{
-      ...source,
-      threadKey: 'who_sent_the_letter',
-      label: 'Who sent the letter',
-      relatedFragmentIds: [],
-      visibility: 'foreground',
-    }],
-    characterKnowledge: [{
-      ...source,
-      characterId: 'ch-0001',
-      knowledgeKey: 'key_missing',
-      fact: 'The key is missing.',
-      acquisition: 'witnessed',
-    }],
+    liveThreads: [makeLiveThread({ threadKey: 'who_sent_the_letter', label: 'Who sent the letter' })],
+    liveStates: [
+      makeLiveState({
+        key: 'villain', fragmentId: undefined, name: 'Villain', present: true,
+        fields: [makeLiveStateField('Where', 'the north tower')],
+      }),
+      makeLiveState({ items: [makeLiveStateItem('Knows', 'The key is missing.')] }),
+    ],
     staleProjectionCount: 0,
     ...overrides,
   }
@@ -64,29 +52,37 @@ export function makeContinuityView(overrides: Partial<ContinuityView> = {}): Con
 /** A live thread with throwaway provenance, for the render tests above. */
 export function makeLiveThread(overrides: Partial<LiveThreadEntry> = {}): LiveThreadEntry {
   return {
-    sourceFragmentId: 'pr-0001',
-    analysisId: 'la-1',
-    narrativePosition: 1,
+    ...THROWAWAY_SOURCE,
     threadKey: 'a_thread',
     label: 'A thread',
-    relatedFragmentIds: [],
     visibility: 'foreground',
     ...overrides,
   }
 }
 
-/** A knowledge entry with throwaway provenance, for the render tests above. */
-export function makeCharacterKnowledge(overrides: Partial<CharacterKnowledgeEntry> = {}): CharacterKnowledgeEntry {
+/** A character's folded live state, elsewhere unless stated otherwise. */
+export function makeLiveState(overrides: Partial<FoldedLiveState> = {}): FoldedLiveState {
+  const fragmentId = 'fragmentId' in overrides ? overrides.fragmentId : 'ch-0001'
   return {
-    sourceFragmentId: 'pr-0001',
-    analysisId: 'la-1',
-    narrativePosition: 1,
-    characterId: 'ch-0001',
-    knowledgeKey: 'a_fact',
-    fact: 'A fact.',
-    acquisition: 'witnessed',
+    ...THROWAWAY_SOURCE,
+    kind: 'character',
+    key: fragmentId ?? 'someone',
+    ...(fragmentId ? { fragmentId } : {}),
+    name: 'Alice',
+    present: false,
+    fields: [],
+    items: [],
+    ended: [],
     ...overrides,
   }
+}
+
+export function makeLiveStateField(field: string, value: string, overrides: Partial<FoldedLiveStateField> = {}): FoldedLiveStateField {
+  return { ...THROWAWAY_SOURCE, field, value, holds: 'lastKnown', visibility: 'outward', scenesAgo: 0, ...overrides }
+}
+
+export function makeLiveStateItem(field: string, text: string, overrides: Partial<FoldedLiveStateItem> = {}): FoldedLiveStateItem {
+  return { ...THROWAWAY_SOURCE, id: liveStateItemId(field, text), field, text, visibility: 'inner', ...overrides }
 }
 
 /**

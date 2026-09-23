@@ -138,10 +138,8 @@ export interface LibrarianAnalysis {
 }
 
 export type LibrarianAnalysisProgressStage =
-  | 'observation'
-  | 'inspection'
+  | 'passage'
   | 'record-maintenance'
-  | 'directions'
 
 /**
  * Normalized analysis state that is safe to display while Analyze is still

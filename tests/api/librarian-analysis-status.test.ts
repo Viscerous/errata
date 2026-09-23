@@ -83,12 +83,11 @@ describe('GET librarian analysis-index', () => {
       timelineEvents: [],
       ...(complete ? {
         continuityProjection: {
-          version: 3 as const,
+          version: 4 as const,
           scene: { transition: 'continue' as const },
-          stateOperations: [],
           threadOperations: [],
           threadFocus: [],
-          knowledgeOperations: [],
+          liveStates: [],
         },
       } : {}),
     }

@@ -58,12 +58,12 @@ describe('Agent Block Config Storage', () => {
       customBlocks: [],
       overrides: { instructions: { enabled: false } },
       blockOrder: ['instructions', 'story-summary'],
-      disabledTools: ['reportAnalysis'],
+      disabledTools: ['reportPassage'],
     })
     const loaded = await getAgentBlockConfig(dataDir, STORY_ID, AGENT_NAME)
     expect(loaded.overrides.instructions?.enabled).toBe(false)
     expect(loaded.blockOrder).toEqual(['instructions', 'story-summary'])
-    expect(loaded.disabledTools).toEqual(['reportAnalysis'])
+    expect(loaded.disabledTools).toEqual(['reportPassage'])
   })
 
   it('adds a custom block', async () => {
@@ -144,8 +144,8 @@ describe('Agent Block Config Storage', () => {
   })
 
   it('updates disabled tools', async () => {
-    const config = await updateAgentDisabledTools(dataDir, STORY_ID, AGENT_NAME, ['reportAnalysis', 'proposeRecordCorrections'])
-    expect(config.disabledTools).toEqual(['reportAnalysis', 'proposeRecordCorrections'])
+    const config = await updateAgentDisabledTools(dataDir, STORY_ID, AGENT_NAME, ['reportPassage', 'reportMaintenance'])
+    expect(config.disabledTools).toEqual(['reportPassage', 'reportMaintenance'])
   })
 
   it('isolates configs between agents', async () => {
@@ -153,7 +153,7 @@ describe('Agent Block Config Storage', () => {
       customBlocks: [],
       overrides: { instructions: { enabled: false } },
       blockOrder: [],
-      disabledTools: ['reportAnalysis'],
+      disabledTools: ['reportPassage'],
     })
     await saveAgentBlockConfig(dataDir, STORY_ID, 'librarian.chat', {
       customBlocks: [],
@@ -166,7 +166,7 @@ describe('Agent Block Config Storage', () => {
     const chatConfig = await getAgentBlockConfig(dataDir, STORY_ID, 'librarian.chat')
 
     expect(analyzeConfig.overrides.instructions?.enabled).toBe(false)
-    expect(analyzeConfig.disabledTools).toEqual(['reportAnalysis'])
+    expect(analyzeConfig.disabledTools).toEqual(['reportPassage'])
     expect(chatConfig.overrides.instructions).toBeUndefined()
     expect(chatConfig.blockOrder).toEqual(['instructions'])
   })

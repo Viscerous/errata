@@ -19,14 +19,11 @@ import {
   type CitedEvidence,
   type ContinuityProjection,
   type ContinuityRegistry,
-  type KnowledgeOperation,
-  type RegistryEntry,
   type SceneUpdate,
-  type StateOperation,
   type ThreadFocus,
   type ThreadOperation,
 } from '@/contracts/continuity'
-import { normalizeContinuityKey, scopedContinuityIdentity } from '@/lib/continuity-keys'
+import { normalizeContinuityKey } from '@/lib/continuity-keys'
 import {
   CharacterReportInputSchema,
   EntityReportInputSchema,
@@ -34,11 +31,7 @@ import {
   LiveStateUpdatesInputSchema,
   normalizeLiveStateReports,
   reportRef,
-  type CharacterReportInput,
-  type EntityReportInput,
-  type LiveStateUpdatesInput,
 } from './live-state-report'
-import { createFragmentTools } from '../llm/tools'
 import {
   createFragmentOperationSchema,
   type FragmentChangeOperation,
@@ -160,17 +153,6 @@ function groundMentions(
   }
 }
 
-/** Candidates name reusable records needing attention; prose is never one. */
-function groundCandidateIds(ids: string[], checkedFragments: Map<string, Fragment> | undefined): string[] {
-  const valid = checkedFragments
-    ? ids.filter((id) => {
-        const fragment = checkedFragments.get(id)
-        return fragment !== undefined && fragment.type !== 'prose'
-      })
-    : ids
-  return [...new Set(valid)]
-}
-
 // --- Collector ---
 
 export interface AnalysisCollector {
@@ -178,7 +160,6 @@ export interface AnalysisCollector {
   /** What happened, one bullet each. Positioned into a timeline by the frame. */
   events: string[]
   mentions: LibrarianMention[]
-  candidateFragmentIds: string[]
   /** Uncatalogued names the prose introduces, confirmed verbatim and not already recorded. */
   newRecordNames: string[]
   contradictions: Array<{
@@ -199,30 +180,29 @@ export function createEmptyCollector(): AnalysisCollector {
     summaryUpdate: '',
     events: [],
     mentions: [],
-    candidateFragmentIds: [],
     newRecordNames: [],
     contradictions: [],
     fragmentChangeProposals: [],
     continuityProjection: {
-      version: 3,
+      version: 4,
       scene: { transition: 'uncertain' },
-      stateOperations: [],
       threadOperations: [],
       threadFocus: [],
-      knowledgeOperations: [],
+      liveStates: [],
     },
     directions: [],
   }
 }
 
 /**
- * Analyze is given the prose chain and the rolling summary in its context, so
- * these two would only offer a second copy of what it is already looking at.
- * They go unused, and an unused tool is still schema the model reads past.
- * listFragmentTypes stays: proposeNewRecords takes a free-string `type` and this
- * is where the valid ones are named.
+ * Only evidence opens record maintenance: a contradiction citing both the
+ * record and the prose, or a new name the prose uses and the catalog lacks. A
+ * lasting change that contradicts nothing belongs in live state until the
+ * author promotes it.
  */
-const READ_TOOLS_ALREADY_IN_ANALYZE_CONTEXT = ['readProseChain', 'readStorySummary']
+export function needsRecordMaintenance(collector: AnalysisCollector): boolean {
+  return collector.contradictions.length > 0 || collector.newRecordNames.length > 0
+}
 
 /**
  * Where a passage sits relative to the narrative present is a property of the
@@ -274,8 +254,8 @@ export function forgivingArray<T extends z.ZodTypeAny>(
 
     // Forgive per entry: keep only items the element schema accepts, so a single
     // malformed entry (a hallucinated ID, a dropped field) does not fail the
-    // whole batched report. The surviving items are then grounded by the caller;
-    // `min` on the inner array still fails a required array when every entry is
+    // whole report. The surviving items are then grounded by the caller; `min`
+    // on the inner array still fails a required array when every entry is
     // dropped, and the slice below trims overflow instead of rejecting it.
     const kept: unknown[] = []
     for (const item of items) {
@@ -365,74 +345,9 @@ function sceneNeedsEvidence(scene: SceneInput): boolean {
     || scene.elapsed !== undefined
 }
 
-/** The current live registry; model-facing entry numbers come directly from it. */
-export type ContinuityKeyRegistry = Partial<ContinuityRegistry>
+const EMPTY_REGISTRY: ContinuityRegistry = { thread: [], items: [] }
 
-function completeRegistry(registry: ContinuityKeyRegistry): ContinuityRegistry {
-  return {
-    state: registry.state ?? [],
-    thread: registry.thread ?? [],
-    knowledge: registry.knowledge ?? [],
-    items: registry.items ?? [],
-  }
-}
-
-/** Entries a scoped lane may address; knowledge keys belong to one character. */
-function inScope(entries: RegistryEntry[], scope?: string): RegistryEntry[] {
-  return entries.filter((entry) => !entry.scope || !scope || entry.scope === scope)
-}
-
-const EMPTY_REGISTRY: ContinuityRegistry = { state: [], thread: [], knowledge: [], items: [] }
-
-/**
- * A continuity key is only an identity if two observations of the same thing
- * land on the same key. Asking for a free string and describing the rule did not
- * achieve that on its own: a model asked for a free key opens a fresh one per
- * fact, many carrying an invented fragment-id prefix.
- *
- * Reuse is steered by naming the live keys at the point of use and by
- * canonicalizing whatever arrives, not by a closed enum. Splitting the field
- * into existingKey/newKey did enforce the choice, but enforcing it cost the
- * whole batched report whenever the model chose wrong, and that was most of the
- * rejections — a small model cannot reliably pick between two sibling optional
- * fields. Normalization already collapses the spellings the enum was there to
- * collapse, so the enum was buying compliance the fold delivers anyway.
- */
-const MAX_STEERED_REGISTRY_KEYS = 24
 const MAX_DERIVED_KEY_CHARS = 64
-
-
-export function buildReportAnalysisInputSchema(
-  _input: ContinuityKeyRegistry = {},
-  options: { includeDirections?: boolean } = {},
-) {
-  const report = z.object({
-    // Model-authored report text is stored as supplied; this schema only asks
-    // for the structure required to interpret it.
-    summary: z.string().trim().min(1).max(1200).describe('Concise retrospective summary of the new prose as past history.'),
-    present: LiveStatePresentInputSchema.default([]),
-    characters: forgivingArray(CharacterReportInputSchema, { max: 6 }).default([])
-      .describe('Characters for whom this passage establishes or changes something. Leave out anyone with nothing new.'),
-    entities: forgivingArray(EntityReportInputSchema, { max: 4 }).default([])
-      .describe('Places, objects, or groups actively involved in this passage, with what changed for them. Use empty [] if none.'),
-    update: LiveStateUpdatesInputSchema.default([]),
-     // Thread strings become stored ThreadOperation.label (max 240); keep the
-     // grammar bound at or below that so a full-length string still decodes.
-     threads: forgivingArray(z.string().trim().max(240), { max: 6 }).default([])
-       .describe('Active narrative threads or open plot questions (e.g. "Who poisoned the king?").'),
-    scene: sceneSchema
-      .describe('Changed scene frame fields; transition uncertain withdraws the claim.'),
-    mentions: forgivingArray(mentionInputSchema, { max: 16 }).default([])
-      .describe('Each catalog record this prose references, judged by meaning.'),
-  })
-
-  return options.includeDirections === false
-    ? report
-    : report.extend({
-        directions: forgivingArray(suggestionDirectionSchema, { min: 1, max: 4 })
-          .describe('Story-specific options for the next passage; aim for three distinct directions.'),
-      })
-}
 
 export const contradictionInputSchema = z.object({
   description: z.string().max(300).describe('What the contradiction is'),
@@ -452,25 +367,51 @@ export const contradictionInputSchema = z.object({
 
 export type ContradictionInput = z.infer<typeof contradictionInputSchema>
 
-export const reportObservationInputSchema = z.object({
+/**
+ * The passage report, in the order each part builds on the last: what
+ * happened, then where everyone now stands, then where the story could go. One
+ * request reasons over the passage once; splitting it into a request per part
+ * re-read the same context for each and did not make a small model any less
+ * likely to run away.
+ */
+export const reportPassageInputSchema = z.object({
   summary: z.string().trim().min(1).max(1200).describe('Concise retrospective summary of the new prose as past history.'),
   events: forgivingArray(z.string().trim().min(1).max(240), { max: 8 }).default([])
     .describe('Distinct events that occurred in this passage, in narrative order. Use empty [] if the summary alone is sufficient.'),
   scene: sceneSchema.describe('Changed scene frame fields; transition uncertain withdraws the claim.'),
   mentions: forgivingArray(mentionInputSchema, { max: 16 }).default([])
     .describe('Each catalog record this prose references, judged by meaning.'),
-  candidateFragmentIds: forgivingArray(z.string().trim().max(64), { max: 4 }).default([])
-    .describe('Candidate fragment IDs from the catalog that may need durable-record attention. Use empty [] if none.'),
   contradictions: forgivingArray(contradictionInputSchema, { max: 3 }).default([])
     .describe('Contradictions with established records. Use empty [] if none.'),
   newRecordNames: forgivingArray(z.string().trim().min(1).max(80), { max: 4 }).default([])
     .describe('Names of lasting people, places, objects, or institutions this prose introduces that have no catalog record, exactly as the prose writes them. Use empty [] if none.'),
+  present: LiveStatePresentInputSchema.default([]),
+  characters: forgivingArray(CharacterReportInputSchema, { max: 6 }).default([])
+    .describe('Characters for whom this passage establishes or changes something. Leave out anyone with nothing new.'),
+  entities: forgivingArray(EntityReportInputSchema, { max: 4 }).default([])
+    .describe('Places, objects, or groups actively involved in this passage, with what changed for them. Use empty [] if none.'),
+  update: LiveStateUpdatesInputSchema.default([]),
+  // Thread strings become stored ThreadOperation.label (max 240); keep the
+  // grammar bound at or below that so a full-length string still decodes.
+  threads: forgivingArray(z.string().trim().max(240), { max: 6 }).default([])
+    .describe('Current foreground narrative threads. Reuse a supplied thread key for an existing thread; otherwise provide a concise label for a new open question. This is a snapshot: omitted existing threads become dormant.'),
+  resolvedThreads: forgivingArray(z.string().trim().max(100), { max: 4 }).default([])
+    .describe('Existing thread keys conclusively answered or closed by this passage. Use empty [] if none.'),
+  // No minimum: a report without usable directions keeps everything else it
+  // found, and the directions lane is recorded as incomplete instead.
+  directions: forgivingArray(suggestionDirectionSchema, { max: 4 })
+    .describe('Three distinct narrative directions for the next passage, each with title, description, and instruction.'),
 })
 
-export type ReportObservationInput = z.infer<typeof reportObservationInputSchema>
+/** Directions are part of the report unless the story turned them off. */
+export function buildPassageReportInputSchema(options: { includeDirections?: boolean } = {}) {
+  return options.includeDirections === false
+    ? reportPassageInputSchema.omit({ directions: true })
+    : reportPassageInputSchema
+}
 
-export const proposalEvidenceSchema = forgivingNumberArray(z.number().int().positive(), { min: 1, max: 24 })
-  .describe('New-prose sentence numbers establishing the proposal.')
+export type ReportPassageInput = z.infer<typeof reportPassageInputSchema>
+type PassageReportArgs = Omit<ReportPassageInput, 'directions'> & Partial<Pick<ReportPassageInput, 'directions'>>
 
 export const correctionProposalItemSchema = z.object({
   fragmentId: z.string().min(1).max(64).describe('Target fragment ID.'),
@@ -486,44 +427,6 @@ export const newFragmentProposalItemSchema = createFragmentOperationSchema.omit(
   description: z.string().trim().max(250).default(''),
 })
 
-export const librarianRecordCorrectionsInputSchema = z.object({
-  title: z.string().max(100).optional()
-    .describe('Optional proposal title.'),
-  evidenceSegments: proposalEvidenceSchema
-    .describe('New-prose sentence numbers establishing these corrections.'),
-  rationale: z.string().trim().max(1200).optional()
-    .describe('Optional shared rationale.'),
-  corrections: forgivingArray(correctionProposalItemSchema, { min: 1, max: 6 })
-    .describe('Localized record corrections grounded by reportAnalysis; not prose errors or unresolved conflicts.'),
-})
-
-export const librarianNewRecordsInputSchema = z.object({
-  title: z.string().max(100).optional()
-    .describe('Optional proposal title.'),
-  evidenceSegments: proposalEvidenceSchema
-    .describe('New-prose sentence numbers establishing these records.'),
-  rationale: z.string().trim().max(1200).optional()
-    .describe('Optional shared rationale.'),
-  newFragments: forgivingArray(newFragmentProposalItemSchema, { min: 1, max: 4 })
-    .describe('New reusable named records established by this prose; not event logs, current conditions, or scene details.'),
-})
-
-export const reportContinuityInputSchema = z.object({
-  present: LiveStatePresentInputSchema.default([]),
-  characters: forgivingArray(CharacterReportInputSchema, { max: 6 }).default([])
-    .describe('Characters for whom this passage establishes or changes something. Leave out anyone with nothing new.'),
-  entities: forgivingArray(EntityReportInputSchema, { max: 4 }).default([])
-    .describe('Places, objects, or groups actively involved in this passage, with what changed for them. Use empty [] if none.'),
-  update: LiveStateUpdatesInputSchema.default([]),
-  // See reportAnalysis: grammar bound stays at or below stored label max (240).
-  threads: forgivingArray(z.string().trim().max(240), { max: 6 }).default([])
-    .describe('Current foreground narrative threads. Reuse a supplied thread key for an existing thread; otherwise provide a concise label for a new open question. This is a snapshot: omitted existing threads become dormant.'),
-  resolvedThreads: forgivingArray(z.string().trim().max(100), { max: 4 }).default([])
-    .describe('Existing thread keys conclusively answered or closed by this passage. Use empty [] if none.'),
-})
-
-export type ReportContinuityInput = z.infer<typeof reportContinuityInputSchema>
-
 export const reportMaintenanceInputSchema = z.object({
   evidenceSegments: forgivingNumberArray(undefined, { max: 24 }).default([])
     .describe('New-prose sentence numbers establishing the proposed corrections or records.'),
@@ -534,18 +437,6 @@ export const reportMaintenanceInputSchema = z.object({
 })
 
 export type ReportMaintenanceInput = z.infer<typeof reportMaintenanceInputSchema>
-
-export const reportDirectionsInputSchema = z.object({
-  directions: forgivingArray(suggestionDirectionSchema, { min: 1, max: 4 })
-    .describe('Three distinct narrative directions for the next passage, each with title, description, and instruction.'),
-})
-
-export type ReportDirectionsInput = z.infer<typeof reportDirectionsInputSchema>
-
-/** Registry-free shape for the context preview and the tool-name listing. */
-export const reportAnalysisInputSchema = buildReportAnalysisInputSchema()
-
-type ReportAnalysisInput = z.infer<ReturnType<typeof buildReportAnalysisInputSchema>>
 
 /**
  * Preserve the strict JSON Schema generated by Zod v4 (including required keys
@@ -570,19 +461,15 @@ function uniqueStrings(values: string[]): string[] {
 }
 
 /**
- * Turn a citation into the stored operation. The resolved text is kept beside
- * the indices so a saved projection stays reviewable, and so the unattended
- * apply path can still re-check it against prose that may since have changed.
+ * Turn a citation into the stored evidence. The resolved text is kept beside
+ * the indices so a saved finding stays reviewable, and so the unattended apply
+ * path can still re-check it against prose that may since have changed.
  */
 function citedEvidence(
   segments: TextSegment[],
   cited: number[],
 ): { evidence: CitedEvidence; invalid: number[] } {
   const resolved = resolveSegments(segments, cited)
-  // `evidence` is the storable half and `invalid` the verdict on it. Returned
-  // flat, every lane spread the whole thing into its record and carried the
-  // verdict into the projection, leaving stored operations with an `invalid: []`
-  // that no type declares and nothing reads.
   return {
     evidence: { evidenceSegments: resolved.indexes.slice(0, 32), evidenceText: resolved.text },
     invalid: resolved.invalid,
@@ -601,20 +488,6 @@ function derivedContinuityKey(source: string | undefined): string {
   return `${prefix}_${digest}`
 }
 
-/**
- * Canonicalizing is what makes reuse happen: a key that differs from a live one
- * only by case, separator, or a prefixed fragment id lands on the live spelling
- * by construction, so the model does not have to declare which it meant.
- *
- * Creation operations may derive a fresh key from their structured identity or
- * description. Existing identities are addressed only by registry number or
- * stable key; human wording is never treated as semantic identity by code.
- */
-function chosenKey(operation: { key?: unknown }, derivedFrom?: string): string | null {
-  const declared = typeof operation.key === 'string' ? normalizeContinuityKey(operation.key) : ''
-  return declared || derivedContinuityKey(derivedFrom) || null
-}
-
 function citationProblem(
   cited: { evidence: CitedEvidence; invalid: number[] },
 ): string | null {
@@ -627,142 +500,19 @@ function citationProblem(
 
 /**
  * Dropped work explains itself on the entry, never only in a sibling note
- * beside the list: the trace panel and the model both read entries. Mentions
- * once carried their explanation in a `skippedMentionNote` alone, so dropped
- * mentions rendered as blank rows the moment the panel learned to report
- * refusals at all.
+ * beside the list: the trace panel reads entries. Mentions once carried their
+ * explanation in a `skippedMentionNote` alone, so dropped mentions rendered as
+ * blank rows the moment the panel learned to report refusals at all.
  */
 type Skipped<T> = T & { reason: string }
 
-/** The single key an entry set agrees on, or nothing when it is ambiguous. */
-function soleKey(entries: RegistryEntry[]): string | undefined {
-  const keys = new Set(entries.map((entry) => entry.key))
-  return keys.size === 1 ? [...keys][0] : undefined
-}
-
-/**
- * The entry the model pointed at. Exact by construction, which is the whole
- * point: every other rung reconstructs an identity from something the model
- * spelled, and spelling is where the identity was being lost.
- */
-function registryKeyAtIndex(
-  entries: RegistryEntry[],
-  entry: unknown,
-  scope?: string,
-): string | undefined {
-  if (typeof entry !== 'number' || !Number.isInteger(entry)) return undefined
-  return soleKey(inScope(entries, scope).filter((candidate) => candidate.index === entry))
-}
-
-/** Resolve the exact state definition carried by an existing registry address. */
-function registeredStateDefinition(
-  entries: RegistryEntry[],
-  operation: { entry?: unknown; key?: unknown },
-  resolvedKey: string,
-): Pick<RegistryEntry, 'subject' | 'facet' | 'slot'> | undefined {
-  const byEntry = typeof operation.entry === 'number' && Number.isInteger(operation.entry)
-    ? entries.filter((candidate) => candidate.index === operation.entry)
-    : []
-  const candidates = byEntry.length > 0
-    ? byEntry
-    : entries.filter((candidate) => candidate.key === resolvedKey)
-  if (candidates.length !== 1) return undefined
-  const [candidate] = candidates
-  return candidate.subject && candidate.facet ? candidate : undefined
-}
-
-/**
- * The identity an operation addresses, or why it has none.
- *
- * Two rules, one place. An action that can create an identity only needs enough
- * to derive one. An action that cannot — clear, advance, resolve, abandon,
- * correct, forget — can only mean something against an identity that already
- * exists, and until now nothing checked that it did: any spelling was accepted,
- * stored, and matched nothing at fold time, which is exactly how a plausible
- * invented key gets through. Reporting one back costs a single operation;
- * letting it through costs the continuity it was meant to record.
- *
- * `live` carries the registry plus whatever this analysis has already created,
- * and the caller adds to it as identities appear, so a retried report can still
- * address what its own earlier call opened.
- */
-function resolveIdentity(
-  operation: { key?: unknown; entry?: unknown; action: string },
-  derivedFrom: string | undefined,
-  options: {
-    lane: 'state' | 'thread' | 'knowledge'
-    allowDerived: boolean
-    live: Set<string>
-    registry: RegistryEntry[]
-    scope?: string
-    /** The derived fields are declared identity components, not prose wording. */
-    structuralDerivation?: boolean
-  },
-): { ok: true; key: string } | { ok: false; reason: string } {
-  const { lane, allowDerived, registry, scope } = options
-  const addressedKey = registryKeyAtIndex(registry, operation.entry, scope)
-    || chosenKey(operation)
-  if (addressedKey) {
-    if (allowDerived || options.live.has(scopedContinuityIdentity(addressedKey, scope))) {
-      return { ok: true, key: addressedKey }
-    }
-    const listed = inScope(registry, scope)
-      .slice(0, MAX_STEERED_REGISTRY_KEYS)
-      .map((entry) => `[${entry.index}] ${entry.key}`)
-    return {
-      ok: false,
-      reason: `No ${lane} identity is tracked under ${addressedKey}, so this ${operation.action} would change nothing. `
-        + (listed.length > 0
-          ? `Cite the entry number of the one you mean: ${listed.join(', ')}.`
-          : `The ${lane} registry is empty, so there is nothing to ${operation.action}.`),
-    }
-  }
-
-  const derivedKey = allowDerived ? chosenKey(operation, derivedFrom) : null
-  if (!derivedKey) {
-    return {
-      ok: false,
-      reason: allowDerived
-        ? `A ${lane} operation needs enough identity to derive a key.`
-        : `A ${lane} ${operation.action} operation must name an existing key.`,
-    }
-  }
-  if (!options.structuralDerivation
-    && options.live.has(scopedContinuityIdentity(derivedKey, scope))) {
-    return {
-      ok: false,
-      reason: `The derived ${lane} key ${derivedKey} already exists. Cite its registry entry to reuse it; code does not infer identity from matching human wording.`,
-    }
-  }
-  return { ok: true, key: derivedKey }
-}
-
-/** Identities a non-create action may address, before this pass adds its own. */
-function liveIdentitySet(entries: RegistryEntry[]): Set<string> {
-  return new Set(entries.map((entry) => scopedContinuityIdentity(entry.key, entry.scope)))
-}
-
-type NormalizedContinuityInput = {
-  scene?: SceneUpdate | NonNullable<ReportAnalysisInput['scene']>
-  threads?: string[]
-  resolvedThreads?: string[]
-  present?: string[]
-  characters?: CharacterReportInput[]
-  entities?: EntityReportInput[]
-  update?: LiveStateUpdatesInput
-  stateOperations?: any[]
-  threadOperations?: any[]
-  knowledgeOperations?: any[]
-}
-
-function normalizeContinuityProjection(
-  input: NormalizedContinuityInput,
+function normalizeScene(
+  input: SceneInput | undefined,
   segments: TextSegment[],
-  registry: ContinuityRegistry = EMPTY_REGISTRY,
-  options?: { checkedFragments?: Map<string, Fragment> },
-): { projection: ContinuityProjection; skipped: Array<Skipped<{ kind: string; key: string }>> } {
-  const skipped: Array<Skipped<{ kind: string; key: string }>> = []
-  let scene: SceneInput & Partial<CitedEvidence> = (input.scene as (SceneInput & Partial<CitedEvidence>)) ?? { transition: 'uncertain', evidenceSegments: [] }
+  checkedFragments: Map<string, Fragment> | undefined,
+  skipped: Array<Skipped<{ kind: string; key: string }>>,
+): SceneUpdate {
+  let scene: SceneInput & Partial<CitedEvidence> = input ?? { transition: 'uncertain', evidenceSegments: [] }
   const requiresSceneEvidence = sceneNeedsEvidence(scene)
   if (requiresSceneEvidence || (scene.evidenceSegments?.length ?? 0) > 0) {
     const resolved = citedEvidence(segments, scene.evidenceSegments ?? [])
@@ -785,273 +535,29 @@ function normalizeContinuityProjection(
   if (scene.transition === 'enter-flashback') scene = { ...scene, line: 'flashback' }
   if (scene.transition === 'enter-flash-forward') scene = { ...scene, line: 'flash-forward' }
 
-  if (scene.location?.fragmentId) {
-    const isValid = (!options?.checkedFragments || options.checkedFragments.has(scene.location.fragmentId))
-      && FragmentIdSchema.safeParse(scene.location.fragmentId).success
-    if (!isValid) {
-      scene = {
-        ...scene,
-        location: {
-          key: scene.location.key,
-          label: scene.location.label,
-        },
-      }
-    }
-  }
-
-  const liveState = liveIdentitySet(registry.state)
-  const stateOperations: StateOperation[] = []
-  for (const operation of input.stateOperations ?? []) {
-    const allowDerived = operation.action === 'set'
-    const derivedStateIdentity = operation.subject && operation.facet
-      ? [derivedContinuityKey(operation.subject.label), operation.facet, operation.slot].filter(Boolean).join('_')
-      : undefined
-    const identity = resolveIdentity(operation, derivedStateIdentity, {
-      lane: 'state',
-      allowDerived,
-      structuralDerivation: true,
-      live: liveState,
-      registry: registry.state,
-    })
-    if (!identity.ok) {
-      skipped.push({ kind: 'state', key: operation.subject?.label ?? '', reason: identity.reason })
-      continue
-    }
-    const stateKey = identity.key
-    if (allowDerived) liveState.add(stateKey)
-    const resolved = citedEvidence(segments, operation.evidenceSegments)
-    const problem = citationProblem(resolved)
-    if (problem) {
-      skipped.push({ kind: 'state', key: stateKey, reason: problem })
-      continue
-    }
-    if (operation.action === 'set' && !operation.value?.trim()) {
-      skipped.push({ kind: 'state', key: stateKey, reason: 'A set operation requires a value.' })
-      continue
-    }
-    const registeredDefinition = registeredStateDefinition(registry.state, operation, stateKey)
-    const validSubjectFragmentId = operation.subject?.fragmentId
-      && (!options?.checkedFragments || options.checkedFragments.has(operation.subject.fragmentId))
-      && FragmentIdSchema.safeParse(operation.subject.fragmentId).success
-      ? operation.subject.fragmentId
-      : undefined
-    const declaredSubject = operation.subject
-      ? {
-          key: derivedContinuityKey(operation.subject.label),
-          label: operation.subject.label,
-          ...(validSubjectFragmentId ? { fragmentId: validSubjectFragmentId } : {}),
-        }
-      : undefined
-    const subject = registeredDefinition?.subject ?? declaredSubject
-    const facet = registeredDefinition?.facet ?? operation.facet
-    const slot = registeredDefinition?.facet
-      ? registeredDefinition.slot
-      : operation.slot
-    if (operation.action === 'set' && (!subject || !facet)) {
-      skipped.push({
-        kind: 'state',
-        key: stateKey,
-        reason: 'A genuinely new set requires a subject and facet; an existing registry entry supplies them automatically.',
-      })
-      continue
-    }
-    stateOperations.push(operation.action === 'clear'
-      ? { action: 'clear', ...resolved.evidence, stateKey }
-      : {
-          action: 'set',
-          stateKey,
-          subject: subject!,
-          facet: facet!,
-          ...(slot?.trim() ? { slot } : {}),
-          value: operation.value!,
-          certainty: operation.certainty ?? 'explicit',
-          scope: operation.scope ?? 'scene',
-          ...(operation.until ? { until: operation.until } : {}),
-          ...resolved.evidence,
-        })
-  }
-
-  const liveThreads = liveIdentitySet(registry.thread)
-  const threadOperations: ThreadOperation[] = []
-  // Assembled as the operations resolve, so the fold receives the prominence
-  // delta without the model having to state each acted-on thread twice.
-  const threadFocus: ThreadFocus[] = []
-
-  const registryThreadsByKey = new Map(registry.thread.map((entry) => [normalizeContinuityKey(entry.key), entry]))
-  const registryThreadsByLabel = new Map(registry.thread.map((entry) => [normalizeContinuityKey(entry.label), entry]))
-  const activeThreadKeys = new Set<string>()
-  const resolvedThreadKeys = new Set<string>()
-
-  for (const value of input.resolvedThreads ?? []) {
-    const requested = normalizeContinuityKey(value)
-    const existing = registryThreadsByKey.get(requested) ?? registryThreadsByLabel.get(requested)
-    if (!existing) {
-      skipped.push({ kind: 'thread', key: value, reason: `No unresolved thread matches "${value}".` })
-      continue
-    }
-    const threadKey = normalizeContinuityKey(existing.key)
-    if (resolvedThreadKeys.has(threadKey)) continue
-    resolvedThreadKeys.add(threadKey)
-    threadOperations.push({
-      action: 'resolve',
-      threadKey,
-      relatedFragmentIds: [],
-      evidenceSegments: [],
-      evidenceText: '',
-    })
-  }
-
-  for (const t of input.threads ?? []) {
-    const label = typeof t === 'string' ? t.trim() : ''
-    if (!label) continue
-    const requested = normalizeContinuityKey(label)
-    const existing = registryThreadsByKey.get(requested) ?? registryThreadsByLabel.get(requested)
-    const threadKey = normalizeContinuityKey(existing?.key ?? derivedContinuityKey(label))
-    if (resolvedThreadKeys.has(threadKey) || activeThreadKeys.has(threadKey)) continue
-    activeThreadKeys.add(threadKey)
-    threadOperations.push({
-      action: existing ? 'advance' : 'open',
-      threadKey,
-      label: existing?.label ?? label,
-      relatedFragmentIds: [],
-      evidenceSegments: [],
-      evidenceText: '',
-    })
-    threadFocus.push({ threadKey, visibility: 'foreground' })
-  }
-
-  // The compact small-model contract is a foreground snapshot. Anything still
-  // unresolved but omitted remains available to directions as dormant memory.
-  for (const existing of registry.thread) {
-    const threadKey = normalizeContinuityKey(existing.key)
-    if (activeThreadKeys.has(threadKey) || resolvedThreadKeys.has(threadKey)) continue
-    threadFocus.push({ threadKey, visibility: 'dormant' })
-  }
-
-  for (const { visibility, ...operation } of input.threadOperations ?? []) {
-    const allowDerived = operation.action === 'open'
-    const identity = resolveIdentity(operation, operation.label || operation.note, {
-      lane: 'thread',
-      allowDerived,
-      live: liveThreads,
-      registry: registry.thread,
-    })
-    if (!identity.ok) {
-      skipped.push({ kind: 'thread', key: operation.label ?? '', reason: identity.reason })
-      continue
-    }
-    const threadKey = identity.key
-    if (allowDerived) liveThreads.add(threadKey)
-    const resolved = citedEvidence(segments, operation.evidenceSegments)
-    const problem = citationProblem(resolved)
-    if (problem) {
-      skipped.push({ kind: 'thread', key: threadKey, reason: problem })
-      continue
-    }
-    const validRelatedFragmentIds = uniqueStrings(operation.relatedFragmentIds).filter(
-      (id) => !options?.checkedFragments || options.checkedFragments.has(id),
-    )
-    threadOperations.push({
-      threadKey,
-      action: operation.action,
-      ...(operation.label?.trim() ? { label: operation.label } : {}),
-      ...(operation.note?.trim() ? { note: operation.note } : {}),
-      relatedFragmentIds: validRelatedFragmentIds,
-      ...resolved.evidence,
-    })
-    // Acting on a thread puts it in view; a resolved or abandoned one is gone
-    // and cannot be.
-    if (operation.action === 'open' || operation.action === 'advance') {
-      threadFocus.push({ threadKey, visibility: visibility ?? 'foreground' })
-    }
-  }
-
-  const liveKnowledge = liveIdentitySet(registry.knowledge)
-  const knowledgeOperations: KnowledgeOperation[] = []
-  for (const operation of input.knowledgeOperations ?? []) {
-    if (options?.checkedFragments) {
-      const charFragment = options.checkedFragments.get(operation.characterId)
-      if (!charFragment) {
-        skipped.push({
-          kind: 'knowledge',
-          key: operation.characterId,
-          reason: `Character fragment "${operation.characterId}" does not exist in the story catalog.`,
-        })
-        continue
-      }
-      if (charFragment.type !== 'character') {
-        skipped.push({
-          kind: 'knowledge',
-          key: operation.characterId,
-          reason: `Fragment "${operation.characterId}" is a ${charFragment.type}, not a character. Knowledge operations must target character records.`,
-        })
-        continue
-      }
-    }
-    const allowDerived = operation.action === 'learn'
-    const identity = resolveIdentity(operation, operation.fact, {
-      lane: 'knowledge',
-      allowDerived,
-      live: liveKnowledge,
-      registry: registry.knowledge,
-      scope: operation.characterId,
-    })
-    if (!identity.ok) {
-      skipped.push({ kind: 'knowledge', key: operation.characterId, reason: identity.reason })
-      continue
-    }
-    const knowledgeKey = identity.key
-    if (allowDerived) liveKnowledge.add(scopedContinuityIdentity(knowledgeKey, operation.characterId))
-    const label = `${operation.characterId}:${knowledgeKey}`
-    const resolved = citedEvidence(segments, operation.evidenceSegments)
-    const problem = citationProblem(resolved)
-    if (problem) {
-      skipped.push({ kind: 'knowledge', key: label, reason: problem })
-      continue
-    }
-    if (operation.action !== 'forget' && !operation.fact?.trim()) {
-      skipped.push({ kind: 'knowledge', key: label, reason: 'Learning or correcting knowledge requires a fact.' })
-      continue
-    }
-    knowledgeOperations.push({
-      characterId: operation.characterId,
-      knowledgeKey,
-      action: operation.action,
-      ...(operation.fact?.trim() ? { fact: operation.fact } : {}),
-      acquisition: operation.acquisition ?? 'other',
-      ...resolved.evidence,
-    })
-  }
-
-  const liveStateInput = input.present !== undefined || input.characters !== undefined || input.entities !== undefined
-  const liveStates = liveStateInput
-    ? normalizeLiveStateReports(
-        { present: input.present, characters: input.characters, entities: input.entities, update: input.update },
-        registry.items,
-        options?.checkedFragments,
-      )
+  const locationFragmentId = scene.location?.fragmentId
+  const validLocationFragmentId = locationFragmentId
+    && (!checkedFragments || checkedFragments.has(locationFragmentId))
+    && FragmentIdSchema.safeParse(locationFragmentId).success
+    ? locationFragmentId
     : undefined
-  if (liveStates) skipped.push(...liveStates.skipped)
-
   const locKey = scene.location?.key?.trim() ?? ''
   const locLabel = scene.location?.label?.trim() ?? ''
-  const sanitizedLocation = scene.location && (locKey || locLabel)
+  const location = scene.location && (locKey || locLabel)
     ? {
         key: locKey || derivedContinuityKey(locLabel),
         label: locLabel || locKey,
-        ...(scene.location.fragmentId ? { fragmentId: scene.location.fragmentId } : {}),
+        ...(validLocationFragmentId ? { fragmentId: validLocationFragmentId } : {}),
       }
     : undefined
-
-  const sanitizedTime = scene.time
+  const time = scene.time
     ? {
         label: scene.time.label,
         certainty: scene.time.certainty,
         ...(scene.time.calendar ? { calendar: scene.time.calendar } : {}),
       }
     : undefined
-
-  const sanitizedElapsed = scene.elapsed
+  const elapsed = scene.elapsed
     ? {
         label: scene.elapsed.label,
         ...(scene.elapsed.minimumSeconds != null ? { minimumSeconds: scene.elapsed.minimumSeconds } : {}),
@@ -1059,27 +565,90 @@ function normalizeContinuityProjection(
       }
     : undefined
 
-  const storedScene: SceneUpdate = {
+  return {
     transition: scene.transition,
     ...(scene.line ? { line: scene.line } : {}),
-    ...(sanitizedLocation ? { location: sanitizedLocation } : {}),
-    ...(sanitizedTime ? { time: sanitizedTime } : {}),
-    ...(sanitizedElapsed ? { elapsed: sanitizedElapsed } : {}),
+    ...(location ? { location } : {}),
+    ...(time ? { time } : {}),
+    ...(elapsed ? { elapsed } : {}),
     ...((scene.evidenceSegments?.length ?? 0) > 0 ? {
       evidenceSegments: scene.evidenceSegments,
       ...(scene.evidenceText ? { evidenceText: scene.evidenceText } : {}),
     } : {}),
   }
+}
+
+/**
+ * Threads are a foreground snapshot plus what this passage settles. A thread
+ * is addressed by its key or its label; anything else opens a new one. Live
+ * threads the snapshot omits stay unresolved but go dormant, still available
+ * to directions.
+ */
+function normalizeThreads(
+  threads: string[],
+  resolvedThreads: string[],
+  registry: ContinuityRegistry['thread'],
+  skipped: Array<Skipped<{ kind: string; key: string }>>,
+): Pick<ContinuityProjection, 'threadOperations' | 'threadFocus'> {
+  const threadOperations: ThreadOperation[] = []
+  const threadFocus: ThreadFocus[] = []
+  const byKey = new Map(registry.map((entry) => [normalizeContinuityKey(entry.key), entry]))
+  const byLabel = new Map(registry.map((entry) => [normalizeContinuityKey(entry.label), entry]))
+  const existing = (value: string) => {
+    const requested = normalizeContinuityKey(value)
+    return byKey.get(requested) ?? byLabel.get(requested)
+  }
+  const active = new Set<string>()
+  const resolved = new Set<string>()
+
+  for (const value of resolvedThreads) {
+    const entry = existing(value)
+    if (!entry) {
+      skipped.push({ kind: 'thread', key: value, reason: `No unresolved thread matches "${value}".` })
+      continue
+    }
+    const threadKey = normalizeContinuityKey(entry.key)
+    if (resolved.has(threadKey)) continue
+    resolved.add(threadKey)
+    threadOperations.push({ action: 'resolve', threadKey })
+  }
+
+  for (const value of threads) {
+    const label = value.trim()
+    if (!label) continue
+    const entry = existing(label)
+    const threadKey = normalizeContinuityKey(entry?.key ?? derivedContinuityKey(label))
+    if (resolved.has(threadKey) || active.has(threadKey)) continue
+    active.add(threadKey)
+    threadOperations.push({ action: entry ? 'advance' : 'open', threadKey, label: entry?.label ?? label })
+    threadFocus.push({ threadKey, visibility: 'foreground' })
+  }
+
+  for (const entry of registry) {
+    const threadKey = normalizeContinuityKey(entry.key)
+    if (active.has(threadKey) || resolved.has(threadKey)) continue
+    threadFocus.push({ threadKey, visibility: 'dormant' })
+  }
+  return { threadOperations, threadFocus }
+}
+
+function normalizeContinuityProjection(
+  input: Pick<ReportPassageInput, 'scene' | 'present' | 'characters' | 'entities' | 'update' | 'threads' | 'resolvedThreads'>,
+  segments: TextSegment[],
+  registry: ContinuityRegistry,
+  checkedFragments: Map<string, Fragment> | undefined,
+): { projection: ContinuityProjection; skipped: Array<Skipped<{ kind: string; key: string }>> } {
+  const skipped: Array<Skipped<{ kind: string; key: string }>> = []
+  const scene = normalizeScene(input.scene, segments, checkedFragments, skipped)
+  const threads = normalizeThreads(input.threads ?? [], input.resolvedThreads ?? [], registry.thread, skipped)
+  const liveStates = normalizeLiveStateReports(
+    { present: input.present, characters: input.characters, entities: input.entities, update: input.update },
+    registry.items,
+    checkedFragments,
+  )
+  skipped.push(...liveStates.skipped)
   return {
-    projection: {
-      version: 3,
-      scene: storedScene,
-      stateOperations,
-      threadOperations,
-      threadFocus,
-      knowledgeOperations,
-      ...(liveStates ? { liveStates: liveStates.reports } : {}),
-    },
+    projection: { version: 4, scene, ...threads, liveStates: liveStates.reports },
     skipped,
   }
 }
@@ -1123,22 +692,15 @@ function proposalTargets(proposal: { operations: FragmentChangeOperation[] }): S
 
 function queueFragmentChangeProposal(params: {
   collector: AnalysisCollector
-  title?: string
-  rationale?: string
   proposalKind: 'correction' | 'new-fragment'
   evidenceSegments?: number[]
   evidenceText?: string
-  eligibilityReason?: string
-  autoApplySafe?: boolean
   operations: FragmentChangeOperation[]
   validation: OperationValidation[]
 }): void {
-  const title = params.title?.trim() ?? ''
-  const rationale = params.rationale?.trim() ?? ''
-  const eligibilityReason = params.eligibilityReason?.trim() ?? ''
   if (params.operations.length === 0) return
 
-  let autoApplySafe = params.autoApplySafe ?? true
+  let autoApplySafe = true
   const newTargets = proposalTargets(params)
   if (newTargets.size > 0) {
     for (const existing of params.collector.fragmentChangeProposals) {
@@ -1152,12 +714,9 @@ function queueFragmentChangeProposal(params: {
   }
 
   params.collector.fragmentChangeProposals.push({
-    ...(title ? { title } : {}),
-    ...(rationale ? { rationale } : {}),
     proposalKind: params.proposalKind,
     ...(params.evidenceSegments?.length ? { evidenceSegments: params.evidenceSegments } : {}),
     ...(params.evidenceText ? { evidenceText: params.evidenceText } : {}),
-    ...(eligibilityReason ? { eligibilityReason } : {}),
     autoApplySafe,
     operations: params.operations,
     validation: params.validation,
@@ -1166,7 +725,7 @@ function queueFragmentChangeProposal(params: {
 
 function correctionContractError(operation: FragmentChangeOperation): string | null {
   if (operation.action !== 'replace_text') {
-    return 'Corrections may only replace an exact existing assertion. Record events and state changes in reportAnalysis; use newFragments for a new reusable record.'
+    return 'Corrections may only replace an exact existing assertion. Live state carries changes that contradict nothing; use newRecords for a new reusable record.'
   }
   if (operation.replaceAll) {
     return 'Corrections cannot replace every occurrence automatically; identify one exact assertion and occurrence.'
@@ -1205,32 +764,152 @@ function deliverResolvedFragments(
   return delivered
 }
 
+/**
+ * The story's records by ID, for grounding what a report cites. Listing is the
+ * normal path; when it fails, the referenced IDs are loaded one by one so a
+ * report can still be grounded against what exists.
+ */
+async function loadCatalog(dataDir: string, storyId: string, referencedIds: string[]): Promise<Map<string, Fragment>> {
+  const catalog = new Map<string, Fragment>()
+  try {
+    for (const fragment of await listFragments(dataDir, storyId)) catalog.set(fragment.id, fragment)
+  } catch {
+    // Loaded by ID below.
+  }
+  if (catalog.size > 0) return catalog
+  const ids = [...new Set(referencedIds.filter((id) => id.trim().length > 0))]
+  for (const fragment of await Promise.all(ids.map((id) => getFragment(dataDir, storyId, id)))) {
+    if (fragment) catalog.set(fragment.id, fragment)
+  }
+  return catalog
+}
+
+function referencedFragmentIds(input: PassageReportArgs): string[] {
+  return [
+    ...input.mentions.map((mention) => mention.fragmentId),
+    ...input.contradictions.flatMap((contradiction) => [
+      ...contradiction.fragmentIds,
+      ...contradiction.conflictingEvidence.map((evidence) => evidence.fragmentId),
+    ]),
+    ...(input.scene.location?.fragmentId ? [input.scene.location.fragmentId] : []),
+    ...input.characters.map(reportRef),
+    ...input.entities.map(reportRef),
+  ]
+}
+
+/**
+ * A contradiction is a review finding, not a guess: it cites the new prose and
+ * the conflicting sentence of a reusable record. Without story storage (pure
+ * callers) there is nothing to cite against, so findings pass through.
+ */
+async function groundContradictions(
+  contradictions: ContradictionInput[],
+  proseSegments: TextSegment[],
+  catalog: Map<string, Fragment> | undefined,
+): Promise<{ grounded: AnalysisCollector['contradictions']; skipped: Array<Skipped<{ description: string }>> }> {
+  const grounded: AnalysisCollector['contradictions'] = []
+  const skipped: Array<Skipped<{ description: string }>> = []
+  for (const contradiction of contradictions) {
+    if (!catalog) {
+      grounded.push({
+        ...contradiction,
+        conflictingEvidence: contradiction.conflictingEvidence.map((evidence) => ({ ...evidence, evidenceText: '' })),
+      })
+      continue
+    }
+    const citedSource = citedEvidence(proseSegments, contradiction.sourceSegments)
+    const citationIssue = citationProblem(citedSource)
+    if (citationIssue) {
+      skipped.push({ description: contradiction.description, reason: citationIssue })
+      continue
+    }
+    if (contradiction.conflictingEvidence.length === 0) {
+      skipped.push({
+        description: contradiction.description,
+        reason: 'The finding did not cite a conflicting sentence in a reusable record.',
+      })
+      continue
+    }
+    // The record is shown sentence-numbered too, so the conflicting side is
+    // cited rather than re-quoted, exactly like the prose side.
+    const evidenceChecks = contradiction.conflictingEvidence.map((evidence) => {
+      const fragment = catalog.get(evidence.fragmentId)
+      const reusable = Boolean(fragment && fragment.type !== 'prose' && fragment.type !== 'summary')
+      const resolved = reusable
+        ? citedEvidence(segmentText(fragment!.content), evidence.segments)
+        : { evidence: { evidenceSegments: [] as number[], evidenceText: '' }, invalid: [] as number[] }
+      return { fragmentId: evidence.fragmentId, valid: reusable && citationProblem(resolved) === null, resolved }
+    })
+    const badEvidence = evidenceChecks.find((check) => !check.valid)
+    if (badEvidence) {
+      skipped.push({
+        description: contradiction.description,
+        reason: `Cite the numbered sentence in ${badEvidence.fragmentId} that carries the incompatible claim; it must be a reusable non-prose record.`,
+      })
+      continue
+    }
+    grounded.push({
+      description: contradiction.description,
+      ...(contradiction.recordCorrectionReason ? { recordCorrectionReason: contradiction.recordCorrectionReason } : {}),
+      fragmentIds: uniqueStrings(evidenceChecks.map((check) => check.fragmentId)),
+      sourceSegments: citedSource.evidence.evidenceSegments,
+      sourceEvidenceText: citedSource.evidence.evidenceText,
+      conflictingEvidence: evidenceChecks.map((check) => ({
+        fragmentId: check.fragmentId,
+        segments: check.resolved.evidence.evidenceSegments,
+        evidenceText: check.resolved.evidence.evidenceText,
+      })),
+    })
+  }
+  return { grounded, skipped }
+}
+
+/**
+ * A new record is warranted only by a name the prose really uses and the
+ * catalog does not already have; a bare claim that one might be is not
+ * evidence.
+ */
+function groundNewRecordNames(names: string[], prose: string, catalog: Map<string, Fragment> | undefined): string[] {
+  const catalogNames = new Set([...(catalog?.values() ?? [])]
+    .filter((fragment) => fragment.type !== 'prose')
+    .map((fragment) => fragment.name.trim().toLocaleLowerCase()))
+  return uniqueStrings(names
+    .map((name) => resolveMentionTerm({ fragmentId: '', modelText: name, prose }))
+    .filter((name) => name && !catalogNames.has(name.toLocaleLowerCase())))
+}
+
 // --- Tools ---
 
+export const PASSAGE_REPORT_TOOL = 'reportPassage'
+export const MAINTENANCE_REPORT_TOOL = 'reportMaintenance'
+
+/**
+ * The analyze reports. `reportPassage` answers the passage; `reportMaintenance`
+ * proposes record changes, and exists only with story storage and suggestions
+ * enabled. Both write into one collector and one numbered-record ledger.
+ * Without options, nothing is grounded against story storage.
+ */
 export function createAnalysisTools(
   collector: AnalysisCollector,
-  opts?: { 
-    dataDir: string; 
-    storyId: string; 
-    proseFragmentId?: string; 
-    disableDirections?: boolean; 
-    disableSuggestions?: boolean;
-    includeReadTools?: boolean;
-    includeReportTool?: boolean;
-    includeStandaloneProposalTools?: boolean;
-    numberedFragmentIds?: Set<string> | readonly string[];
-    continuityKeys?: ContinuityKeyRegistry;
-    customFragmentTypes?: Array<{ type: string; name: string }>;
-    onProgress?: (progress: LibrarianAnalysisProgress) => void;
+  opts?: {
+    dataDir: string
+    storyId: string
+    proseFragmentId?: string
+    disableDirections?: boolean
+    disableSuggestions?: boolean
+    numberedFragmentIds?: Set<string> | readonly string[]
+    registry?: Partial<ContinuityRegistry>
+    customFragmentTypes?: Array<{ type: string; name: string }>
+    onProgress?: (progress: LibrarianAnalysisProgress) => void
   },
-) {
+): ToolSet {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const tools: Record<string, any> = {}
   /**
-   * Every record the model has been shown numbered, from context blocks, reads,
-   * or resolved reports. It is what makes a segment number mean anything: an
-   * unread record still segments server-side, so a citation against one resolves
-   * to a real sentence, just not the one being counted to.
+   * Every record the model has been shown numbered, from context blocks or the
+   * passage report's delivery. It is what makes a segment number mean anything:
+   * an unshown record still segments server-side, so a citation against one
+   * resolves to a real sentence, just not the one being counted to.
    *
    * Held by reference — pipeline compilation adds the context-block half after
    * the tools exist, once user block overrides settle what is actually shown.
@@ -1238,13 +917,9 @@ export function createAnalysisTools(
   const numberedFragmentIds = opts?.numberedFragmentIds instanceof Set
     ? opts.numberedFragmentIds
     : new Set(opts?.numberedFragmentIds ?? [])
-  let hasReported = false
-  const unnumberedProposalAttemptIds = new Set<string>()
-  // Normalized once here; every lookup below reads the same shape and numbering.
-  const continuityRegistry = completeRegistry(opts?.continuityKeys ?? {})
+  const registry: ContinuityRegistry = { ...EMPTY_REGISTRY, ...opts?.registry }
   const emitProgress = (stage: LibrarianAnalysisProgressStage) => {
     if (!opts?.onProgress || !opts.proseFragmentId) return
-    if (!hasReported && stage !== 'observation') return
     opts.onProgress(structuredClone({
       fragmentId: opts.proseFragmentId,
       stage,
@@ -1261,24 +936,80 @@ export function createAnalysisTools(
     }))
   }
 
+  const includeDirections = opts?.disableDirections !== true
+  const maintenanceEnabled = opts !== undefined && opts.disableSuggestions !== true
   const customTypes = opts?.customFragmentTypes ?? []
   const allowedTypes = ['character', 'knowledge', ...customTypes.map((t) => t.type)]
+  const loadProse = async () => (opts?.proseFragmentId
+    ? (await getFragment(opts.dataDir, opts.storyId, opts.proseFragmentId))?.content ?? ''
+    : '')
+
+  tools[PASSAGE_REPORT_TOOL] = tool({
+    description: [
+      'Report this passage in one answer: what happened (summary, events, scene, mentions, and any record evidence),',
+      'then where each character and entity now stands and which threads are open or resolved',
+      includeDirections ? ', then distinct directions for the next passage.' : '.',
+    ].join(' '),
+    inputSchema: toExactJsonSchema(buildPassageReportInputSchema({ includeDirections })),
+    execute: async (input: PassageReportArgs) => {
+      if (!input.summary.trim()) {
+        return { ok: false, note: 'Empty summary: please provide a concise retrospective summary of the prose.' }
+      }
+      const prose = await loadProse()
+      // The same segmentation the prompt block rendered, so the numbers the
+      // model saw are the numbers resolved here.
+      const proseSegments = segmentText(prose)
+      const catalog = opts ? await loadCatalog(opts.dataDir, opts.storyId, referencedFragmentIds(input)) : undefined
+
+      const continuity = normalizeContinuityProjection(input, proseSegments, registry, catalog)
+      const mentions = groundMentions(input.mentions, prose, catalog)
+      const contradictions = await groundContradictions(input.contradictions, proseSegments, catalog)
+      collector.summaryUpdate = input.summary
+      collector.events = input.events
+      collector.continuityProjection = continuity.projection
+      collector.mentions = mentions.reported
+      collector.contradictions = contradictions.grounded
+      collector.newRecordNames = groundNewRecordNames(input.newRecordNames, prose, catalog)
+      if (input.directions) collector.directions = input.directions
+
+      // Record maintenance is shown these numbered, so a correction can
+      // address the sentence it replaces.
+      const resolvedFragments = catalog
+        ? deliverResolvedFragments(catalog, uniqueStrings([
+            ...collector.mentions.map((mention) => mention.fragmentId),
+            ...collector.contradictions.flatMap((contradiction) => contradiction.fragmentIds),
+          ]), numberedFragmentIds)
+        : []
+
+      emitProgress(maintenanceEnabled && needsRecordMaintenance(collector) ? 'record-maintenance' : 'passage')
+      return {
+        ok: true,
+        eventCount: collector.events.length,
+        mentionCount: collector.mentions.length,
+        contradictionCount: collector.contradictions.length,
+        newRecordNames: collector.newRecordNames,
+        sceneTransition: collector.continuityProjection.scene.transition,
+        subjectCount: collector.continuityProjection.liveStates.length,
+        threadCount: collector.continuityProjection.threadOperations.length,
+        directionCount: collector.directions.length,
+        ...(resolvedFragments.length > 0 ? { resolvedFragments } : {}),
+        ...(continuity.skipped.length > 0 ? { skippedContinuity: continuity.skipped } : {}),
+        ...(mentions.skipped.length > 0 ? { skippedMentions: mentions.skipped } : {}),
+        ...(contradictions.skipped.length > 0 ? { skippedContradictions: contradictions.skipped } : {}),
+      }
+    },
+  })
+
+  if (!opts || !maintenanceEnabled) return tools
 
   const resolveEvidence = async (cited: number[]) => {
-    if (!opts?.proseFragmentId) {
-      return { evidence: { evidenceSegments: cited, evidenceText: '' } }
-    }
-    const prose = await getFragment(opts.dataDir, opts.storyId, opts.proseFragmentId)
-    const resolved = citedEvidence(segmentText(prose?.content ?? ''), cited)
+    const resolved = citedEvidence(segmentText(await loadProse()), cited)
     const problem = citationProblem(resolved)
     if (problem) {
       return {
         error: {
           ok: false,
-          proposalCount: collector.fragmentChangeProposals.length,
-          queuedOperationCount: 0,
           invalid: 1,
-          evidenceMatched: false,
           note: `${problem} Cite sentence numbers from the New Prose Fragment.`,
         },
       }
@@ -1286,69 +1017,53 @@ export function createAnalysisTools(
     return { evidence: resolved.evidence }
   }
 
-  /** A proposal call is one atomic, self-contained author-facing change. */
+  /** A proposal is one atomic, self-contained author-facing change. */
   const queueValidatedProposal = async (params: {
-    toolName: 'proposeRecordCorrections' | 'proposeNewRecords' | 'reportMaintenance'
     proposalKind: 'correction' | 'new-fragment'
     evidence: CitedEvidence
-    title?: string
-    rationale?: string
     operations: FragmentChangeOperation[]
     rejected?: AnalysisProposalSkipped[]
   }) => {
     const skipped: AnalysisProposalSkipped[] = [...(params.rejected ?? [])]
     for (const operation of params.operations) {
-      if (operation.action === 'replace_text') {
-        const contractError = correctionContractError(operation)
-        if (contractError) {
-          skipped.push({ operationId: operation.operationId ?? '', action: operation.action, reason: contractError })
-        }
+      const contractError = correctionContractError(operation)
+      if (params.proposalKind === 'correction' && contractError) {
+        skipped.push({ operationId: operation.operationId ?? '', action: operation.action, reason: contractError })
       }
     }
 
-    const validation = (skipped.length === 0 && opts)
+    const validation = skipped.length === 0
       ? await validateOperations(opts.dataDir, opts.storyId, params.operations, {
-        allowedCreateTypes: allowedTypes,
-        createTypeScopeDescription: 'librarian analysis proposals',
-      })
+          allowedCreateTypes: allowedTypes,
+          createTypeScopeDescription: 'librarian analysis proposals',
+        })
       : { operations: [], results: [] as OperationValidation[] }
     for (const result of validation.results) {
       if (result.status !== 'valid') skipped.push(skippedOperation(result))
     }
 
-    if (skipped.length > 0 || (opts && validation.operations.length !== params.operations.length)) {
+    if (skipped.length > 0 || validation.operations.length !== params.operations.length) {
       return {
         ok: false,
-        proposalCount: collector.fragmentChangeProposals.length,
         queuedOperationCount: 0,
         invalid: skipped.length,
-        evidenceMatched: true,
         ...operationEchoFields(validation.results),
         skipped,
-        note: 'The proposal was not queued because one or more operations were invalid.',
       }
     }
 
     queueFragmentChangeProposal({
       collector,
-      title: params.title,
-      rationale: params.rationale,
       proposalKind: params.proposalKind,
       evidenceSegments: params.evidence.evidenceSegments,
       evidenceText: params.evidence.evidenceText,
-      eligibilityReason: params.rationale,
-      autoApplySafe: true,
       operations: validation.operations,
       validation: validation.results,
     })
-    emitProgress('record-maintenance')
     return {
       ok: true,
-      proposalCount: collector.fragmentChangeProposals.length,
       queuedOperationCount: validation.operations.length,
       invalid: 0,
-      evidenceMatched: true,
-      autoApplySafe: true,
       ...operationEchoFields(validation.results),
     }
   }
@@ -1358,7 +1073,7 @@ export function createAnalysisTools(
     const operations: FragmentChangeOperation[] = []
     for (const correction of corrections) {
       const field = correction.field ?? 'content'
-      const target = opts ? await getFragment(opts.dataDir, opts.storyId, correction.fragmentId) : null
+      const target = await getFragment(opts.dataDir, opts.storyId, correction.fragmentId)
       const current = target?.[field]
       if (!target || typeof current !== 'string') {
         unresolved.push({
@@ -1369,11 +1084,10 @@ export function createAnalysisTools(
         continue
       }
       if (!numberedFragmentIds.has(correction.fragmentId)) {
-        unnumberedProposalAttemptIds.add(correction.fragmentId)
         unresolved.push({
           operationId: '',
           action: 'replace_text',
-          reason: `${correction.fragmentId} has not been shown with numbered sentences. Include it in candidateFragmentIds or report mentions to inspect its numbered sentences.`,
+          reason: `${correction.fragmentId} has not been shown with numbered sentences, so no sentence of it can be addressed.`,
         })
         continue
       }
@@ -1404,664 +1118,60 @@ export function createAnalysisTools(
     return { operations, unresolved }
   }
 
-  if (opts?.includeReportTool !== false) {
-    tools.reportAnalysis = tool({
-      description: 'Report all prose findings in one self-contained batch. Evidence fields cite numbered sentences.',
-      inputSchema: toExactJsonSchema(buildReportAnalysisInputSchema(opts?.continuityKeys ?? {}, {
-        includeDirections: false,
-      })),
-      execute: async (input: ReportAnalysisInput & Record<string, any>) => {
-        const {
-          summary,
-          characters = [],
-          entities = [],
-          threads = [],
-          mentions = [],
-          scene = { transition: 'uncertain', evidenceSegments: [] },
-          // Legacy programmatic fallbacks
-          events = [],
-          stateOperations = [],
-          threadOperations = [],
-          knowledgeOperations = [],
-          maintenanceNeeded = false,
-        } = input
-        const candidateFragmentIds: string[] = Array.isArray(input.candidateFragmentIds)
-          ? input.candidateFragmentIds.filter((id: unknown): id is string => typeof id === 'string')
-          : []
-        const contradictions: ContradictionInput[] = Array.isArray(input.contradictions)
-          ? (input.contradictions as ContradictionInput[])
-          : []
-        const rawDirections = 'directions' in input && Array.isArray(input.directions)
-          ? input.directions
-          : []
-        const directions: SuggestionDirection[] = rawDirections.map((d: any) => {
-          const title = (d.title || d.label || d.summary || 'Direction').trim()
-          const instruction = (d.instruction || d.prompt || d.description || '').trim()
-          const description = (d.description || d.summary || d.instruction || d.prompt || '').trim()
-          return {
-            title,
-            description,
-            instruction,
-          }
-        })
-        const sourceProse = opts?.proseFragmentId
-          ? await getFragment(opts.dataDir, opts.storyId, opts.proseFragmentId)
-          : null
+  tools[MAINTENANCE_REPORT_TOOL] = tool({
+    description: 'Report only durable-record maintenance supported by the supplied numbered prose and records. Use empty arrays when review finds no safe correction or new reusable record.',
+    inputSchema: toExactJsonSchema(reportMaintenanceInputSchema),
+    execute: async (input: ReportMaintenanceInput) => {
+      const { evidenceSegments, corrections, newRecords } = input
+      const skippedProposals: unknown[] = []
+      let queuedOperationCount = 0
+      let invalid = 0
+      const record = (result: { queuedOperationCount?: number; invalid?: number; skipped?: unknown[] }) => {
+        queuedOperationCount += result.queuedOperationCount ?? 0
+        invalid += result.invalid ?? 0
+        skippedProposals.push(...(result.skipped ?? []))
+      }
 
-        if (!summary || summary.trim().length === 0) {
-          return {
-            ok: false,
-            note: 'Empty summary: please provide a concise retrospective summary of what happened in the prose.',
-          }
-        }
-
-        const checkedFragments = new Map<string, Fragment>()
-        if (opts) {
-          try {
-            const allStoryFragments = await listFragments(opts.dataDir, opts.storyId)
-            for (const f of allStoryFragments) {
-              checkedFragments.set(f.id, f)
-            }
-          } catch {
-            const uniqueIds = [...new Set<string>([
-              ...mentions.map((m) => m.fragmentId).filter(Boolean),
-              ...candidateFragmentIds,
-              ...contradictions.flatMap((c: any) => [
-                ...(c.fragmentIds ?? []),
-                ...(c.conflictingEvidence ?? []).map((evidence: any) => evidence.fragmentId),
-              ]),
-              ...(scene.location?.fragmentId ? [scene.location.fragmentId] : []),
-              ...((stateOperations ?? []).flatMap((op: any) => op?.subject?.fragmentId ? [op.subject.fragmentId] : [])),
-              ...((threadOperations ?? []).flatMap((operation: any) => operation?.relatedFragmentIds ?? [])),
-              ...((knowledgeOperations ?? []).map((operation: any) => operation?.characterId)),
-              ...characters.map(reportRef).filter(Boolean),
-              ...entities.map(reportRef).filter(Boolean),
-            ].filter((id): id is string => typeof id === 'string' && id.trim().length > 0))]
-
-            const checks = await Promise.all(
-              uniqueIds.map(async (fid) => ({ fid, fragment: await getFragment(opts.dataDir, opts.storyId, fid) })),
-            )
-            for (const check of checks) {
-              if (check.fragment) checkedFragments.set(check.fid, check.fragment)
-            }
-          }
-        }
-
-        // The same segmentation the prompt block rendered, so the numbers the
-        // model saw are the numbers resolved here.
-        const proseSegments = segmentText(sourceProse?.content ?? '')
-        const normalizedProjection = normalizeContinuityProjection({
-          scene,
-          threads,
-          characters,
-          entities,
-          stateOperations: stateOperations ?? undefined,
-          threadOperations: threadOperations ?? undefined,
-          knowledgeOperations: knowledgeOperations ?? undefined,
-        }, proseSegments, continuityRegistry, {
-          checkedFragments: opts ? checkedFragments : undefined,
-        })
-        collector.continuityProjection = normalizedProjection.projection
-
-        const candidateEvents = input.events ?? events
-        const rawEvents: string[] = Array.isArray(candidateEvents)
-          ? candidateEvents
-          : (typeof candidateEvents === 'string' && candidateEvents.trim().length > 0 ? [candidateEvents.trim()] : [])
-        collector.events = rawEvents
-        collector.summaryUpdate = summary
-        collector.directions = directions
-
-        // Mentions are the model's contextual judgment about which catalog
-        // records the prose references. The highlight term resolves to the
-        // record's catalog name, so a mention highlights without the model
-        // retyping a span; an in-prose verbatim span overrides it for aliases.
-        const { reported: reportedMentions, skipped: skippedMentions } = groundMentions(
-          mentions,
-          sourceProse?.content ?? '',
-          opts ? checkedFragments : undefined,
-        )
-        collector.mentions = reportedMentions
-        collector.candidateFragmentIds = groundCandidateIds(candidateFragmentIds, opts ? checkedFragments : undefined)
-
-        // Mentions become resolved context for the next writer turn; durable
-        // candidates additionally constrain continuity and record maintenance.
-        // Both deltas come back here rather than through readFragments: this
-        // call already loaded every referenced fragment to validate its ID, so
-        // making the model fetch what the process is holding buys only round
-        // trips.
-        const resolvedFragments = deliverResolvedFragments(
-          checkedFragments,
-          [...reportedMentions.map((mention) => mention.fragmentId), ...collector.candidateFragmentIds],
-          numberedFragmentIds,
-        )
-        // Mention bodies improve the next writer context but do not, by
-        // themselves, justify another Analyze request. Candidate IDs are the
-        // model explicitly asking to inspect durable assertions, so only a
-        // newly delivered candidate keeps the inspection stage open.
-        const candidateIds = new Set([...collector.candidateFragmentIds, ...unnumberedProposalAttemptIds])
-        const inspectionRequired = resolvedFragments.some((fragment) => candidateIds.has(fragment.id))
-        unnumberedProposalAttemptIds.clear()
-
-        const skippedContradictions: Array<Skipped<{ description: string }>> = []
-        const groundedContradictions: AnalysisCollector['contradictions'] = []
-        for (const contradiction of contradictions) {
-          // Pure/test consumers have no durable records to cite. The
-          // online Librarian must ground both sides so a plausible narrative
-          // transition cannot become a permanent red flag merely because the
-          // model called it a contradiction.
-          if (!opts?.proseFragmentId) {
-            groundedContradictions.push({
-              ...contradiction,
-              recordCorrectionReason: contradiction.recordCorrectionReason ?? undefined,
-              conflictingEvidence: (contradiction.conflictingEvidence ?? [])
-                .map((evidence: any) => ({ ...evidence, evidenceText: '' })),
-            })
-            continue
-          }
-          const citedSource = citedEvidence(proseSegments, contradiction.sourceSegments ?? [])
-          const citationIssue = citationProblem(citedSource)
-          if (citationIssue) {
-            skippedContradictions.push({
-              description: contradiction.description,
-              reason: citationIssue,
-            })
-            continue
-          }
-          if ((contradiction.conflictingEvidence ?? []).length === 0) {
-            skippedContradictions.push({
-              description: contradiction.description,
-              reason: 'The finding did not cite a conflicting sentence in a reusable record.',
-            })
-            continue
-          }
-
-          // The record is shown sentence-numbered too, so the conflicting side
-          // is cited rather than re-quoted, exactly like the prose side.
-          const evidenceChecks = await Promise.all((contradiction.conflictingEvidence ?? []).map(async (evidence: any) => {
-            const fragment = checkedFragments.get(evidence.fragmentId)
-              ?? await getFragment(opts.dataDir, opts.storyId, evidence.fragmentId)
-            const reusable = Boolean(fragment && fragment.type !== 'prose' && fragment.type !== 'summary')
-            const resolved = reusable
-              ? citedEvidence(segmentText(fragment!.content), evidence.segments)
-              : { evidence: { evidenceSegments: [] as number[], evidenceText: '' }, invalid: [] as number[] }
-            return { fragmentId: evidence.fragmentId, valid: reusable && citationProblem(resolved) === null, resolved }
-          }))
-          const badEvidence = evidenceChecks.find((check) => !check.valid)
-          if (badEvidence) {
-            skippedContradictions.push({
-              description: contradiction.description,
-              reason: `Cite the numbered sentence in ${badEvidence.fragmentId} that carries the incompatible claim; it must be a reusable non-prose record.`,
-            })
-            continue
-          }
-          const conflictingEvidence = evidenceChecks.map((check) => ({
-            fragmentId: check.fragmentId,
-            segments: check.resolved.evidence.evidenceSegments,
-            evidenceText: check.resolved.evidence.evidenceText,
-          }))
-          groundedContradictions.push({
-            description: contradiction.description,
-            ...(contradiction.recordCorrectionReason ? { recordCorrectionReason: contradiction.recordCorrectionReason } : {}),
-            fragmentIds: uniqueStrings(evidenceChecks.map((check) => check.fragmentId)),
-            sourceSegments: citedSource.evidence.evidenceSegments,
-            sourceEvidenceText: citedSource.evidence.evidenceText,
-            conflictingEvidence,
-          })
-        }
-        collector.contradictions = groundedContradictions
-
-        hasReported = true
-        emitProgress(inspectionRequired
-          ? 'inspection'
-          : opts?.disableDirections === true ? 'observation' : 'directions')
-        return {
-          ok: true,
-          mentionCount: collector.mentions.length,
-          candidateFragmentCount: collector.candidateFragmentIds.length,
-          contradictionCount: collector.contradictions.length,
-          eventCount: collector.events.length,
-          stateOperationCount: collector.continuityProjection.stateOperations.length,
-          threadOperationCount: collector.continuityProjection.threadOperations.length,
-          focusedThreadCount: collector.continuityProjection.threadFocus.length,
-          knowledgeOperationCount: collector.continuityProjection.knowledgeOperations.length,
-          directionCount: collector.directions.length,
-          directionsProvided: collector.directions.length > 0,
-          ...(resolvedFragments.length > 0 ? {
-            resolvedFragments,
-            resolvedFragmentNote: 'Full records for what you just reported, not already in your context. Their sentences are numbered for correction targeting. Use them for directions and record maintenance; no further reads are needed for these.',
-          } : {}),
-          ...(inspectionRequired ? { inspectionRequired: true } : {}),
-          maintenanceNeeded: maintenanceNeeded === true,
-          ...(normalizedProjection.skipped.length > 0 ? { skippedContinuity: normalizedProjection.skipped } : {}),
-          ...(skippedMentions.length > 0 ? {
-            skippedMentions,
-            skippedMentionNote: 'These texts do not appear verbatim in the prose, or cite unknown records, and were not stored as highlights.',
-          } : {}),
-          ...(skippedContradictions.length > 0 ? {
-            skippedContradictions,
-            skippedContradictionNote: 'Contradictions are review findings, not guesses. Cite sentence numbers on both sides.',
-          } : {}),
-        }
-      },
-    })
-
-    tools.reportObservation = tool({
-      description: 'Report grounded narrative observations: retrospective summary, scene frame, catalog mentions, and candidate/contradiction records.',
-      inputSchema: toExactJsonSchema(reportObservationInputSchema),
-      execute: async (input: ReportObservationInput) => {
-        const {
-          summary,
-          events = [],
-          scene = { transition: 'uncertain', evidenceSegments: [] },
-          mentions = [],
-          candidateFragmentIds = [],
-          contradictions = [],
-          newRecordNames = [],
-        } = input
-        if (!summary || summary.trim().length === 0) {
-          return { ok: false, note: 'Empty summary: please provide a concise retrospective summary of the prose.' }
-        }
-
-        const sourceProse = opts?.proseFragmentId
-          ? await getFragment(opts.dataDir, opts.storyId, opts.proseFragmentId)
-          : null
-        const proseSegments = segmentText(sourceProse?.content ?? '')
-
-        const checkedFragments = new Map<string, Fragment>()
-        if (opts) {
-          try {
-            const allStoryFragments = await listFragments(opts.dataDir, opts.storyId)
-            for (const f of allStoryFragments) checkedFragments.set(f.id, f)
-          } catch {
-            // best-effort fallback
-          }
-          if (checkedFragments.size === 0) {
-            const uniqueIds = [...new Set<string>([
-              ...mentions.map((m) => m.fragmentId).filter(Boolean),
-              ...candidateFragmentIds,
-              ...contradictions.flatMap((c: any) => [
-                ...(c.fragmentIds ?? []),
-                ...(c.conflictingEvidence ?? []).map((evidence: any) => evidence.fragmentId),
-              ]),
-              ...(scene.location?.fragmentId ? [scene.location.fragmentId] : []),
-            ].filter((id): id is string => typeof id === 'string' && id.trim().length > 0))]
-
-            const checks = await Promise.all(
-              uniqueIds.map(async (fid) => ({ fid, fragment: await getFragment(opts.dataDir, opts.storyId, fid) })),
-            )
-            for (const check of checks) {
-              if (check.fragment) checkedFragments.set(check.fid, check.fragment)
-            }
-          }
-        }
-
-        const normalizedProjection = normalizeContinuityProjection({
-          scene,
-        }, proseSegments, continuityRegistry, {
-          checkedFragments: opts ? checkedFragments : undefined,
-        })
-        collector.continuityProjection.scene = normalizedProjection.projection.scene
-        collector.summaryUpdate = summary
-        collector.events = events
-
-        // Mentions are the model's contextual judgment about which catalog
-        // records the prose references. The highlight term resolves to the
-        // record's catalog name, so a mention highlights without the model
-        // retyping a span; an in-prose verbatim span overrides it for aliases.
-        const { reported: reportedMentions, skipped: skippedMentions } = groundMentions(
-          mentions,
-          sourceProse?.content ?? '',
-          opts ? checkedFragments : undefined,
-        )
-        collector.mentions = reportedMentions
-
-        const rawCandidateIds = (candidateFragmentIds ?? []).filter((id): id is string => typeof id === 'string')
-        collector.candidateFragmentIds = groundCandidateIds(rawCandidateIds, opts ? checkedFragments : undefined)
-
-        // Contradiction Grounding
-        const skippedContradictions: Array<Skipped<{ description: string }>> = []
-        const groundedContradictions: AnalysisCollector['contradictions'] = []
-        for (const contradiction of contradictions) {
-          if (!opts?.proseFragmentId) {
-            groundedContradictions.push({
-              ...contradiction,
-              recordCorrectionReason: contradiction.recordCorrectionReason ?? undefined,
-              conflictingEvidence: (contradiction.conflictingEvidence ?? [])
-                .map((evidence: any) => ({ ...evidence, evidenceText: '' })),
-            })
-            continue
-          }
-          const citedSource = citedEvidence(proseSegments, contradiction.sourceSegments ?? [])
-          const citationIssue = citationProblem(citedSource)
-          if (citationIssue) {
-            skippedContradictions.push({
-              description: contradiction.description,
-              reason: citationIssue,
-            })
-            continue
-          }
-          if ((contradiction.conflictingEvidence ?? []).length === 0) {
-            skippedContradictions.push({
-              description: contradiction.description,
-              reason: 'The finding did not cite a conflicting sentence in a reusable record.',
-            })
-            continue
-          }
-
-          const evidenceChecks = await Promise.all((contradiction.conflictingEvidence ?? []).map(async (evidence: any) => {
-            const fragment = checkedFragments.get(evidence.fragmentId)
-              ?? await getFragment(opts.dataDir, opts.storyId, evidence.fragmentId)
-            const reusable = Boolean(fragment && fragment.type !== 'prose' && fragment.type !== 'summary')
-            const resolved = reusable
-              ? citedEvidence(segmentText(fragment!.content), evidence.segments)
-              : { evidence: { evidenceSegments: [] as number[], evidenceText: '' }, invalid: [] as number[] }
-            return { fragmentId: evidence.fragmentId, valid: reusable && citationProblem(resolved) === null, resolved }
-          }))
-          const badEvidence = evidenceChecks.find((check) => !check.valid)
-          if (badEvidence) {
-            skippedContradictions.push({
-              description: contradiction.description,
-              reason: `Cite the numbered sentence in ${badEvidence.fragmentId} that carries the incompatible claim; it must be a reusable non-prose record.`,
-            })
-            continue
-          }
-          const conflictingEvidence = evidenceChecks.map((check) => ({
-            fragmentId: check.fragmentId,
-            segments: check.resolved.evidence.evidenceSegments,
-            evidenceText: check.resolved.evidence.evidenceText,
-          }))
-          groundedContradictions.push({
-            description: contradiction.description,
-            ...(contradiction.recordCorrectionReason ? { recordCorrectionReason: contradiction.recordCorrectionReason } : {}),
-            fragmentIds: uniqueStrings(evidenceChecks.map((check) => check.fragmentId)),
-            sourceSegments: citedSource.evidence.evidenceSegments,
-            sourceEvidenceText: citedSource.evidence.evidenceText,
-            conflictingEvidence,
-          })
-        }
-        collector.contradictions = groundedContradictions
-
-        // A new record is warranted only by a name the prose really uses and the
-        // catalog does not already have; a bare claim that one might be is not
-        // evidence.
-        const catalogNames = new Set([...checkedFragments.values()]
-          .filter((fragment) => fragment.type !== 'prose')
-          .map((fragment) => fragment.name.trim().toLocaleLowerCase()))
-        collector.newRecordNames = uniqueStrings(newRecordNames
-          .map((name) => resolveMentionTerm({ fragmentId: '', modelText: name, prose: sourceProse?.content ?? '' }))
-          .filter((name) => name && !catalogNames.has(name.toLocaleLowerCase())))
-
-        // Deliver resolved fragments with numbered sentences for mentions, candidates, and contradictory records
-        const fragmentIdsToDeliver = uniqueStrings([
-          ...reportedMentions.map((mention) => mention.fragmentId),
-          ...collector.candidateFragmentIds,
-          ...groundedContradictions.flatMap((c) => c.conflictingEvidence?.map((e) => e.fragmentId) ?? []),
-        ])
-        const resolvedFragments = deliverResolvedFragments(
-          checkedFragments,
-          fragmentIdsToDeliver,
-          numberedFragmentIds,
-        )
-
-        hasReported = true
-        emitProgress('observation')
-
-        return {
-          ok: true,
-          nextInstruction: 'Observation complete. Stop here; the pipeline will invoke the continuity task separately.',
-          summaryLength: summary.length,
-          eventCount: collector.events.length,
-          mentionCount: reportedMentions.length,
-          candidateFragmentCount: collector.candidateFragmentIds.length,
-          contradictionCount: collector.contradictions.length,
-          sceneTransition: collector.continuityProjection.scene?.transition ?? 'uncertain',
-          newRecordNames: collector.newRecordNames,
-          ...(resolvedFragments.length > 0 ? {
-            resolvedFragments,
-            resolvedFragmentNote: 'Full records for what you just reported, not already in your context. Their sentences are numbered for correction targeting. Use them for record maintenance; no further reads are needed for these.',
-          } : {}),
-          ...(skippedMentions.length > 0 ? { skippedMentions } : {}),
-          ...(skippedContradictions.length > 0 ? { skippedContradictions } : {}),
-        }
-      },
-    })
-
-    tools.reportContinuity = tool({
-      description: 'Report only current continuity: active character and entity rosters, immediate working state, and foreground or resolved narrative threads. Every roster item needs ref: use its catalog ID when available, otherwise its name.',
-      inputSchema: toExactJsonSchema(reportContinuityInputSchema),
-      execute: async (input: ReportContinuityInput) => {
-        const {
-          present = [],
-          characters = [],
-          entities = [],
-          update = [],
-          threads = [],
-          resolvedThreads = [],
-        } = input
-        const sourceProse = opts?.proseFragmentId
-          ? await getFragment(opts.dataDir, opts.storyId, opts.proseFragmentId)
-          : null
-        const proseSegments = segmentText(sourceProse?.content ?? '')
-
-        const checkedFragments = new Map<string, Fragment>()
-        if (opts) {
-          try {
-            const allStoryFragments = await listFragments(opts.dataDir, opts.storyId)
-            for (const f of allStoryFragments) checkedFragments.set(f.id, f)
-          } catch {
-            // best-effort fallback
-          }
-          if (checkedFragments.size === 0) {
-            const uniqueIds = [...new Set<string>([
-              ...characters.map(reportRef).filter(Boolean),
-              ...entities.map(reportRef).filter(Boolean),
-            ].filter((id): id is string => typeof id === 'string' && id.trim().length > 0))]
-
-            const checks = await Promise.all(
-              uniqueIds.map(async (fid) => ({ fid, fragment: await getFragment(opts.dataDir, opts.storyId, fid) })),
-            )
-            for (const check of checks) {
-              if (check.fragment) checkedFragments.set(check.fid, check.fragment)
-            }
-          }
-        }
-
-        const normalizedProjection = normalizeContinuityProjection({
-          scene: collector.continuityProjection.scene,
-          present,
-          characters,
-          entities,
-          update,
-          threads,
-          resolvedThreads,
-        }, proseSegments, continuityRegistry, {
-          checkedFragments: opts ? checkedFragments : undefined,
-        })
-
-        collector.continuityProjection.liveStates = normalizedProjection.projection.liveStates
-        collector.continuityProjection.threadOperations = normalizedProjection.projection.threadOperations
-        collector.continuityProjection.threadFocus = normalizedProjection.projection.threadFocus
-        emitProgress('observation')
-
-        return {
-          ok: true,
-          nextInstruction: 'Continuity complete. Stop here; the pipeline will invoke directions separately when enabled.',
-          characterCount: (normalizedProjection.projection.liveStates ?? []).filter((report) => report.kind === 'character' && report.present).length,
-          entityCount: (normalizedProjection.projection.liveStates ?? []).filter((report) => report.kind === 'entity' && report.present).length,
-          threadCount: (normalizedProjection.projection.threadOperations ?? []).length,
-          ...(normalizedProjection.skipped.length > 0 ? { skippedContinuity: normalizedProjection.skipped } : {}),
-        }
-      },
-    })
-
-    if (opts?.disableSuggestions !== true && opts?.proseFragmentId) {
-      tools.reportMaintenance = tool({
-        description: 'Report only durable-record maintenance supported by the supplied numbered prose and records. Use empty arrays when review finds no safe correction or new reusable record.',
-        inputSchema: toExactJsonSchema(reportMaintenanceInputSchema),
-        execute: async (input: ReportMaintenanceInput) => {
-          const { evidenceSegments = [], corrections = [], newRecords = [] } = input
-          const proposalSkipped: any[] = []
-          let queuedOperationCount = 0
-          let invalid = 0
-          const recordResult = (result: { queuedOperationCount?: number; invalid?: number }) => {
-            queuedOperationCount += result.queuedOperationCount ?? 0
-            invalid += result.invalid ?? 0
-          }
-          const hasProposalWork = corrections.length > 0 || newRecords.length > 0
-          const evidence = hasProposalWork ? await resolveEvidence(evidenceSegments) : undefined
-
-          if (evidence?.error) {
-            recordResult(evidence.error)
-            proposalSkipped.push(evidence.error)
-          } else {
-            if (corrections.length > 0) {
-              const { operations, unresolved } = await resolveCorrectionOperations(corrections)
-              const result = await queueValidatedProposal({
-                toolName: 'reportMaintenance',
-                proposalKind: 'correction',
-                evidence: evidence!.evidence!,
-                operations,
-                rejected: unresolved,
-              })
-              recordResult(result)
-              if (!result.ok && 'skipped' in result && Array.isArray(result.skipped)) {
-                proposalSkipped.push(...result.skipped)
-              }
-            }
-
-            if (newRecords.length > 0) {
-              const result = await queueValidatedProposal({
-                toolName: 'reportMaintenance',
-                proposalKind: 'new-fragment',
-                evidence: evidence!.evidence!,
-                operations: newRecords.map((operation) => ({ ...operation, description: operation.description ?? '', action: 'create_fragment' as const })),
-              })
-              recordResult(result)
-              if (!result.ok && 'skipped' in result && Array.isArray(result.skipped)) {
-                proposalSkipped.push(...result.skipped)
-              }
-            }
-          }
-
-          emitProgress('record-maintenance')
-          return {
-            ok: true,
-            nextInstruction: 'Record maintenance complete. Stop here.',
-            proposalCount: collector.fragmentChangeProposals.length,
-            queuedOperationCount,
-            invalid,
-            ...(proposalSkipped.length > 0 ? { skippedProposals: proposalSkipped } : {}),
-          }
-        },
-      })
-    }
-  }
-
-  if (opts?.disableDirections !== true) {
-    tools.reportDirections = tool({
-      description: 'Report three distinct creative narrative directions for what could happen in the next passage. Analysis is complete after this call.',
-      inputSchema: toExactJsonSchema(reportDirectionsInputSchema),
-      execute: async (input: ReportDirectionsInput) => {
-        collector.directions = input.directions
-        emitProgress('directions')
-        return {
-          ok: true,
-          nextInstruction: 'Directions complete. Analysis finished.',
-          directionCount: collector.directions.length,
-        }
-      },
-    })
-  }
-
-  if (opts && opts.includeReadTools !== false) {
-    // Sharing the ledger is what makes a read the way to earn a record's
-    // numbers, rather than a second presentation that forgets to grant them.
-    const readTools = createFragmentTools(opts.dataDir, opts.storyId, {
-      readOnly: true,
-      numberedFragmentIds,
-      skipNumberedFragments: true,
-    })
-    for (const name of READ_TOOLS_ALREADY_IN_ANALYZE_CONTEXT) delete readTools[name]
-    Object.assign(tools, readTools)
-  }
-
-  if (!opts?.disableSuggestions && opts?.proseFragmentId && opts.includeStandaloneProposalTools !== false) {
-    tools.proposeRecordCorrections = tool({
-      description: 'Queue author-reviewed corrections for reusable records proven wrong by a grounded reportAnalysis finding. Do not rewrite prose or unresolved conflicts.',
-      inputSchema: librarianRecordCorrectionsInputSchema,
-      execute: async ({ title, evidenceSegments, rationale, corrections }) => {
+      if (corrections.length > 0 || newRecords.length > 0) {
         const evidence = await resolveEvidence(evidenceSegments)
-        if (evidence.error) return evidence.error
-        const { operations, unresolved } = await resolveCorrectionOperations(corrections)
-        return queueValidatedProposal({
-          toolName: 'proposeRecordCorrections',
-          proposalKind: 'correction',
-          evidence: evidence.evidence!,
-          title,
-          rationale,
-          operations,
-          rejected: unresolved,
-        })
-      },
-    })
+        if (evidence.error) {
+          invalid += evidence.error.invalid
+          skippedProposals.push(evidence.error)
+        } else {
+          if (corrections.length > 0) {
+            const { operations, unresolved } = await resolveCorrectionOperations(corrections)
+            record(await queueValidatedProposal({
+              proposalKind: 'correction',
+              evidence: evidence.evidence,
+              operations,
+              rejected: unresolved,
+            }))
+          }
+          if (newRecords.length > 0) {
+            record(await queueValidatedProposal({
+              proposalKind: 'new-fragment',
+              evidence: evidence.evidence,
+              operations: newRecords.map((operation) => ({ ...operation, action: 'create_fragment' as const })),
+            }))
+          }
+        }
+      }
 
-    tools.proposeNewRecords = tool({
-      description: `Queue new reusable named records established by the prose; not events, temporary conditions, unnamed scenery, or feelings. Allowed type values: ${allowedTypes.join(', ')}.`,
-      inputSchema: librarianNewRecordsInputSchema,
-      execute: async ({ title, evidenceSegments, rationale, newFragments }) => {
-        const evidence = await resolveEvidence(evidenceSegments)
-        if (evidence.error) return evidence.error
-        return queueValidatedProposal({
-          toolName: 'proposeNewRecords',
-          proposalKind: 'new-fragment',
-          evidence: evidence.evidence!,
-          title,
-          rationale,
-          operations: newFragments.map((operation) => ({ ...operation, description: operation.description ?? '', action: 'create_fragment' as const })),
-        })
-      },
-    })
-  }
+      emitProgress('record-maintenance')
+      return {
+        ok: true,
+        proposalCount: collector.fragmentChangeProposals.length,
+        queuedOperationCount,
+        invalid,
+        ...(skippedProposals.length > 0 ? { skippedProposals } : {}),
+      }
+    },
+  })
 
   return tools
 }
 
-/**
- * The analyze toolset. Single source for the runtime handler and the agent's
- * available-tools list, so the toggle path and the model stay in sync.
- *
- * Online analysis uses one shared collector and numbered-record ledger. Its
- * isolated observation, continuity, and directions requests report into that
- * collector without returning bodies already available in their prompt.
- * Deeper router/audit/backfill jobs can feed candidates into this same shape.
- */
-export function createLibrarianOnlineTools(
-  collector: AnalysisCollector,
-  opts: {
-    dataDir: string
-    storyId: string
-    proseFragmentId?: string
-    disableDirections?: boolean
-    disableSuggestions?: boolean
-    numberedFragmentIds?: Set<string> | readonly string[]
-    continuityKeys?: ContinuityKeyRegistry
-    customFragmentTypes?: Array<{ type: string; name: string }>
-    onProgress?: (progress: LibrarianAnalysisProgress) => void
-  },
-): ToolSet {
-  return createAnalysisTools(collector, {
-    ...opts,
-    includeReadTools: false,
-    includeReportTool: true,
-    includeStandaloneProposalTools: false,
-  })
-}
-
 /** Tool names the analyze agent exposes — drives the toggle list with no drift. */
 export function listLibrarianAnalyzeToolNames(): string[] {
-  return Object.keys(createLibrarianOnlineTools(createEmptyCollector(), {
-    dataDir: '',
-    storyId: '',
-    proseFragmentId: 'pr-preview',
-  }))
+  return Object.keys(createAnalysisTools(createEmptyCollector(), { dataDir: '', storyId: '' }))
 }

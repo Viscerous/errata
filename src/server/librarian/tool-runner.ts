@@ -44,14 +44,14 @@ export interface ToolLoopPassResult {
 
 export interface ToolLoopStepUsage {
   stepNumber: number
-  /** Parent pipeline stage when several isolated requests are aggregated. */
+  /** Parent pipeline stage when several requests are aggregated. */
   stage?: string
   finishReason: string
   usage: unknown
   servedModelId?: string
-  /** Tool schemas exposed for this request when the loop uses staged tools. */
+  /** Tool schemas exposed for this request when the loop restricts them. */
   activeTools?: string[]
-  /** Wall time for the request and its tool execution, when staged timing is available. */
+  /** Wall time for the request and its tool execution, when timing is available. */
   durationMs?: number
 }
 

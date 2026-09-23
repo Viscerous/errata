@@ -84,13 +84,7 @@ export function LibrarianAnalysisCard({
     ),
     [analysis?.mentions, fragmentById, customTypeByType],
   )
-  const provisionalLabel = provisionalStage === 'inspection'
-    ? 'Checking records'
-    : provisionalStage === 'record-maintenance'
-      ? 'Reviewing memory'
-      : provisionalStage === 'directions'
-        ? 'Adding directions'
-        : 'Analyzing'
+  const provisionalLabel = provisionalStage === 'record-maintenance' ? 'Reviewing memory' : 'Analyzing'
 
   return (
     <article
@@ -248,7 +242,7 @@ function ContinuityNotes({ projection, stale, charName }: {
         {projection.scene.location ? ` — ${projection.scene.location.label}` : ''}
         {projection.scene.time ? ` — ${projection.scene.time.label}` : ''}
       </InlineField>
-      {projection.liveStates && projection.liveStates.length > 0 && (
+      {projection.liveStates.length > 0 && (
         <div>
           <SubLabel>Characters and entities</SubLabel>
           <AnalysisList items={projection.liveStates.map((report) => {
@@ -264,18 +258,7 @@ function ContinuityNotes({ projection, stale, charName }: {
           })} />
         </div>
       )}
-      {projection.stateOperations.length > 0 && (
-        <div><SubLabel>Current state</SubLabel><AnalysisList items={projection.stateOperations.map((operation, index) => ({
-          key: `state-${index}`,
-          content: operation.action === 'clear'
-            ? `${operation.stateKey}: no longer current`
-            : `${operation.subject.label} — ${operation.facet}${operation.slot ? `/${operation.slot}` : ''}: ${operation.value} (${operation.scope}${operation.until ? ` until ${operation.until.label}` : ''}, ${operation.certainty})`,
-        }))} /></div>
-      )}
       {threadRows.length > 0 && <div><SubLabel>Unresolved threads</SubLabel><AnalysisList items={threadRows} /></div>}
-      {projection.knowledgeOperations.length > 0 && (
-        <div><SubLabel>Character awareness</SubLabel><AnalysisList items={projection.knowledgeOperations.map((operation, index) => ({ key: `knowledge-${index}`, content: `${charName(operation.characterId)}: ${operation.action}${operation.fact ? ` — ${operation.fact}` : ''}` }))} /></div>
-      )}
     </div>
   )
 }
@@ -354,7 +337,7 @@ function AnalysisList({ items, marker = true }: { items: Array<{ key: string; co
   return <ul className="mt-0.5 space-y-0.5">{items.map(item => <li key={item.key} className="leading-relaxed text-foreground/60">{marker ? '- ' : ''}{item.content}</li>)}</ul>
 }
 
-const THREAD_ACTION_LABELS: Record<string, string> = { open: 'opened', advance: 'advanced', resolve: 'resolved', abandon: 'abandoned' }
+const THREAD_ACTION_LABELS: Record<string, string> = { open: 'opened', advance: 'advanced', resolve: 'resolved' }
 export function threadContinuityRows(
   operations: Array<{ threadKey: string; action: string; label?: string }>,
   focus: Array<{ threadKey: string; visibility: string }>,

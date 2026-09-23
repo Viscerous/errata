@@ -1,12 +1,7 @@
 import { z } from 'zod'
 import {
-  reportObservationInputSchema,
-  reportContinuityInputSchema,
-  reportDirectionsInputSchema,
   reportMaintenanceInputSchema,
-  reportAnalysisInputSchema,
-  librarianRecordCorrectionsInputSchema,
-  librarianNewRecordsInputSchema,
+  reportPassageInputSchema,
 } from '../src/server/librarian/analysis-tools'
 import { proposeFragmentChangesSchema } from '../src/contracts/fragment-changes'
 
@@ -41,13 +36,8 @@ function walk(node: any, path: string, problems: string[]) {
 }
 
 for (const [name, schema] of [
-  ['reportObservation', reportObservationInputSchema],
-  ['reportAnalysis', reportAnalysisInputSchema],
-  ['reportContinuity', reportContinuityInputSchema],
+  ['reportPassage', reportPassageInputSchema],
   ['reportMaintenance', reportMaintenanceInputSchema],
-  ['reportDirections', reportDirectionsInputSchema],
-  ['proposeRecordCorrections', librarianRecordCorrectionsInputSchema],
-  ['proposeNewRecords', librarianNewRecordsInputSchema],
   ['proposeFragmentChanges', proposeFragmentChangesSchema],
 ] as const) {
   const doc = z.toJSONSchema(schema as any)
@@ -61,6 +51,3 @@ for (const [name, schema] of [
   }
 }
 
-const cont = z.toJSONSchema(reportContinuityInputSchema as any) as any
-console.log('\nstate node (characters.items.properties.state):')
-console.log(JSON.stringify(cont.properties.characters.items.properties.state, null, 1))
