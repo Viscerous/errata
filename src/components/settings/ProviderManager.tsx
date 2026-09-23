@@ -3,11 +3,12 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, type DiscoveredProvider, type ProviderConfigSafe, type ProviderModelInfo } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Checkbox } from '@/components/ui/checkbox'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Plus, Trash2, Star, Pencil, RefreshCw, Loader2, X, ArrowLeft, Minus, Zap, Copy, KeyRound, Server } from 'lucide-react'
 import { EmptyHint, Hint } from '@/components/ui/prose-text'
 import { randomToken } from '@/lib/client-ids'
-import { PROVIDER_PRESETS, providerPresetEntries, type PresetId } from '@/contracts/providers'
+import { DEFAULT_REASONING_ALLOWANCE, PROVIDER_PRESETS, providerPresetEntries, type PresetId } from '@/contracts/providers'
 import { modelOptionLabel } from '@/lib/model-capabilities'
 import {
   Panel,
@@ -31,6 +32,9 @@ interface FormState {
   defaultModel: string
   customHeaders: Array<{ key: string; value: string; _id: string }>
   temperature: string // stored as string for input; '' means unset
+  /** Per model, as typed; '' or absent means the default allowance. */
+  reasoningAllowance: Record<string, string>
+  structuredOutput: boolean
 }
 
 type ModelOption = ProviderModelInfo
@@ -44,6 +48,8 @@ const emptyForm: FormState = {
   defaultModel: defaultPreset.defaultModel,
   customHeaders: [],
   temperature: '',
+  reasoningAllowance: {},
+  structuredOutput: defaultPreset.structuredOutput,
 }
 
 /**
@@ -119,13 +125,13 @@ export function ProviderPanel({ onClose }: { onClose: () => void }) {
   }, [])
 
   const addMutation = useMutation({
-    mutationFn: (data: { name: string; preset?: string; baseURL: string; apiKey: string; defaultModel: string; customHeaders?: Record<string, string>; temperature?: number }) =>
+    mutationFn: (data: { name: string; preset?: string; baseURL: string; apiKey: string; defaultModel: string; customHeaders?: Record<string, string>; temperature?: number; reasoningAllowance?: Record<string, number>; structuredOutput?: boolean }) =>
       api.config.addProvider(data),
     onSuccess: () => { invalidate(); closeForm() },
   })
 
   const updateMutation = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: { name?: string; baseURL?: string; apiKey?: string; defaultModel?: string; customHeaders?: Record<string, string>; temperature?: number } }) =>
+    mutationFn: ({ id, data }: { id: string; data: { name?: string; baseURL?: string; apiKey?: string; defaultModel?: string; customHeaders?: Record<string, string>; temperature?: number; reasoningAllowance?: Record<string, number>; structuredOutput?: boolean } }) =>
       api.config.updateProvider(id, data),
     onSuccess: () => { invalidate(); closeForm() },
   })
@@ -160,6 +166,8 @@ export function ProviderPanel({ onClose }: { onClose: () => void }) {
       defaultModel: provider.models[0]?.id ?? preset.defaultModel,
       customHeaders: [],
       temperature: '',
+      reasoningAllowance: {},
+      structuredOutput: preset.structuredOutput,
     })
     setFetchedModels(provider.models)
     setFetchError(null)
@@ -207,6 +215,11 @@ export function ProviderPanel({ onClose }: { onClose: () => void }) {
       defaultModel: provider.defaultModel,
       customHeaders: Object.entries(headers).map(([key, value]) => ({ key, value, _id: randomToken() })),
       temperature: provider.temperature != null ? String(provider.temperature) : '',
+      reasoningAllowance: Object.fromEntries(
+        Object.entries(provider.reasoningAllowance ?? {}).map(([model, tokens]) => [model, String(tokens)]),
+      ),
+      structuredOutput: provider.structuredOutput
+        ?? (provider.preset in PROVIDER_PRESETS && PROVIDER_PRESETS[provider.preset as PresetKey].structuredOutput),
     })
     setFetchedModels([])
     setFetchError(null)
@@ -224,6 +237,8 @@ export function ProviderPanel({ onClose }: { onClose: () => void }) {
       defaultModel: p.defaultModel || form.defaultModel,
       customHeaders: Object.entries(p.customHeaders).map(([key, value]) => ({ key, value, _id: randomToken() })),
       temperature: form.temperature,
+      reasoningAllowance: form.reasoningAllowance,
+      structuredOutput: p.structuredOutput,
     })
     setFetchedModels([])
     setFetchError(null)
@@ -307,6 +322,11 @@ export function ProviderPanel({ onClose }: { onClose: () => void }) {
     }
     const parsedTemp = form.temperature !== '' ? parseFloat(form.temperature) : undefined
     const temperature = parsedTemp != null && !isNaN(parsedTemp) ? parsedTemp : undefined
+    const reasoningAllowance: Record<string, number> = {}
+    for (const [model, typed] of Object.entries(form.reasoningAllowance)) {
+      const tokens = Number.parseInt(typed, 10)
+      if (Number.isInteger(tokens) && tokens >= 0) reasoningAllowance[model] = tokens
+    }
     if (editingId) {
       const data: {
         name: string
@@ -314,8 +334,10 @@ export function ProviderPanel({ onClose }: { onClose: () => void }) {
         defaultModel: string
         customHeaders: Record<string, string>
         temperature?: number
+        reasoningAllowance: Record<string, number>
+        structuredOutput: boolean
         apiKey?: string
-      } = { name: form.name, baseURL: form.baseURL, defaultModel: form.defaultModel, customHeaders: headersRecord, temperature }
+      } = { name: form.name, baseURL: form.baseURL, defaultModel: form.defaultModel, customHeaders: headersRecord, temperature, reasoningAllowance, structuredOutput: form.structuredOutput }
       if (form.apiKey) data.apiKey = form.apiKey
       updateMutation.mutate({ id: editingId, data })
     } else {
@@ -327,6 +349,8 @@ export function ProviderPanel({ onClose }: { onClose: () => void }) {
         defaultModel: form.defaultModel,
         customHeaders: headersRecord,
         temperature,
+        reasoningAllowance,
+        structuredOutput: form.structuredOutput,
       })
     }
   }
@@ -610,6 +634,42 @@ export function ProviderPanel({ onClose }: { onClose: () => void }) {
               </div>
               <p className="text-ui-label text-muted-foreground mt-1">
                 Controls randomness (0 = deterministic, 2 = most creative). Leave empty for model default.
+              </p>
+            </div>
+
+            {/* Reasoning allowance, for the selected model */}
+            <div>
+              <label htmlFor="provider-form-reasoning" className={labelClass}>Reasoning allowance</label>
+              <Input
+                id="provider-form-reasoning"
+                type="number"
+                min={0}
+                step={1024}
+                value={form.reasoningAllowance[form.defaultModel] ?? ''}
+                onChange={(e) => setForm({
+                  ...form,
+                  reasoningAllowance: { ...form.reasoningAllowance, [form.defaultModel]: e.target.value },
+                })}
+                className="h-9 w-32 bg-muted/30"
+                placeholder={String(DEFAULT_REASONING_ALLOWANCE)}
+              />
+              <p className="text-ui-label text-muted-foreground mt-1">
+                Tokens {form.defaultModel || 'this model'} may think for before a librarian answer. A model that reasons longer needs more; the cap is what stops a runaway request.
+              </p>
+            </div>
+
+            {/* Structured output */}
+            <div>
+              <label htmlFor="provider-form-structured" className="flex items-center gap-2 text-sm">
+                <Checkbox
+                  id="provider-form-structured"
+                  checked={form.structuredOutput}
+                  onCheckedChange={(checked) => setForm({ ...form, structuredOutput: checked === true })}
+                />
+                Structured output
+              </label>
+              <p className="text-ui-label text-muted-foreground mt-1">
+                The server holds librarian reports to their exact form (llama.cpp, LM Studio, Ollama). Turn off if this server rejects JSON-schema responses.
               </p>
             </div>
 

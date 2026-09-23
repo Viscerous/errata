@@ -14,6 +14,7 @@ import {
 import { createLogger } from '../logging'
 import type { SamplingSettings, StoryMeta } from '@/contracts/story'
 import { isGeminiProvider, normalizeGeminiBaseURL } from '../config/provider-urls'
+import { PROVIDER_PRESETS, isPresetId } from '@/contracts/providers'
 
 type ModelOverride = StoryMeta['settings']['modelOverrides'][string]
 
@@ -22,9 +23,16 @@ type ModelOverride = StoryMeta['settings']['modelOverrides'][string]
 const providerCache = new Map<string, ReturnType<typeof createOpenAICompatible>>()
 const googleProviderCache = new Map<string, ReturnType<typeof createGoogleGenerativeAI>>()
 
-function getCachedProvider(id: string, baseURL: string, apiKey: string, name: string, customHeaders?: Record<string, string>) {
+function getCachedProvider(
+  id: string,
+  baseURL: string,
+  apiKey: string,
+  name: string,
+  customHeaders: Record<string, string> | undefined,
+  structuredOutput: boolean,
+) {
   const headerStr = customHeaders ? JSON.stringify(customHeaders) : ''
-  const cacheKey = `${id}:${name}:${baseURL}:${apiKey}:${headerStr}`
+  const cacheKey = `${id}:${name}:${baseURL}:${apiKey}:${headerStr}:${structuredOutput}`
   let provider = providerCache.get(cacheKey)
   if (!provider) {
     provider = createOpenAICompatible({
@@ -32,6 +40,7 @@ function getCachedProvider(id: string, baseURL: string, apiKey: string, name: st
       baseURL,
       apiKey,
       includeUsage: true,
+      supportsStructuredOutputs: structuredOutput,
       headers: customHeaders && Object.keys(customHeaders).length > 0 ? customHeaders : undefined,
     })
     providerCache.set(cacheKey, provider)
@@ -119,6 +128,10 @@ export interface ResolvedModel extends SamplingSettings {
   model: LanguageModel
   providerId: string | null
   modelId: string
+  /** Whether the provider constrains a JSON-schema response format while decoding. */
+  structuredOutput: boolean
+  /** Configured reasoning tokens per structured request for this model, if any. */
+  reasoningAllowance?: number
   config: {
     providerName: string | null
     baseURL: string | null
@@ -210,9 +223,12 @@ export async function getModel(dataDir: string, storyId?: string, opts: GetModel
     const nativeGemini = isGeminiProvider(provider)
     const baseURL = nativeGemini ? normalizeGeminiBaseURL(provider.baseURL) : provider.baseURL
     const providerOptionsKey = provider.name.split('.')[0].trim()
+    const structuredOutput = !nativeGemini && (
+      provider.structuredOutput ?? (isPresetId(provider.preset) && PROVIDER_PRESETS[provider.preset].structuredOutput)
+    )
     const rawModel = nativeGemini
       ? getCachedGoogleProvider(provider.id, baseURL, provider.apiKey, provider.customHeaders)(modelId)
-      : getCachedProvider(provider.id, provider.baseURL, provider.apiKey, provider.name, provider.customHeaders).chatModel(modelId)
+      : getCachedProvider(provider.id, provider.baseURL, provider.apiKey, provider.name, provider.customHeaders, structuredOutput).chatModel(modelId)
     const model = nativeGemini
       ? rawModel
       : wrapLanguageModel({
@@ -228,6 +244,8 @@ export async function getModel(dataDir: string, storyId?: string, opts: GetModel
       model,
       providerId: provider.id,
       modelId,
+      structuredOutput,
+      ...(provider.reasoningAllowance?.[modelId] !== undefined ? { reasoningAllowance: provider.reasoningAllowance[modelId] } : {}),
       temperature,
       topP: targetTopP,
       topK: targetTopK,
@@ -255,6 +273,8 @@ export async function getModel(dataDir: string, storyId?: string, opts: GetModel
 export interface AgentRuntime extends ResolvedModel {
   providerOptions?: ProviderOptions
   guards: GenerationGuards
+  /** Whether the story lets the model reason before answering. */
+  thinkingEnabled: boolean
 }
 
 /** Settings that can be spread directly into AI SDK generation calls. */
@@ -292,5 +312,6 @@ export async function resolveAgentRuntime(
     ...resolved,
     providerOptions: buildProviderOptions(story.settings.disableThinking ?? false),
     guards: resolveGenerationGuards(story.settings.generationLimits),
+    thinkingEnabled: story.settings.disableThinking !== true,
   }
 }

@@ -165,8 +165,8 @@ describe('compileAgentContext', () => {
     const instructions = result.blocks.find((block) => block.id === 'instructions')!
 
     expect(Object.keys(result.tools)).toEqual(['reportAnalysis'])
-    expect(instructions.content).toContain('This request has one active reporting task.')
-    expect(instructions.content).toContain('Use the active tool exactly once, then stop.')
+    expect(instructions.content).toContain('This request has one reporting task.')
+    expect(instructions.content).toContain('Deliver its report exactly once, in the form the task asks for, then stop.')
     expect(instructions.content).not.toContain('record-maintenance')
   })
 

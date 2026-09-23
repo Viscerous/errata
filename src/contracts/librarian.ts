@@ -4,6 +4,7 @@ import type {
   ContinuityProjection,
   ContinuityView,
 } from './continuity'
+import type { FoldedLiveState } from './live-state'
 import type {
   AppliedChange,
   FragmentChangeOperation,
@@ -224,15 +225,14 @@ export interface LibrarianContinuityResponse {
   latestAnalysisId: string | null
 }
 
-export interface UpdateCharacterLiveStateResponse {
+export interface UpdateLiveStateRequest {
+  fields: Array<{ field: string; value: string }>
+  /** An edited item keeps its id; a new item has none. */
+  items: Array<{ id?: string; field: string; text: string }>
+}
+
+export interface UpdateLiveStateResponse {
   ok: boolean
-  characterState: {
-    characterId: string
-    name: string
-    immediate?: string
-    state: Record<string, string>
-    knowledge: string[]
-    secrets: string[]
-  }
+  liveState: FoldedLiveState | null
 }
 

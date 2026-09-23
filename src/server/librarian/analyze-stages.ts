@@ -6,7 +6,7 @@ export const ANALYZE_CONTINUITY_TOOL = 'reportContinuity'
 export const ANALYZE_MAINTENANCE_TOOL = 'reportMaintenance'
 export const ANALYZE_DIRECTIONS_TOOL = 'reportDirections'
 
-export type AnalyzeStageId = 'observation' | 'continuity' | 'maintenance' | 'directions'
+export type AnalyzeStageId = 'observation' | 'continuity' | 'maintenance' | 'directions' | 'passage'
 
 export interface AnalyzeStageDefinition {
   id: AnalyzeStageId
@@ -15,7 +15,10 @@ export interface AnalyzeStageDefinition {
   conditional: boolean
   toolName: string
   toolNames: string[]
+  /** The task, stated for a request answered by calling its tool. */
   directive: string
+  /** The same task, stated for a request answered in its tool's schema as JSON. */
+  structuredDirective: string
 }
 
 function stage(
@@ -23,10 +26,19 @@ function stage(
   toolName: string,
   label: string,
   description: string,
-  directive: string,
+  task: string,
   conditional = false,
 ): AnalyzeStageDefinition {
-  return { id, toolName, toolNames: [toolName], label, description, directive, conditional }
+  return {
+    id,
+    toolName,
+    toolNames: [toolName],
+    label,
+    description,
+    directive: `Perform only the ${task} task. Call ${toolName} exactly once, then stop.`,
+    structuredDirective: `Perform only the ${task} task. Answer with the report as a single JSON object in the form below.`,
+    conditional,
+  }
 }
 
 /**
@@ -47,7 +59,7 @@ export function buildAnalyzeStagePlan(availableTools: readonly string[]): Analyz
     observationTool,
     'Observation',
     'Grounded narrative summary, scene frame, mentions, and continuity candidates.',
-    `Perform only the observation task. Call ${observationTool} exactly once, then stop.`,
+    'observation',
   )]
 
   if (observationTool === ANALYZE_OBSERVATION_TOOL && available.has(ANALYZE_CONTINUITY_TOOL)) {
@@ -56,7 +68,7 @@ export function buildAnalyzeStagePlan(availableTools: readonly string[]): Analyz
       ANALYZE_CONTINUITY_TOOL,
       'Continuity',
       'Active character and entity state plus foreground and resolved threads.',
-      'Perform only the continuity task. Call reportContinuity exactly once, then stop.',
+      'continuity',
     ))
   }
 
@@ -66,7 +78,7 @@ export function buildAnalyzeStagePlan(availableTools: readonly string[]): Analyz
       ANALYZE_MAINTENANCE_TOOL,
       'Record maintenance',
       'Corrections or new reusable records, only when observation found durable-record work.',
-      'Perform only the record-maintenance task. Call reportMaintenance exactly once, then stop.',
+      'record-maintenance',
       true,
     ))
   }
@@ -77,11 +89,28 @@ export function buildAnalyzeStagePlan(availableTools: readonly string[]): Analyz
       ANALYZE_DIRECTIONS_TOOL,
       'Directions',
       'Distinct next-passage directions based on the completed analysis.',
-      'Perform only the directions task. Call reportDirections exactly once, then stop.',
+      'directions',
     ))
   }
 
   return stages
+}
+
+/**
+ * The single-report plan: the whole passage in one request, then record
+ * maintenance only when that report produced evidence for it.
+ */
+export function buildSinglePassPlan(passageToolName: string, availableTools: readonly string[]): AnalyzeStageDefinition[] {
+  return [
+    stage(
+      'passage',
+      passageToolName,
+      'Passage',
+      'Observation, live state, threads, and directions in one report.',
+      'passage-analysis',
+    ),
+    ...buildAnalyzeStagePlan(availableTools).filter((candidate) => candidate.id === 'maintenance'),
+  ]
 }
 
 /** Static stage map used by the context preview. */

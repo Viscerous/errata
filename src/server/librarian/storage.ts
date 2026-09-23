@@ -8,6 +8,7 @@ import { generateConversationId } from '@/lib/fragment-ids'
 import { writeJsonAtomic } from '../fs-utils'
 import { withKeyLock } from '../async-lock'
 import { ContinuityProjectionSchema } from '@/contracts/continuity'
+import { LiveStateEditLogSchema, type LiveStateEdit, type LiveStateEditLog } from '@/contracts/live-state'
 import type {
   LibrarianAnalysis,
   LibrarianAnalysisSummary,
@@ -371,7 +372,7 @@ export async function getAnalysis(
   const pending = (async () => {
     if (!existsSync(path)) return null
     const raw = await readFile(path, 'utf-8')
-    return normalizeAnalysis(JSON.parse(raw))
+    return normalizeStoredAnalysis(JSON.parse(raw))
   })()
   cacheAnalysisRead(path, pending)
   try {
@@ -380,6 +381,19 @@ export async function getAnalysis(
     if (analysisReadCache.get(path) === pending) analysisReadCache.delete(path)
     throw error
   }
+}
+
+/**
+ * A stored projection in an earlier format is not read: the passage folds as
+ * unanalyzed until it is analyzed again. Writes stay strict.
+ */
+function normalizeStoredAnalysis(data: Record<string, unknown>): LibrarianAnalysis {
+  const projection = data.continuityProjection as { version?: unknown } | undefined
+  if (projection && projection.version !== 3) {
+    const { continuityProjection: _earlier, ...rest } = data
+    return normalizeAnalysis(rest)
+  }
+  return normalizeAnalysis(data)
 }
 
 function normalizeAnalysis(data: Record<string, unknown>): LibrarianAnalysis {
@@ -403,7 +417,7 @@ export async function deleteAnalysis(
 
   // Read the analysis to get fragmentId for index cleanup
   const raw = await readFile(path, 'utf-8')
-  const analysis = normalizeAnalysis(JSON.parse(raw))
+  const analysis = normalizeStoredAnalysis(JSON.parse(raw))
 
   await unlink(path)
   analysisReadCache.delete(path)
@@ -468,7 +482,7 @@ async function readAnalysisSummary(path: string): Promise<CachedAnalysisSummary>
   const cached = summaryCache.get(path)
   if (cached?.signature === signature) return cached
 
-  const analysis = normalizeAnalysis(JSON.parse(await readFile(path, 'utf-8')))
+  const analysis = normalizeStoredAnalysis(JSON.parse(await readFile(path, 'utf-8')))
   const entry: CachedAnalysisSummary = {
     signature,
     source: {
@@ -570,6 +584,29 @@ export async function saveState(
   const dir = await librarianDir(dataDir, storyId)
   await mkdir(dir, { recursive: true })
   await writeJsonAtomic(await statePath(dataDir, storyId), state)
+}
+
+// --- Live-state author corrections ---
+
+async function liveStateEditsPath(dataDir: string, storyId: string): Promise<string> {
+  const dir = await librarianDir(dataDir, storyId)
+  return join(dir, 'live-state-edits.json')
+}
+
+/** Author corrections to live state on the active branch, oldest first. */
+export async function getLiveStateEditLog(dataDir: string, storyId: string): Promise<LiveStateEditLog> {
+  const path = await liveStateEditsPath(dataDir, storyId)
+  if (!existsSync(path)) return { version: 1, edits: [] }
+  return LiveStateEditLogSchema.parse(JSON.parse(await readFile(path, 'utf-8')))
+}
+
+export async function appendLiveStateEdit(dataDir: string, storyId: string, edit: LiveStateEdit): Promise<void> {
+  await withKeyLock(`live-state-edits:${storyId}`, async () => {
+    const log = await getLiveStateEditLog(dataDir, storyId)
+    const dir = await librarianDir(dataDir, storyId)
+    await mkdir(dir, { recursive: true })
+    await writeJsonAtomic(await liveStateEditsPath(dataDir, storyId), { ...log, edits: [...log.edits, edit] })
+  })
 }
 
 export async function clearFragmentFromState(

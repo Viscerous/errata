@@ -6,9 +6,9 @@ export const config = {
     apiFetch<GlobalConfigSafe>('/config/providers'),
   discoverLocal: () =>
     apiFetch<{ providers: DiscoveredProvider[] }>('/config/discover-local'),
-  addProvider: (data: { name: string; preset?: string; baseURL: string; apiKey: string; defaultModel: string; customHeaders?: Record<string, string>; temperature?: number }) =>
+  addProvider: (data: { name: string; preset?: string; baseURL: string; apiKey: string; defaultModel: string; customHeaders?: Record<string, string>; temperature?: number; reasoningAllowance?: Record<string, number>; structuredOutput?: boolean }) =>
     apiFetch<GlobalConfigSafe>('/config/providers', { method: 'POST', body: JSON.stringify(data) }),
-  updateProvider: (providerId: string, data: { name?: string; baseURL?: string; apiKey?: string; defaultModel?: string; enabled?: boolean; customHeaders?: Record<string, string>; temperature?: number }) =>
+  updateProvider: (providerId: string, data: { name?: string; baseURL?: string; apiKey?: string; defaultModel?: string; enabled?: boolean; customHeaders?: Record<string, string>; temperature?: number; reasoningAllowance?: Record<string, number>; structuredOutput?: boolean }) =>
     apiFetch<GlobalConfigSafe>(`/config/providers/${providerId}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteProvider: (providerId: string) =>
     apiFetch<GlobalConfigSafe>(`/config/providers/${providerId}`, { method: 'DELETE' }),

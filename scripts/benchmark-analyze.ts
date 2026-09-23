@@ -5,11 +5,21 @@
  *
  *   bun run benchmark:analyze -- --story=story-id --fragment=pr-id \
  *     --model="Model name" --runs=3 --label=staged
+ *
+ * --branch=<id> analyzes against that timeline, --thinking=on|off overrides the
+ * story's reasoning setting, --max-run-ms aborts a sample that never ends (a
+ * degenerate loop keeps streaming, so the idle timeout cannot catch it), and
+ * --capture=<dir> writes each raw completion stream to its own file there.
+ * --rebuild-chain first re-analyzes every earlier passage in order, once, so the
+ * samples run against a ledger the current code built rather than stored analyses.
+ * --mode=single|staged selects the analyze experiment (ERRATA_ANALYZE_MODE).
  */
+import { createWriteStream } from 'node:fs'
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
 import { runLibrarian } from '../src/server/librarian/agent'
+import { getActiveProseIds } from '../src/server/fragments/prose-chain'
 import { registerLibrarianAgents } from '../src/server/librarian/agents'
 import { getAnalysis, listAnalyses, type LibrarianAnalysis } from '../src/server/librarian/storage'
 import { toolResultOutcome } from '../src/lib/librarian-outcome'
@@ -22,6 +32,11 @@ interface Options {
   runs: number
   label: string
   idleTimeoutMs: number
+  maxRunMs?: number
+  branchId?: string
+  thinking?: 'on' | 'off'
+  captureDir?: string
+  rebuildChain: boolean
   inPlace: boolean
 }
 
@@ -34,6 +49,7 @@ interface Sample {
   workflowComplete: boolean
   error?: string
   toolCalls: string[]
+  stages: string[]
   toolErrors: number
   toolErrorDetails: string[]
   lossAttempts: number
@@ -68,8 +84,19 @@ function parseArgs(argv: string[]): Options {
     runs: Math.max(1, Number.parseInt(values.get('runs') || '3', 10) || 3),
     label: values.get('label')?.trim() || 'analyze',
     idleTimeoutMs: Math.max(1, Number.parseInt(values.get('idle-timeout-ms') || '1800000', 10) || 1_800_000),
+    maxRunMs: values.has('max-run-ms') ? Number.parseInt(values.get('max-run-ms')!, 10) || undefined : undefined,
+    branchId: values.get('branch')?.trim() || undefined,
+    thinking: parseThinking(values.get('thinking')),
+    captureDir: values.get('capture') ? resolve(values.get('capture')!) : undefined,
+    rebuildChain: values.has('rebuild-chain'),
     inPlace: values.has('in-place') || values.has('persist'),
   }
+}
+
+function parseThinking(value: string | undefined): Options['thinking'] {
+  if (value === undefined) return undefined
+  if (value === 'on' || value === 'off') return value
+  throw new Error('--thinking must be "on" or "off".')
 }
 
 async function copyFixture(options: Options): Promise<{ root: string; dataDir: string }> {
@@ -93,11 +120,20 @@ async function copyFixture(options: Options): Promise<{ root: string; dataDir: s
   const meta = JSON.parse(await readFile(metaPath, 'utf8')) as {
     settings?: {
       autoApplyLibrarianSuggestions?: boolean
+      disableThinking?: boolean
       modelOverrides?: Record<string, unknown>
     }
   }
   meta.settings ??= {}
   meta.settings.autoApplyLibrarianSuggestions = false
+  if (options.thinking) meta.settings.disableThinking = options.thinking === 'off'
+  if (options.branchId) {
+    const branchesPath = join(dataDir, 'stories', options.storyId, 'branches.json')
+    const branches = JSON.parse(await readFile(branchesPath, 'utf8')) as { activeBranchId: string }
+    branches.activeBranchId = options.branchId
+    await writeFile(branchesPath, `${JSON.stringify(branches, null, 2)}
+`, 'utf8')
+  }
   if (options.modelId) {
     const config = JSON.parse(await readFile(join(dataDir, 'config.json'), 'utf8')) as {
       defaultProviderId?: string | null
@@ -138,6 +174,14 @@ function countTraceLosses(trace: unknown): { toolErrors: number; toolErrorDetail
   return { toolErrors, toolErrorDetails, lossAttempts }
 }
 
+/** One "stage:seconds/outputTokens" entry per request, so slow or runaway stages are visible. */
+function stageTimings(stepUsage: unknown): string[] {
+  if (!Array.isArray(stepUsage)) return []
+  return stepUsage.map((step: Record<string, unknown>) => (
+    `${String(step.stage ?? step.stepNumber)}:${Math.round(Number(step.durationMs ?? 0) / 1000)}s/${String(step.outputTokens ?? '?')}out`
+  ))
+}
+
 function words(value: string): Set<string> {
   return new Set(value.toLowerCase().match(/[\p{L}\p{N}']+/gu) ?? [])
 }
@@ -172,9 +216,70 @@ function pairwiseSimilarity(samples: Sample[], select: (sample: Sample) => strin
   return scores.length ? mean(scores) : null
 }
 
+/**
+ * Tee every completion request and its streamed response to a numbered file.
+ * The stream is the only record of a run that never finishes: the analysis is
+ * saved only after a stage returns.
+ */
+async function captureCompletionStreams(dir: string, label: string): Promise<void> {
+  await mkdir(dir, { recursive: true })
+  const originalFetch = globalThis.fetch
+  let requestNumber = 0
+  globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+    const response = await originalFetch(input, init)
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+    if (!url.includes('/chat/completions') || !response.body) return response
+    requestNumber += 1
+    const file = createWriteStream(join(dir, `${label}-${String(requestNumber).padStart(3, '0')}.log`))
+    file.write(`${typeof init?.body === 'string' ? init.body : ''}
+
+--- response ---
+`)
+    const [forCaller, forFile] = response.body.tee()
+    void (async () => {
+      const decoder = new TextDecoder()
+      const reader = forFile.getReader()
+      try {
+        for (let part = await reader.read(); !part.done; part = await reader.read()) {
+          file.write(decoder.decode(part.value, { stream: true }))
+        }
+      } catch {
+        // An aborted request ends the capture where the stream stopped.
+      } finally {
+        file.end()
+      }
+    })()
+    return new Response(forCaller, { status: response.status, statusText: response.statusText, headers: response.headers })
+  }) as typeof fetch
+}
+
 const options = parseArgs(process.argv.slice(2))
+const modeArg = process.argv.find((arg) => arg.startsWith('--mode='))?.slice('--mode='.length)
+if (modeArg) process.env.ERRATA_ANALYZE_MODE = modeArg
+if (options.captureDir) await captureCompletionStreams(options.captureDir, options.label)
 const samples: Sample[] = []
 registerLibrarianAgents()
+
+if (options.rebuildChain && !options.inPlace) {
+  const base = await copyFixture(options)
+  const chain = await getActiveProseIds(base.dataDir, options.storyId)
+  const earlier = chain.slice(0, Math.max(chain.indexOf(options.fragmentId), 0))
+  for (const [position, fragmentId] of earlier.entries()) {
+    const started = performance.now()
+    try {
+      await runLibrarian(base.dataDir, options.storyId, fragmentId, {
+        idleTimeoutMs: options.idleTimeoutMs,
+        ...(options.maxRunMs ? { abortSignal: AbortSignal.timeout(options.maxRunMs) } : {}),
+      })
+      console.info(`[${options.label}] rebuilt ${position + 1}/${earlier.length} ${fragmentId} in ${Math.round(performance.now() - started)} ms`)
+    } catch (cause) {
+      console.info(`[${options.label}] rebuild of ${fragmentId} failed: ${cause instanceof Error ? cause.message : String(cause)}`)
+    }
+  }
+  console.info(`[${options.label}] rebuilt fixture kept at ${base.dataDir}`)
+  // Samples copy the rebuilt fixture; its settings are already applied.
+  options.dataDir = base.dataDir
+}
 
 for (let index = 0; index < options.runs; index += 1) {
   const fixture = await copyFixture(options)
@@ -187,6 +292,7 @@ for (let index = 0; index < options.runs; index += 1) {
     try {
       analysis = await runLibrarian(fixture.dataDir, options.storyId, options.fragmentId, {
         idleTimeoutMs: options.idleTimeoutMs,
+        ...(options.maxRunMs ? { abortSignal: AbortSignal.timeout(options.maxRunMs) } : {}),
       })
     } catch (cause) {
       error = cause instanceof Error ? cause.message : String(cause)
@@ -206,6 +312,7 @@ for (let index = 0; index < options.runs; index += 1) {
         workflowComplete: false,
         ...(error ? { error } : {}),
         toolCalls: [],
+        stages: [],
         toolErrors: 0,
         toolErrorDetails: [],
         lossAttempts: 0,
@@ -233,6 +340,7 @@ for (let index = 0; index < options.runs; index += 1) {
       toolCalls: Array.isArray(diagnostics.toolCallNames)
         ? diagnostics.toolCallNames.filter((name): name is string => typeof name === 'string')
         : [],
+      stages: stageTimings(diagnostics.stepUsage),
       ...losses,
       summary: analysis.summaryUpdate,
       directions: (analysis.directions ?? []).map((direction) =>

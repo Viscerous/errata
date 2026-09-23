@@ -112,12 +112,56 @@ A flashback updates its own temporal frame and does not silently replace
 present-line state. Summary records retain coverage boundaries so older history
 is not presented as though it happened immediately before the current scene.
 
+Live state encodes time structurally, never as a value on an entry. Each
+narrative line is a frame: entering a flashback or flash-forward pushes an
+overlay that starts from lasting entries only, and returning pops it. Lasting
+entries added or ended inside a flashback carry back to the present, because the
+past it shows precedes the present; a flash-forward's do not. Cuts, time skips,
+and line changes are scene boundaries: they end the moment and age last-known
+values. Items are never given story-time ranges, and the fold runs in reading
+order rather than reordering by chronology.
+
+## Live state
+
+Live state is where each character and entity stands after the passages on the
+active branch: what they are doing, where they were last seen, what they know,
+and what they hide. It is derived and branch-local; the character fragment
+remains who they are.
+
+Field names are vocabulary, not schema. A default set is suggested to the model
+(`Currently`, `Where`, `Appearance`, `Condition`, `Wants`, `Knows`, `Secrets`;
+entities get `Currently`, `Condition`, `Notes`) and any other field may be used.
+The engine acts only on four structural properties of a field:
+
+| Property | Values | Effect |
+|---|---|---|
+| Owner | character or entity key | Whose state it is |
+| Visibility | `outward`, `inner` | Whether others present could notice it; an unknown field is `inner` |
+| Holds | `moment`, `lastKnown`, `lasting` | `moment` ends with the scene; `lastKnown` stays and is shown with its age in scenes; `lasting` stays until something ends it |
+| Ending | `revealed`, `changed`, `resolved` | How a lasting entry stops holding |
+
+The model reports story events; the author corrects the record. Each passage's
+report sets field values, adds entries to lasting lists, and ends numbered
+entries with what happened to them (revealed to whom, changed into what, or
+resolved). Entries already shown stay recorded without being repeated, and an
+entry's identity comes from its field and normalized text, so a restatement is
+the same entry. Ended entries leave the current state but remain as history.
+
+Rewording or removing an entry without a story reason is an author correction.
+Corrections are kept in a branch-local log and apply after the passage they were
+made at, so analysis reruns never erase them and analyses are never edited.
+
+The subjects a passage reports are the scene's roster: everyone else is absent,
+which also ends their moment. Readers are shown present subjects and in-scope
+characters who are elsewhere, with their last-known state.
+
 ## Character knowledge
 
-Analyze records explicit knowledge gains, corrections, and losses, including
-whether a fact was witnessed, told, inferred, or acquired another way. A global
-presence or witness roster is not continuity truth. Context shown to Writer
-grants knowledge to the model, not automatically to every character in a scene.
+Character knowledge is the `inner` part of live state: what a character knows,
+believes, and hides. A global presence or witness roster is not continuity
+truth. Context shown to Writer grants knowledge to the model, not automatically
+to every character in a scene; character chat reads only its own character's
+state.
 
 Any future character-specific agent must consume this projection rather than
 creating another memory authority.

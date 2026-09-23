@@ -606,8 +606,8 @@ describe('Librarian Analyze Prompt', () => {
   it('keeps only role and cross-tool workflow in the system instruction', () => {
     const prompt = buildAnalyzeSystemPrompt()
     expect(prompt).toContain('Analyze the new prose against the supplied story context')
-    expect(prompt).toContain('one active reporting task')
-    expect(prompt).toContain('Use the active tool exactly once')
+    expect(prompt).toContain('one reporting task')
+    expect(prompt).toContain('Deliver its report exactly once')
     expect(prompt).not.toContain('reportAnalysis')
     expect(prompt).not.toContain('reportDirections')
   })
@@ -616,7 +616,7 @@ describe('Librarian Analyze Prompt', () => {
     const noOptionalTools = buildAnalyzeSystemPrompt({
       disabledTools: ['reportMaintenance', 'reportDirections'],
     })
-    expect(noOptionalTools).toContain('one active reporting task')
+    expect(noOptionalTools).toContain('one reporting task')
     expect(noOptionalTools).not.toContain('reportMaintenance')
 
     const noReport = buildAnalyzeSystemPrompt({ enabledTools: [] })

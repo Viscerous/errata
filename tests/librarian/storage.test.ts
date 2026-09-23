@@ -96,7 +96,7 @@ describe('librarian storage', () => {
       expect(loaded).toBeNull()
     })
 
-    it('rejects a non-v2 continuity projection before writing it', async () => {
+    it('rejects a continuity projection in an earlier format before writing it', async () => {
       const analysis = makeAnalysis({
         id: 'analysis-invalid-save',
         continuityProjection: {
@@ -115,7 +115,7 @@ describe('librarian storage', () => {
       await mkdir(dir, { recursive: true })
       const analysis = makeAnalysis({ id: 'analysis-invalid-read' }) as unknown as Record<string, unknown>
       analysis.continuityProjection = {
-        version: 2,
+        version: 3,
         scene: { transition: 'enter-flashback', line: 'present' },
         stateOperations: [],
         threadOperations: [],
@@ -227,7 +227,7 @@ describe('librarian storage', () => {
       })
       const prose = (await getFragment(dataDir, storyId, 'pr-stale'))!
       const projection = {
-        version: 2 as const,
+        version: 3 as const,
         scene: { transition: 'continue' as const, line: 'present' as const },
         stateOperations: [],
         threadOperations: [],
@@ -272,7 +272,7 @@ describe('librarian storage', () => {
 
     it('indexes the latest analysis and latest completed projection independently', async () => {
       const projection = {
-        version: 2 as const,
+        version: 3 as const,
         scene: { transition: 'continue' as const },
         stateOperations: [], threadOperations: [], threadFocus: [], knowledgeOperations: [],
       }
@@ -308,7 +308,7 @@ describe('librarian storage', () => {
 
     it('rebuilds an obsolete index into the current dual-pointer shape', async () => {
       const projection = {
-        version: 2 as const,
+        version: 3 as const,
         scene: { transition: 'continue' as const },
         stateOperations: [], threadOperations: [], threadFocus: [], knowledgeOperations: [],
       }
@@ -329,7 +329,7 @@ describe('librarian storage', () => {
 
     it('promotes both index pointers when the latest completed analysis is deleted', async () => {
       const projection = {
-        version: 2 as const,
+        version: 3 as const,
         scene: { transition: 'continue' as const },
         stateOperations: [], threadOperations: [], threadFocus: [], knowledgeOperations: [],
       }

@@ -1,11 +1,13 @@
 import { Elysia, t } from 'elysia'
-import { getStory, getFragment, listFragments, updateFragment } from '../fragments/storage'
+import { getStory, getFragment, listFragments } from '../fragments/storage'
 import { getActiveProseIds } from '../fragments/prose-chain'
 import {
   buildContinuityLedger,
   projectContinuityView,
   invalidateContinuityCache,
 } from '../librarian/continuity-view'
+import { diffLiveStateCorrection, isEmptyCorrection } from '../librarian/live-state-corrections'
+import { FragmentIdSchema } from '@/contracts/story'
 import {
   getGenerationLog,
   listGenerationLogs,
@@ -26,6 +28,7 @@ import {
   saveConversationHistory,
   getAnalysisIndex,
   rebuildAnalysisIndex,
+  appendLiveStateEdit,
 } from '../librarian/storage'
 import {
   applyFragmentChangeProposal,
@@ -48,6 +51,17 @@ const summaryGapWarning: Record<SummaryGapReason, string> = {
   'unverified-source': 'Analysis cannot be matched to this passage',
   'stale-source': 'Passage changed since analysis',
   'old-contract': 'Analysis uses an older story-summary format',
+}
+
+async function branchContinuity(dataDir: string, storyId: string) {
+  const [activeProseIds, analysisIndex] = await Promise.all([
+    getActiveProseIds(dataDir, storyId),
+    getAnalysisIndex(dataDir, storyId),
+  ])
+  const activeProse = (await Promise.all(activeProseIds.map((id) => getFragment(dataDir, storyId, id))))
+    .filter((fragment): fragment is NonNullable<typeof fragment> => fragment?.type === 'prose' && !fragment.archived)
+  const ledger = await buildContinuityLedger({ dataDir, storyId, activeProseFragments: activeProse, analysisIndex })
+  return { ledger, analysisIndex, activeProse }
 }
 
 export function librarianRoutes(dataDir: string) {
@@ -119,18 +133,7 @@ export function librarianRoutes(dataDir: string) {
         set.status = 404
         return { error: 'Story not found' }
       }
-      const [activeProseIds, analysisIndex] = await Promise.all([
-        getActiveProseIds(dataDir, params.storyId),
-        getAnalysisIndex(dataDir, params.storyId),
-      ])
-      const activeProse = (await Promise.all(activeProseIds.map((id) => getFragment(dataDir, params.storyId, id))))
-        .filter((fragment): fragment is NonNullable<typeof fragment> => fragment?.type === 'prose' && !fragment.archived)
-      const ledger = await buildContinuityLedger({
-        dataDir,
-        storyId: params.storyId,
-        activeProseFragments: activeProse,
-        analysisIndex,
-      })
+      const { ledger, analysisIndex, activeProse } = await branchContinuity(dataDir, params.storyId)
       const view = projectContinuityView(ledger)
       const latestProseId = activeProse.at(-1)?.id
       const latestAnalysisId = latestProseId
@@ -143,97 +146,54 @@ export function librarianRoutes(dataDir: string) {
       }
     }, { detail: { summary: 'Get branch folded continuity ledger and view' } })
 
-    .put('/stories/:storyId/librarian/characters/:characterId/live-state', async ({ params, body, set }) => {
+    // The author corrects the record here; analyses stay as the model reported
+    // them, and the correction applies after the latest passage.
+    .put('/stories/:storyId/librarian/live-states/:kind/:key', async ({ params, body, set }) => {
       const story = await getStory(dataDir, params.storyId)
       if (!story) {
         set.status = 404
         return { error: 'Story not found' }
       }
-      const charFragment = await getFragment(dataDir, params.storyId, params.characterId)
-      if (!charFragment) {
-        set.status = 404
-        return { error: 'Character fragment not found' }
+      const kind = params.kind
+      if (kind !== 'character' && kind !== 'entity') {
+        set.status = 400
+        return { error: 'Kind must be character or entity' }
       }
-
-      const input = body as {
-        immediate?: string
-        state?: Record<string, string>
-        knowledge?: string[]
-        secrets?: string[]
-      }
-
-      const [activeProseIds, analysisIndex] = await Promise.all([
-        getActiveProseIds(dataDir, params.storyId),
-        getAnalysisIndex(dataDir, params.storyId),
-      ])
-      const activeProse = (await Promise.all(activeProseIds.map((id) => getFragment(dataDir, params.storyId, id))))
-        .filter((fragment): fragment is NonNullable<typeof fragment> => fragment?.type === 'prose' && !fragment.archived)
-      const latestProseId = activeProse.at(-1)?.id
-      const latestAnalysisId = latestProseId
-        ? analysisIndex?.latestProjectionByFragmentId[latestProseId]?.analysisId ?? analysisIndex?.latestByFragmentId[latestProseId]?.analysisId ?? null
+      const { ledger, activeProse } = await branchContinuity(dataDir, params.storyId)
+      const current = ledger?.liveStates?.find((subject) => subject.kind === kind && subject.key === params.key)
+      const fragment = FragmentIdSchema.safeParse(params.key).success
+        ? await getFragment(dataDir, params.storyId, params.key)
         : null
-
-      if (latestAnalysisId) {
-        const analysis = await getLibrarianAnalysis(dataDir, params.storyId, latestAnalysisId)
-        if (analysis) {
-          if (!analysis.continuityProjection) {
-            analysis.continuityProjection = {
-              version: 2,
-              scene: { transition: 'continue', line: 'present' },
-              stateOperations: [],
-              threadOperations: [],
-              threadFocus: [],
-              knowledgeOperations: [],
-              characterStates: {},
-            }
-          }
-          analysis.continuityProjection.characterStates = analysis.continuityProjection.characterStates ?? {}
-          analysis.continuityProjection.characterStates[params.characterId] = {
-            characterId: params.characterId,
-            name: charFragment.name,
-            immediate: input.immediate?.trim() || undefined,
-            state: input.state ?? {},
-            knowledge: input.knowledge ?? [],
-            secrets: input.secrets ?? [],
-          }
-          await saveLibrarianAnalysis(dataDir, params.storyId, analysis)
-        }
+      const name = current?.name ?? fragment?.name
+      if (!name) {
+        set.status = 404
+        return { error: 'No live state or record for that key' }
       }
-
-      await updateFragment(dataDir, params.storyId, {
-        ...charFragment,
-        meta: {
-          ...charFragment.meta,
-          liveState: {
-            immediate: input.immediate?.trim() || undefined,
-            state: input.state ?? {},
-            knowledge: input.knowledge ?? [],
-            secrets: input.secrets ?? [],
-          },
-        },
-      })
-
-      invalidateContinuityCache(dataDir, params.storyId, latestAnalysisId ?? undefined)
-
+      const correction = diffLiveStateCorrection(current, body)
+      if (!isEmptyCorrection(correction)) {
+        await appendLiveStateEdit(dataDir, params.storyId, {
+          kind,
+          key: params.key,
+          ...(fragment ? { fragmentId: fragment.id } : current?.fragmentId ? { fragmentId: current.fragmentId } : {}),
+          name,
+          id: `lse-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
+          createdAt: new Date().toISOString(),
+          afterFragmentId: activeProse.at(-1)?.id ?? null,
+          ...correction,
+        })
+        invalidateContinuityCache(dataDir, params.storyId)
+      }
+      const updated = await branchContinuity(dataDir, params.storyId)
       return {
         ok: true,
-        characterState: {
-          characterId: params.characterId,
-          name: charFragment.name,
-          immediate: input.immediate?.trim() || undefined,
-          state: input.state ?? {},
-          knowledge: input.knowledge ?? [],
-          secrets: input.secrets ?? [],
-        },
+        liveState: updated.ledger?.liveStates?.find((subject) => subject.kind === kind && subject.key === params.key) ?? null,
       }
     }, {
       body: t.Object({
-        immediate: t.Optional(t.String()),
-        state: t.Optional(t.Record(t.String(), t.String())),
-        knowledge: t.Optional(t.Array(t.String())),
-        secrets: t.Optional(t.Array(t.String())),
+        fields: t.Array(t.Object({ field: t.String(), value: t.String() })),
+        items: t.Array(t.Object({ id: t.Optional(t.String()), field: t.String(), text: t.String() })),
       }),
-      detail: { summary: 'Update live state for a character on the active branch' },
+      detail: { summary: 'Correct the live state of a character or entity on the active branch' },
     })
 
     .post('/stories/:storyId/librarian/analyze', async ({ params, body, set }) => {

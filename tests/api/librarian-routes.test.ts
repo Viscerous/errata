@@ -825,59 +825,23 @@ describe('librarian API routes', () => {
       expect(data).toHaveProperty('view')
       expect(data.latestAnalysisId).toBeNull()
     })
-
-    it('seeds character live state from fragment meta when no prose analyses exist', async () => {
-      await createFragment(dataDir, storyId, {
-        id: 'ch-hero',
-        type: 'character',
-        name: 'Hero',
-        description: 'Protagonist',
-        content: 'A brave adventurer.',
-        tags: [],
-        refs: [],
-        sticky: false,
-        placement: 'user',
-        createdAt: '2025-01-01T00:00:00.000Z',
-        updatedAt: '2025-01-01T00:00:00.000Z',
-        order: 0,
-        meta: {
-          liveState: {
-            immediate: 'crouched behind shield',
-            state: { attire: 'travelling cloak', gear: 'iron sword' },
-            knowledge: ['the gate is barred'],
-            secrets: ['carries the lost map'],
-          },
-        },
-      })
-
-      const res = await app.fetch(
-        new Request(`http://localhost/api/stories/${storyId}/librarian/continuity`),
-      )
-      expect(res.status).toBe(200)
-      const data = await res.json()
-      expect(data.ledger.characterStates).toHaveLength(1)
-      expect(data.ledger.characterStates[0]).toMatchObject({
-        characterId: 'ch-hero',
-        name: 'Hero',
-        immediate: 'crouched behind shield',
-        state: { attire: 'travelling cloak', gear: 'iron sword' },
-      })
-    })
   })
 
-  describe('PUT /stories/:storyId/librarian/characters/:characterId/live-state', () => {
-    it('returns 404 if character does not exist', async () => {
-      const res = await app.fetch(
-        new Request(`http://localhost/api/stories/${storyId}/librarian/characters/nonexistent/live-state`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ immediate: 'standing' }),
-        }),
-      )
+  describe('PUT /stories/:storyId/librarian/live-states/:kind/:key', () => {
+    const put = (key: string, body: unknown) => app.fetch(
+      new Request(`http://localhost/api/stories/${storyId}/librarian/live-states/character/${key}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
+    )
+
+    it('returns 404 for a key with neither live state nor a record', async () => {
+      const res = await put('nonexistent', { fields: [], items: [] })
       expect(res.status).toBe(404)
     })
 
-    it('updates character live state in fragment meta and invalidates cache', async () => {
+    it('records a correction the continuity view reflects, keeping an edited entry\'s identity', async () => {
       await createFragment(dataDir, storyId, {
         id: 'ch-alice',
         type: 'character',
@@ -894,47 +858,33 @@ describe('librarian API routes', () => {
         meta: {},
       })
 
-      const putRes = await app.fetch(
-        new Request(`http://localhost/api/stories/${storyId}/librarian/characters/ch-alice/live-state`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            immediate: 'inspecting ancient tome',
-            state: { attire: 'scholar robes', gear: 'quill and ink' },
-            knowledge: ['the cipher is solved'],
-            secrets: ['hides a secret diary'],
-          }),
-        }),
-      )
-      expect(putRes.status).toBe(200)
-      const putData = await putRes.json()
-      expect(putData.ok).toBe(true)
-      expect(putData.characterState).toMatchObject({
-        characterId: 'ch-alice',
+      const first = await put('ch-alice', {
+        fields: [{ field: 'Currently', value: 'inspecting an ancient tome' }],
+        items: [
+          { field: 'Knows', text: 'the cipher is solved' },
+          { field: 'Secrets', text: 'keeps a diary' },
+        ],
+      })
+      expect(first.status).toBe(200)
+      const created = (await first.json()).liveState
+      expect(created).toMatchObject({
+        kind: 'character',
+        key: 'ch-alice',
         name: 'Alice',
-        immediate: 'inspecting ancient tome',
-        state: { attire: 'scholar robes', gear: 'quill and ink' },
-        knowledge: ['the cipher is solved'],
-        secrets: ['hides a secret diary'],
+        fields: [expect.objectContaining({ field: 'Currently', value: 'inspecting an ancient tome' })],
       })
+      const cipher = created.items.find((item: { text: string }) => item.text === 'the cipher is solved')
 
-      // Check updated fragment meta
-      const updatedFrag = await getFragment(dataDir, storyId, 'ch-alice')
-      expect(updatedFrag?.meta?.liveState).toMatchObject({
-        immediate: 'inspecting ancient tome',
-        state: { attire: 'scholar robes', gear: 'quill and ink' },
+      const second = await put('ch-alice', {
+        fields: [],
+        items: [{ id: cipher.id, field: 'Knows', text: 'the cipher is half solved' }],
       })
+      expect(second.status).toBe(200)
 
-      // Check continuity endpoint reflects the change
-      const contRes = await app.fetch(
-        new Request(`http://localhost/api/stories/${storyId}/librarian/continuity`),
-      )
-      expect(contRes.status).toBe(200)
-      const contData = await contRes.json()
-      const char = contData.ledger.characterStates.find((c: any) => c.characterId === 'ch-alice')
-      expect(char).toBeDefined()
-      expect(char.immediate).toBe('inspecting ancient tome')
-      expect(char.state.attire).toBe('scholar robes')
+      const contRes = await app.fetch(new Request(`http://localhost/api/stories/${storyId}/librarian/continuity`))
+      const alice = (await contRes.json()).ledger.liveStates.find((subject: { key: string }) => subject.key === 'ch-alice')
+      expect(alice.fields).toEqual([])
+      expect(alice.items).toEqual([expect.objectContaining({ id: cipher.id, text: 'the cipher is half solved' })])
     })
   })
 })

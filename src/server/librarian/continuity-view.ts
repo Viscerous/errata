@@ -1,11 +1,18 @@
 import type { Fragment } from '@/contracts/story'
-import { listFragments } from '../fragments/storage'
 import {
   getAnalysis,
   getAnalysisIndex,
+  getLiveStateEditLog,
   type LibrarianAnalysis,
   type LibrarianAnalysisIndex,
 } from './storage'
+import { LiveStateFold } from './live-state-fold'
+import {
+  type FoldedLiveState,
+  type LiveStateEdit,
+  type LiveStateRegistryEntry,
+  type LiveStateSource,
+} from '@/contracts/live-state'
 import { proseContentHash } from './continuity-source'
 import { continuityKeyLabel, normalizeContinuityKey, scopedContinuityIdentity } from '@/lib/continuity-keys'
 import type {
@@ -14,8 +21,6 @@ import type {
   ContinuityRegistry,
   ContinuityView,
   CurrentStateEntry,
-  FoldedCharacterLiveState,
-  FoldedEntityLiveState,
   LiveThreadEntry,
   ProjectionSource,
   RegistryEntry,
@@ -27,8 +32,7 @@ export type {
   ContinuityLedger,
   ContinuityView,
   CurrentStateEntry,
-  FoldedCharacterLiveState,
-  FoldedEntityLiveState,
+  FoldedLiveState,
   LiveThreadEntry,
   ProjectionSource,
   SceneFrame,
@@ -36,9 +40,7 @@ export type {
 
 const MAX_CURRENT_STATE = 24
 const MAX_KNOWLEDGE_PER_CHARACTER = 16
-const MAX_LIVE_LIST_ITEMS = 24
-const MAX_CHARACTER_STATES = 24
-const MAX_ENTITY_STATES = 24
+const MAX_LIVE_STATES = 48
 /**
  * Threads only leave this list when resolved or abandoned, so an unbounded list
  * grows for the life of the story. It is not just a rendering concern: the live
@@ -47,7 +49,6 @@ const MAX_ENTITY_STATES = 24
  */
 const MAX_LIVE_THREADS = 24
 const MAX_CACHE_ENTRIES = 32
-const CLEARED_STATE_VALUES = new Set(['none', 'cleared', 'removed', 'healed', 'empty', 'normal', 'default', 'null', 'undefined'])
 
 interface LoadedAnalysis {
   source: Fragment
@@ -147,6 +148,14 @@ function sourceOf(item: LoadedAnalysis): ProjectionSource {
   }
 }
 
+function editSource(edit: LiveStateEdit, narrativePosition: number): LiveStateSource {
+  return {
+    sourceFragmentId: edit.afterFragmentId ?? '',
+    analysisId: `edit:${edit.id}`,
+    narrativePosition,
+  }
+}
+
 function hasSceneSignal(frame: SceneFrame | undefined): frame is SceneFrame {
   return frame !== undefined && (
     frame.line !== 'present'
@@ -181,6 +190,7 @@ export async function buildContinuityLedger(params: {
       failedByFragmentId: {},
     }
 
+  const editLog = await getLiveStateEditLog(params.dataDir, params.storyId)
   const fragmentHashes = new Map(
     params.activeProseFragments.map((fragment) => [fragment.id, proseContentHash(fragment)]),
   )
@@ -188,6 +198,7 @@ export async function buildContinuityLedger(params: {
     ...params.activeProseFragments.map((fragment) => (
       `${fragment.id}:${fragmentHashes.get(fragment.id)}:${index.latestProjectionByFragmentId[fragment.id]?.analysisId ?? ''}`
     )),
+    `edits:${editLog.edits.length}:${editLog.edits.at(-1)?.id ?? ''}`,
   ].join('|')
   const cacheKey = `${params.dataDir}\u0000${params.storyId}`
   const cached = ledgerCache.get(cacheKey)
@@ -218,13 +229,31 @@ export async function buildContinuityLedger(params: {
   const suspended: SceneCursor[] = []
   const liveThreads = new Map<string, LiveThreadEntry>()
   const characterKnowledge = new Map<string, CharacterKnowledgeEntry>()
-  const liveCharacters = new Map<string, FoldedCharacterLiveState>()
-  const liveEntities = new Map<string, FoldedEntityLiveState>()
+  const liveStates = new LiveStateFold()
   const threadVisibility = new Map<string, LiveThreadEntry['visibility']>()
   let staleProjectionCount = 0
-  let sawCharacterRoster = false
+
+  // Author corrections apply after the passage they were made at, so a later
+  // passage builds on them and a rerun analysis of an earlier one cannot erase
+  // them. A correction whose passage has left the chain applies at the end.
+  const chainPositions = new Map(params.activeProseFragments.map((fragment, indexInChain) => [fragment.id, indexInChain + 1]))
+  const pendingEdits = editLog.edits
+    .map((edit) => ({
+      edit,
+      position: edit.afterFragmentId === null ? 0 : chainPositions.get(edit.afterFragmentId) ?? Number.POSITIVE_INFINITY,
+    }))
+    .sort((left, right) => left.position - right.position)
+  let nextEdit = 0
+  const applyEditsBefore = (position: number) => {
+    while (nextEdit < pendingEdits.length && (pendingEdits[nextEdit].position < position || position === Number.POSITIVE_INFINITY)) {
+      const { edit, position: editPosition } = pendingEdits[nextEdit]
+      liveStates.applyEdit(edit, editSource(edit, Number.isFinite(editPosition) ? editPosition : params.activeProseFragments.length))
+      nextEdit += 1
+    }
+  }
 
   for (const item of loaded) {
+    applyEditsBefore(item.narrativePosition)
     const source = sourceOf(item)
     if (!item.projectionIsCurrent) {
       staleProjectionCount += 1
@@ -238,21 +267,17 @@ export async function buildContinuityLedger(params: {
     if (transition === 'enter-flashback' || transition === 'enter-flash-forward') {
       suspended.push(cursor)
       cursor = { state: new Map() }
+      liveStates.enterLine(transition === 'enter-flashback' ? 'flashback' : 'flash-forward')
     } else if (transition === 'return') {
       cursor = suspended.pop() ?? { state: new Map() }
+      liveStates.returnToPriorLine()
+    } else if (transition === 'cut' || transition === 'advance') {
+      liveStates.sceneBoundary()
     }
 
     if (transition === 'cut') {
       for (const [key, entry] of cursor.state) {
         if (entry.scope === 'scene') cursor.state.delete(key)
-      }
-      for (const [_, char] of liveCharacters) {
-        char.immediate = undefined
-        char.present = false
-      }
-      for (const [_, ent] of liveEntities) {
-        ent.immediate = undefined
-        ent.present = false
       }
     }
     const impliedLine = transition === 'enter-flashback'
@@ -375,142 +400,26 @@ export async function buildContinuityLedger(params: {
       }
     }
 
-    const presentCharacterKeys = projection.presentCharacterKeys
-      ?? (projection.characterStates ? Object.keys(projection.characterStates) : undefined)
-    if (presentCharacterKeys) {
-      sawCharacterRoster = true
-      for (const character of liveCharacters.values()) {
-        character.present = false
-        character.immediate = undefined
-      }
-    }
-    const presentCharacterSet = new Set((presentCharacterKeys ?? []).map(normalizeContinuityKey))
-
-    if (projection.characterStates) {
-      for (const [key, update] of Object.entries(projection.characterStates)) {
-        const charKey = normalizeContinuityKey(key)
-        const existing = liveCharacters.get(charKey)
-        const state = existing ? { ...existing.state } : {}
-        if (update.state) {
-          for (const [sKey, sVal] of Object.entries(update.state)) {
-            const normalizedStateKey = sKey.trim()
-            if (!sVal || CLEARED_STATE_VALUES.has(sVal.toLowerCase())) {
-              delete state[normalizedStateKey]
-            } else {
-              state[normalizedStateKey] = sVal
-            }
-          }
-        }
-        const knowledge = takeLatest([...new Set([
-          ...(existing?.knowledge ?? []),
-          ...(update.knowledge ?? []),
-        ])], MAX_LIVE_LIST_ITEMS)
-        const secrets = takeLatest([...new Set([
-          ...(existing?.secrets ?? []),
-          ...(update.secrets ?? []),
-        ])], MAX_LIVE_LIST_ITEMS)
-        liveCharacters.set(charKey, {
-          ...source,
-          characterId: update.characterId ?? existing?.characterId,
-          name: update.name || existing?.name || key,
-          immediate: update.immediate ?? existing?.immediate,
-          state,
-          knowledge,
-          secrets,
-          ...(presentCharacterKeys ? { present: presentCharacterSet.has(charKey) } : existing?.present !== undefined ? { present: existing.present } : {}),
-        })
-      }
-    }
-
-    const presentEntityKeys = projection.presentEntityKeys
-      ?? (projection.entityStates ? Object.keys(projection.entityStates) : undefined)
-    if (presentEntityKeys) {
-      for (const entity of liveEntities.values()) {
-        entity.present = false
-        entity.immediate = undefined
-      }
-    }
-    const presentEntitySet = new Set((presentEntityKeys ?? []).map(normalizeContinuityKey))
-
-    if (projection.entityStates) {
-      for (const [key, update] of Object.entries(projection.entityStates)) {
-        const entityKey = normalizeContinuityKey(key)
-        const existing = liveEntities.get(entityKey)
-        const state = existing ? { ...existing.state } : {}
-        if (update.state) {
-          for (const [sKey, sVal] of Object.entries(update.state)) {
-            const normalizedStateKey = sKey.trim()
-            if (!sVal || CLEARED_STATE_VALUES.has(sVal.toLowerCase())) {
-              delete state[normalizedStateKey]
-            } else {
-              state[normalizedStateKey] = sVal
-            }
-          }
-        }
-        const notes = takeLatest([...new Set([
-          ...(existing?.notes ?? []),
-          ...(update.notes ?? []),
-        ])], MAX_LIVE_LIST_ITEMS)
-        liveEntities.set(entityKey, {
-          ...source,
-          entityId: update.entityId ?? existing?.entityId,
-          name: update.name || existing?.name || key,
-          category: update.category ?? existing?.category,
-          immediate: update.immediate ?? existing?.immediate,
-          state,
-          notes,
-          ...(presentEntityKeys ? { present: presentEntitySet.has(entityKey) } : existing?.present !== undefined ? { present: existing.present } : {}),
-        })
-      }
-    }
+    liveStates.applyReports(projection.liveStates, source)
   }
+  applyEditsBefore(Number.POSITIVE_INFINITY)
 
   const allThreads: LiveThreadEntry[] = [...liveThreads.values()].map((thread) => ({
     ...thread,
     visibility: threadVisibility.get(thread.threadKey) ?? ('dormant' as const),
   }))
-  const characters = await listFragments(params.dataDir, params.storyId, 'character').catch(() => [])
-  for (const char of characters) {
-    const existingKey = [...liveCharacters].find(([, entry]) => entry.characterId === char.id)?.[0]
-      ?? normalizeContinuityKey(char.name)
-    if (liveCharacters.has(existingKey)) continue
-    const liveState = char.meta?.liveState as {
-      immediate?: string
-      state?: Record<string, string>
-      knowledge?: string[]
-      secrets?: string[]
-    } | undefined
-    if (liveState && (liveState.immediate || (liveState.state && Object.keys(liveState.state).length > 0) || (liveState.knowledge && liveState.knowledge.length > 0) || (liveState.secrets && liveState.secrets.length > 0))) {
-      liveCharacters.set(normalizeContinuityKey(char.name), {
-        sourceFragmentId: char.id,
-        analysisId: '',
-        narrativePosition: 0,
-        characterId: char.id,
-        name: char.name,
-        immediate: liveState.immediate,
-        state: liveState.state ?? {},
-        knowledge: liveState.knowledge ?? [],
-        secrets: liveState.secrets ?? [],
-        ...(sawCharacterRoster ? { present: false } : {}),
-      })
-    }
-  }
-
-  const allCharacters = [...liveCharacters.values()]
-  const allEntities = [...liveEntities.values()]
+  const foldedLiveStates = liveStates.result()
   const ledger: ContinuityLedger | undefined = (
     cursor.state.size > 0
     || allThreads.length > 0
     || characterKnowledge.size > 0
-    || allCharacters.length > 0
-    || allEntities.length > 0
+    || foldedLiveStates.length > 0
     || hasSceneSignal(cursor.frame)
   ) ? {
       currentState: [...cursor.state.values()],
       liveThreads: allThreads,
       characterKnowledge: [...characterKnowledge.values()],
-      ...(allCharacters.length > 0 ? { characterStates: allCharacters } : {}),
-      ...(allEntities.length > 0 ? { entityStates: allEntities } : {}),
+      ...(foldedLiveStates.length > 0 ? { liveStates: foldedLiveStates } : {}),
       currentScene: cursor.frame,
       staleProjectionCount,
     } : undefined
@@ -550,19 +459,15 @@ export function projectContinuityView(
   }
   const characterKnowledge = [...knowledgeByCharacterId.values()]
     .flatMap((entries) => takeLatest(entries, MAX_KNOWLEDGE_PER_CHARACTER))
-  const characterStates = ledger.characterStates
-    ? takeMostRecentlySourced(ledger.characterStates, MAX_CHARACTER_STATES)
-    : undefined
-  const entityStates = ledger.entityStates
-    ? takeMostRecentlySourced(ledger.entityStates, MAX_ENTITY_STATES)
+  const liveStates = ledger.liveStates
+    ? takeMostRecentlySourced(ledger.liveStates, MAX_LIVE_STATES)
     : undefined
 
   return {
     currentState,
     liveThreads,
     characterKnowledge,
-    ...(characterStates ? { characterStates } : {}),
-    ...(entityStates ? { entityStates } : {}),
+    ...(liveStates ? { liveStates } : {}),
     currentScene: ledger.currentScene,
     staleProjectionCount: ledger.staleProjectionCount,
   }
@@ -683,9 +588,9 @@ function activeCast(source: ContinuitySource): Set<string> {
   return new Set([
     ...(source.stickyCharacters ?? []).map((fragment) => fragment.id),
     ...(source.recentCharacters ?? []).map((fragment) => fragment.id),
-    ...(source.continuityView?.characterStates ?? [])
-      .filter((character) => character.present !== false && Boolean(character.characterId))
-      .map((character) => character.characterId!),
+    ...(source.continuityView?.liveStates ?? [])
+      .filter((subject) => subject.kind === 'character' && subject.present && Boolean(subject.fragmentId))
+      .map((subject) => subject.fragmentId!),
   ])
 }
 
@@ -693,8 +598,9 @@ function charactersInScope(source: ContinuitySource, scope: CharacterScope): Set
   if (scope === 'all') {
     return new Set([
       ...(source.continuityView?.characterKnowledge.map((entry) => entry.characterId) ?? []),
-      ...(source.continuityView?.characterStates ?? [])
-        .map((character) => character.characterId)
+      ...(source.continuityView?.liveStates ?? [])
+        .filter((subject) => subject.kind === 'character')
+        .map((subject) => subject.fragmentId)
         .filter((id): id is string => Boolean(id)),
     ])
   }
@@ -849,61 +755,101 @@ function renderAuthorialContinuity(
     ].filter((line): line is string => Boolean(line)).join('\n\n'))
   }
 
-  const scopedCharacterStates = (view.characterStates ?? []).filter((character) => (
-    character.present !== false
-    && (!character.characterId || characterIds.has(character.characterId))
-  ))
-  if (scopedCharacterStates.length > 0) {
-    const lines: string[] = ['### Active character live states']
-    for (const char of scopedCharacterStates) {
-      const details: string[] = []
-      if (char.immediate) {
-        details.push(`  - Immediate: ${char.immediate}`)
-      }
-      const statePairs = Object.entries(char.state).filter(([_, v]) => Boolean(v))
-      if (statePairs.length > 0) {
-        details.push(`  - State: ${statePairs.map(([k, v]) => `${k}: ${v}`).join(' | ')}`)
-      }
-      if (char.knowledge.length > 0) {
-        details.push(`  - Knowledge: ${char.knowledge.join('; ')}`)
-      }
-      if (char.secrets.length > 0) {
-        details.push(`  - Secrets: ${char.secrets.join('; ')}`)
-      }
-      if (details.length > 0) {
-        lines.push(`- **${char.name}**${char.characterId ? ` (\`${char.characterId}\`)` : ''}\n${details.join('\n')}`)
-      }
-    }
-    if (lines.length > 1) {
-      parts.push(lines.join('\n'))
-    }
-  }
-
-  const activeEntityStates = (view.entityStates ?? []).filter((entity) => entity.present !== false)
-  if (activeEntityStates.length > 0) {
-    const lines: string[] = ['### Active entity live states']
-    for (const ent of activeEntityStates) {
-      const details: string[] = []
-      if (ent.immediate) {
-        details.push(`  - Immediate: ${ent.immediate}`)
-      }
-      const statePairs = Object.entries(ent.state).filter(([_, v]) => Boolean(v))
-      if (statePairs.length > 0) {
-        details.push(`  - State: ${statePairs.map(([k, v]) => `${k}: ${v}`).join(' | ')}`)
-      }
-      if (ent.notes.length > 0) {
-        details.push(`  - Notes: ${ent.notes.join('; ')}`)
-      }
-      if (details.length > 0) {
-        lines.push(`- **${ent.name}**${ent.entityId ? ` (\`${ent.entityId}\`)` : ''}${ent.category ? ` [${ent.category}]` : ''}\n${details.join('\n')}`)
-      }
-    }
-    if (lines.length > 1) {
-      parts.push(lines.join('\n'))
-    }
-  }
+  const liveStates = renderLiveStates(view, characterIds, showThreadKeys)
+  if (liveStates) parts.push(liveStates)
 
   return parts.join('\n\n')
+}
+
+/**
+ * The subjects an authorial reader is shown: everyone in the scene, plus
+ * in-scope characters who are elsewhere, whose last-known state is exactly what
+ * keeps them from acting on a scene they did not witness.
+ */
+function shownLiveStates(view: ContinuityView, characterIds: Set<string>): FoldedLiveState[] {
+  const subjects = view.liveStates ?? []
+  const inScope = (subject: FoldedLiveState) => subject.kind === 'character'
+    && Boolean(subject.fragmentId && characterIds.has(subject.fragmentId))
+  return [
+    ...subjects.filter((subject) => subject.present),
+    ...subjects.filter((subject) => !subject.present && inScope(subject)),
+  ]
+}
+
+/** Item numbers run across every shown subject, in the order they are rendered. */
+function numberLiveStateItems(subjects: FoldedLiveState[]): LiveStateRegistryEntry[] {
+  return subjects.flatMap((subject) => subject.items.map((item) => ({ item, subject })))
+    .map(({ item, subject }, index) => ({
+      index: index + 1,
+      kind: subject.kind,
+      subjectKey: subject.key,
+      subjectName: subject.name,
+      id: item.id,
+      field: item.field,
+      text: item.text,
+    }))
+}
+
+function describeAge(field: FoldedLiveState['fields'][number]): string {
+  if (field.holds !== 'lastKnown' || field.scenesAgo === 0) return ''
+  return field.scenesAgo === 1 ? ' (previous scene)' : ` (${field.scenesAgo} scenes ago)`
+}
+
+function describeEnding(ended: FoldedLiveState['ended'][number], names: Map<string, string>): string {
+  if (ended.happened === 'revealed') {
+    const to = (ended.to ?? []).map((key) => names.get(key) ?? key)
+    return to.length > 0 ? `revealed to ${to.join(', ')}` : 'revealed'
+  }
+  if (ended.happened === 'changed') return ended.now ? `changed; now: ${ended.now}` : 'changed'
+  return 'resolved'
+}
+
+/** Groups list items under their field in first-seen order. */
+function itemsByField(items: FoldedLiveState['items']): Array<[string, FoldedLiveState['items']]> {
+  const groups = new Map<string, FoldedLiveState['items']>()
+  for (const item of items) groups.set(item.field, [...(groups.get(item.field) ?? []), item])
+  return [...groups]
+}
+
+function renderLiveStates(
+  view: ContinuityView,
+  characterIds: Set<string>,
+  numbered: boolean,
+): string | null {
+  const shown = shownLiveStates(view, characterIds)
+  if (shown.length === 0) return null
+  const numbers = numbered
+    ? new Map(numberLiveStateItems(shown).map((entry) => [`${entry.kind}:${entry.subjectKey}:${entry.id}`, entry.index]))
+    : undefined
+  const names = new Map((view.liveStates ?? []).map((subject) => [subject.key, subject.name]))
+  const latestPosition = view.currentScene?.narrativePosition
+    ?? Math.max(0, ...(view.liveStates ?? []).map((subject) => subject.narrativePosition))
+
+  const lines = ['### Where things stand']
+  for (const subject of shown) {
+    const header = [
+      `**${subject.name}**`,
+      subject.fragmentId ? ` (\`${subject.fragmentId}\`)` : '',
+      subject.category ? ` [${subject.category}]` : '',
+      subject.present ? '' : ' — not in the current scene',
+    ].join('')
+    const details = subject.fields.map((field) => `- ${field.field}: ${field.value}${describeAge(field)}`)
+    for (const [field, items] of itemsByField(subject.items)) {
+      details.push(`- ${field}:`)
+      for (const item of items) {
+        const number = numbers?.get(`${subject.kind}:${subject.key}:${item.id}`)
+        details.push(`  - ${number !== undefined ? `[${number}] ` : ''}${item.text}`)
+      }
+    }
+    for (const ended of subject.ended.filter((item) => item.endedAt.narrativePosition >= latestPosition)) {
+      details.push(`- No longer (${ended.field}): ${ended.text} — ${describeEnding(ended, names)}`)
+    }
+    lines.push([header, ...details].join('\n'))
+  }
+  if (numbers && numbers.size > 0) {
+    lines.splice(1, 0, 'Numbered items can be ended by number when this passage reveals, changes, or resolves them.')
+  }
+  return lines.join('\n\n')
 }
 
 /**
@@ -917,24 +863,15 @@ function renderAuthorialContinuity(
  */
 function renderSelfAwareness(view: ContinuityView | undefined, characterId: string): string {
   const known = view?.characterKnowledge.filter((entry) => entry.characterId === characterId) ?? []
-  const charState = view?.characterStates?.find((c) => c.characterId === characterId)
+  const charState = view?.liveStates?.find((subject) => subject.kind === 'character' && subject.fragmentId === characterId)
   const lines = [
     '## What You Know',
     'Your character sheet and the list below are your memory. Do not infer knowledge from authorial story material or from what other characters know: if something does not appear here, you have not learned it.',
   ]
   if (charState) {
-    if (charState.immediate) {
-      lines.push(`- Immediate: ${charState.immediate}`)
-    }
-    const statePairs = Object.entries(charState.state).filter(([_, v]) => Boolean(v))
-    if (statePairs.length > 0) {
-      lines.push(`- Physical state: ${statePairs.map(([k, v]) => `${k}: ${v}`).join(' | ')}`)
-    }
-    if (charState.secrets.length > 0) {
-      lines.push(...charState.secrets.map((s) => `- Private: ${s}`))
-    }
-    if (charState.knowledge.length > 0) {
-      lines.push(...charState.knowledge.map((k) => `- ${k}`))
+    lines.push(...charState.fields.map((field) => `- ${field.field}: ${field.value}`))
+    for (const [field, items] of itemsByField(charState.items)) {
+      lines.push(`- ${field}:`, ...items.map((item) => `  - ${item.text}`))
     }
   }
   if (known.length > 0) {
@@ -958,7 +895,7 @@ export function continuityRegistry(
 ): ContinuityRegistry {
   const view = source.continuityView
   const ledger = source.continuityLedger ?? view
-  if (!ledger) return { state: [], thread: [], knowledge: [] }
+  if (!ledger) return { state: [], thread: [], knowledge: [], items: [] }
   const characterIds = charactersInScope(source, 'passage-candidates')
   const knowers = characterLabels(source, ledger.characterKnowledge.map((entry) => entry.characterId))
   const detailedState = new Set(view?.currentState.map((entry) => entry.stateKey) ?? [])
@@ -966,7 +903,12 @@ export function continuityRegistry(
   const detailedKnowledge = new Set(
     view?.characterKnowledge.map((entry) => scopedContinuityIdentity(entry.knowledgeKey, entry.characterId)) ?? [],
   )
+  const analyzePolicy = POLICY_BY_READER['librarian.analyze']
+  const items = view && analyzePolicy.presentation !== 'self'
+    ? numberLiveStateItems(shownLiveStates(view, charactersInScope(source, analyzePolicy.characterScope)))
+    : []
   return {
+    items,
     state: ledger.currentState.map((item, index) => ({
       index: index + 1,
       key: item.stateKey,

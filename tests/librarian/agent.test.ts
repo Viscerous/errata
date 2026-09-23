@@ -149,12 +149,7 @@ function mockStreamWithToolCalls(toolCalls: Array<{ toolName: string; args: Reco
         let input: Record<string, unknown>
         if (prompt.includes('Call reportObservation exactly once')) {
           toolName = 'reportObservation'
-          input = {
-            ...legacy,
-            maintenanceNeeded: toolCalls.some((call) => (
-              call.toolName === 'proposeRecordCorrections' || call.toolName === 'proposeNewRecords'
-            )),
-          }
+          input = { ...legacy }
         } else if (prompt.includes('Call reportContinuity exactly once')) {
           const continuity = lastArgs(['reportContinuity', 'reportAnalysis'])
           toolName = 'reportContinuity'
@@ -541,7 +536,11 @@ describe('librarian agent', () => {
           input = {
             summary: 'Alice resigned from command at dawn.',
             candidateFragmentIds: ['ch-0001'],
-            maintenanceNeeded: true,
+            contradictions: [{
+              description: 'The record says Alice commands the gate; she resigned.',
+              sourceSegments: [1],
+              conflictingEvidence: [{ fragmentId: 'ch-0001', segments: [1] }],
+            }],
           }
         } else if (args.prompt?.includes('Call reportContinuity exactly once')) {
           toolName = 'reportContinuity'
@@ -627,7 +626,7 @@ describe('librarian agent', () => {
           summary: 'A forbidden book pulsed on the altar.',
           mentions: [
             { fragmentId: 'kn-0001', text: 'Necronomicon' },
-            { fragmentId: 'kn-0001', text: 'spellbook' },
+            { fragmentId: 'kn-0001', text: 'a spellbook' },
           ],
         },
       },
@@ -636,12 +635,12 @@ describe('librarian agent', () => {
     const analysis = await runLibrarian(dataDir, storyId, 'pr-0001')
     expect(analysis.mentions).toEqual([
       { fragmentId: 'kn-0001', text: 'Necronomicon' },
-      { fragmentId: 'kn-0001', text: 'spellbook' },
+      { fragmentId: 'kn-0001', text: 'a spellbook' },
     ])
 
     const fragment = await getFragment(dataDir, storyId, 'pr-0001')
     const annotations = fragment!.meta.annotations as Array<{ type: string; fragmentId: string; text: string }>
-    expect(annotations.map(a => a.text)).toEqual(['Necronomicon', 'spellbook'])
+    expect(annotations.map(a => a.text)).toEqual(['Necronomicon', 'a spellbook'])
 
     const state = await getState(dataDir, storyId)
     expect(state.recentMentions['kn-0001']).toEqual(['pr-0001'])
@@ -839,8 +838,8 @@ describe('librarian agent', () => {
       },
       continuity: {
         characters: [{
-          ref: 'ch-0001',
-          state: [{ key: 'location', value: 'north hall' }],
+          character: 'ch-0001',
+          set: [{ field: 'Where', value: 'north hall' }],
         }],
         entities: [],
         threads: [],
@@ -854,8 +853,8 @@ describe('librarian agent', () => {
     expect(summaries).toHaveLength(1)
     const analysis = await getAnalysis(dataDir, storyId, summaries[0].id)
     expect(analysis?.summaryUpdate).toBe('Alice crossed the north hall.')
-    expect(analysis?.continuityProjection?.characterStates?.['ch-0001']?.state)
-      .toEqual({ location: 'north hall' })
+    expect(analysis?.continuityProjection?.liveStates?.find((report) => report.key === 'ch-0001')?.set)
+      .toEqual([{ field: 'Where', value: 'north hall' }])
     expect(analysis?.passes?.[0]).toMatchObject({ name: 'analyze', status: 'complete' })
 
     const state = await getState(dataDir, storyId)
@@ -963,6 +962,11 @@ describe('librarian agent', () => {
         args: {
           summary: 'Alice resigned.',
           candidateFragmentIds: ['ch-0001'],
+          contradictions: [{
+            description: 'The record says Alice is captain; she resigned.',
+            sourceSegments: [1],
+            conflictingEvidence: [{ fragmentId: 'ch-0001', segments: [1] }],
+          }],
         },
       },
       {
@@ -1230,6 +1234,7 @@ describe('librarian agent', () => {
         toolName: 'reportAnalysis',
         args: {
           summary: 'An ancient city called Valdris was revealed.',
+          newRecordNames: ['Valdris'],
         },
       },
       {
@@ -1277,6 +1282,7 @@ describe('librarian agent', () => {
         toolName: 'reportAnalysis',
         args: {
           summary: 'Valdris appears in old records.',
+          newRecordNames: ['Valdris'],
         },
       },
       {
@@ -1733,8 +1739,9 @@ describe('librarian agent', () => {
 
     const analysis = await runLibrarian(dataDir, storyId, 'pr-0001')
     expect(analysis.fragmentChangeProposals).toEqual([])
+    // A candidate alone is not evidence, so record maintenance never runs.
     expect(analysis.passes?.find((pass) => pass.name === 'analyze')?.diagnostics)
-      .toMatchObject({ proposalToolCallCount: 1, proposalQueuedOperationCount: 0 })
+      .toMatchObject({ proposalToolCallCount: 0, proposalQueuedOperationCount: 0 })
 
     const updated = await getFragment(dataDir, storyId, 'ch-0001')
     expect(updated?.content).toBe('Alice waits at the gate.')

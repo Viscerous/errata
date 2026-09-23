@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { ContinuityProjectionSchema, type ContinuityProjection } from '@/contracts/continuity'
+import { liveStateItemId } from '@/contracts/live-state'
 import type { LibrarianAnalysis as ClientLibrarianAnalysis } from '@/lib/api/types'
 
 type ClientContinuityProjection = NonNullable<ClientLibrarianAnalysis['continuityProjection']>
@@ -13,19 +14,19 @@ describe('continuity projection contract', () => {
     expect(usesCanonicalType).toBe(true)
 
     const projection: ContinuityProjection = {
-      version: 2,
+      version: 3,
       scene: { transition: 'continue', line: 'present' },
       stateOperations: [],
       threadOperations: [],
       threadFocus: [],
       knowledgeOperations: [],
     }
-    expect(projection.version).toBe(2)
+    expect(projection.version).toBe(3)
   })
 
-  it('accepts only canonical persisted v2 projections', () => {
+  it('accepts only canonical persisted projections', () => {
     const projection: ContinuityProjection = {
-      version: 2,
+      version: 3,
       scene: { transition: 'enter-flashback', line: 'flashback' },
       stateOperations: [],
       threadOperations: [],
@@ -54,40 +55,31 @@ describe('continuity projection contract', () => {
     }).success).toBe(false)
   })
 
-  it('accepts characterStates and entityStates in canonical projections', () => {
+  it('accepts live-state reports that set fields, add entries, and end them', () => {
+    const secretId = liveStateItemId('Secrets', 'carries the map')
     const projection: ContinuityProjection = {
-      version: 2,
+      version: 3,
       scene: { transition: 'continue', line: 'present' },
       stateOperations: [],
       threadOperations: [],
       threadFocus: [],
       knowledgeOperations: [],
-      characterStates: {
-        'ch-0001': {
-          characterId: 'ch-0001',
-          name: 'Alice',
-          immediate: 'Catching breath; dust clinging to boots',
-          state: {
-            attire: 'travel cloak',
-            injury: 'sprained ankle',
-            gear: 'lantern in hand',
-          },
-          knowledge: ['saw the courtyard gate unlatched'],
-          secrets: ['carrying the map in a secret pocket'],
-        },
-      },
-      entityStates: {
-        'loc-0001': {
-          name: 'North Gate',
-          category: 'location',
-          immediate: 'Cold draft whistling through the iron bars',
-          state: {
-            lock: 'broken',
-          },
-          notes: ['stone construction'],
-        },
-      },
+      liveStates: [{
+        kind: 'character',
+        key: 'ch-0001',
+        fragmentId: 'ch-0001',
+        name: 'Alice',
+        present: true,
+        set: [{ field: 'Currently', value: 'catching her breath' }],
+        add: [{ id: liveStateItemId('Knows', 'the gate is unlatched'), field: 'Knows', text: 'the gate is unlatched' }],
+        update: [{ id: secretId, happened: 'revealed', to: ['ch-0002'] }],
+      }],
     }
     expect(ContinuityProjectionSchema.safeParse(projection).success).toBe(true)
+  })
+
+  it('derives the same item identity from the same statement however it is spelled', () => {
+    expect(liveStateItemId('Knows', 'The gate is unlatched.')).toBe(liveStateItemId('knows', 'the gate is  unlatched'))
+    expect(liveStateItemId('Knows', 'the gate is unlatched')).not.toBe(liveStateItemId('Secrets', 'the gate is unlatched'))
   })
 })

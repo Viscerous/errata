@@ -10,6 +10,7 @@ import {
   type ContextMessage,
 } from '../llm/context-builder'
 import { samplingDiagnostics, type resolveAgentRuntime } from '../llm/client'
+import { toolCallOutputCap } from '../llm/output-budget'
 import { normalizeTokenUsage, resolveAndReportServedUsage } from '../llm/usage-normalizer'
 import type { ContextSelectionSource, FragmentSignal } from '../llm/context-selection'
 import { buildAnalyzeContext } from './blocks'
@@ -19,7 +20,8 @@ import {
   createLibrarianOnlineTools,
   type AnalysisCollector,
 } from './analysis-tools'
-import { buildAnalyzeStagePlan, type AnalyzeStageId } from './analyze-stages'
+import { buildAnalyzeStagePlan, buildSinglePassPlan, type AnalyzeStageId } from './analyze-stages'
+import { PASSAGE_REPORT_TOOL, createPassageReportTool } from './passage-report'
 import {
   type FragmentCandidate,
   fragmentCandidateIds,
@@ -35,6 +37,7 @@ import {
   type LibrarianPassRecord,
 } from './storage'
 import {
+  runStructuredPass,
   runToolLoopPass,
   ToolLoopPassError,
   type ToolLoopPassArgs,
@@ -143,6 +146,44 @@ async function runCompiledToolPass(args: RunCompiledPassArgs): Promise<{
   })
 }
 
+/**
+ * A structured answer is constrained by its schema but never shown it: the
+ * server turns the schema into a decoding grammar, not into prompt text. The
+ * task block therefore carries what a tool declaration would have: the tool's
+ * description and its schema with field descriptions.
+ */
+function structuredOutputForm(tool: ToolSet[string]): string {
+  const schema = (tool.inputSchema as { jsonSchema?: unknown }).jsonSchema
+  return [
+    tool.description ?? '',
+    'Report form (JSON Schema):',
+    JSON.stringify(schema),
+  ].filter(Boolean).join('\n')
+}
+
+async function runCompiledStructuredPass(
+  args: Omit<RunCompiledPassArgs, 'maxSteps' | 'terminalToolName' | 'terminalRequiresToolName' | 'prepareStep' | 'stopWhen'>
+    & { toolName: string },
+): ReturnType<typeof runStructuredPass> {
+  const systemMessage = args.compiled.messages.find(m => m.role === 'system')
+  const userMessage = args.compiled.messages.find(m => m.role === 'user')
+  return runStructuredPass({
+    model: args.model,
+    instructions: systemMessage?.content || MISSING_SYSTEM_PROMPT_FALLBACK,
+    prompt: userMessage?.content ?? '',
+    toolName: args.toolName,
+    tool: args.compiled.tools[args.toolName],
+    temperature: args.temperature,
+    topP: args.topP,
+    topK: args.topK,
+    providerOptions: args.providerOptions,
+    maxOutputTokens: args.maxOutputTokens,
+    emit: args.emit,
+    abortSignal: args.abortSignal,
+    idleTimeoutMs: args.idleTimeoutMs,
+  })
+}
+
 async function withAnalyzeStagePrompt(
   compiled: RunCompiledPassArgs['compiled'],
   dataDir: string,
@@ -154,7 +195,10 @@ async function withAnalyzeStagePrompt(
 ): Promise<RunCompiledPassArgs['compiled']> {
   const compactBuiltinIds = new Set(['story-summary', 'continuity-memory', 'prose-new'])
   const blocks = compiled.blocks.filter((block) => {
-    if (stage === 'observation' || block.role === 'system' || block.source !== 'builtin') return true
+    // Maintenance edits authored records; live state is not something it may
+    // change, and showing it invites writing scene beats into canon.
+    if (stage === 'maintenance' && block.id === 'continuity-memory') return false
+    if (stage === 'observation' || stage === 'passage' || block.role === 'system' || block.source !== 'builtin') return true
     if (compactBuiltinIds.has(block.id)) return true
     const ids = block.fragmentContext?.fragmentIds ?? []
     return (stage === 'continuity' || stage === 'maintenance')
@@ -174,6 +218,23 @@ async function withAnalyzeStagePrompt(
     messages,
     blocks,
   }
+}
+
+/**
+ * A stage request may produce its tool's largest well-formed call plus the
+ * model's reasoning allowance, and no more. The provider is the only party that
+ * can stop generation: a client abort does not reliably reach it, and a
+ * degenerate continuation the server's tool-call parser withholds never shows
+ * on the stream. An explicit story limit still applies when it is lower.
+ */
+function stageOutputCap(tool: ToolSet[string] | undefined, runtime: LibrarianRuntime): number | undefined {
+  const schema = (tool?.inputSchema as { jsonSchema?: unknown } | undefined)?.jsonSchema
+  const derived = schema
+    ? toolCallOutputCap(schema, { enabled: runtime.thinkingEnabled, allowance: runtime.reasoningAllowance })
+    : undefined
+  const configured = runtime.guards.maxOutputTokens
+  if (derived === undefined) return configured
+  return configured === undefined ? derived : Math.min(derived, configured)
 }
 
 function successfulToolCall(
@@ -208,6 +269,7 @@ function maintenanceHandoff(collector: AnalysisCollector, observationResult?: un
       summary: collector.summaryUpdate,
       candidateFragmentIds: collector.candidateFragmentIds,
       contradictions: collector.contradictions,
+      newRecordNames: collector.newRecordNames,
       resolvedFragments: result?.resolvedFragments,
     }),
   ].join('\n')
@@ -219,8 +281,7 @@ function directionsHandoff(collector: AnalysisCollector): string {
     JSON.stringify({
       summary: collector.summaryUpdate,
       scene: collector.continuityProjection.scene,
-      characterStates: collector.continuityProjection.characterStates,
-      entityStates: collector.continuityProjection.entityStates,
+      liveStates: collector.continuityProjection.liveStates,
       threadOperations: collector.continuityProjection.threadOperations,
       threadFocus: collector.continuityProjection.threadFocus,
     }),
@@ -367,7 +428,7 @@ async function runOnlineAnalyzePass(
   disableSuggestions: boolean,
 ): Promise<OnlinePassOutcome> {
   const { dataDir, storyId, story, fragment, runtime, requestLogger, emit, abortSignal, idleTimeoutMs } = input
-  const { model, modelId, providerId, config, temperature, topP, topK, providerOptions, guards } = runtime
+  const { model, modelId, providerId, config, temperature, topP, topK, providerOptions } = runtime
   const startedAt = new Date().toISOString()
   const startTime = Date.now()
   const sampling = samplingDiagnostics(runtime)
@@ -439,7 +500,19 @@ async function runOnlineAnalyzePass(
     })
 
     const availableToolNames = Object.keys(compiled.tools)
-    const stages = buildAnalyzeStagePlan(availableToolNames)
+    // Experiment: ERRATA_ANALYZE_MODE=single answers the passage in one report.
+    const singlePass = process.env.ERRATA_ANALYZE_MODE === 'single'
+      && Boolean(compiled.tools.reportObservation && compiled.tools.reportContinuity)
+    const passageIncludesDirections = singlePass && Boolean(compiled.tools.reportDirections)
+    if (singlePass) {
+      compiled.tools = {
+        ...compiled.tools,
+        [PASSAGE_REPORT_TOOL]: createPassageReportTool(compiled.tools, passageIncludesDirections),
+      }
+    }
+    const stages = singlePass
+      ? buildSinglePassPlan(PASSAGE_REPORT_TOOL, availableToolNames)
+      : buildAnalyzeStagePlan(availableToolNames)
     if (stages.length === 0) throw new Error('Analyze has no enabled observation report tool')
 
     let observationToolOutput: unknown
@@ -448,9 +521,12 @@ async function runOnlineAnalyzePass(
     let stepCount = 0
     const completedStageIds = new Set<string>()
     for (const stage of stages) {
-      const maintenanceNeeded = collector.candidateFragmentIds.length > 0
-        || collector.contradictions.length > 0
-        || booleanToolResultField(observationToolOutput, 'maintenanceNeeded') === true
+      // Only evidence opens record maintenance: a contradiction citing both the
+      // record and the prose, or a new name the prose uses and the catalog lacks.
+      // Naming a record as a candidate is a claim, not evidence; a lasting change
+      // that contradicts nothing belongs in live state until the author promotes it.
+      const maintenanceNeeded = collector.contradictions.length > 0
+        || collector.newRecordNames.length > 0
       if (stage.id === 'maintenance' && !maintenanceNeeded) {
         completedStageIds.add(stage.id)
         continue
@@ -460,12 +536,16 @@ async function runOnlineAnalyzePass(
         ...collector.candidateFragmentIds,
         ...collector.contradictions.flatMap((contradiction) => contradiction.fragmentIds),
       ])
+      const stageTool = compiled.tools[stage.toolName]
+      // Answered in the tool's schema where the provider enforces it, so the
+      // schema bounds the whole answer; through a tool call elsewhere.
+      const structured = runtime.structuredOutput && stageTool !== undefined
       const stageCompiled = await withAnalyzeStagePrompt(
         compiled,
         dataDir,
         storyId,
         stage.id,
-        stage.directive,
+        structured ? `${stage.structuredDirective}\n\n${structuredOutputForm(stageTool)}` : stage.directive,
         stage.id === 'continuity'
           ? continuityHandoff(collector)
           : stage.id === 'maintenance'
@@ -478,22 +558,25 @@ async function runOnlineAnalyzePass(
         toolName: stage.toolName,
       })
       activeStageId = stage.id
-      const stageResult = await runCompiledToolPass({
+      const stageSettings = {
         compiled: stageCompiled,
         model,
         temperature,
         topP,
         topK,
         providerOptions,
-        // Respect the story's configured limit when present. Analyze does not
-        // invent a role-wide ceiling: reasoning budgets vary materially by model.
-        maxOutputTokens: guards.maxOutputTokens,
-        maxSteps: 1,
+        maxOutputTokens: stageOutputCap(stageTool, runtime),
         emit,
         abortSignal,
         idleTimeoutMs: idleTimeoutMs ?? DEFAULT_ANALYZE_IDLE_TIMEOUT_MS,
-        prepareStep: () => ({ activeTools: [stage.toolName], toolChoice: 'required' }),
-      })
+      }
+      const stageResult = structured
+        ? await runCompiledStructuredPass({ ...stageSettings, toolName: stage.toolName })
+        : await runCompiledToolPass({
+            ...stageSettings,
+            maxSteps: 1,
+            prepareStep: () => ({ activeTools: [stage.toolName], toolChoice: 'required' }),
+          })
       const reported = await resolveAndReportServedUsage(
         dataDir,
         storyId,
@@ -526,8 +609,11 @@ async function runOnlineAnalyzePass(
       if (stage.id === 'observation') {
         observationToolOutput = expectedCall?.result
       }
+      if (stage.id === 'passage') {
+        observationToolOutput = (expectedCall?.result as { reportObservation?: unknown } | undefined)?.reportObservation
+      }
       const stageComplete = Boolean(expectedCall)
-        || (stage.id === 'directions' && collector.directions.length > 0)
+        || ((stage.id === 'directions' || stage.id === 'passage') && collector.directions.length > 0)
       if (!stageComplete) {
         const detail = stageResult.toolErrors.map((item) => item.error).join('; ')
         throw new AnalyzeStageIncompleteError(`${stage.id} stage did not complete ${stage.toolName}${detail ? `: ${detail}` : ''}`)
@@ -537,7 +623,7 @@ async function runOnlineAnalyzePass(
     }
 
     const toolCallNames = completedToolCalls.map((call) => call.toolName)
-    const directionsRequired = stages.some((stage) => stage.id === 'directions')
+    const directionsRequired = stages.some((stage) => stage.id === 'directions') || passageIncludesDirections
     const workflowComplete = stages.every((stage) => completedStageIds.has(stage.id))
       && (!directionsRequired || collector.directions.length > 0)
     const proposalToolNames = new Set(['reportMaintenance'])

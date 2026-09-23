@@ -702,7 +702,7 @@ describe('context-builder', () => {
       summaryUpdate: '',
       mentions: [], contradictions: [], fragmentChangeProposals: [], timelineEvents: [],
       continuityProjection: {
-        version: 2,
+        version: 3,
         scene: { transition: 'continue', line: 'present' },
         stateOperations: Array.from({ length: 30 }, (_, index) => ({
           stateKey: `condition_${index}`,

@@ -15,6 +15,14 @@ export const ProviderConfigSchema = z.object({
     .union([z.number().min(0).max(2), z.null()])
     .optional()
     .transform((v) => v ?? undefined),
+  /**
+   * Reasoning tokens each model may spend per structured request, keyed by model
+   * ID. Models reason at very different lengths, so this is set per model rather
+   * than per role; an absent entry uses the default allowance.
+   */
+  reasoningAllowance: z.record(z.string(), z.int().min(0)).optional().default({}),
+  /** Overrides the preset's structured-output default; absent follows the preset. */
+  structuredOutput: z.boolean().optional(),
   createdAt: z.iso.datetime(),
 })
 

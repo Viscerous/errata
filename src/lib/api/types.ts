@@ -47,7 +47,8 @@ export type {
   LibrarianRevertChangeProposalResponse,
   LibrarianStatusResponse,
   LibrarianContinuityResponse,
-  UpdateCharacterLiveStateResponse,
+  UpdateLiveStateRequest,
+  UpdateLiveStateResponse,
   StoredLibrarianState,
 } from '@/contracts/librarian'
 export type {
@@ -62,13 +63,19 @@ export type {
   RevertResult as LibrarianProposalRevertResult,
 } from '@/contracts/fragment-changes'
 export type {
+  EndedLiveStateItem,
+  FoldedLiveState,
+  FoldedLiveStateField,
+  FoldedLiveStateItem,
+  LiveStateHappened,
+  LiveStateKind,
+} from '@/contracts/live-state'
+export type {
   AnalysisSourceRevision,
   CitedEvidence,
   ContinuityLedger,
   ContinuityProjection,
   ContinuityView,
-  FoldedCharacterLiveState,
-  FoldedEntityLiveState,
   KnowledgeOperation,
   NarrativeDuration,
   NarrativeTime,
@@ -181,6 +188,10 @@ export interface ProviderConfigSafe {
   enabled: boolean
   customHeaders?: Record<string, string>
   temperature?: number
+  /** Reasoning tokens per structured request, keyed by model ID. */
+  reasoningAllowance?: Record<string, number>
+  /** Overrides the preset's structured-output default. */
+  structuredOutput?: boolean
   createdAt: string
 }
 

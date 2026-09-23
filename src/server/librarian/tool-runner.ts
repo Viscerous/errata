@@ -1,4 +1,4 @@
-import { ToolLoopAgent, stepCountIs, type ToolSet } from 'ai'
+import { Output, ToolLoopAgent, asSchema, stepCountIs, streamText, type ToolSet } from 'ai'
 import { drainAgentStream } from '../agents/drain-agent-stream'
 import type { ActivityStreamEvent } from '../agents/activity-stream'
 import { servedModelIdFromResponse } from '../llm/served-models'
@@ -168,6 +168,111 @@ export async function runToolLoopPass(args: ToolLoopPassArgs): Promise<ToolLoopP
       toolErrors: drained.toolErrors,
       stepCount: drained.stepCount,
       finishReason: drained.finishReason,
+      servedModelId: drained.servedModelId,
+      totalUsage: result.totalUsage,
+      stepUsages,
+    }
+  } catch (error) {
+    if (!controller.signal.aborted) controller.abort()
+    throw new ToolLoopPassError(error, stepUsages)
+  } finally {
+    dispose()
+  }
+}
+
+export interface StructuredPassArgs {
+  model: ToolLoopPassArgs['model']
+  instructions: string
+  prompt: string
+  toolName: string
+  tool: ToolSet[string]
+  temperature: ToolLoopPassArgs['temperature']
+  topP: ToolLoopPassArgs['topP']
+  topK: ToolLoopPassArgs['topK']
+  providerOptions: ToolLoopPassArgs['providerOptions']
+  maxOutputTokens?: number
+  emit?: (event: ActivityStreamEvent) => void
+  abortSignal?: AbortSignal
+  idleTimeoutMs?: number
+}
+
+/**
+ * One request answered in the tool's input schema as a JSON response format,
+ * then handed to the tool as its input.
+ *
+ * Where the provider constrains that format while decoding, the schema is the
+ * whole answer: bounds hold, required fields exist, and nothing can follow the
+ * closing brace. The result has the shape of a one-step tool pass, so callers
+ * treat both the same.
+ */
+export async function runStructuredPass(args: StructuredPassArgs): Promise<ToolLoopPassResult> {
+  const stepUsages: ToolLoopStepUsage[] = []
+  const startedAt = Date.now()
+  const schema = asSchema(args.tool.inputSchema)
+  const { controller, dispose } = linkedAbortController(args.abortSignal)
+  try {
+    const result = streamText({
+      model: args.model,
+      system: args.instructions,
+      prompt: args.prompt,
+      output: Output.object({ schema, name: args.toolName, description: args.tool.description }),
+      temperature: args.temperature,
+      topP: args.topP,
+      topK: args.topK,
+      providerOptions: args.providerOptions,
+      maxOutputTokens: args.maxOutputTokens,
+      abortSignal: controller.signal,
+      onStepFinish: (event) => {
+        stepUsages.push({
+          stepNumber: 0,
+          finishReason: event.finishReason,
+          usage: event.usage,
+          servedModelId: servedModelIdFromResponse(event.response),
+          activeTools: [args.toolName],
+          durationMs: Date.now() - startedAt,
+        })
+      },
+    })
+    const drained = await drainAgentStream(result.fullStream, args.emit ?? (() => {}), {
+      abortSignal: controller.signal,
+      idleTimeoutMs: args.idleTimeoutMs ?? DEFAULT_TOOL_LOOP_IDLE_TIMEOUT_MS,
+      onIdleTimeout: () => controller.abort(),
+    })
+
+    const toolCalls: ToolLoopPassResult['toolCalls'] = []
+    const toolErrors: ToolLoopPassResult['toolErrors'] = []
+    const toolCallId = `structured-${args.toolName}-${startedAt.toString(36)}`
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(drained.fullText)
+    } catch {
+      toolErrors.push({
+        toolName: args.toolName,
+        error: `The response was not a complete JSON report (finish reason: ${drained.finishReason}).`,
+      })
+    }
+    if (parsed !== undefined) {
+      const validation = await schema.validate?.(parsed) ?? { success: true as const, value: parsed }
+      if (!validation.success) {
+        toolErrors.push({ toolName: args.toolName, error: String(validation.error) })
+      } else {
+        const input = validation.value as Record<string, unknown>
+        args.emit?.({ type: 'tool-call', id: toolCallId, toolName: args.toolName, args: input })
+        const output = await args.tool.execute?.(input, { toolCallId, messages: [], abortSignal: controller.signal })
+        args.emit?.({ type: 'tool-result', id: toolCallId, toolName: args.toolName, result: output })
+        toolCalls.push({ toolName: args.toolName, args: input, result: output })
+      }
+    }
+    for (const failure of toolErrors) {
+      args.emit?.({ type: 'tool-error', id: toolCallId, toolName: failure.toolName, error: failure.error })
+    }
+
+    return {
+      fullText: '',
+      toolCalls,
+      toolErrors,
+      stepCount: drained.stepCount,
+      finishReason: toolCalls.length > 0 ? 'tool-calls' : drained.finishReason,
       servedModelId: drained.servedModelId,
       totalUsage: result.totalUsage,
       stepUsages,

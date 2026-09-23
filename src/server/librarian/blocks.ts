@@ -91,9 +91,9 @@ export function buildAnalyzeSystemPrompt(opts?: {
 Analyze the new prose against the supplied story context and keep its durable records accurate.
 
 ${hasReportTool
-    ? `This request has one active reporting task. Use the active tool exactly once, then stop. Do not write a markdown summary or conversational response, plan a later task, or repeat work supplied in a completed-stage handoff.
+    ? `This request has one reporting task. Deliver its report exactly once, in the form the task asks for, then stop. Do not write a markdown summary or conversational response, plan a later task, or repeat work supplied in a completed-stage handoff.
 
-Ground claims in the numbered prose and supplied records. Prefer omission over invention. Field semantics and output bounds are defined by the active tool.`
+Ground claims in the numbered prose and supplied records. Prefer omission over invention. Field meanings and bounds are defined by the report's form.`
     : 'Review the prose against the supplied context without inventing a replacement reporting tool.'}
 `.trim()
 }

@@ -248,32 +248,18 @@ function ContinuityNotes({ projection, stale, charName }: {
         {projection.scene.location ? ` — ${projection.scene.location.label}` : ''}
         {projection.scene.time ? ` — ${projection.scene.time.label}` : ''}
       </InlineField>
-      {projection.characterStates && Object.keys(projection.characterStates).length > 0 && (
+      {projection.liveStates && projection.liveStates.length > 0 && (
         <div>
-          <SubLabel>Character states</SubLabel>
-          <AnalysisList items={Object.entries(projection.characterStates).map(([charId, liveState]) => {
-            const parts: string[] = []
-            if (liveState.immediate) parts.push(`Immediate: ${liveState.immediate}`)
-            const stateEntries = Object.entries(liveState.state || {})
-            if (stateEntries.length > 0) parts.push(stateEntries.map(([k, v]) => `${k}: ${v}`).join(', '))
-            if (liveState.knowledge && liveState.knowledge.length > 0) parts.push(`Aware: ${liveState.knowledge.join('; ')}`)
-            if (liveState.secrets && liveState.secrets.length > 0) parts.push(`Secrets: ${liveState.secrets.join('; ')}`)
+          <SubLabel>Characters and entities</SubLabel>
+          <AnalysisList items={projection.liveStates.map((report) => {
+            const parts: string[] = [
+              ...report.set.map((change) => (change.value ? `${change.field}: ${change.value}` : `${change.field} cleared`)),
+              ...report.add.map((entry) => `${entry.field} + ${entry.text}`),
+              ...report.update.map((ending) => `${ending.happened}${ending.now ? ` → ${ending.now.text}` : ''}`),
+            ]
             return {
-              key: `char-state-${charId}`,
-              content: `${charName(charId)}: ${parts.join(' — ') || 'active'}`,
-            }
-          })} />
-        </div>
-      )}
-      {projection.entityStates && Object.keys(projection.entityStates).length > 0 && (
-        <div>
-          <SubLabel>Entity states</SubLabel>
-          <AnalysisList items={Object.entries(projection.entityStates).map(([entityName, entity]) => {
-            const stateEntries = Object.entries(entity.state || {})
-            const stateText = stateEntries.map(([k, v]) => `${k}: ${v}`).join(', ')
-            return {
-              key: `entity-state-${entityName}`,
-              content: `${entity.name || entityName}: ${stateText || 'active'}`,
+              key: `live-state-${report.kind}-${report.key}`,
+              content: `${report.fragmentId ? charName(report.fragmentId) : report.name}${report.present ? '' : ' (not present)'}: ${parts.join(' — ') || 'present'}`,
             }
           })} />
         </div>

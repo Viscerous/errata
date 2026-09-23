@@ -1,22 +1,13 @@
-import { useState, useMemo } from 'react'
+import { useId, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import {
-  Activity,
-  BookOpen,
-  EyeOff,
-  Layers,
-  Pencil,
-  Plus,
-  Trash2,
-  Check,
-  Loader2,
-} from 'lucide-react'
-import { api, type Fragment } from '@/lib/api'
+import { Activity, BookOpen, Check, EyeOff, History, Layers, List, Loader2, Pencil, Plus, Trash2, type LucideIcon } from 'lucide-react'
+import { api, type EndedLiveStateItem, type FoldedLiveState, type Fragment } from '@/lib/api'
 import { q, qk, useActiveBranchId } from '@/lib/query-keys'
 import { normalizeContinuityKey } from '@/lib/continuity-keys'
-import { Eyebrow, EmptyHint, Hint } from '@/components/ui/prose-text'
+import { DEFAULT_LIVE_STATE_FIELDS, liveStateFieldKey } from '@/contracts/live-state'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Hint } from '@/components/ui/prose-text'
 import { Input } from '@/components/ui/input'
 
 interface CharacterLiveStatePanelProps {
@@ -24,331 +15,254 @@ interface CharacterLiveStatePanelProps {
   fragment: Fragment
 }
 
-interface StateRow {
-  key: string
+interface FieldRow {
+  field: string
   value: string
+}
+
+interface ItemRow {
+  id?: string
+  field: string
+  text: string
+}
+
+const MAX_SHOWN_ENDED = 5
+const CHARACTER_FIELDS = DEFAULT_LIVE_STATE_FIELDS.character
+const VALUE_FIELD_NAMES = CHARACTER_FIELDS.filter((definition) => definition.holds !== 'lasting').map((definition) => definition.field)
+const LIST_FIELD_NAMES = CHARACTER_FIELDS.filter((definition) => definition.holds === 'lasting').map((definition) => definition.field)
+
+/** Template fields first, in template order; anything else after, as reported. */
+function fieldOrder(field: string): number {
+  const index = CHARACTER_FIELDS.findIndex((definition) => liveStateFieldKey(definition.field) === liveStateFieldKey(field))
+  return index === -1 ? CHARACTER_FIELDS.length : index
+}
+
+function describeAge(scenesAgo: number): string | null {
+  if (scenesAgo === 0) return null
+  return scenesAgo === 1 ? 'previous scene' : `${scenesAgo} scenes ago`
+}
+
+function describeEnding(ended: EndedLiveStateItem, names: Map<string, string>): string {
+  if (ended.happened === 'revealed') {
+    const to = (ended.to ?? []).map((key) => names.get(key) ?? key)
+    return to.length > 0 ? `Revealed to ${to.join(', ')}` : 'Revealed'
+  }
+  if (ended.happened === 'changed') return ended.now ? `Changed; now: ${ended.now}` : 'Changed'
+  return 'Resolved'
+}
+
+function groupItems(items: FoldedLiveState['items']): Array<[string, FoldedLiveState['items']]> {
+  const groups = new Map<string, FoldedLiveState['items']>()
+  for (const item of items) groups.set(item.field, [...(groups.get(item.field) ?? []), item])
+  return [...groups].sort(([left], [right]) => fieldOrder(left) - fieldOrder(right))
+}
+
+/** Knows and Secrets keep their own look; any other list reads as a plain list. */
+function listStyle(field: string): { icon: LucideIcon; iconClass: string; itemClass: string } {
+  const key = liveStateFieldKey(field)
+  if (key === 'knows') return { icon: BookOpen, iconClass: 'text-emerald-400', itemClass: '' }
+  if (key === 'secrets') return { icon: EyeOff, iconClass: 'text-rose-400', itemClass: 'italic' }
+  return { icon: List, iconClass: 'text-muted-foreground', itemClass: '' }
 }
 
 export function CharacterLiveStatePanel({ storyId, fragment }: CharacterLiveStatePanelProps) {
   const queryClient = useQueryClient()
   const branchId = useActiveBranchId(storyId)
+  const valueFieldListId = useId()
+  const listFieldListId = useId()
 
-  const { data: continuityData, isLoading } = useQuery({
+  const { data: continuityData } = useQuery({
     ...q.librarianContinuity(storyId, branchId),
     enabled: !!storyId,
   })
 
-  // Match live character state from the folded view or fallback to authored meta.liveState
-  const foldedState = useMemo(() => {
-    const characters = continuityData?.view?.characterStates ?? continuityData?.ledger?.characterStates ?? []
-    const found = characters.find(
-      (c) =>
-        c.characterId === fragment.id ||
-        (c.name && fragment.name && normalizeContinuityKey(c.name) === normalizeContinuityKey(fragment.name)),
-    )
-    if (found) return found
+  const subjects = useMemo(
+    () => continuityData?.view?.liveStates ?? continuityData?.ledger?.liveStates ?? [],
+    [continuityData],
+  )
+  const liveState = useMemo(() => subjects.find((subject) => (
+    subject.kind === 'character'
+    && (subject.fragmentId === fragment.id
+      || subject.key === fragment.id
+      || normalizeContinuityKey(subject.name) === normalizeContinuityKey(fragment.name))
+  )) ?? null, [subjects, fragment.id, fragment.name])
+  const names = useMemo(() => new Map(subjects.map((subject) => [subject.key, subject.name])), [subjects])
 
-    const authored = (fragment.meta?.liveState as {
-      immediate?: string
-      state?: Record<string, string>
-      knowledge?: string[]
-      secrets?: string[]
-    } | undefined)
-
-    if (authored) {
-      return {
-        characterId: fragment.id,
-        name: fragment.name,
-        immediate: authored.immediate,
-        state: authored.state ?? {},
-        knowledge: authored.knowledge ?? [],
-        secrets: authored.secrets ?? [],
-        sourceFragmentId: fragment.id,
-        analysisId: 'authored',
-        narrativePosition: 0,
-      }
-    }
-
-    return null
-  }, [continuityData, fragment.id, fragment.name, fragment.meta?.liveState])
+  const fields = useMemo(
+    () => [...(liveState?.fields ?? [])].sort((left, right) => fieldOrder(left.field) - fieldOrder(right.field)),
+    [liveState],
+  )
+  const itemGroups = useMemo(() => groupItems(liveState?.items ?? []), [liveState])
+  const ended = useMemo(() => [...(liveState?.ended ?? [])].reverse().slice(0, MAX_SHOWN_ENDED), [liveState])
 
   const [isEditing, setIsEditing] = useState(false)
-  const [immediate, setImmediate] = useState('')
-  const [stateRows, setStateRows] = useState<StateRow[]>([])
-  const [knowledgeList, setKnowledgeList] = useState<string[]>([])
-  const [secretsList, setSecretsList] = useState<string[]>([])
-
-  // Synchronize form values when entering edit mode or when foldedState changes
-  const resetForm = () => {
-    setImmediate(foldedState?.immediate ?? '')
-    setStateRows(
-      foldedState?.state
-        ? Object.entries(foldedState.state).map(([key, value]) => ({ key, value }))
-        : [],
-    )
-    setKnowledgeList(foldedState?.knowledge ?? [])
-    setSecretsList(foldedState?.secrets ?? [])
-  }
+  const [fieldRows, setFieldRows] = useState<FieldRow[]>([])
+  const [itemRows, setItemRows] = useState<ItemRow[]>([])
 
   const startEditing = () => {
-    resetForm()
+    setFieldRows(fields.map((field) => ({ field: field.field, value: field.value })))
+    setItemRows((liveState?.items ?? []).map((item) => ({ id: item.id, field: item.field, text: item.text })))
     setIsEditing(true)
   }
 
-  const cancelEditing = () => {
-    setIsEditing(false)
-    resetForm()
-  }
-
   const updateMutation = useMutation({
-    mutationFn: async () => {
-      const stateObj: Record<string, string> = {}
-      for (const row of stateRows) {
-        const k = row.key.trim()
-        const v = row.value.trim()
-        if (k && v) stateObj[k] = v
-      }
-      const cleanKnowledge = knowledgeList.map((k) => k.trim()).filter(Boolean)
-      const cleanSecrets = secretsList.map((s) => s.trim()).filter(Boolean)
-
-      return api.librarian.updateCharacterLiveState(storyId, fragment.id, {
-        immediate: immediate.trim() || undefined,
-        state: stateObj,
-        knowledge: cleanKnowledge,
-        secrets: cleanSecrets,
-      })
-    },
+    mutationFn: () => api.librarian.updateLiveState(storyId, 'character', liveState?.key ?? fragment.id, {
+      fields: fieldRows
+        .map((row) => ({ field: row.field.trim(), value: row.value.trim() }))
+        .filter((row) => row.field && row.value),
+      items: itemRows
+        .map((row) => ({ ...(row.id ? { id: row.id } : {}), field: row.field.trim(), text: row.text.trim() }))
+        .filter((row) => row.field && row.text),
+    }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: qk.librarianContinuity(storyId, branchId) })
-      queryClient.invalidateQueries({ queryKey: qk.librarianAnalyses(storyId, branchId) })
-      queryClient.invalidateQueries({ queryKey: qk.fragment(storyId, branchId, fragment.id) })
       setIsEditing(false)
     },
   })
 
-  const hasContent = Boolean(
-    foldedState &&
-      (foldedState.immediate ||
-        (foldedState.state && Object.keys(foldedState.state).length > 0) ||
-        (foldedState.knowledge && foldedState.knowledge.length > 0) ||
-        (foldedState.secrets && foldedState.secrets.length > 0)),
+  const momentField = fields.find((field) => field.holds === 'moment')
+  const otherFields = fields.filter((field) => field !== momentField)
+  const hasContent = fields.length > 0 || itemGroups.length > 0 || ended.length > 0
+
+  const editButton = !isEditing && (
+    <div className="flex justify-end">
+      <Button type="button" size="sm" variant="ghost" className="h-7 gap-1.5 text-xs" onClick={startEditing}>
+        <Pencil className="size-3" />
+        {hasContent ? 'Edit State' : 'Add state'}
+      </Button>
+    </div>
   )
 
-  return (
-    <section className="space-y-4 px-6 py-5">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Eyebrow>Live Character State</Eyebrow>
-          {foldedState && (
-            <Badge variant="outline" className="text-[10px] text-muted-foreground font-normal py-0">
-              {foldedState.analysisId === 'authored' ? 'Authored Seed' : 'Folded Memory'}
-            </Badge>
-          )}
-        </div>
-        {!isEditing && (
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            className="h-7 text-xs gap-1.5"
-            onClick={startEditing}
-          >
-            <Pencil className="size-3" />
-            {hasContent ? 'Edit State' : 'Initialize State'}
-          </Button>
-        )}
-      </div>
+  if (isEditing) {
+    return (
+      <section className="space-y-4 px-6 py-5">
+        <datalist id={valueFieldListId}>
+          {VALUE_FIELD_NAMES.map((name) => <option key={name} value={name} />)}
+        </datalist>
+        <datalist id={listFieldListId}>
+          {LIST_FIELD_NAMES.map((name) => <option key={name} value={name} />)}
+        </datalist>
 
-      {isLoading && !foldedState && (
-        <div className="flex items-center gap-2 text-xs text-muted-foreground py-2">
-          <Loader2 className="size-3.5 animate-spin" />
-          Loading continuity projection...
-        </div>
-      )}
-
-      {isEditing ? (
         <div className="space-y-5 rounded-md border border-border/60 bg-muted/20 p-4">
-          {/* Immediate Kinetic Posture */}
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium flex items-center gap-1.5 text-foreground">
-              <Activity className="size-3.5 text-amber-500" />
-              Immediate Scene Posture
-            </label>
-            <Hint className="text-[11px]">
-              Tactile or kinetic beat for the current scene (e.g. &quot;tense posture; catching breath after sprint&quot;).
-            </Hint>
-            <Input
-              value={immediate}
-              onChange={(e) => setImmediate(e.target.value)}
-              placeholder="Immediate posture or action beat..."
-              className="text-xs h-8"
-            />
-          </div>
-
-          {/* Dynamic Physical State Keys */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <label className="text-xs font-medium flex items-center gap-1.5 text-foreground">
+              <label className="flex items-center gap-1.5 text-xs font-medium text-foreground">
                 <Layers className="size-3.5 text-blue-500" />
-                Dynamic State (Attire, Gear, Injuries, Status)
+                Fields
               </label>
               <Button
                 type="button"
                 size="sm"
                 variant="ghost"
-                className="h-6 text-[11px] gap-1 px-2"
-                onClick={() => setStateRows((prev) => [...prev, { key: '', value: '' }])}
+                className="h-6 gap-1 px-2 text-[11px]"
+                onClick={() => setFieldRows((rows) => [...rows, { field: '', value: '' }])}
               >
-                <Plus className="size-3" /> Add Key
+                <Plus className="size-3" /> Add Field
               </Button>
             </div>
-            {stateRows.length === 0 ? (
-              <EmptyHint asChild>
-                <span className="text-xs">No dynamic state keys. Click &quot;Add Key&quot; to define attire, gear, or conditions.</span>
-              </EmptyHint>
-            ) : (
-              <div className="space-y-1.5">
-                {stateRows.map((row, idx) => (
-                  <div key={idx} className="flex items-center gap-2">
-                    <Input
-                      value={row.key}
-                      onChange={(e) => {
-                        const val = e.target.value
-                        setStateRows((prev) => prev.map((r, i) => (i === idx ? { ...r, key: val } : r)))
-                      }}
-                      placeholder="Key (e.g. attire, gear, injuries)"
-                      className="text-xs h-7 w-1/3"
-                    />
-                    <Input
-                      value={row.value}
-                      onChange={(e) => {
-                        const val = e.target.value
-                        setStateRows((prev) => prev.map((r, i) => (i === idx ? { ...r, value: val } : r)))
-                      }}
-                      placeholder="Value (e.g. grey coat, brass compass)"
-                      className="text-xs h-7 flex-1"
-                    />
-                    <Button
-                      type="button"
-                      size="icon"
-                      variant="ghost"
-                      className="size-7 text-muted-foreground hover:text-destructive"
-                      onClick={() => setStateRows((prev) => prev.filter((_, i) => i !== idx))}
-                    >
-                      <Trash2 className="size-3.5" />
-                    </Button>
-                  </div>
-                ))}
-              </div>
-            )}
+            <Hint className="text-[11px]">Currently, Where, Appearance, Condition, Wants, or any field of your own.</Hint>
+            <div className="space-y-1.5">
+              {fieldRows.map((row, index) => (
+                <div key={index} className="flex items-center gap-2">
+                  <Input
+                    value={row.field}
+                    list={valueFieldListId}
+                    onChange={(event) => {
+                      const field = event.target.value
+                      setFieldRows((rows) => rows.map((candidate, i) => (i === index ? { ...candidate, field } : candidate)))
+                    }}
+                    placeholder="Field"
+                    aria-label="Field"
+                    className="h-7 w-1/3 text-xs"
+                  />
+                  <Input
+                    value={row.value}
+                    onChange={(event) => {
+                      const value = event.target.value
+                      setFieldRows((rows) => rows.map((candidate, i) => (i === index ? { ...candidate, value } : candidate)))
+                    }}
+                    placeholder="driving to the harbour"
+                    aria-label="Value"
+                    className="h-7 flex-1 text-xs"
+                  />
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    className="size-7 text-muted-foreground hover:text-destructive"
+                    aria-label="Remove field"
+                    onClick={() => setFieldRows((rows) => rows.filter((_, i) => i !== index))}
+                  >
+                    <Trash2 className="size-3.5" />
+                  </Button>
+                </div>
+              ))}
+            </div>
           </div>
 
-          {/* Active Knowledge */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <label className="text-xs font-medium flex items-center gap-1.5 text-foreground">
+              <label className="flex items-center gap-1.5 text-xs font-medium text-foreground">
                 <BookOpen className="size-3.5 text-emerald-500" />
-                Knowledge (Active scene facts &amp; discoveries)
+                Entries
               </label>
               <Button
                 type="button"
                 size="sm"
                 variant="ghost"
-                className="h-6 text-[11px] gap-1 px-2"
-                onClick={() => setKnowledgeList((prev) => [...prev, ''])}
+                className="h-6 gap-1 px-2 text-[11px]"
+                onClick={() => setItemRows((rows) => [...rows, { field: 'Knows', text: '' }])}
               >
-                <Plus className="size-3" /> Add Fact
+                <Plus className="size-3" /> Add Entry
               </Button>
             </div>
-            {knowledgeList.length === 0 ? (
-              <EmptyHint asChild>
-                <span className="text-xs">No active scene knowledge entries.</span>
-              </EmptyHint>
-            ) : (
-              <div className="space-y-1.5">
-                {knowledgeList.map((item, idx) => (
-                  <div key={idx} className="flex items-center gap-2">
-                    <Input
-                      value={item}
-                      onChange={(e) => {
-                        const val = e.target.value
-                        setKnowledgeList((prev) => prev.map((it, i) => (i === idx ? val : it)))
-                      }}
-                      placeholder="Known fact or witnessed event..."
-                      className="text-xs h-7 flex-1"
-                    />
-                    <Button
-                      type="button"
-                      size="icon"
-                      variant="ghost"
-                      className="size-7 text-muted-foreground hover:text-destructive"
-                      onClick={() => setKnowledgeList((prev) => prev.filter((_, i) => i !== idx))}
-                    >
-                      <Trash2 className="size-3.5" />
-                    </Button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Secrets & Deceptions */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <label className="text-xs font-medium flex items-center gap-1.5 text-foreground">
-                <EyeOff className="size-3.5 text-rose-500" />
-                Secrets (Private motives, withheld facts)
-              </label>
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                className="h-6 text-[11px] gap-1 px-2"
-                onClick={() => setSecretsList((prev) => [...prev, ''])}
-              >
-                <Plus className="size-3" /> Add Secret
-              </Button>
+            <Hint className="text-[11px]">Lasting lists such as Knows and Secrets.</Hint>
+            <div className="space-y-1.5">
+              {itemRows.map((row, index) => (
+                <div key={row.id ?? `new-${index}`} className="flex items-center gap-2">
+                  <Input
+                    value={row.field}
+                    list={listFieldListId}
+                    onChange={(event) => {
+                      const field = event.target.value
+                      setItemRows((rows) => rows.map((candidate, i) => (i === index ? { ...candidate, field } : candidate)))
+                    }}
+                    placeholder="List"
+                    aria-label="List"
+                    className="h-7 w-1/3 text-xs"
+                  />
+                  <Input
+                    value={row.text}
+                    onChange={(event) => {
+                      const text = event.target.value
+                      setItemRows((rows) => rows.map((candidate, i) => (i === index ? { ...candidate, text } : candidate)))
+                    }}
+                    placeholder="the harbour gate is unguarded at night"
+                    aria-label="Entry"
+                    className="h-7 flex-1 text-xs"
+                  />
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    className="size-7 text-muted-foreground hover:text-destructive"
+                    aria-label="Remove entry"
+                    onClick={() => setItemRows((rows) => rows.filter((_, i) => i !== index))}
+                  >
+                    <Trash2 className="size-3.5" />
+                  </Button>
+                </div>
+              ))}
             </div>
-            {secretsList.length === 0 ? (
-              <EmptyHint asChild>
-                <span className="text-xs">No active secret entries.</span>
-              </EmptyHint>
-            ) : (
-              <div className="space-y-1.5">
-                {secretsList.map((item, idx) => (
-                  <div key={idx} className="flex items-center gap-2">
-                    <Input
-                      value={item}
-                      onChange={(e) => {
-                        const val = e.target.value
-                        setSecretsList((prev) => prev.map((it, i) => (i === idx ? val : it)))
-                      }}
-                      placeholder="Withheld secret or hidden goal..."
-                      className="text-xs h-7 flex-1"
-                    />
-                    <Button
-                      type="button"
-                      size="icon"
-                      variant="ghost"
-                      className="size-7 text-muted-foreground hover:text-destructive"
-                      onClick={() => setSecretsList((prev) => prev.filter((_, i) => i !== idx))}
-                    >
-                      <Trash2 className="size-3.5" />
-                    </Button>
-                  </div>
-                ))}
-              </div>
-            )}
           </div>
 
-          {/* Form Actions */}
-          <div className="flex items-center justify-end gap-2 pt-2 border-t border-border/50">
+          <div className="flex items-center justify-end gap-2 border-t border-border/50 pt-2">
             <Button
               type="button"
               size="sm"
               variant="ghost"
               className="h-7 text-xs"
-              onClick={cancelEditing}
+              onClick={() => setIsEditing(false)}
               disabled={updateMutation.isPending}
             >
               Cancel
@@ -356,93 +270,85 @@ export function CharacterLiveStatePanel({ storyId, fragment }: CharacterLiveStat
             <Button
               type="button"
               size="sm"
-              className="h-7 text-xs gap-1.5"
+              className="h-7 gap-1.5 text-xs"
               onClick={() => updateMutation.mutate()}
               disabled={updateMutation.isPending}
             >
-              {updateMutation.isPending ? (
-                <>
-                  <Loader2 className="size-3 animate-spin" />
-                  Saving...
-                </>
-              ) : (
-                <>
-                  <Check className="size-3" />
-                  Save State
-                </>
-              )}
+              {updateMutation.isPending
+                ? <><Loader2 className="size-3 animate-spin" /> Saving…</>
+                : <><Check className="size-3" /> Save State</>}
             </Button>
           </div>
         </div>
-      ) : !hasContent ? (
-        <EmptyHint asChild>
-          <div className="py-2 text-xs">
-            No working memory recorded for this character yet. It updates automatically when passages are analyzed, or you can initialize it manually.
-          </div>
-        </EmptyHint>
-      ) : (
+      </section>
+    )
+  }
+
+  return (
+    <section className="space-y-3 px-6 py-5">
+      {editButton}
+      {hasContent && (
         <div className="space-y-3.5 rounded-lg border border-border/50 bg-card/40 p-4 text-xs">
-          {/* Immediate Posture */}
-          {foldedState?.immediate && (
-            <div className="flex items-start gap-2.5 rounded-md bg-amber-500/10 border border-amber-500/20 px-3 py-2 text-foreground">
-              <Activity className="size-3.5 text-amber-500 shrink-0 mt-0.5" />
+          {liveState && !liveState.present && (
+            <div className="text-[11px] text-muted-foreground">Not in the current scene</div>
+          )}
+
+          {momentField && (
+            <div className="flex items-start gap-2.5 rounded-md border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-foreground">
+              <Activity className="mt-0.5 size-3.5 shrink-0 text-amber-500" />
               <div>
-                <span className="font-medium text-amber-600 dark:text-amber-400 mr-1.5">Immediate:</span>
-                <span>{foldedState.immediate}</span>
+                <span className="mr-1.5 font-medium text-amber-600 dark:text-amber-400">{momentField.field}:</span>
+                <span>{momentField.value}</span>
               </div>
             </div>
           )}
 
-          {/* Dynamic State Badges */}
-          {foldedState?.state && Object.keys(foldedState.state).length > 0 && (
-            <div>
-              <div className="flex items-center gap-1.5 text-muted-foreground mb-1.5">
-                <Layers className="size-3 text-blue-400" />
-                <span className="font-medium text-[11px] uppercase tracking-wider">Dynamic State</span>
-              </div>
-              <div className="flex flex-wrap gap-1.5">
-                {Object.entries(foldedState.state).map(([key, value]) => (
-                  <Badge
-                    key={key}
-                    variant="secondary"
-                    className="text-xs px-2 py-0.5 border border-border/40 font-normal"
-                  >
-                    <span className="text-muted-foreground font-medium mr-1.5">{key}:</span>
-                    <span>{value}</span>
+          {otherFields.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {otherFields.map((field) => {
+                const age = field.holds === 'lastKnown' ? describeAge(field.scenesAgo) : null
+                return (
+                  <Badge key={field.field} variant="secondary" className="border border-border/40 px-2 py-0.5 text-xs font-normal">
+                    <span className="mr-1.5 font-medium text-muted-foreground">{field.field}:</span>
+                    <span>{field.value}</span>
+                    {age && <span className="ml-1.5 text-muted-foreground/70">· {age}</span>}
                   </Badge>
-                ))}
-              </div>
+                )
+              })}
             </div>
           )}
 
-          {/* Knowledge */}
-          {foldedState?.knowledge && foldedState.knowledge.length > 0 && (
-            <div>
-              <div className="flex items-center gap-1.5 text-muted-foreground mb-1.5">
-                <BookOpen className="size-3 text-emerald-400" />
-                <span className="font-medium text-[11px] uppercase tracking-wider">Knowledge</span>
+          {itemGroups.map(([field, items]) => {
+            const style = listStyle(field)
+            const Icon = style.icon
+            return (
+              <div key={field}>
+                <div className="mb-1.5 flex items-center gap-1.5 text-muted-foreground">
+                  <Icon className={`size-3 ${style.iconClass}`} />
+                  <span className="text-[11px] font-medium uppercase tracking-wider">{field}</span>
+                </div>
+                <ul className="list-inside list-disc space-y-1 pl-1 text-muted-foreground">
+                  {items.map((item) => (
+                    <li key={item.id} className={`leading-relaxed text-foreground/90 ${style.itemClass}`}>
+                      <span>{item.text}</span>
+                    </li>
+                  ))}
+                </ul>
               </div>
-              <ul className="space-y-1 list-disc list-inside text-muted-foreground pl-1">
-                {foldedState.knowledge.map((item, idx) => (
-                  <li key={idx} className="text-foreground/90 leading-relaxed">
-                    <span>{item}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
+            )
+          })}
 
-          {/* Secrets */}
-          {foldedState?.secrets && foldedState.secrets.length > 0 && (
+          {ended.length > 0 && (
             <div>
-              <div className="flex items-center gap-1.5 text-muted-foreground mb-1.5">
-                <EyeOff className="size-3 text-rose-400" />
-                <span className="font-medium text-[11px] uppercase tracking-wider">Secrets</span>
+              <div className="mb-1.5 flex items-center gap-1.5 text-muted-foreground">
+                <History className="size-3 text-muted-foreground" />
+                <span className="text-[11px] font-medium uppercase tracking-wider">No longer</span>
               </div>
-              <ul className="space-y-1 list-disc list-inside text-muted-foreground pl-1">
-                {foldedState.secrets.map((item, idx) => (
-                  <li key={idx} className="text-foreground/90 leading-relaxed italic">
-                    <span>{item}</span>
+              <ul className="space-y-1 pl-1 text-muted-foreground">
+                {ended.map((item) => (
+                  <li key={`${item.id}-${item.endedAt.analysisId}`} className="leading-relaxed">
+                    <span className="line-through decoration-muted-foreground/40">{item.text}</span>
+                    <span> — {describeEnding(item, names)}</span>
                   </li>
                 ))}
               </ul>

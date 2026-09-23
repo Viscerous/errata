@@ -19,6 +19,7 @@ import {
   timelineEventsFor,
 } from '@/server/librarian/analysis-tools'
 import { forgivingStringArray } from '@/contracts/continuity'
+import { liveStateItemId } from '@/contracts/live-state'
 import { z } from 'zod/v4'
 import { getFragment } from '@/server/fragments/storage'
 import type { Fragment } from '@/contracts/story'
@@ -52,10 +53,10 @@ describe('analysis tool contracts', () => {
 
   it('creates an empty collector', () => {
     expect(createEmptyCollector()).toEqual({
-      summaryUpdate: '', events: [], mentions: [], candidateFragmentIds: [], contradictions: [],
+      summaryUpdate: '', events: [], mentions: [], candidateFragmentIds: [], newRecordNames: [], contradictions: [],
       fragmentChangeProposals: [], directions: [],
       continuityProjection: {
-        version: 2, scene: { transition: 'uncertain' }, stateOperations: [],
+        version: 3, scene: { transition: 'uncertain' }, stateOperations: [],
         threadOperations: [], threadFocus: [], knowledgeOperations: [],
       },
     })
@@ -179,10 +180,7 @@ describe('reportAnalysis', () => {
       fragmentId: prose.id,
       stage: 'inspection',
       summaryUpdate: 'Alice entered the hall.',
-      mentions: [
-        { fragmentId: record.id, text: 'Alice' },
-        { fragmentId: record.id, text: 'Alice' },
-      ],
+      mentions: [{ fragmentId: record.id, text: 'Alice' }],
       timelineEvents: [{ event: 'Alice entered the north hall.', position: 'after' }],
       directions: expect.arrayContaining([expect.objectContaining({ title: 'Wait' })]),
     }))
@@ -219,18 +217,18 @@ describe('reportAnalysis', () => {
     }, executionContext)
     // 'Alice' appears verbatim in the prose so it is kept; '"Silver ash"' is not
     // verbatim (the quotes are not in the prose) so it resolves to the catalog
-    // name; a spanless mention also resolves to the catalog name.
+    // name; a spanless mention also resolves to the catalog name, and so
+    // collapses into the first Alice mention.
     expect(collector.mentions).toEqual([
       { fragmentId: 'ch-0001', text: 'Alice' },
       { fragmentId: 'kn-0001', text: 'Silver ash' },
-      { fragmentId: 'ch-0001', text: 'Alice' },
     ])
     expect(collector.candidateFragmentIds).toEqual(['ch-0001'])
-    expect(result).toMatchObject({ mentionCount: 3, candidateFragmentCount: 1 })
+    expect(result).toMatchObject({ mentionCount: 2, candidateFragmentCount: 1 })
     expect(result.skippedMentions ?? []).toEqual([])
   })
 
-  it('captures a valid mention segment and drops an out-of-range one', async () => {
+  it('collapses per-sentence restatements of one mention', async () => {
     const prose = mockFragment({ id: 'pr-0001', type: 'prose', content: 'Alice studied the gate. The ash was cold.' })
     vi.mocked(getFragment).mockImplementation(async (_dataDir, _storyId, id) => {
       if (id === 'pr-0001') return prose
@@ -246,11 +244,8 @@ describe('reportAnalysis', () => {
         { fragmentId: 'ch-0001', segment: 9 },
       ],
     }, executionContext)
-    expect(collector.mentions).toEqual([
-      { fragmentId: 'ch-0001', text: 'Alice', segment: 1 },
-      { fragmentId: 'ch-0001', text: 'Alice' },
-    ])
-    expect(result).toMatchObject({ mentionCount: 2 })
+    expect(collector.mentions).toEqual([{ fragmentId: 'ch-0001', text: 'Alice' }])
+    expect(result).toMatchObject({ mentionCount: 1 })
   })
 
   it('grounds continuity evidence and skips invalid operations without rejecting the report', async () => {
@@ -325,12 +320,27 @@ describe('reportAnalysis', () => {
     expect(resolveMentionTerm({ fragmentId: 'ch-0001', modelText: 'ghost', resolveName: () => undefined })).toBe('')
   })
 
-  it('accepts an optional mention segment and drops invalid numbers', () => {
-    expect(mentionInputSchema.safeParse({ fragmentId: 'ch-0001' }).success).toBe(true)
-    expect(mentionInputSchema.parse({ fragmentId: 'ch-0001', segment: 3 }).segment).toBe(3)
-    expect(mentionInputSchema.parse({ fragmentId: 'ch-0001', segment: '3' }).segment).toBe(3)
-    expect(mentionInputSchema.parse({ fragmentId: 'ch-0001', segment: 0 }).segment).toBeUndefined()
-    expect(mentionInputSchema.parse({ fragmentId: 'ch-0001', segment: 'x' }).segment).toBeUndefined()
+  it('confirms a highlight as whole words and never guesses one from part of a name', () => {
+    const resolveName = () => 'The Silver Ash and the Key'
+    expect(resolveMentionTerm({ fragmentId: 'kn-0001', prose: 'She took the key and left.', resolveName })).toBe('')
+    expect(resolveMentionTerm({ fragmentId: 'ch-0001', modelText: 'Ann', prose: 'Annabel left.', resolveName: () => 'Ann' })).toBe('')
+    expect(resolveMentionTerm({ fragmentId: 'ch-0001', modelText: 'the  researcher', prose: 'Then the researcher knelt.', resolveName })).toBe('the researcher')
+  })
+
+  it('requires the words the prose uses for a mention', () => {
+    expect(mentionInputSchema.safeParse({ fragmentId: 'ch-0001' }).success).toBe(false)
+    expect(mentionInputSchema.parse({ fragmentId: 'ch-0001', text: 'the captain', segment: 3 })).toEqual({ fragmentId: 'ch-0001', text: 'the captain' })
+  })
+
+  it('highlights names and phrases, never a pronoun or a lone common word', () => {
+    const prose = 'I watched my daughters. Hiddema and the girls waited in the hall.'
+    const resolveName = () => undefined
+    expect(resolveMentionTerm({ fragmentId: 'ch-0001', modelText: 'I', prose, resolveName })).toBe('')
+    expect(resolveMentionTerm({ fragmentId: 'ch-0001', modelText: 'my', prose, resolveName })).toBe('')
+    expect(resolveMentionTerm({ fragmentId: 'ch-0001', modelText: 'hall', prose, resolveName })).toBe('')
+    expect(resolveMentionTerm({ fragmentId: 'ch-0001', modelText: 'Hiddema', prose, resolveName })).toBe('Hiddema')
+    expect(resolveMentionTerm({ fragmentId: 'ch-0001', modelText: 'the girls', prose, resolveName })).toBe('the girls')
+    expect(resolveMentionTerm({ fragmentId: 'ch-0001', modelText: 'my daughters', prose, resolveName })).toBe('my daughters')
   })
 })
 
@@ -534,16 +544,19 @@ describe('reportAnalysis resilience and forgiving boundaries', () => {
       threads: ['Who unlocked the gate?'],
        characters: [
          {
-           name: 'Alice',
-           immediate: 'Alert and scanning the perimeter',
-           state: [{ key: 'posture', value: 'ready' }],
+           character: 'Alice',
+           set: [{ field: 'Currently', value: 'Alert and scanning the perimeter' }, { field: 'posture', value: 'ready' }],
          },
        ],
      })
      expect(parsed.threads).toEqual(['Who unlocked the gate?'])
-     expect(parsed.characters[0].name).toBe('Alice')
-     expect(parsed.characters[0].immediate).toBe('Alert and scanning the perimeter')
-     expect(parsed.characters[0].state).toEqual([{ key: 'posture', value: 'ready' }])
+     expect(parsed.characters[0]).toMatchObject({
+       character: 'Alice',
+       set: [
+         { field: 'Currently', value: 'Alert and scanning the perimeter' },
+         { field: 'posture', value: 'ready' },
+       ],
+     })
   })
 
   it('skips unknown fragment mentions and non-character knowledge operations without throwing', async () => {
@@ -636,56 +649,64 @@ describe('reportAnalysis resilience and forgiving boundaries', () => {
       summary: 'Alice examined the old tower gates while the wind howled outside.',
       characters: [
         {
-          name: 'Alice',
-          characterId: 'ch-0001',
-          immediate: 'Catching breath; dust clinging to boots',
-           state: [
-             { key: 'attire', value: 'tattered travel cloak' },
-             { key: 'injury', value: 'none' },
-             { key: 'gear', value: 'holding brass lantern' },
-           ],
-          knowledge: ['The tower gate was unlatched from within'],
-          secrets: ['Carrying the brass key'],
+          character: 'ch-0001',
+          set: [
+            { field: 'Currently', value: 'Catching breath; dust clinging to boots' },
+            { field: 'attire', value: 'tattered travel cloak' },
+            { field: 'injury', value: 'none' },
+            { field: 'gear', value: 'holding brass lantern' },
+          ],
+          add: [
+            { field: 'Knows', text: 'The tower gate was unlatched from within' },
+            { field: 'Secrets', text: 'Carrying the brass key' },
+          ],
         },
       ],
       entities: [
         {
-          name: 'Old Tower',
+          entity: 'Old Tower',
           category: 'location',
-          immediate: 'Cold draft whistling through the iron bars',
-           state: [
-             { key: 'gate', value: 'unlatched' },
-           ],
-          notes: ['Pre-war construction'],
+          set: [
+            { field: 'Currently', value: 'Cold draft whistling through the iron bars' },
+            { field: 'gate', value: 'unlatched' },
+          ],
+          add: [{ field: 'Notes', text: 'Pre-war construction' }],
         },
       ],
     }, executionContext)
 
     expect(result.ok).toBe(true)
     expect(collector.summaryUpdate).toContain('old tower gates')
-    expect(collector.continuityProjection.characterStates).toBeDefined()
-    expect(collector.continuityProjection.characterStates?.['ch-0001']).toEqual({
-      characterId: 'ch-0001',
-      name: 'Alice',
-      immediate: 'Catching breath; dust clinging to boots',
-      state: {
-        attire: 'tattered travel cloak',
-        injury: '',
-        gear: 'holding brass lantern',
-      },
-      knowledge: ['The tower gate was unlatched from within'],
-      secrets: ['Carrying the brass key'],
+    const [alice, tower] = collector.continuityProjection.liveStates ?? []
+    expect(alice).toEqual({
+      kind: 'character',
+      key: 'ch-0001',
+      fragmentId: 'ch-0001',
+      name: 'ch-0001',
+      present: true,
+      set: [
+        { field: 'Currently', value: 'Catching breath; dust clinging to boots' },
+        { field: 'attire', value: 'tattered travel cloak' },
+        { field: 'injury', value: '' },
+        { field: 'gear', value: 'holding brass lantern' },
+      ],
+      add: [
+        { id: liveStateItemId('Knows', 'The tower gate was unlatched from within'), field: 'Knows', text: 'The tower gate was unlatched from within' },
+        { id: liveStateItemId('Secrets', 'Carrying the brass key'), field: 'Secrets', text: 'Carrying the brass key' },
+      ],
+      update: [],
     })
-
-    expect(collector.continuityProjection.entityStates).toBeDefined()
-    expect(collector.continuityProjection.entityStates?.['old_tower']).toEqual({
+    expect(tower).toMatchObject({
+      kind: 'entity',
+      key: 'old_tower',
       name: 'Old Tower',
       category: 'location',
-      immediate: 'Cold draft whistling through the iron bars',
-      state: {
-        gate: 'unlatched',
-      },
-      notes: ['Pre-war construction'],
+      present: true,
+      set: [
+        { field: 'Currently', value: 'Cold draft whistling through the iron bars' },
+        { field: 'gate', value: 'unlatched' },
+      ],
+      add: [{ field: 'Notes', text: 'Pre-war construction' }],
     })
 
     // Timeline events fallback when events is empty
@@ -762,6 +783,86 @@ describe('3-beat staged pipeline tools', () => {
     expect(collector.contradictions[0].sourceSegments).toEqual([1])
   })
 
+  it('reportObservation keeps one mention per record and never accepts prose as a candidate', async () => {
+    const prose = mockFragment({
+      id: 'pr-0001',
+      type: 'prose',
+      content: 'The old knight drew his sword. The old knight opened the gate.',
+    })
+    const record = mockFragment({ id: 'ch-0001', type: 'character', name: 'Old Knight', content: 'A knight.' })
+    vi.mocked(getFragment).mockImplementation(async (_dir, _story, id) => {
+      if (id === 'pr-0001') return prose
+      if (id === 'ch-0001') return record
+      return null
+    })
+
+    const collector = createEmptyCollector()
+    const tools = createAnalysisTools(collector, {
+      dataDir: '/tmp',
+      storyId: 'story-test',
+      proseFragmentId: 'pr-0001',
+      numberedFragmentIds: new Set<string>(),
+    })
+
+    const result = await tools.reportObservation.execute({
+      summary: 'The old knight drew his sword and opened the gate.',
+      mentions: [
+        { fragmentId: 'ch-0001', text: 'old knight' },
+        { fragmentId: 'ch-0001' },
+        { fragmentId: 'ch-0001', text: 'Old Knight' },
+        { fragmentId: 'ch-0001', text: 'his sword' },
+      ],
+      candidateFragmentIds: ['pr-0001', 'ch-0001', 'ch-0001'],
+    }, executionContext)
+
+    expect(result.ok).toBe(true)
+    expect(collector.mentions).toEqual([
+      { fragmentId: 'ch-0001', text: 'old knight' },
+      { fragmentId: 'ch-0001', text: 'his sword' },
+    ])
+    expect(collector.candidateFragmentIds).toEqual(['ch-0001'])
+  })
+
+  it('keeps only new record names the prose uses and the catalog lacks', async () => {
+    const prose = mockFragment({ id: 'pr-0001', type: 'prose', content: 'Alice rode to Valdris past the Salt Gate.' })
+    const alice = mockFragment({ id: 'ch-0001', type: 'character', name: 'Alice' })
+    vi.mocked(getFragment).mockImplementation(async (_dir, _story, id) => (
+      id === 'pr-0001' ? prose : id === 'ch-0001' ? alice : null
+    ))
+    const collector = createEmptyCollector()
+    const tools = createAnalysisTools(collector, {
+      dataDir: '/tmp',
+      storyId: 'story-test',
+      proseFragmentId: 'pr-0001',
+      numberedFragmentIds: new Set<string>(),
+    })
+
+    const result = await tools.reportObservation.execute({
+      summary: 'Alice rode to Valdris.',
+      mentions: [{ fragmentId: 'ch-0001', text: 'Alice' }],
+      newRecordNames: ['Valdris', 'salt gate', 'Alice', 'Mirewood'],
+    }, executionContext)
+
+    expect(result.ok).toBe(true)
+    expect(collector.newRecordNames).toEqual(['Valdris', 'Salt Gate'])
+  })
+
+  it('keeps an observation whose optional scene claim is malformed', () => {
+    const parsed = reportObservationInputSchema.parse({
+      summary: 'Night fell over the waiting ship.',
+      scene: {
+        transition: 'advance',
+        time: { label: 'night', certainty: 'approximate', calendar: '' },
+        elapsed: { label: 'hours', minimumSeconds: 7200, maximumSeconds: 60 },
+        evidenceSegments: [1],
+      },
+    })
+
+    expect(parsed.summary).toBe('Night fell over the waiting ship.')
+    expect(parsed.scene.time).toEqual({ label: 'night', certainty: 'approximate' })
+    expect(parsed.scene.elapsed).toBeUndefined()
+  })
+
   it('separates live continuity from validated record maintenance', async () => {
     const prose = mockFragment({
       id: 'pr-0001',
@@ -792,14 +893,13 @@ describe('3-beat staged pipeline tools', () => {
     const continuityResult = await tools.reportContinuity.execute({
       characters: [
         {
-          ref: 'ch-0001',
-          name: 'Old Knight',
-          immediate: 'Standing at the threshold',
-           state: [
-             { key: 'attire', value: 'worn chainmail' },
-             { key: 'weapon', value: 'silver sword' },
-           ],
-          knowledge: ['The gate mechanism is undamaged'],
+          character: 'ch-0001',
+          set: [
+            { field: 'Currently', value: 'Standing at the threshold' },
+            { field: 'Appearance', value: 'worn chainmail' },
+            { field: 'weapon', value: 'silver sword' },
+          ],
+          add: [{ field: 'Knows', text: 'The gate mechanism is undamaged' }],
         },
       ],
       entities: [],
@@ -831,7 +931,7 @@ describe('3-beat staged pipeline tools', () => {
     expect(continuityResult.characterCount).toBe(1)
     expect(continuityResult.threadCount).toBe(1)
     expect(maintenanceResult.proposalCount).toBe(2)
-    expect(collector.continuityProjection.presentCharacterKeys).toEqual(['ch-0001'])
+    expect(collector.continuityProjection.liveStates?.map((report) => report.key)).toEqual(['ch-0001'])
 
     expect(collector.fragmentChangeProposals).toHaveLength(2)
     const correctionProposal = collector.fragmentChangeProposals.find(p => p.proposalKind === 'correction')
@@ -850,6 +950,63 @@ describe('3-beat staged pipeline tools', () => {
       type: 'knowledge',
       name: 'North Gate Lore',
     }))
+  })
+
+  it('ends numbered entries on their owner and records who learned a revealed secret', async () => {
+    const victoria = mockFragment({ id: 'ch-0001', type: 'character', name: 'Victoria', content: 'The sovereign.' })
+    const thorne = mockFragment({ id: 'ch-0002', type: 'character', name: 'Aris Thorne', content: 'A researcher.' })
+    vi.mocked(getFragment).mockImplementation(async (_dir, _story, id) => (
+      id === 'ch-0001' ? victoria : id === 'ch-0002' ? thorne : null
+    ))
+    const secretId = liveStateItemId('Secrets', 'craves the ruin of her status')
+    const beliefId = liveStateItemId('Knows', 'the baseline is only a sample')
+    const collector = createEmptyCollector()
+    const tools = createAnalysisTools(collector, {
+      dataDir: '/tmp',
+      storyId: 'story-test',
+      continuityKeys: {
+        items: [
+          { index: 1, kind: 'character', subjectKey: 'ch-0001', subjectName: 'Victoria', id: secretId, field: 'Secrets', text: 'craves the ruin of her status' },
+          { index: 2, kind: 'character', subjectKey: 'ch-0002', subjectName: 'Aris Thorne', id: beliefId, field: 'Knows', text: 'the baseline is only a sample' },
+        ],
+      },
+    })
+
+    const result = await tools.reportContinuity.execute({
+      characters: [
+        { character: 'ch-0002', set: [{ field: 'Currently', value: 'kneeling by the dais' }] },
+      ],
+      // Only Thorne is present; the revealed secret is Victoria's.
+      update: [
+        { item: 1, happened: 'revealed', to: ['Aris Thorne'] },
+        { item: 2, happened: 'changed', now: 'the baseline is the source' },
+        { item: 9, happened: 'resolved' },
+      ],
+      entities: [],
+      threads: [],
+      resolvedThreads: [],
+    }, executionContext)
+
+    expect(result.ok).toBe(true)
+    expect(collector.continuityProjection.liveStates).toEqual([
+      expect.objectContaining({
+        key: 'ch-0002',
+        present: true,
+        set: [{ field: 'Currently', value: 'kneeling by the dais' }],
+        update: [{
+          id: beliefId,
+          happened: 'changed',
+          now: { id: liveStateItemId('Knows', 'the baseline is the source'), text: 'the baseline is the source' },
+        }],
+      }),
+      expect.objectContaining({
+        key: 'ch-0001',
+        name: 'Victoria',
+        present: false,
+        update: [{ id: secretId, happened: 'revealed', to: ['ch-0002'] }],
+      }),
+    ])
+    expect(result.skippedContinuity).toEqual([expect.objectContaining({ kind: 'item', key: '9' })])
   })
 
   it('treats compact threads as a foreground snapshot and resolves existing keys explicitly', async () => {
@@ -1018,9 +1175,9 @@ describe('3-beat staged pipeline tools', () => {
       const maintenance = z.toJSONSchema(reportMaintenanceInputSchema) as any
       const observation = z.toJSONSchema(reportObservationInputSchema) as any
 
-      expect(continuity.required).toEqual(['characters', 'entities', 'threads', 'resolvedThreads'])
-      expect(continuity.properties.characters.items.required).toContain('ref')
-      expect(continuity.properties.entities.items.required).toContain('ref')
+      expect(continuity.required).toEqual(['present', 'characters', 'entities', 'update', 'threads', 'resolvedThreads'])
+      expect(continuity.properties.characters.items.required).toContain('character')
+      expect(continuity.properties.entities.items.required).toContain('entity')
       expect(maintenance.required).toEqual(['evidenceSegments', 'corrections', 'newRecords'])
       expect(observation.required).toEqual([
         'summary',
@@ -1029,52 +1186,26 @@ describe('3-beat staged pipeline tools', () => {
         'mentions',
         'candidateFragmentIds',
         'contradictions',
-        'maintenanceNeeded',
+        'newRecordNames',
       ])
     })
 
-    it('coerces empty string or null state to empty array [] without crashing', () => {
-      const resultEmptyStr = reportContinuityInputSchema.safeParse({
-        characters: [
-          { name: 'Pieter van Reede', state: '' },
-          { name: 'Hiddema', state: null },
-        ],
-      })
-      expect(resultEmptyStr.success).toBe(true)
-      if (resultEmptyStr.success) {
-        expect(resultEmptyStr.data.characters[0].state).toEqual([])
-        expect(resultEmptyStr.data.characters[1].state).toEqual([])
-      }
-    })
-
-    it('coerces a plain state object with boolean or number values into key/value pairs', () => {
+    it('forgives a single object or empty value where a list of changes belongs', () => {
       const result = reportContinuityInputSchema.safeParse({
         characters: [
-          { name: 'Victoria', state: { repaired: true, count: 2, condition: 'alert' } },
+          { character: 'Victoria', set: { field: 'Currently', value: 'standing' }, add: '' },
+          { character: 'Hiddema', set: null },
         ],
-      })
-      expect(result.success).toBe(true)
-      if (result.success) {
-        expect(result.data.characters[0].state).toEqual([
-          { key: 'repaired', value: 'true' },
-          { key: 'count', value: '2' },
-          { key: 'condition', value: 'alert' },
-        ])
-      }
-    })
-
-    it('coerces empty string or null arrays to empty arrays []', () => {
-      const result = reportContinuityInputSchema.safeParse({
-        characters: [
-          { name: 'Victoria', knowledge: '', secrets: null },
-        ],
+        update: [{ item: '[2]', happened: 'resolved' }, { item: 'x', happened: 'resolved' }],
         entities: '',
         threads: null,
       })
       expect(result.success).toBe(true)
       if (result.success) {
-        expect(result.data.characters[0].knowledge).toEqual([])
-        expect(result.data.characters[0].secrets).toEqual([])
+        expect(result.data.characters[0].set).toEqual([{ field: 'Currently', value: 'standing' }])
+        expect(result.data.characters[0].add).toEqual([])
+        expect(result.data.characters[1].set).toEqual([])
+        expect(result.data.update).toEqual([{ item: 2, happened: 'resolved' }])
         expect(result.data.entities).toEqual([])
         expect(result.data.threads).toEqual([])
       }
@@ -1088,15 +1219,9 @@ describe('3-beat staged pipeline tools', () => {
     })
 
     it('coerces single string or number inputs into arrays', () => {
-      const result = reportContinuityInputSchema.safeParse({
-        characters: [
-          { name: 'Victoria', knowledge: 'Learned the truth' },
-        ],
-        threads: 'Who poisoned the king?',
-      })
+      const result = reportContinuityInputSchema.safeParse({ threads: 'Who poisoned the king?' })
       expect(result.success).toBe(true)
       if (result.success) {
-        expect(result.data.characters[0].knowledge).toEqual(['Learned the truth'])
         expect(result.data.threads).toEqual(['Who poisoned the king?'])
       }
       expect(reportMaintenanceInputSchema.parse({ evidenceSegments: 4 }).evidenceSegments).toEqual([4])
@@ -1141,14 +1266,14 @@ describe('forgiving array per-item forgiveness', () => {
   it('drops a schema-invalid entry without failing the whole array', () => {
     const schema = forgivingArray(mentionInputSchema, { max: 24 })
     const result = schema.safeParse([
-      { fragmentId: 'ch-0001' },
-      { fragmentId: 'zzz' },
+      { fragmentId: 'ch-0001', text: 'Alice' },
+      { fragmentId: 'zzz', text: 'Zed' },
       { fragmentId: 'kn-bakagu', text: 'Bakagu' },
     ])
     expect(result.success).toBe(true)
     if (result.success) {
       expect(result.data).toEqual([
-        { fragmentId: 'ch-0001' },
+        { fragmentId: 'ch-0001', text: 'Alice' },
         { fragmentId: 'kn-bakagu', text: 'Bakagu' },
       ])
     }
@@ -1156,11 +1281,11 @@ describe('forgiving array per-item forgiveness', () => {
 
   it('trims an over-limit array instead of rejecting it', () => {
     const schema = forgivingArray(mentionInputSchema, { max: 2 })
-    const items = Array.from({ length: 5 }, (_, i) => ({ fragmentId: `ch-000${i + 1}` }))
+    const items = Array.from({ length: 5 }, (_, i) => ({ fragmentId: `ch-000${i + 1}`, text: `Name ${i + 1}` }))
     const result = schema.safeParse(items)
     expect(result.success).toBe(true)
     if (result.success) {
-      expect(result.data).toEqual([{ fragmentId: 'ch-0001' }, { fragmentId: 'ch-0002' }])
+      expect(result.data).toEqual([{ fragmentId: 'ch-0001', text: 'Name 1' }, { fragmentId: 'ch-0002', text: 'Name 2' }])
     }
   })
 
@@ -1172,10 +1297,10 @@ describe('forgiving array per-item forgiveness', () => {
 
   it('keeps a min-required array that still has one valid entry', () => {
     const schema = forgivingArray(mentionInputSchema, { min: 1, max: 24 })
-    const result = schema.safeParse([{ fragmentId: 'zzz' }, { fragmentId: 'ch-0001' }])
+    const result = schema.safeParse([{ fragmentId: 'zzz', text: 'Zed' }, { fragmentId: 'ch-0001', text: 'Alice' }])
     expect(result.success).toBe(true)
     if (result.success) {
-      expect(result.data).toEqual([{ fragmentId: 'ch-0001' }])
+      expect(result.data).toEqual([{ fragmentId: 'ch-0001', text: 'Alice' }])
     }
   })
 

@@ -35,6 +35,7 @@ describe('global configuration storage', () => {
     enabled: true,
     customHeaders: {},
     temperature: undefined,
+    reasoningAllowance: {},
     createdAt: new Date().toISOString(),
   })
 

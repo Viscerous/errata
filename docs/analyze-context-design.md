@@ -131,36 +131,30 @@ The current policy is semantic first, with no numeric context caps chosen yet:
   source.
 - **Fragment routing** remains a bounded supporting job for deeper or historical
   work. Routine online analysis does not block on a synchronous router fallback.
-- **Online analysis uses one staged adaptive tool loop.** The compiled story
-  context and conversation stay in one agent run, while the tool schemas
-  exposed to each model request change with the workflow. The primary request
-  contains reporting, optional record proposals, and directions, preserving the
-  common one-response path; read tools and `finishInspection` are absent.
-  Once the required tools succeed, the server ends the run without asking the
-  model to restate that it is finished. If a report newly resolves a record that
-  was explicitly marked as a durable-review candidate, a conditional inspection
-  stage exposes the full surface so the finding can be amended. Resolving a
-  mention for future writer context does not create this extra request. Failed
-  reports and proposals return to the same primary surface; there is no
-  model-specific recovery schema. This hybrid follows the stored trace evidence: most runs
-  already produced report and directions in one response, so isolating
-  observation would have added latency to the common path. A repeated
-  `readFragments` request for an available record returns its ID under
-  `alreadyAvailable` instead of echoing the body again. Pass diagnostics retain
-  usage, active tool names, and wall time for each model step as well as the
-  aggregate, making both total work and the largest individual request visible.
-  Because changing tool schemas may also change a provider's prompt-cache
-  prefix, the latency benefit is treated as measurable rather than assumed;
-  these diagnostics are the basis for comparing providers and deciding whether
-  any backend should retain a stable tool surface.
-- **Automatic directions** remain a required lane in the adaptive loop when
-  enabled. When disabled, their tool and instructions are absent.
-  `reportAnalysis` loads every referenced fragment to validate its ID and makes
-  records not already in the initial prompt available to subsequent model
-  steps. Deterministic completion still requires successful directions when
-  enabled. Normal runs stop deterministically after their required calls;
-  `finishInspection` only closes an inspection that leaves the report unchanged.
-  Directions cannot be abandoned as an optional skip. The dedicated `directions.suggest`
+- **Online analysis runs isolated stage requests.** Observation, continuity,
+  record maintenance, and directions are separate requests over the same
+  compiled context, each carrying one report and a compact handoff from the
+  stages before it. A failed stage leaves the earlier stages' work intact.
+- **A stage is answered in its report's schema.** Where the provider constrains
+  a JSON-schema response format while decoding (llama.cpp, LM Studio, and
+  Ollama by default; a per-provider setting), the stage requests that format,
+  so the schema bounds the whole answer and nothing can follow its closing
+  brace. The server does not show the model that schema, so the task block
+  carries the report's description and schema. Elsewhere the stage calls the
+  report as its only tool. Both paths hand the parsed report to the same tool
+  code.
+- **Every stage request has an output ceiling**: the largest report its schema
+  admits plus the model's reasoning allowance when thinking is enabled. The
+  provider is the only party that can stop a runaway request, so the ceiling is
+  sent with the request rather than enforced by the client.
+- **Record maintenance runs only on evidence**: a contradiction citing both the
+  record and the prose, or a new name the prose uses verbatim and the catalog
+  lacks. Naming a candidate record is a claim, not evidence. A lasting change
+  that contradicts nothing belongs in live state until the author promotes it.
+  Maintenance is shown the records it may edit and the cited evidence, not live
+  state.
+- **Automatic directions** remain a required lane when enabled. When disabled,
+  their tool and instructions are absent. The dedicated `directions.suggest`
   runner remains available for guided/on-demand suggestions even when automatic
   directions are disabled.
 - **Lane completion is observable.** Observation is required, record maintenance

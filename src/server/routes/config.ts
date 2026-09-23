@@ -108,6 +108,8 @@ export function configRoutes(dataDir: string) {
         enabled: true,
         customHeaders: body.customHeaders ?? {},
         temperature: body.temperature,
+        reasoningAllowance: body.reasoningAllowance ?? {},
+        ...(body.structuredOutput !== undefined ? { structuredOutput: body.structuredOutput } : {}),
         createdAt: new Date().toISOString(),
       })
       const config = await addProvider(dataDir, provider)
@@ -122,6 +124,8 @@ export function configRoutes(dataDir: string) {
         defaultModel: t.String(),
         customHeaders: t.Optional(t.Record(t.String(), t.String())),
         temperature: t.Optional(t.Number()),
+        reasoningAllowance: t.Optional(t.Record(t.String(), t.Integer({ minimum: 0 }))),
+        structuredOutput: t.Optional(t.Boolean()),
       }),
     })
 
@@ -134,6 +138,8 @@ export function configRoutes(dataDir: string) {
       if (body.enabled !== undefined) updates.enabled = body.enabled
       if (body.customHeaders !== undefined) updates.customHeaders = body.customHeaders
       if (body.temperature !== undefined) updates.temperature = body.temperature
+      if (body.reasoningAllowance !== undefined) updates.reasoningAllowance = body.reasoningAllowance
+      if (body.structuredOutput !== undefined) updates.structuredOutput = body.structuredOutput
       const config = await updateProviderConfig(dataDir, params.providerId, updates)
       return maskConfigProviders(config)
     }, {
@@ -146,6 +152,8 @@ export function configRoutes(dataDir: string) {
         enabled: t.Optional(t.Boolean()),
         customHeaders: t.Optional(t.Record(t.String(), t.String())),
         temperature: t.Optional(t.Union([t.Number(), t.Null()])),
+        reasoningAllowance: t.Optional(t.Record(t.String(), t.Integer({ minimum: 0 }))),
+        structuredOutput: t.Optional(t.Boolean()),
       }),
     })
 

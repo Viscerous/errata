@@ -1,4 +1,5 @@
 import { z } from 'zod/v4'
+import { LiveStateReportSchema, type FoldedLiveState, type LiveStateRegistryEntry } from './live-state'
 import { FragmentIdSchema } from './story'
 
 export const AnalysisSourceRevisionSchema = z.strictObject({
@@ -59,7 +60,11 @@ export const NarrativeTimeInputSchema = z.object({
   label: z.string().trim().min(1).max(200)
     .describe('Descriptive story time (e.g. "early morning", "three days later", "at dusk").'),
   certainty: narrativeTimeShape.certainty.default('unknown'),
-  calendar: z.string().trim().min(1).max(80).optional(),
+  // A blank calendar means none was stated, not an invalid calendar.
+  calendar: z.preprocess(
+    (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+    z.string().trim().min(1).max(80).optional(),
+  ),
 })
 
 const narrativeDurationShape = {
@@ -217,6 +222,8 @@ export interface ContinuityRegistry {
   state: RegistryEntry[]
   thread: RegistryEntry[]
   knowledge: RegistryEntry[]
+  /** Live-state items of the subjects shown to the analyst, in rendered order. */
+  items: LiveStateRegistryEntry[]
 }
 
 export const KnowledgeOperationSchema = z.strictObject({
@@ -230,70 +237,6 @@ export const KnowledgeOperationSchema = z.strictObject({
 
 export type KnowledgeOperation = z.infer<typeof KnowledgeOperationSchema>
 
-export const CharacterLiveStateSchema = z.strictObject({
-  characterId: FragmentIdSchema.optional(),
-  name: z.string().trim().min(1).max(160),
-  /** Immediate kinetic/tactile beat (overwritten each scene). E.g. "tense posture; catching breath after sprint" */
-  immediate: z.string().trim().max(300).optional(),
-  /** Persistent dynamic keys (survives until explicitly modified or cleared). E.g. attire, injuries, gear, wings */
-  state: z.record(z.string().trim().min(1).max(100), z.string().trim().max(500)).optional(),
-  /** Facts learned, witnessed, or deduced in this scene */
-  knowledge: z.array(z.string().trim().max(500)).optional(),
-  /** Secrets withheld, active deceptions, or unrevealed goals */
-  secrets: z.array(z.string().trim().max(500)).optional(),
-})
-
-export type CharacterLiveState = z.infer<typeof CharacterLiveStateSchema>
-
-export const EntityLiveStateSchema = z.strictObject({
-  entityId: FragmentIdSchema.optional(),
-  name: z.string().trim().min(1).max(160),
-  category: z.enum(['location', 'artefact', 'faction', 'other']).optional(),
-  immediate: z.string().trim().max(300).optional(),
-  state: z.record(z.string().trim().min(1).max(100), z.string().trim().max(500)).optional(),
-  notes: z.array(z.string().trim().max(500)).optional(),
-})
-
-export type EntityLiveState = z.infer<typeof EntityLiveStateSchema>
-
-export const stateKeyValuePairSchema = z.object({
-  key: z.string().trim().min(1).max(100),
-  value: z.string().trim().max(500),
-})
-
-// Grammar-safe sparse state: GBNF (llama.cpp's default PEG generator) cannot
-// bound the key count of an object with free-form additionalProperties, so an
-// unbounded z.record leaves an open key loop in the tool grammar that weak
-// models degenerate into. A bounded array of key/value pairs expresses the
-// same dictionary while staying grammatically finite; the forgiving
-// preprocess still accepts plain records from non-grammar clients.
-export function forgivingDynamicState() {
-  const toPair = (key: unknown, value: unknown) => ({
-    key: String(key ?? '').trim().slice(0, 100),
-    value: String(value ?? '').trim().slice(0, 500),
-  })
-  return z.preprocess((val) => {
-    let pairs: Array<{ key: string; value: string }>
-    if (val === null || val === undefined) pairs = []
-    else if (Array.isArray(val)) {
-      pairs = val
-        .filter((item) => item !== null && typeof item === 'object')
-        .map((item) => {
-          const record = item as { key?: unknown; value?: unknown }
-          return toPair(record.key, record.value)
-        })
-        .filter((pair) => pair.key.length > 0)
-    }
-    else if (typeof val === 'object') {
-      pairs = Object.entries(val as Record<string, unknown>)
-        .filter(([, v]) => v !== null && v !== undefined)
-        .map(([k, v]) => toPair(k, v))
-        .filter((pair) => pair.key.length > 0)
-    }
-    else pairs = []
-    return pairs.slice(0, 32)
-  }, z.array(stateKeyValuePairSchema).max(32))
-}
 
 export function forgivingStringArray(maxLen = 500, options?: { min?: number; max?: number }) {
   let arr = z.array(z.string().trim().max(maxLen))
@@ -318,53 +261,9 @@ export function forgivingStringArray(maxLen = 500, options?: { min?: number; max
   }, arr)
 }
 
-function injectLiveStateRef(value: unknown, idField: 'characterId' | 'entityId'): unknown {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return value
-  const record = value as Record<string, unknown>
-  if (typeof record.ref === 'string' && record.ref.trim()) return value
-  const legacyRef = [record[idField], record.id, record.name]
-    .find((candidate) => typeof candidate === 'string' && candidate.trim())
-  return legacyRef ? { ...record, ref: legacyRef } : value
-}
-
-export const CharacterLiveStateInputSchema = z.preprocess(
-  (value) => injectLiveStateRef(value, 'characterId'),
-  z.object({
-    ref: z.string().trim().min(1).max(160)
-      .describe('Character catalog ID when available; otherwise the character name.'),
-    name: z.string().trim().min(1).max(160).optional(),
-    immediate: z.string().trim().max(300).optional()
-      .describe('Immediate kinetic/tactile beat right now (e.g. "tense posture; catching breath against the wall").'),
-    state: forgivingDynamicState().optional()
-      .describe('Sparse dynamic state as key/value pairs, e.g. [{"key":"weapon","value":"broken"}]. Note ONLY important physical or gear changes of note (e.g. broken weapon, acquired item, severe injury). Omit or leave empty [] if no changes occurred in this passage. Do not record mundane inventory.'),
-    knowledge: forgivingStringArray(500, { max: 12 }).optional()
-      .describe('New facts learned, witnessed, or deduced in this scene. Omit or leave empty [] if none.'),
-    secrets: forgivingStringArray(500, { max: 12 }).optional()
-      .describe('Active deceptions, hidden motives, or withheld truths. Omit or leave empty [] if none.'),
-  }),
-)
-
-export type CharacterLiveStateInput = z.infer<typeof CharacterLiveStateInputSchema>
-
-export const EntityLiveStateInputSchema = z.preprocess(
-  (value) => injectLiveStateRef(value, 'entityId'),
-  z.object({
-    ref: z.string().trim().min(1).max(160)
-      .describe('Entity catalog ID when available; otherwise the entity name.'),
-    name: z.string().trim().min(1).max(160).optional(),
-    category: z.enum(['location', 'artefact', 'faction', 'other']).optional(),
-    immediate: z.string().trim().max(300).optional()
-      .describe('Immediate kinetic or visual state in this scene.'),
-    state: forgivingDynamicState().optional()
-      .describe('Sparse dynamic state as key/value pairs for notable entity changes, e.g. [{"key":"condition","value":"damaged"}]. Omit or leave empty [] if no changes.'),
-    notes: forgivingStringArray(500, { max: 12 }).optional(),
-  }),
-)
-
-export type EntityLiveStateInput = z.infer<typeof EntityLiveStateInputSchema>
 
 export const ContinuityProjectionSchema = z.strictObject({
-  version: z.literal(2),
+  version: z.literal(3),
   scene: SceneUpdateSchema,
   // Producer and prompt budgets are policy, not persisted truth invariants.
   stateOperations: z.array(StateOperationSchema).default([]),
@@ -372,12 +271,12 @@ export const ContinuityProjectionSchema = z.strictObject({
   /** Sparse prominence updates; omission retains the prior value. */
   threadFocus: z.array(ThreadFocusSchema).default([]),
   knowledgeOperations: z.array(KnowledgeOperationSchema).default([]),
-  /** Snapshot of who is physically active in this passage; state remains durable when absent. */
-  presentCharacterKeys: z.array(z.string().trim().min(1).max(160)).max(24).optional(),
-  /** Snapshot of non-character entities actively participating in this passage. */
-  presentEntityKeys: z.array(z.string().trim().min(1).max(160)).max(24).optional(),
-  characterStates: z.record(z.string(), CharacterLiveStateSchema).optional(),
-  entityStates: z.record(z.string(), EntityLiveStateSchema).optional(),
+  /**
+   * Characters and entities active in this passage and what changed for them.
+   * Present means reported; absent when the passage reported no roster, so a
+   * failed continuity lane cannot mark everyone as gone.
+   */
+  liveStates: z.array(LiveStateReportSchema).max(32).optional(),
 })
 
 export type ContinuityProjection = z.infer<typeof ContinuityProjectionSchema>
@@ -420,34 +319,11 @@ export interface CharacterKnowledgeEntry extends ProjectionSource {
   acquisition: 'witnessed' | 'told' | 'inferred' | 'other'
 }
 
-export interface FoldedCharacterLiveState extends ProjectionSource {
-  characterId?: string
-  name: string
-  immediate?: string
-  state: Record<string, string>
-  knowledge: string[]
-  secrets: string[]
-  /** False means retained working memory for an off-scene character. */
-  present?: boolean
-}
-
-export interface FoldedEntityLiveState extends ProjectionSource {
-  entityId?: string
-  name: string
-  category?: 'location' | 'artefact' | 'faction' | 'other'
-  immediate?: string
-  state: Record<string, string>
-  notes: string[]
-  /** False means retained working memory for an off-scene entity. */
-  present?: boolean
-}
-
 export interface ContinuityLedger {
   currentState: CurrentStateEntry[]
   liveThreads: LiveThreadEntry[]
   characterKnowledge: CharacterKnowledgeEntry[]
-  characterStates?: FoldedCharacterLiveState[]
-  entityStates?: FoldedEntityLiveState[]
+  liveStates?: FoldedLiveState[]
   currentScene?: SceneFrame
   staleProjectionCount: number
 }
@@ -456,8 +332,7 @@ export interface ContinuityView {
   currentState: CurrentStateEntry[]
   liveThreads: LiveThreadEntry[]
   characterKnowledge: CharacterKnowledgeEntry[]
-  characterStates?: FoldedCharacterLiveState[]
-  entityStates?: FoldedEntityLiveState[]
+  liveStates?: FoldedLiveState[]
   currentScene?: SceneFrame
   staleProjectionCount: number
 }
