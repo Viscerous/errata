@@ -17,6 +17,7 @@ export function useLiveAnalysisProgress(storyId: string, active: boolean) {
         queryClient.invalidateQueries({ queryKey: ['librarian-analyses', storyId] }),
         queryClient.invalidateQueries({ queryKey: ['librarian-analysis-index', storyId] }),
         queryClient.invalidateQueries({ queryKey: ['librarian-status', storyId] }),
+        queryClient.invalidateQueries({ queryKey: ['librarian-continuity', storyId] }),
         queryClient.invalidateQueries({ queryKey: ['fragments', storyId] }),
       ]).then(() => {
         if (!unmounted) setProgress(null)
@@ -56,6 +57,7 @@ export function useLiveAnalysisProgress(storyId: string, active: boolean) {
           queryClient.invalidateQueries({ queryKey: ['librarian-analyses', storyId] }),
           queryClient.invalidateQueries({ queryKey: ['librarian-analysis-index', storyId] }),
           queryClient.invalidateQueries({ queryKey: ['librarian-status', storyId] }),
+          queryClient.invalidateQueries({ queryKey: ['librarian-continuity', storyId] }),
           queryClient.invalidateQueries({ queryKey: ['fragments', storyId] }),
         ])
         if (!cancelled) setProgress(null)

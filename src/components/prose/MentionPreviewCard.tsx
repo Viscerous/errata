@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import type { Fragment } from '@/lib/api'
 import { FragmentAvatar } from '@/components/shared/CharacterAvatar'
 import { Badge } from '@/components/ui/badge'
@@ -16,11 +16,15 @@ type PreviewScrollState = {
 export function MentionPreviewCard({
   fragment,
   mediaById,
+  children,
 }: {
   fragment: Fragment
   mediaById: Map<string, Fragment>
+  /** Shown between the header and the record body, e.g. the record's live state. */
+  children?: ReactNode
 }) {
   const bodyRef = useRef<HTMLDivElement | null>(null)
+  const bodyContentRef = useRef<HTMLDivElement | null>(null)
   const hideScrollbarTimerRef = useRef<number | null>(null)
   const [scrollState, setScrollState] = useState<PreviewScrollState>({
     active: false,
@@ -83,12 +87,15 @@ export function MentionPreviewCard({
     updateScrollState(false)
   }, [fragment.content, updateScrollState])
 
+  // The body's own size is capped, so its content is observed too: live state
+  // arrives after the card opens and grows what there is to scroll.
   useEffect(() => {
     const body = bodyRef.current
     if (!body || !window.ResizeObserver) return
 
     const observer = new ResizeObserver(() => updateScrollState(false))
     observer.observe(body)
+    if (bodyContentRef.current) observer.observe(bodyContentRef.current)
 
     return () => observer.disconnect()
   }, [updateScrollState])
@@ -121,8 +128,8 @@ export function MentionPreviewCard({
         </div>
       </div>
 
-      {/* Content preview */}
-      {fragment.content && (
+      {/* Live state and content preview scroll together below the header */}
+      {(fragment.content || children) && (
         <div
           className={[
             'mention-preview-scroll-shell relative min-h-0',
@@ -134,9 +141,16 @@ export function MentionPreviewCard({
           <div
             ref={bodyRef}
             onScroll={showScrollbar}
-            className="mention-preview-scroll max-h-40 overflow-y-auto overscroll-contain pr-2 text-xs text-muted-foreground/80 leading-relaxed whitespace-pre-wrap"
+            className="mention-preview-scroll max-h-60 overflow-y-auto overscroll-contain pr-2"
           >
-            {fragment.content}
+            <div ref={bodyContentRef} className="space-y-2.5">
+              {children}
+              {fragment.content && (
+                <div className="text-xs text-muted-foreground/80 leading-relaxed whitespace-pre-wrap">
+                  {fragment.content}
+                </div>
+              )}
+            </div>
           </div>
           {scrollState.canScroll && (
             <div

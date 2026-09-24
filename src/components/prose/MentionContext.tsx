@@ -2,6 +2,7 @@ import { createContext, useContext, useMemo } from 'react'
 import type { Fragment } from '@/lib/api'
 
 interface MentionContextValue {
+  storyId: string
   getFragment: (id: string) => Fragment | undefined
   mediaById: Map<string, Fragment>
 }
@@ -9,10 +10,12 @@ interface MentionContextValue {
 const MentionContext = createContext<MentionContextValue | null>(null)
 
 export function MentionProvider({
+  storyId,
   fragments,
   mediaById,
   children,
 }: {
+  storyId: string
   fragments: Fragment[]
   mediaById: Map<string, Fragment>
   children: React.ReactNode
@@ -21,10 +24,11 @@ export function MentionProvider({
     const fragmentMap = new Map<string, Fragment>()
     for (const fragment of fragments) fragmentMap.set(fragment.id, fragment)
     return {
+      storyId,
       getFragment: (id: string) => fragmentMap.get(id),
       mediaById,
     }
-  }, [fragments, mediaById])
+  }, [storyId, fragments, mediaById])
 
   return (
     <MentionContext.Provider value={value}>

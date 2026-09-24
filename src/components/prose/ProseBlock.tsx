@@ -225,11 +225,11 @@ export const ProseBlock = memo(function ProseBlock({
     )
     const hasAnyMentions = (enabledMentionTypes?.size ?? 0) > 0
     const mentionHighlighter = hasAnyMentions && filteredAnnotations && filteredAnnotations.length > 0 && onClickMention
-      ? buildAnnotationHighlighter(filteredAnnotations, onClickMention, mentionColors)
+      ? buildAnnotationHighlighter(filteredAnnotations, onClickMention, mentionColors, fragment.id)
       : null
     if (mentionHighlighter) return composeTextTransforms(formatDialogue, mentionHighlighter)
     return formatDialogue
-  }, [enabledMentionTypes, mentionFragmentTypesById, annotations, onClickMention, mentionColors])
+  }, [enabledMentionTypes, mentionFragmentTypesById, annotations, onClickMention, mentionColors, fragment.id])
 
   const textTransformKey = useMemo(() => {
     const types = enabledMentionTypes ? Array.from(enabledMentionTypes).sort().join(',') : ''

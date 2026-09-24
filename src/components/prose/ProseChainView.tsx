@@ -1052,7 +1052,7 @@ export function ProseChainView({
               <div className="absolute inset-0 bg-gradient-to-t from-background via-background/20 to-transparent" />
             </div>
           )}
-          <MentionProvider fragments={allMentionFragments} mediaById={mediaById}>
+          <MentionProvider storyId={storyId} fragments={allMentionFragments} mediaById={mediaById}>
           <div
             ref={proseContentRef}
             className="mx-auto w-full py-6 px-4 sm:py-12 sm:px-8"

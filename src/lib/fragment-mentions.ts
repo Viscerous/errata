@@ -50,6 +50,7 @@ export function buildAnnotationHighlighter(
   annotations: Annotation[],
   onClick: (fragmentId: string) => void,
   colorOverrides?: Map<string, string>,
+  passageId?: string,
 ): ((text: string) => ReactNode) | null {
   const mentions = annotations.filter(a => a.type === 'mention' && a.fragmentId && a.text.trim())
   if (mentions.length === 0) return null
@@ -108,6 +109,7 @@ export function buildAnnotationHighlighter(
           {
             key: `${matchStart}-${matchedText}`,
             fragmentId: annotation.fragmentId,
+            passageId,
             className: 'mention-highlight',
             style: { color },
             onClick: (e: React.MouseEvent) => {

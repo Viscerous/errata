@@ -19,8 +19,11 @@ export const librarian = {
     apiFetch<LibrarianStatusResponse>(`/stories/${storyId}/librarian/status`),
   getAnalysisIndex: (storyId: string) =>
     apiFetch<LibrarianAnalysisStatusResponse>(`/stories/${storyId}/librarian/analysis-index`),
-  getContinuity: (storyId: string) =>
-    apiFetch<LibrarianContinuityResponse>(`/stories/${storyId}/librarian/continuity`),
+  /** `at` folds through that passage: continuity as it stood there. */
+  getContinuity: (storyId: string, at?: string) =>
+    apiFetch<LibrarianContinuityResponse>(
+      `/stories/${storyId}/librarian/continuity${at ? `?at=${encodeURIComponent(at)}` : ''}`,
+    ),
   updateLiveState: (
     storyId: string,
     kind: 'character' | 'entity',

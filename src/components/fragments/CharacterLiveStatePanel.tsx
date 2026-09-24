@@ -1,10 +1,10 @@
 import { useId, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Activity, BookOpen, Check, EyeOff, History, Layers, List, Loader2, Pencil, Plus, Trash2, type LucideIcon } from 'lucide-react'
-import { api, type EndedLiveStateItem, type FoldedLiveState, type Fragment } from '@/lib/api'
+import { Activity, BookOpen, Check, History, Layers, Loader2, Pencil, Plus, Trash2 } from 'lucide-react'
+import { api, type Fragment } from '@/lib/api'
 import { q, qk, useActiveBranchId } from '@/lib/query-keys'
-import { normalizeContinuityKey } from '@/lib/continuity-keys'
-import { DEFAULT_LIVE_STATE_FIELDS, liveStateFieldKey } from '@/contracts/live-state'
+import { DEFAULT_LIVE_STATE_FIELDS } from '@/contracts/live-state'
+import { describeAge, describeEnding, fieldOrder, groupItems, listStyle, liveStateFor } from './live-state-display'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Hint } from '@/components/ui/prose-text'
@@ -31,40 +31,6 @@ const CHARACTER_FIELDS = DEFAULT_LIVE_STATE_FIELDS.character
 const VALUE_FIELD_NAMES = CHARACTER_FIELDS.filter((definition) => definition.holds !== 'lasting').map((definition) => definition.field)
 const LIST_FIELD_NAMES = CHARACTER_FIELDS.filter((definition) => definition.holds === 'lasting').map((definition) => definition.field)
 
-/** Template fields first, in template order; anything else after, as reported. */
-function fieldOrder(field: string): number {
-  const index = CHARACTER_FIELDS.findIndex((definition) => liveStateFieldKey(definition.field) === liveStateFieldKey(field))
-  return index === -1 ? CHARACTER_FIELDS.length : index
-}
-
-function describeAge(scenesAgo: number): string | null {
-  if (scenesAgo === 0) return null
-  return scenesAgo === 1 ? 'previous scene' : `${scenesAgo} scenes ago`
-}
-
-function describeEnding(ended: EndedLiveStateItem, names: Map<string, string>): string {
-  if (ended.happened === 'revealed') {
-    const to = (ended.to ?? []).map((key) => names.get(key) ?? key)
-    return to.length > 0 ? `Revealed to ${to.join(', ')}` : 'Revealed'
-  }
-  if (ended.happened === 'changed') return ended.now ? `Changed; now: ${ended.now}` : 'Changed'
-  return 'Resolved'
-}
-
-function groupItems(items: FoldedLiveState['items']): Array<[string, FoldedLiveState['items']]> {
-  const groups = new Map<string, FoldedLiveState['items']>()
-  for (const item of items) groups.set(item.field, [...(groups.get(item.field) ?? []), item])
-  return [...groups].sort(([left], [right]) => fieldOrder(left) - fieldOrder(right))
-}
-
-/** Knows and Secrets keep their own look; any other list reads as a plain list. */
-function listStyle(field: string): { icon: LucideIcon; iconClass: string; itemClass: string } {
-  const key = liveStateFieldKey(field)
-  if (key === 'knows') return { icon: BookOpen, iconClass: 'text-emerald-400', itemClass: '' }
-  if (key === 'secrets') return { icon: EyeOff, iconClass: 'text-rose-400', itemClass: 'italic' }
-  return { icon: List, iconClass: 'text-muted-foreground', itemClass: '' }
-}
-
 export function CharacterLiveStatePanel({ storyId, fragment }: CharacterLiveStatePanelProps) {
   const queryClient = useQueryClient()
   const branchId = useActiveBranchId(storyId)
@@ -80,12 +46,7 @@ export function CharacterLiveStatePanel({ storyId, fragment }: CharacterLiveStat
     () => continuityData?.view?.liveStates ?? continuityData?.ledger?.liveStates ?? [],
     [continuityData],
   )
-  const liveState = useMemo(() => subjects.find((subject) => (
-    subject.kind === 'character'
-    && (subject.fragmentId === fragment.id
-      || subject.key === fragment.id
-      || normalizeContinuityKey(subject.name) === normalizeContinuityKey(fragment.name))
-  )) ?? null, [subjects, fragment.id, fragment.name])
+  const liveState = useMemo(() => liveStateFor(subjects, fragment), [subjects, fragment])
   const names = useMemo(() => new Map(subjects.map((subject) => [subject.key, subject.name])), [subjects])
 
   const fields = useMemo(

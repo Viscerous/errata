@@ -85,6 +85,10 @@ export const qk = {
   librarianContinuity: (storyId: string | undefined, branchId: BranchId) =>
     ['librarian-continuity', storyId, branchId] as const,
 
+  /** Nested under the branch's continuity, so invalidating that refreshes these too. */
+  librarianContinuityAt: (storyId: string | undefined, branchId: BranchId, passageId: string) =>
+    ['librarian-continuity', storyId, branchId, 'at', passageId] as const,
+
   librarianConversations: (storyId: string | undefined, branchId: BranchId) =>
     ['librarian-conversations', storyId, branchId] as const,
 
@@ -153,5 +157,14 @@ export const q = {
     queryOptions({
       queryKey: qk.librarianContinuity(storyId, branchId),
       queryFn: () => api.librarian.getContinuity(storyId!),
+    }),
+
+  librarianContinuityAt: (storyId: string | undefined, branchId: BranchId, passageId: string) =>
+    queryOptions({
+      queryKey: qk.librarianContinuityAt(storyId, branchId, passageId),
+      queryFn: () => api.librarian.getContinuity(storyId!, passageId),
+      // Continuity at a passage changes only when an analysis finishes or a
+      // correction is saved, and both invalidate the branch's continuity.
+      staleTime: Infinity,
     }),
 } as const

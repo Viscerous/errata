@@ -1,9 +1,12 @@
 import { HoverCard } from 'radix-ui'
 import { useMentionContext } from './MentionContext'
 import { MentionPreviewCard } from './MentionPreviewCard'
+import { MentionLiveState } from './MentionLiveState'
 
 interface MentionSpanProps {
   fragmentId: string
+  /** The passage the mention sits in; the card shows live state as of it. */
+  passageId?: string
   className?: string
   style?: React.CSSProperties
   onClick?: (e: React.MouseEvent) => void
@@ -15,6 +18,7 @@ interface MentionSpanProps {
 
 export function MentionSpan({
   fragmentId,
+  passageId,
   className,
   style,
   onClick,
@@ -66,7 +70,9 @@ export function MentionSpan({
           <MentionPreviewCard
             fragment={fragment}
             mediaById={ctx.mediaById}
-          />
+          >
+            {passageId && <MentionLiveState storyId={ctx.storyId} passageId={passageId} fragment={fragment} />}
+          </MentionPreviewCard>
         </HoverCard.Content>
       </HoverCard.Portal>
     </HoverCard.Root>
