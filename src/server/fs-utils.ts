@@ -1,4 +1,4 @@
-import { writeFile, rename, readFile } from 'node:fs/promises'
+import { writeFile, rename, readFile, rm } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { withKeyLock } from './async-lock'
 
@@ -34,7 +34,34 @@ export async function readJsonFile<T = unknown>(path: string): Promise<T | undef
 export async function writeJsonAtomic(path: string, value: unknown, mode?: number): Promise<void> {
   const tmpPath = `${path}.tmp-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
   await writeFile(tmpPath, JSON.stringify(value, null, 2), { encoding: 'utf-8', mode })
-  await rename(tmpPath, path)
+  try {
+    await renameOver(tmpPath, path)
+  } catch (error) {
+    await rm(tmpPath, { force: true })
+    throw error
+  }
+}
+
+/**
+ * Windows refuses to replace a file another process holds open, such as a
+ * virus scanner or the search indexer reading it the moment it was written,
+ * and reports it as one of these codes. The hold lasts moments, so the rename
+ * is retried briefly before the write is reported as failed.
+ */
+const TRANSIENT_RENAME_CODES = new Set(['EPERM', 'EACCES', 'EBUSY'])
+const RENAME_ATTEMPTS = 8
+
+async function renameOver(from: string, to: string): Promise<void> {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      await rename(from, to)
+      return
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code
+      if (attempt >= RENAME_ATTEMPTS || !code || !TRANSIENT_RENAME_CODES.has(code)) throw error
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, 10 * 2 ** attempt))
+    }
+  }
 }
 
 /**

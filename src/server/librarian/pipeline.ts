@@ -10,7 +10,7 @@ import {
   type ContextMessage,
 } from '../llm/context-builder'
 import { samplingDiagnostics, type resolveAgentRuntime } from '../llm/client'
-import { toolCallOutputCap } from '../llm/output-budget'
+import { structuredOutputCap } from '../llm/output-budget'
 import { normalizeTokenUsage, resolveAndReportServedUsage } from '../llm/usage-normalizer'
 import type { ContextSelectionSource, FragmentSignal } from '../llm/context-selection'
 import { buildAnalyzeContext } from './blocks'
@@ -40,6 +40,7 @@ import {
 import {
   runStructuredPass,
   runToolLoopPass,
+  structuredOutputForm,
   ToolLoopPassError,
   type ToolLoopPassArgs,
   type ToolLoopPrepareStep,
@@ -147,21 +148,6 @@ async function runCompiledToolPass(args: RunCompiledPassArgs): Promise<{
   })
 }
 
-/**
- * A structured answer is constrained by its schema but never shown it: the
- * server turns the schema into a decoding grammar, not into prompt text. The
- * task block therefore carries what a tool declaration would have: the tool's
- * description and its schema with field descriptions.
- */
-function structuredOutputForm(tool: ToolSet[string]): string {
-  const schema = (tool.inputSchema as { jsonSchema?: unknown }).jsonSchema
-  return [
-    tool.description ?? '',
-    'Report form (JSON Schema):',
-    JSON.stringify(schema),
-  ].filter(Boolean).join('\n')
-}
-
 async function runCompiledStructuredPass(
   args: Omit<RunCompiledPassArgs, 'maxSteps' | 'terminalToolName' | 'terminalRequiresToolName' | 'prepareStep' | 'stopWhen'>
     & { toolName: string },
@@ -217,23 +203,6 @@ async function withAnalyzeStagePrompt(
     messages,
     blocks,
   }
-}
-
-/**
- * A stage request may produce its tool's largest well-formed call plus the
- * model's reasoning allowance, and no more. The provider is the only party that
- * can stop generation: a client abort does not reliably reach it, and a
- * degenerate continuation the server's tool-call parser withholds never shows
- * on the stream. An explicit story limit still applies when it is lower.
- */
-function stageOutputCap(tool: ToolSet[string] | undefined, runtime: LibrarianRuntime): number | undefined {
-  const schema = (tool?.inputSchema as { jsonSchema?: unknown } | undefined)?.jsonSchema
-  const derived = schema
-    ? toolCallOutputCap(schema, { enabled: runtime.thinkingEnabled, allowance: runtime.reasoningAllowance })
-    : undefined
-  const configured = runtime.guards.maxOutputTokens
-  if (derived === undefined) return configured
-  return configured === undefined ? derived : Math.min(derived, configured)
 }
 
 function successfulToolCall(
@@ -513,7 +482,7 @@ async function runOnlineAnalyzePass(
         topP,
         topK,
         providerOptions,
-        maxOutputTokens: stageOutputCap(stageTool, runtime),
+        maxOutputTokens: structuredOutputCap(stageTool, runtime),
         emit,
         abortSignal,
         idleTimeoutMs: idleTimeoutMs ?? DEFAULT_ANALYZE_IDLE_TIMEOUT_MS,

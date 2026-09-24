@@ -77,8 +77,8 @@ export const StoryMetaSchema = z.object({
       outputFormat: z.enum(['plaintext', 'markdown']).default('markdown'),
       enabledPlugins: z.array(z.string()).default([]),
       maxSteps: z.int().min(1).max(50).default(10),
-      // Optional provider-facing generation limits. When absent, Errata leaves
-      // output length to the provider/model and its configured context window.
+      // Optional explicit generation limit. Requests are already bounded by
+      // their answer size plus the model's reasoning allowance; this only lowers it.
       generationLimits: z.object({
         maxOutputTokens: z.int().min(256).optional(),
       }).optional(),

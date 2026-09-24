@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod/v4'
 import { reportMaintenanceInputSchema, reportPassageInputSchema } from '@/server/librarian/analysis-tools'
-import { maxSerializedChars, toolCallOutputCap } from '@/server/llm/output-budget'
+import { FREEFORM_ANSWER_TOKENS, freeformOutputCap, maxSerializedChars, toolCallOutputCap } from '@/server/llm/output-budget'
 import { DEFAULT_REASONING_ALLOWANCE } from '@/contracts/providers'
 
 // Each budget is roughly an order of magnitude above a typical report, so a
@@ -32,5 +32,17 @@ describe('tool-call output cap', () => {
 
   it('leaves an unbounded schema to the provider', () => {
     expect(toolCallOutputCap({ type: 'string' }, { enabled: false })).toBeUndefined()
+  })
+})
+
+describe('free-form output cap', () => {
+  it('bounds a prose or chat request by its answer plus the reasoning allowance', () => {
+    expect(freeformOutputCap({ thinkingEnabled: false, reasoningAllowance: 40_000, guards: {} })).toBe(FREEFORM_ANSWER_TOKENS)
+    expect(freeformOutputCap({ thinkingEnabled: true, reasoningAllowance: 40_000, guards: {} })).toBe(FREEFORM_ANSWER_TOKENS + 40_000)
+    expect(freeformOutputCap({ thinkingEnabled: true, guards: {} })).toBe(FREEFORM_ANSWER_TOKENS + DEFAULT_REASONING_ALLOWANCE)
+  })
+
+  it('yields to a lower explicit story limit', () => {
+    expect(freeformOutputCap({ thinkingEnabled: true, guards: { maxOutputTokens: 2_000 } })).toBe(2_000)
   })
 })

@@ -146,21 +146,34 @@ export function numberSentences(source: string, render?: (text: string) => strin
     .join('\n')
 }
 
-const SEGMENT_MARKER_RE = /^\s*\[\d+\]\s*/
+const SEGMENT_MARKER_RE = /^[ \t]*\[\d+\][ \t]*/
+/** A marker between two sentences on one line: after sentence-ending punctuation, before the next sentence. */
+const INLINE_SEGMENT_MARKER_RE = /(?<=[.!?…]["'”’)]?)[ \t]+\[\d+\][ \t]+(?=\S)/g
 
 /**
- * The inverse of the marker `numberSentences` adds, for text a model writes back.
- * Numbering a record so it can be addressed by sentence teaches the model that a
- * sentence looks like `[16] He is waiting.`, so it writes the replacement the
- * same way, marker included. Left in place that marker both inflates the length
- * check and writes `[16] ` verbatim into the record.
+ * The inverse of `numberSentences`, for text a model writes back. Numbering a
+ * record so it can be addressed by sentence teaches the model that a record
+ * looks like `[1] He waits.\n[2] He listens.`, so it writes new text the same
+ * way: a replacement sentence with its marker, or a whole new record numbered
+ * one sentence per line or run together on one.
  *
- * Stripping it here keeps the presentation format from leaking into stored
- * content no matter which surface echoes it back, and it lives beside the
- * renderer so the two cannot drift.
+ * A marker is only recognised where the numbering puts one: opening a line, or
+ * between two sentences. Every such marker goes, and lines a marker started
+ * rejoin into the paragraphs the numbering split apart; a bracketed number
+ * anywhere else is content. It lives beside the renderer so the two cannot drift.
  */
-export function stripSegmentMarker(text: string): string {
-  return text.replace(SEGMENT_MARKER_RE, '')
+export function stripSegmentMarkers(text: string): string {
+  const unmarked = text.replace(INLINE_SEGMENT_MARKER_RE, ' ')
+  if (!unmarked.split('\n').some((line) => SEGMENT_MARKER_RE.test(line))) return unmarked
+  return unmarked
+    .split(/\n[ \t]*\n/)
+    .map((paragraph) => paragraph
+      .split('\n')
+      .map((line) => line.replace(SEGMENT_MARKER_RE, '').trim())
+      .filter(Boolean)
+      .join(' '))
+    .filter(Boolean)
+    .join('\n\n')
 }
 
 /**

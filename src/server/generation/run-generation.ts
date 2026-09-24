@@ -18,6 +18,7 @@ import { createContextReceipt } from '../llm/context-receipt'
 import { applyBlockConfig } from '../blocks/apply'
 import { createScriptHelpers } from '../blocks/script-context'
 import { resolveAgentRuntime, samplingCallSettings, samplingDiagnostics } from '../llm/client'
+import { freeformOutputCap } from '../llm/output-budget'
 import type { SamplingSettings } from '@/contracts/story'
 import { runPrewriter, createWriterBriefBlocks } from '../llm/prewriter'
 import {
@@ -192,7 +193,7 @@ export async function runGeneration(
 
   // Resolve model early so modelId is available for instruction resolution
   const runtime = await resolveAgentRuntime(dataDir, storyId, 'generation.writer', story)
-  const { model, modelId: resolvedModelId, providerId, providerOptions, guards } = runtime
+  const { model, modelId: resolvedModelId, providerId, providerOptions } = runtime
   // What the provider reports it answered with, once it has answered. Until then
   // the configured id is the best available name for it.
   let servedModelId = resolvedModelId
@@ -426,7 +427,7 @@ export async function runGeneration(
           stopWhen: stepCountIs(writerMaxSteps),
           ...samplingCallSettings(runtime),
           providerOptions,
-          maxOutputTokens: guards.maxOutputTokens,
+          maxOutputTokens: freeformOutputCap(runtime),
         })
         const result = await writerAgent.stream({
           messages: writerMessages,

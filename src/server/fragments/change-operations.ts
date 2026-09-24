@@ -15,6 +15,7 @@ import {
   getStory,
   updateFragmentVersioned,
 } from './storage'
+import { stripSegmentMarkers } from '../llm/segments'
 import { registry } from './registry'
 import { checkFragmentWrite, isFragmentLocked } from './protection'
 
@@ -404,8 +405,30 @@ export function normalizeOperations(operations: FragmentChangeOperation[]): Frag
       suffix += 1
     }
     seen.add(operationId)
-    return { ...operation, operationId }
+    return withoutSegmentMarkers({ ...operation, operationId })
   })
+}
+
+/**
+ * Operations are model-authored, and a model shown numbered sentences writes
+ * text back in that form. The markers never belong in a record, including in an
+ * anchor that has to match the stored text.
+ */
+function withoutSegmentMarkers(operation: FragmentChangeOperation): FragmentChangeOperation {
+  switch (operation.action) {
+    case 'create_fragment':
+      return { ...operation, content: stripSegmentMarkers(operation.content) }
+    case 'replace_text':
+      return { ...operation, oldText: stripSegmentMarkers(operation.oldText), newText: stripSegmentMarkers(operation.newText) }
+    case 'append_paragraph':
+      return { ...operation, text: stripSegmentMarkers(operation.text) }
+    case 'set_fields':
+      return operation.fields.content === undefined
+        ? operation
+        : { ...operation, fields: { ...operation.fields, content: stripSegmentMarkers(operation.fields.content) } }
+    case 'archive_fragment':
+      return operation
+  }
 }
 
 async function validateCreateOperation(

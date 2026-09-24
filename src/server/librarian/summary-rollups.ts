@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { mkdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { ToolLoopAgent, stepCountIs, tool } from 'ai'
+import { tool } from 'ai'
 import { z } from 'zod/v4'
 import { getContentRoot } from '../fragments/branches'
 import { getFragment, getStory } from '../fragments/storage'
@@ -10,26 +10,18 @@ import { getActiveProseIds } from '../fragments/prose-chain'
 import { writeJsonAtomic } from '../fs-utils'
 import { withKeyLock } from '../async-lock'
 import { createLogger } from '../logging'
-import { drainAgentStream } from '../agents/drain-agent-stream'
-import type { AgentStreamEvent } from '../agents/stream-types'
-import { resolveAgentRuntime, samplingCallSettings } from '../llm/client'
+import type { ActivityStreamEvent } from '../agents/activity-stream'
+import { resolveAgentRuntime } from '../llm/client'
+import { structuredOutputCap } from '../llm/output-budget'
 import { resolveAndReportServedUsage } from '../llm/usage-normalizer'
 import { getObservedServedModelId } from '../llm/served-models'
 import { getAnalysisIndex } from './storage'
 import { inspectSummarySource } from './summary-source'
-import { DEFAULT_TOOL_LOOP_IDLE_TIMEOUT_MS, terminalToolSucceeded } from './tool-runner'
+import { runStructuredPass, runToolLoopPass, structuredOutputForm, toExactJsonSchema } from './tool-runner'
 
 export const SUMMARY_ROLLUP_CONTRACT_VERSION = 2
 export const SUMMARY_ROLLUP_FANOUT = 6
 export const SUMMARY_ROLLUP_MAX_TEXT_CHARS = 2400
-
-/**
- * Room for the record (~700 tokens at the character cap) plus its title and
- * tool-call envelope, with headroom so an overshoot still closes the call rather
- * than truncating mid-argument. The previous 1024 sat *below* the character cap,
- * putting the schema limit out of reach.
- */
-const SUMMARY_ROLLUP_MAX_OUTPUT_TOKENS = 1536
 
 export interface SummaryRollupLeaf {
   id: string
@@ -77,11 +69,10 @@ const ROLLUP_TOOL_NAME = 'recordRollup'
 const UNOBSERVED_MODEL_ID = '__unobserved_in_this_process__'
 
 /**
- * Reported through a tool rather than parsed out of free text, so the shape
- * reaches the model as a schema it is decoded against — grammar-constrained on
- * llama.cpp, structured output elsewhere. A malformed record stops being
- * something the call can produce, and an over-long one comes back as a tool
- * error the model can correct.
+ * The record is a schema, never parsed out of free text: a JSON response format
+ * where the provider constrains one while decoding, so a malformed or over-long
+ * record cannot be produced, and otherwise a required tool call whose rejected
+ * record comes back as an error the model can correct.
  */
 const rollupInputSchema = z.object({
   title: z.string().trim().min(1).max(120)
@@ -364,7 +355,7 @@ function rollupModelConfigKey(runtime: {
   }))
 }
 
-const ROLLUP_INSTRUCTIONS = `Compress the ordered child story-memory records into one retrospective record, then report it by calling ${ROLLUP_TOOL_NAME}.
+const ROLLUP_INSTRUCTIONS = `Compress the ordered child story-memory records into one retrospective record and report it.
 
 - Write in perfect-aspect historical register ("the gate had opened"), never present tense.
 - Preserve causality, the named participants, and every thread still unresolved at the end of the interval.
@@ -375,7 +366,7 @@ const ROLLUP_INSTRUCTIONS = `Compress the ordered child story-memory records int
 export interface SummaryRollupDerivationOptions {
   abortSignal?: AbortSignal
   onModelStart?: () => void
-  onEvent?: (event: AgentStreamEvent) => void
+  onEvent?: (event: ActivityStreamEvent) => void
 }
 
 export async function deriveNextSummaryRollupNode(
@@ -426,51 +417,47 @@ async function deriveNextSummaryRollupNodeInner(
     text: child.text,
   }))
   const prompt = JSON.stringify({ children: childPayload })
-  const agent = new ToolLoopAgent({
+  const report = tool({
+    description: 'Report the single compressed record covering all of the child records.',
+    inputSchema: toExactJsonSchema(rollupInputSchema),
+    execute: async () => ({ ok: true }),
+  })
+  const pass = {
     model: runtime.model,
-    instructions: ROLLUP_INSTRUCTIONS,
-    tools: {
-      [ROLLUP_TOOL_NAME]: tool({
-        description: 'Report the single compressed record covering all of the child records.',
-        inputSchema: rollupInputSchema,
-        execute: async () => ({ ok: true }),
-      }),
-    },
-    toolChoice: 'required' as const,
-    // One repair round, which is what the analysis lane shows a rejected tool
-    // call reliably needs.
-    stopWhen: [terminalToolSucceeded(ROLLUP_TOOL_NAME), stepCountIs(2)],
-    ...samplingCallSettings(runtime),
+    prompt,
+    temperature: runtime.temperature,
+    topP: runtime.topP,
+    topK: runtime.topK,
     // Thinking follows the same story-level preference as every other role.
     // A task must not silently override the user's configured model behaviour.
     providerOptions: runtime.providerOptions,
-    maxOutputTokens: Math.min(
-      runtime.guards.maxOutputTokens ?? SUMMARY_ROLLUP_MAX_OUTPUT_TOKENS,
-      SUMMARY_ROLLUP_MAX_OUTPUT_TOKENS,
-    ),
-  })
-  const controller = new AbortController()
-  const abort = () => controller.abort()
-  if (options.abortSignal?.aborted) abort()
-  else options.abortSignal?.addEventListener('abort', abort, { once: true })
-  let result: Awaited<ReturnType<typeof agent.stream>>
-  let drained: Awaited<ReturnType<typeof drainAgentStream>>
-  try {
-    options.onModelStart?.()
-    result = await agent.stream({ prompt, abortSignal: controller.signal })
-    drained = await drainAgentStream(result.fullStream, options.onEvent, {
-      abortSignal: controller.signal,
-      idleTimeoutMs: DEFAULT_TOOL_LOOP_IDLE_TIMEOUT_MS,
-      onIdleTimeout: abort,
-    })
-  } finally {
-    options.abortSignal?.removeEventListener('abort', abort)
+    maxOutputTokens: structuredOutputCap(report, runtime),
+    emit: options.onEvent,
+    abortSignal: options.abortSignal,
   }
+  options.onModelStart?.()
+  const drained = runtime.structuredOutput
+    ? await runStructuredPass({
+        ...pass,
+        instructions: `${ROLLUP_INSTRUCTIONS}\n\n${structuredOutputForm(report)}`,
+        toolName: ROLLUP_TOOL_NAME,
+        tool: report,
+      })
+    : await runToolLoopPass({
+        ...pass,
+        instructions: ROLLUP_INSTRUCTIONS,
+        tools: { [ROLLUP_TOOL_NAME]: report },
+        toolChoice: 'required',
+        // One repair round, which is what the analysis lane shows a rejected
+        // tool call reliably needs.
+        maxSteps: 2,
+        terminalToolName: ROLLUP_TOOL_NAME,
+      })
   const { modelId: servedModelId } = await resolveAndReportServedUsage(
     dataDir,
     storyId,
     'librarian.rollup',
-    result.totalUsage,
+    drained.totalUsage,
     {
       providerId: runtime.providerId,
       configuredModelId: runtime.modelId,

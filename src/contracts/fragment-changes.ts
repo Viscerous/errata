@@ -21,7 +21,8 @@ export type EditableField = z.infer<typeof editableFieldSchema>
 const operationIdSchema = z.string().min(1).max(80).optional()
 
 /**
- * Model-authored content is stored exactly as supplied by the tool call. The
+ * Model-authored content is stored as supplied, less any sentence numbering
+ * the model echoed from its view of a record (see normalizeOperations). The
  * maxLength keeps the local-grammar (GBNF) form bounded: an unbounded string
  * is an infinite repetition in the grammar, which weak models degenerate into.
  */

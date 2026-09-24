@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest'
+import { FREEFORM_ANSWER_TOKENS } from '@/server/llm/output-budget'
+import { DEFAULT_REASONING_ALLOWANCE } from '@/contracts/providers'
 import { ensureCoreAgentsRegistered } from '@/server/agents/register-core'
 import { createTempDir, seedTestProvider, makeTestSettings } from '../setup'
 import {
@@ -429,10 +431,10 @@ describe('prewriter', () => {
       const writerConfig = mockAgentCtor.mock.calls[1][0] as any
       expect(writerConfig.toolChoice).toBe('auto')
 
-      // With no story override, both agents delegate output length to the
-      // provider/model rather than imposing an Errata default.
-      expect(prewriterConfig.maxOutputTokens).toBeUndefined()
-      expect(writerConfig.maxOutputTokens).toBeUndefined()
+      // With no story override, both agents are bounded by the longest
+      // free-form answer plus the model's reasoning allowance, never left open.
+      expect(prewriterConfig.maxOutputTokens).toBe(FREEFORM_ANSWER_TOKENS + DEFAULT_REASONING_ALLOWANCE)
+      expect(writerConfig.maxOutputTokens).toBe(FREEFORM_ANSWER_TOKENS + DEFAULT_REASONING_ALLOWANCE)
     })
 
     it('prewriter mode passes stripped context to writer', async () => {

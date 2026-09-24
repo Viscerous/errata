@@ -26,8 +26,12 @@ export interface ProviderPresetDefinition {
   structuredOutput: boolean
 }
 
-/** Reasoning tokens a thinking model may spend per structured request when none is configured for it. */
-export const DEFAULT_REASONING_ALLOWANCE = 16_384
+/**
+ * Reasoning tokens a thinking model may spend per request when none is
+ * configured for it: enough for models that think for tens of thousands of
+ * tokens, so it only binds on a request that has stopped making progress.
+ */
+export const DEFAULT_REASONING_ALLOWANCE = 32_768
 
 /**
  * The single provider catalogue used by validation, onboarding, settings, and

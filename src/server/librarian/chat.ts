@@ -1,6 +1,7 @@
 import { tool, ToolLoopAgent, stepCountIs, type ToolSet } from 'ai'
 import { z } from 'zod/v4'
 import { resolveAgentRuntime, samplingCallSettings, samplingDiagnostics } from '../llm/client'
+import { freeformOutputCap } from '../llm/output-budget'
 import { resolveAndReportServedUsage } from '../llm/usage-normalizer'
 import { MISSING_SYSTEM_PROMPT_FALLBACK } from '../instructions'
 import { getFragment, getStory } from '../fragments/storage'
@@ -155,7 +156,7 @@ async function librarianChatInner(
 
   // Resolve model early so modelId is available for instruction resolution
   const runtime = await resolveAgentRuntime(dataDir, storyId, 'librarian.chat', story)
-  const { model, modelId, providerId, providerOptions, guards } = runtime
+  const { model, modelId, providerId, providerOptions } = runtime
   requestLogger.info('Resolved model', { modelId, sampling: samplingDiagnostics(runtime) })
 
   // Create write-enabled fragment tools + enabled plugin tools
@@ -206,7 +207,7 @@ async function librarianChatInner(
     stopWhen: stepCountIs(opts.maxSteps ?? 10),
     ...samplingCallSettings(runtime),
     providerOptions,
-    maxOutputTokens: guards.maxOutputTokens,
+    maxOutputTokens: freeformOutputCap(runtime),
   })
 
   // Build messages: context as first user message, then conversation history

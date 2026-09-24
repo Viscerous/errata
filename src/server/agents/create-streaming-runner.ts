@@ -11,6 +11,7 @@ import type { ContextBuildState } from '../llm/context-builder'
 import { type AgentBlockContext, baseBlockContext } from './agent-block-context'
 import type { AgentStreamResult, ResolvedAgentStreamResult } from './stream-types'
 import { resolveAgentRuntime, samplingCallSettings, samplingDiagnostics } from '../llm/client'
+import { freeformOutputCap } from '../llm/output-budget'
 import { MISSING_SYSTEM_PROMPT_FALLBACK } from '../instructions'
 import { getStory } from '../fragments/storage'
 import { buildContextState } from '../llm/context-builder'
@@ -143,7 +144,7 @@ export function createStreamingRunner<TOpts extends object, TValidated = Record<
 
       // 3. Resolve model early (modelId needed for instruction resolution)
       const runtime = await resolveAgentRuntime(dataDir, storyId, role, story)
-      const { model, modelId, providerId, providerOptions, guards } = runtime
+      const { model, modelId, providerId, providerOptions } = runtime
       requestLogger.info('Resolved model', { modelId, sampling: samplingDiagnostics(runtime) })
 
       // 4. Build story context (optional)
@@ -195,7 +196,7 @@ export function createStreamingRunner<TOpts extends object, TValidated = Record<
         stopWhen: stepCountIs(maxSteps ?? defaultMaxSteps),
         ...samplingCallSettings(runtime),
         providerOptions,
-        maxOutputTokens: guards.maxOutputTokens,
+        maxOutputTokens: freeformOutputCap(runtime),
       })
 
       // 10. Build messages

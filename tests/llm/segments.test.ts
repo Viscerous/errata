@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { numberSentences, resolveSegments, sentenceIndexAt, segmentText, stripSegmentMarker } from '@/server/llm/segments'
+import { numberSentences, resolveSegments, sentenceIndexAt, segmentText, stripSegmentMarkers } from '@/server/llm/segments'
 
 const texts = (source: string) => segmentText(source).map((segment) => segment.text)
 
@@ -124,25 +124,32 @@ describe('segment resolution', () => {
 })
 
 /**
- * Numbering a record teaches the model that a sentence looks like
- * `[16] He is waiting.`, so it writes replacements the same way. The marker is
- * presentation and must never reach stored content.
+ * Numbering a record teaches the model that a record looks like
+ * `[1] He waits.` / `[2] He listens.`, so it writes new text the same way. The
+ * markers are presentation and must never reach stored content.
  */
-describe('stripSegmentMarker', () => {
+describe('stripSegmentMarkers', () => {
   it('removes the marker numberSentences adds, and nothing else', () => {
-    const rendered = numberSentences('Alpha one. Beta two.')
-    for (const line of rendered.split('\n')) {
-      expect(stripSegmentMarker(line)).not.toMatch(/^\[\d+\]/)
-    }
-    expect(stripSegmentMarker('[16] He is deceased.')).toBe('He is deceased.')
-    expect(stripSegmentMarker('  [3]   Spacing survives the trim.')).toBe('Spacing survives the trim.')
+    expect(stripSegmentMarkers('[16] He is deceased.')).toBe('He is deceased.')
+    expect(stripSegmentMarkers('  [3]   Spacing survives the trim.')).toBe('Spacing survives the trim.')
   })
 
-  it('leaves prose that merely begins with a bracket alone', () => {
-    expect(stripSegmentMarker('[redacted] was struck from the record.')).toBe('[redacted] was struck from the record.')
-    expect(stripSegmentMarker('He is waiting.')).toBe('He is waiting.')
-    // Only the leading marker goes; a citation inside the sentence is content.
-    expect(stripSegmentMarker('[2] See [4] for the rest.')).toBe('See [4] for the rest.')
+  it('turns a numbered record back into the prose it was rendered from', () => {
+    const source = 'Alpha one. Beta two. Gamma three.'
+    expect(stripSegmentMarkers(numberSentences(source))).toBe(source)
+    expect(stripSegmentMarkers('[1] He waits.\n[2] He listens.\n\n[3] Later, he leaves.'))
+      .toBe('He waits. He listens.\n\nLater, he leaves.')
+    // The same record run together on one line.
+    expect(stripSegmentMarkers('[1] He waits. [2] He listens. [3] "Now," he says.'))
+      .toBe('He waits. He listens. "Now," he says.')
+    expect(stripSegmentMarkers('He waits. [2] He listens.')).toBe('He waits. He listens.')
+  })
+
+  it('leaves text without a line-leading marker alone', () => {
+    expect(stripSegmentMarkers('[redacted] was struck from the record.')).toBe('[redacted] was struck from the record.')
+    expect(stripSegmentMarkers('He is waiting.\nOn two lines.')).toBe('He is waiting.\nOn two lines.')
+    // Only leading markers go; a citation inside the sentence is content.
+    expect(stripSegmentMarkers('[2] See [4] for the rest.')).toBe('See [4] for the rest.')
   })
 })
 

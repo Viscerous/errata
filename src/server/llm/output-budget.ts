@@ -62,3 +62,47 @@ export function toolCallOutputCap(
   const callTokens = Math.ceil(chars / CHARS_PER_TOKEN)
   return callTokens + (reasoning.enabled ? reasoning.allowance ?? DEFAULT_REASONING_ALLOWANCE : 0)
 }
+
+/**
+ * The output cap for one structured request on a resolved runtime: the tool's
+ * largest well-formed call plus the reasoning allowance, and no more. The
+ * provider is the only party that can stop generation: a client abort does not
+ * reliably reach it, and a degenerate continuation the server's tool-call parser
+ * withholds never shows on the stream. An explicit story limit still applies
+ * when it is lower.
+ */
+export function structuredOutputCap(
+  tool: { inputSchema?: unknown } | undefined,
+  runtime: { thinkingEnabled: boolean; reasoningAllowance?: number; guards: { maxOutputTokens?: number } },
+): number | undefined {
+  const schema = (tool?.inputSchema as { jsonSchema?: unknown } | undefined)?.jsonSchema
+  const derived = schema
+    ? toolCallOutputCap(schema, { enabled: runtime.thinkingEnabled, allowance: runtime.reasoningAllowance })
+    : undefined
+  const configured = runtime.guards.maxOutputTokens
+  if (derived === undefined) return configured
+  return configured === undefined ? derived : Math.min(derived, configured)
+}
+
+/**
+ * The longest free-form answer a role legitimately writes in one request, a
+ * prose passage or a chat reply: several thousand words, well beyond any
+ * passage the writer produces.
+ */
+export const FREEFORM_ANSWER_TOKENS = 8_192
+
+/**
+ * The output cap for one free-form request: the longest legitimate answer plus
+ * the reasoning allowance when the model thinks. Without it a sampling loop in
+ * reasoning or prose runs until the context window fills, since nothing but
+ * the provider's token limit can stop generation. An explicit story limit
+ * still applies when it is lower.
+ */
+export function freeformOutputCap(
+  runtime: { thinkingEnabled: boolean; reasoningAllowance?: number; guards: { maxOutputTokens?: number } },
+): number {
+  const derived = FREEFORM_ANSWER_TOKENS
+    + (runtime.thinkingEnabled ? runtime.reasoningAllowance ?? DEFAULT_REASONING_ALLOWANCE : 0)
+  const configured = runtime.guards.maxOutputTokens
+  return configured === undefined ? derived : Math.min(derived, configured)
+}

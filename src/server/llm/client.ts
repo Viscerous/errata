@@ -112,9 +112,9 @@ export interface GenerationGuards {
 }
 
 /**
- * Resolve opt-in per-generation safety settings. Output length is deliberately
- * unbounded by Errata when unset so reasoning-capable models can use the budget
- * exposed by their provider and context window.
+ * Resolve the story's explicit per-generation limits. Every request is also
+ * bounded by the size of its answer plus the reasoning allowance (see
+ * output-budget.ts); an explicit limit applies only where it is lower.
  */
 export function resolveGenerationGuards(
   limits?: { maxOutputTokens?: number },

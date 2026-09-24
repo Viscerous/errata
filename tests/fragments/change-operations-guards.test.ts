@@ -77,6 +77,32 @@ describe('change-operation state integrity', () => {
     })
   })
 
+  it('keeps the numbered sentence form a model was shown out of what it writes', async () => {
+    await createFragment(dataDir, 'story-guards', makeKnowledge('The gate is shut. The key is lost.'))
+
+    const { operations, results } = await validateOperations(dataDir, 'story-guards', [
+      {
+        action: 'create_fragment',
+        type: 'knowledge',
+        name: 'The Archive',
+        description: '',
+        content: '[1] The archive is sealed.\n[2] Only the warden holds a key.',
+      },
+      {
+        action: 'replace_text',
+        fragmentId: 'kn-guard01',
+        field: 'content',
+        oldText: '[2] The key is lost.',
+        newText: '[2] The key was found.',
+        replaceAll: false,
+      },
+    ])
+
+    expect(results.map((result) => result.status)).toEqual(['valid', 'valid'])
+    expect(operations[0]).toMatchObject({ content: 'The archive is sealed. Only the warden holds a key.' })
+    expect(operations[1]).toMatchObject({ oldText: 'The key is lost.', newText: 'The key was found.' })
+  })
+
   it('allows replace_text to replace a whole current field', async () => {
     const current = 'Status: Active Elicitation.\n\nCurrent Lure: Victoria will approach Thorne through the preservation project.'
     await createFragment(dataDir, 'story-guards', makeKnowledge(current))

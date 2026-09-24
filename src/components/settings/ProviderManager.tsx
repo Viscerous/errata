@@ -654,7 +654,7 @@ export function ProviderPanel({ onClose }: { onClose: () => void }) {
                 placeholder={String(DEFAULT_REASONING_ALLOWANCE)}
               />
               <p className="text-ui-label text-muted-foreground mt-1">
-                Tokens {form.defaultModel || 'this model'} may think for before a librarian answer. A model that reasons longer needs more; the cap is what stops a runaway request.
+                Tokens {form.defaultModel || 'this model'} may think for before any answer. A model that reasons longer needs more; the cap is what stops a request stuck repeating itself.
               </p>
             </div>
 

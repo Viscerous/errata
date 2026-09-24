@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createStory, createFragment } from '@/server/fragments/storage'
+import { createStory, createFragment, updateStory } from '@/server/fragments/storage'
+import { saveGlobalConfig } from '@/server/config/storage'
+import { DEFAULT_REASONING_ALLOWANCE } from '@/contracts/providers'
 import { addProseSection, initProseChain } from '@/server/fragments/prose-chain'
 import { analysisSourceRevision } from '@/server/librarian/continuity-source'
 import { saveAnalysis } from '@/server/librarian/storage'
@@ -13,14 +15,19 @@ import { clearServedModelObservations } from '@/server/llm/served-models'
 import { listActiveAgents } from '@/server/agents/active-registry'
 import { clearAgentRuns, listAgentRuns } from '@/server/agents/traces'
 import { withBranch } from '@/server/fragments/branches'
-import { createTempDir, makeTestSettings, seedTestProvider } from '../setup'
+import { createTempDir, makeTestGlobalConfig, makeTestSettings, seedTestProvider } from '../setup'
 
-const { streamMock, agentMock } = vi.hoisted(() => ({ streamMock: vi.fn(), agentMock: vi.fn() }))
+const { streamMock, agentMock, streamTextMock } = vi.hoisted(() => ({
+  streamMock: vi.fn(),
+  agentMock: vi.fn(),
+  streamTextMock: vi.fn(),
+}))
 
 vi.mock('ai', async () => {
   const actual = await vi.importActual('ai')
   return {
     ...actual,
+    streamText: (settings: unknown) => streamTextMock(settings),
     ToolLoopAgent: class {
       constructor(settings: unknown) {
         agentMock(settings)
@@ -110,6 +117,7 @@ describe('summary roll-up maintenance', () => {
     await seedTestProvider(dataDir)
     streamMock.mockReset()
     agentMock.mockReset()
+    streamTextMock.mockReset()
     clearServedModelObservations()
     clearAgentRuns('story-test')
     streamMock.mockImplementation(async () => ({
@@ -263,15 +271,57 @@ describe('summary roll-up maintenance', () => {
     expect(await listSummaryRollupNodes(dataDir, 'story-test')).toEqual([])
   })
 
-  it('respects the story thinking preference and keeps an output budget above the record cap', async () => {
+  it('budgets the largest record plus the reasoning allowance, under the story thinking preference', async () => {
     await createStory(dataDir, makeStory({ disableThinking: false }))
-    await seedPassages(dataDir, 6)
+    await seedPassages(dataDir, 12)
 
     await deriveNextSummaryRollupNode(dataDir, 'story-test')
 
-    const settings = agentMock.mock.calls[0][0] as { providerOptions?: unknown; maxOutputTokens: number }
-    expect(settings.providerOptions).toBeUndefined()
-    expect(settings.maxOutputTokens).toBeGreaterThan(SUMMARY_ROLLUP_MAX_TEXT_CHARS / 4)
+    const thinking = agentMock.mock.calls[0][0] as { providerOptions?: unknown; maxOutputTokens: number }
+    expect(thinking.providerOptions).toBeUndefined()
+    expect(thinking.maxOutputTokens).toBeGreaterThan(DEFAULT_REASONING_ALLOWANCE + SUMMARY_ROLLUP_MAX_TEXT_CHARS / 4)
+
+    await updateStory(dataDir, { ...makeStory({ disableThinking: true }) })
+    await deriveNextSummaryRollupNode(dataDir, 'story-test')
+    const record = agentMock.mock.calls[1][0] as { providerOptions?: unknown; maxOutputTokens: number }
+    expect(record.providerOptions).toBeDefined()
+    expect(record.maxOutputTokens).toBeGreaterThan(SUMMARY_ROLLUP_MAX_TEXT_CHARS / 4)
+    expect(record.maxOutputTokens).toBeLessThan(SUMMARY_ROLLUP_MAX_TEXT_CHARS)
+  })
+
+  it('answers in a constrained response format where the provider supports one', async () => {
+    await saveGlobalConfig(dataDir, makeTestGlobalConfig({
+      providers: [{
+        id: 'test-provider',
+        name: 'Test',
+        preset: 'llamacpp',
+        apiKey: '',
+        baseURL: 'http://localhost:0',
+        defaultModel: 'test-model',
+        enabled: true,
+        customHeaders: {},
+        createdAt: new Date().toISOString(),
+      }],
+      defaultProviderId: 'test-provider',
+    }))
+    await createStory(dataDir, makeStory())
+    await seedPassages(dataDir, 6)
+    streamTextMock.mockImplementation(() => ({
+      fullStream: (async function* () {
+        yield { type: 'text-delta' as const, text: JSON.stringify({ title: 'The Gate Opened', text: 'The gate had opened.' }) }
+        yield { type: 'finish' as const, finishReason: 'stop' }
+      })(),
+      totalUsage: Promise.resolve({ inputTokens: 10, outputTokens: 10 }),
+    }))
+
+    const node = await deriveNextSummaryRollupNode(dataDir, 'story-test')
+
+    expect(node).toMatchObject({ title: 'The Gate Opened', text: 'The gate had opened.' })
+    expect(agentMock).not.toHaveBeenCalled()
+    const settings = streamTextMock.mock.calls[0][0] as { system: string; output: unknown; maxOutputTokens: number }
+    expect(settings.output).toBeDefined()
+    expect(settings.system).toContain('Report form (JSON Schema)')
+    expect(settings.maxOutputTokens).toBeGreaterThan(DEFAULT_REASONING_ALLOWANCE)
   })
 
   it('continues after a rejected record call and stops only after a successful result', async () => {
@@ -283,7 +333,7 @@ describe('summary roll-up maintenance', () => {
     const settings = agentMock.mock.calls[0][0] as {
       stopWhen: Array<(args: { steps: Array<{ toolCalls?: unknown[]; toolResults?: Array<{ toolName: string; output: unknown }> }> }) => boolean>
     }
-    const terminal = settings.stopWhen[0]
+    const terminal = settings.stopWhen.at(-1)!
     expect(terminal({
       steps: [{ toolCalls: [{ toolName: 'recordRollup' }], toolResults: [] }],
     })).toBe(false)

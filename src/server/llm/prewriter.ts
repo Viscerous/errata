@@ -1,6 +1,7 @@
 import { tool, ToolLoopAgent, stepCountIs, hasToolCall, type ToolSet } from 'ai'
 import { z } from 'zod/v4'
 import { resolveAgentRuntime, samplingCallSettings, samplingDiagnostics } from './client'
+import { freeformOutputCap } from './output-budget'
 import { addCacheBreakpoints, compileBlocks, expandMessagesFragmentTags, type ContextBlock } from './context-builder'
 import { proseWindowBlock } from './fragment-context-blocks'
 import { compileAgentContext } from '../agents/compile-agent-context'
@@ -158,7 +159,7 @@ export async function runPrewriter(args: RunPrewriterArgs): Promise<PrewriterRes
 
   const startTime = Date.now()
   const runtime = await resolveAgentRuntime(dataDir, storyId, 'generation.prewriter', story)
-  const { model, modelId, providerId, providerOptions, guards } = runtime
+  const { model, modelId, providerId, providerOptions } = runtime
   requestLogger.info('Prewriter model resolved', { modelId, sampling: samplingDiagnostics(runtime) })
 
   // Build the prewriter prompt from blocks (allows user customization via block editor).
@@ -301,7 +302,7 @@ export async function runPrewriter(args: RunPrewriterArgs): Promise<PrewriterRes
     ],
     ...samplingCallSettings(runtime),
     providerOptions,
-    maxOutputTokens: guards.maxOutputTokens,
+    maxOutputTokens: freeformOutputCap(runtime),
   })
 
   // The brief is the text of the LATEST step that produced text. Capturing per
