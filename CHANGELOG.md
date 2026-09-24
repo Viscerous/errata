@@ -3,6 +3,35 @@
 All notable changes to Errata are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are git tags.
 
+## [1.12.0] — 2026-09-14
+
+### Added
+- **Inline passage editing.** Double-click any passage in the story view to
+  edit it in place. The caret lands on the word you clicked, Ctrl/Cmd+Enter or
+  clicking away saves a new version, and Esc discards the draft.
+- **Interaction sounds** for panels and semantic actions, with hover cues kept
+  silent.
+- Per-story setting to expand generation thinking by default.
+- Librarian prose transforms now include sticky context.
+
+### Changed
+- The passage action toolbar opens just above the click point instead of under
+  the cursor, so a double-click always reaches the prose.
+- Native `confirm()` dialogs are replaced with an in-app dialog, avoiding
+  window focus loss on the desktop app.
+- Story setup includes existing fragment context in its conversation.
+
+### Fixed
+- The librarian re-analyzes prose after LLM tool edits, reads fragments before
+  editing them to prevent blind overwrites, skips analysis after disabled
+  edits, and the analysis indicator refreshes after prose saves.
+- Scrolling up during generation breaks free of autoscroll, and streaming
+  thoughts stay pinned to the bottom as they overflow.
+- Inline `<think>` reasoning is stripped from OpenAI-compatible streams.
+- Number fields in settings accept typed input via draft-commit.
+- File drop dialog actions stay pinned below the scroll area.
+- Onboarding guilloche rotation no longer repaints the SVG every frame.
+
 ## [1.11.0] — 2026-07-18
 
 ### Added
