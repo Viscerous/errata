@@ -825,6 +825,13 @@ describe('librarian API routes', () => {
       expect(data).toHaveProperty('view')
       expect(data.latestAnalysisId).toBeNull()
     })
+
+    it('returns 404 when asked for continuity at a passage off the active timeline', async () => {
+      const res = await app.fetch(
+        new Request(`http://localhost/api/stories/${storyId}/librarian/continuity?at=pr-nowhere`),
+      )
+      expect(res.status).toBe(404)
+    })
   })
 
   describe('PUT /stories/:storyId/librarian/live-states/:kind/:key', () => {

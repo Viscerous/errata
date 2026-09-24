@@ -96,7 +96,7 @@ character-only special case.
 - Analyze no longer exposes direct write tools. Every model-authored change goes
   through the change-proposal queue before it can be accepted or auto-applied.
 - Routine events, current conditions, relationship movement, and open threads
-  stay in the passage report's events, live state, and threads unless their
+  stay in the passage report's events, live state, and open questions unless their
   progression makes an assertion in a reusable fragment inaccurate. In that case the stale assertion is eligible
   for the smallest possible correction. Events are never appended as
   character-sheet diary paragraphs.
@@ -129,8 +129,8 @@ The current policy is semantic first, with no numeric context caps chosen yet:
   work. Routine online analysis does not block on a synchronous router fallback.
 - **Online analysis answers the passage in one request.** `reportPassage`
   carries, in order, what happened (summary, events, scene, mentions, and any
-  record evidence), where each character and entity now stands, which threads
-  are open or resolved, and, when enabled, directions for the next passage.
+  record evidence), where each character and entity now stands, which
+  questions are open or answered, and, when enabled, directions for the next passage.
   Each part builds on the one before it, and the model reasons over the
   passage once. Splitting the parts into a request each re-read the same
   context per part, more than doubled latency on slow models, and did not stop

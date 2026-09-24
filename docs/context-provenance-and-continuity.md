@@ -152,7 +152,16 @@ made at, so analysis reruns never erase them and analyses are never edited.
 
 The subjects a passage reports are the scene's roster: everyone else is absent,
 which also ends their moment. Readers are shown present subjects and in-scope
-characters who are elsewhere, with their last-known state.
+characters who are elsewhere, with their last-known state. The roster places
+known subjects; it cannot introduce one, and a subject with nothing to show is
+left out of prompts.
+
+A subject's identity is its catalog record. A passage may name someone before
+their record exists, or report a person as an entity; the fold resolves every
+report against the current catalog, by ID or by name, and the record decides
+whether it is a character or an entity. A record created later therefore
+gathers everything reported about that name from the first passage. A name
+without a record is one subject whichever list reported it.
 
 ## Character knowledge
 

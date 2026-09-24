@@ -174,7 +174,8 @@ describe('Librarian Analyze Blocks', () => {
     const memory = blocks.find((block) => block.id === 'continuity-memory')
     expect(memory?.content).toContain('**Alice** (`ch-0001`)')
     expect(memory?.content).toContain('- Where: north gate')
-    expect(memory?.content).toContain('[dormant] [missing-key] The missing key')
+    expect(memory?.content).toContain('**Dormant**\n- The missing key')
+    expect(memory?.content).not.toContain('missing-key')
   })
 
   it('renders recent-context characters in full and drops them from the catalog', () => {

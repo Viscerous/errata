@@ -360,6 +360,7 @@ export async function buildContextState(
       storyId,
       activeProseFragments: sortedProse,
       analysisIndex,
+      catalog: allFragments,
     }),
     excludeStorySummary
       ? Promise.resolve(undefined)

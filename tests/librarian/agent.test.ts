@@ -125,7 +125,7 @@ async function* toolCallEvents(
 
 const PASSAGE_KEYS = [
   'summary', 'events', 'scene', 'mentions', 'contradictions', 'newRecordNames',
-  'present', 'characters', 'entities', 'update', 'threads', 'resolvedThreads', 'directions',
+  'present', 'characters', 'entities', 'endedEntries', 'openQuestions', 'answeredQuestions', 'directions',
 ]
 
 /** Fixture findings, keyed by what they report, merged into one passage report. */
@@ -820,8 +820,8 @@ describe('librarian agent', () => {
           set: [{ field: 'Where', value: 'north hall' }],
         }],
         entities: [],
-        threads: [],
-        resolvedThreads: [],
+        openQuestions: [],
+        answeredQuestions: [],
       },
     })))
 

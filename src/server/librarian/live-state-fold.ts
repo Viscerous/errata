@@ -3,6 +3,7 @@ import {
   liveStateFieldDefinition,
   liveStateFieldKey,
   liveStateItemId,
+  liveStateKindOf,
   type EndedLiveStateItem,
   type FoldedLiveState,
   type FoldedLiveStateItem,
@@ -15,6 +16,7 @@ import {
   type LiveStateSource,
 } from '@/contracts/live-state'
 import type { SceneFrame } from '@/contracts/continuity'
+import { normalizeContinuityKey } from '@/lib/continuity-keys'
 
 const MAX_ACTIVE_ITEMS = 24
 const MAX_ENDED_ITEMS = 24
@@ -66,8 +68,11 @@ interface LineFrame {
   carried: CarriedOperation[]
 }
 
-function subjectMapKey(kind: LiveStateKind, key: string): string {
-  return `${kind}:${key}`
+/** A catalog record a subject can belong to. */
+export interface LiveStateCatalogRecord {
+  id: string
+  name: string
+  type: string
 }
 
 function cloneSubject(subject: Subject, keepFields: boolean): Subject {
@@ -91,6 +96,17 @@ function cloneSubject(subject: Subject, keepFields: boolean): Subject {
  */
 export class LiveStateFold {
   private readonly frames: LineFrame[] = [{ line: 'present', scene: 0, subjects: new Map(), carried: [] }]
+  private readonly catalogById = new Map<string, LiveStateCatalogRecord>()
+  private readonly catalogByName = new Map<string, LiveStateCatalogRecord[]>()
+
+  constructor(catalog: LiveStateCatalogRecord[] = []) {
+    for (const record of catalog) {
+      if (record.type === 'prose') continue
+      this.catalogById.set(record.id, record)
+      const nameKey = normalizeContinuityKey(record.name)
+      this.catalogByName.set(nameKey, [...this.catalogByName.get(nameKey) ?? [], record])
+    }
+  }
 
   private get frame(): LineFrame {
     return this.frames[this.frames.length - 1]
@@ -136,7 +152,7 @@ export class LiveStateFold {
    * the scene and everyone else is not, which also ends their moment.
    */
   applyReports(reports: LiveStateReport[], source: LiveStateSource): void {
-    const reported = new Set(reports.filter((report) => report.present).map((report) => subjectMapKey(report.kind, report.key)))
+    const reported = new Set(reports.filter((report) => report.present).map((report) => this.identify(report).key))
     for (const [key, subject] of this.frame.subjects) {
       if (reported.has(key)) continue
       subject.present = false
@@ -168,7 +184,9 @@ export class LiveStateFold {
       key: subject.key,
       ...(subject.fragmentId ? { fragmentId: subject.fragmentId } : {}),
       name: subject.name,
-      ...(subject.category ? { category: subject.category } : {}),
+      // A category sorts entities; one reported for a subject that turned out to
+      // be a character says nothing about them.
+      ...(subject.category && subject.kind === 'entity' ? { category: subject.category } : {}),
       present: subject.present,
       fields: [...subject.fields.values()].map((entry) => {
         const definition = liveStateFieldDefinition(subject.kind, entry.field, 'value')
@@ -186,8 +204,27 @@ export class LiveStateFold {
     }))
   }
 
-  private subject(identity: SubjectIdentity, source: LiveStateSource): Subject {
-    const key = subjectMapKey(identity.kind, identity.key)
+  /**
+   * The catalog is the authority on identity. A subject reported by name before
+   * its record existed, or under the other kind, belongs to the record, so a
+   * sheet created later gathers everything said about that name from the start.
+   * A subject with no record is its name, whichever kind reported it.
+   */
+  private identify(identity: SubjectIdentity): SubjectIdentity {
+    if (identity.fragmentId) {
+      const record = this.catalogById.get(identity.fragmentId)
+      return record ? { ...identity, kind: liveStateKindOf(record.type), name: record.name } : identity
+    }
+    const named = this.catalogByName.get(normalizeContinuityKey(identity.name)) ?? []
+    const record = named.find((candidate) => liveStateKindOf(candidate.type) === identity.kind) ?? named[0]
+    return record
+      ? { ...identity, kind: liveStateKindOf(record.type), key: record.id, fragmentId: record.id, name: record.name }
+      : identity
+  }
+
+  private subject(reported: SubjectIdentity, source: LiveStateSource): Subject {
+    const identity = this.identify(reported)
+    const key = identity.key
     const existing = this.frame.subjects.get(key)
     if (existing) {
       existing.name = identity.name || existing.name

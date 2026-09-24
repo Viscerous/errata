@@ -122,7 +122,7 @@ describe('continuity view', () => {
       fragmentId: `ch-${index}`,
       name: `Character ${index}`,
       present: false,
-      fields: [],
+      fields: [{ field: 'Where', value: 'the hall', holds: 'lastKnown' as const, visibility: 'outward' as const, scenesAgo: 0, sourceFragmentId: `pr-${index}`, analysisId: `la-${index}`, narrativePosition: index + 1 }],
       items: [],
       ended: [],
     }))
@@ -363,7 +363,7 @@ describe('continuity view', () => {
     expect(rendered).toContain('- Where: childhood village')
     // What Alice knew is lasting, so the flashback still carries it.
     expect(rendered).toContain('The key is missing.')
-    expect(rendered).toContain('[background] The missing key')
+    expect(rendered).toContain('**Background**\n- The missing key')
     expect(rendered).toContain('not tasks, promised beats')
     expect(rendered).not.toContain('ch-0001')
     expect(rendered).not.toContain('incorrect place')
@@ -406,7 +406,7 @@ describe('continuity view', () => {
 
     expect(view?.liveThreads).toMatchObject([{ threadKey: 'the_missing_key', visibility: 'foreground' }])
     expect(renderContinuity({ continuityView: view }, 'generation.writer'))
-      .toContain('[foreground] The missing key')
+      .toContain('**Foreground**\n- The missing key')
   })
 
   it('lets an explicit dormant update remove a thread from immediate writing context', async () => {
@@ -522,6 +522,47 @@ describe('continuity view', () => {
    * can derive. Requiring one dropped the whole `open` — the thread never
    * existed — over a field that was never load-bearing.
    */
+  // A record created after a subject was first reported by name, and a name
+  // reported as both a character and an entity, are each one subject.
+  it('gathers everything reported about a record under it, including before it existed', async () => {
+    const story = makeStory()
+    await createStory(dataDir, story)
+    await createFragment(dataDir, story.id, makeFragment({ id: 'ch-0009', type: 'character', name: 'Dr. Aris' }))
+    const passages: Fragment[] = []
+    for (let position = 1; position <= 2; position += 1) {
+      const fragment = makeFragment({ id: `pr-000${position}`, type: 'prose', order: position, content: `Passage ${position}` })
+      passages.push(fragment)
+      await createFragment(dataDir, story.id, fragment)
+    }
+    await saveAnalysis(dataDir, story.id, {
+      ...analysis('pr-0001', 1),
+      sourceRevision: analysisSourceRevision(passages[0]),
+      continuityProjection: projection({
+        liveStates: [
+          { kind: 'character', key: 'dr_aris', name: 'Dr. Aris', present: true, set: [{ field: 'Where', value: 'the dais' }], add: [knows('He wrote the first journals.')], update: [] },
+          { kind: 'entity', key: 'dr_aris', name: 'Dr. Aris', category: 'other', present: true, set: [], add: [{ id: liveStateItemId('Notes', 'Driven by fear.'), field: 'Notes', text: 'Driven by fear.' }], update: [] },
+        ],
+      }),
+    })
+    await saveAnalysis(dataDir, story.id, {
+      ...analysis('pr-0002', 2),
+      sourceRevision: analysisSourceRevision(passages[1]),
+      continuityProjection: projection({
+        liveStates: [
+          { kind: 'character', key: 'ch-0009', fragmentId: 'ch-0009', name: 'Dr. Aris', present: true, set: [{ field: 'Currently', value: 'kneeling' }], add: [], update: [] },
+        ],
+      }),
+    })
+
+    const view = await buildContinuityView({ dataDir, storyId: story.id, activeProseFragments: passages })
+
+    expect(view?.liveStates).toHaveLength(1)
+    expect(view?.liveStates?.[0]).toMatchObject({ kind: 'character', key: 'ch-0009', fragmentId: 'ch-0009', present: true })
+    expect(view?.liveStates?.[0]).not.toHaveProperty('category')
+    expect(view?.liveStates?.[0].fields.map((field) => field.value)).toEqual(['the dais', 'kneeling'])
+    expect(view?.liveStates?.[0].items.map((item) => item.text)).toEqual(['He wrote the first journals.', 'Driven by fear.'])
+  })
+
   it('opens a thread that arrived without a label, naming it from the key', async () => {
     const story = makeStory()
     await createStory(dataDir, story)
@@ -651,7 +692,7 @@ describe('renderContinuity', () => {
     it('offers every thread as latent material', () => {
       const rendered = renderContinuity({ continuityView: view }, 'directions.suggest')!
       expect(rendered).toContain('The open wound')
-      expect(rendered).toContain('[dormant] Who sent the letter')
+      expect(rendered).toContain('**Dormant**\n- Who sent the letter')
       expect(rendered).toContain('has simply gone quiet, not been resolved')
       expect(rendered).toContain('None of them is owed an answer')
       // The constraint framing is the opposite instruction; both at once is noise.
@@ -665,13 +706,14 @@ describe('renderContinuity', () => {
       expect(rendered).toContain('the whole ledger')
       expect(rendered).toContain('The key is missing.')
       expect(rendered).toContain('The hero lied')
-      expect(rendered).toContain('[dormant] Who sent the letter')
+      expect(rendered).toContain('**Dormant**\n- Who sent the letter')
     })
 
-    it('shows the analyst the keys and numbers it reports against', () => {
+    it('shows the analyst the ids and numbers it reports against, and threads by the label it repeats', () => {
       const source = { continuityView: view, stickyCharacters: [{ id: 'ch-0001' }] }
       const rendered = renderContinuity(source, 'librarian.analyze')!
-      expect(rendered).toContain('[the_open_wound] The open wound')
+      expect(rendered).toContain('\n- The open wound')
+      expect(rendered).not.toContain('the_open_wound')
       expect(rendered).toContain('**Zinozi** (`ch-0001`)')
       expect(rendered).toContain('  - [1] The key is missing.')
       expect(continuityRegistry(source).items).toEqual([
@@ -942,6 +984,30 @@ describe('renderContinuity', () => {
       expect(field('ch-0001', 'Wants')?.value).toBe('to leave the city')
       expect(field('ch-0001', 'Currently')?.value).toBe('packing')
       expect(subject('ch-0001')?.items).toEqual([expect.objectContaining({ id: knows.id, text: 'The gate was unlatched from inside' })])
+    })
+
+    it('folds through a passage to show what stood there, without later passages or corrections', async () => {
+      const first = await passage(1, { liveStates: [report('ch-0001', 'Alice', { set: [{ field: 'Where', value: 'the harbour' }] })] })
+      const second = await passage(2, { liveStates: [report('ch-0001', 'Alice', { set: [{ field: 'Where', value: 'the archive' }] })] })
+      await appendLiveStateEdit(dataDir, story.id, {
+        kind: 'character', key: 'ch-0001', fragmentId: 'ch-0001', name: 'Alice',
+        id: 'lse-late', createdAt: '2026-01-01T00:00:00.000Z', afterFragmentId: second.id,
+        set: [{ field: 'Wants', value: 'to leave the city' }], add: [], update: [], revise: [], remove: [],
+      })
+
+      const whole = await buildContinuityLedger({ dataDir, storyId: story.id, activeProseFragments: [first, second] })
+      const atFirst = await buildContinuityLedger({
+        dataDir, storyId: story.id, activeProseFragments: [first, second], throughFragmentId: first.id,
+      })
+      const fieldsOf = (ledger: ContinuityLedger | undefined) => Object.fromEntries(
+        (ledger?.liveStates?.[0]?.fields ?? []).map((field) => [field.field, field.value]),
+      )
+
+      expect(fieldsOf(atFirst)).toEqual({ Where: 'the harbour' })
+      expect(fieldsOf(whole)).toEqual({ Where: 'the archive', Wants: 'to leave the city' })
+      // The partial fold does not displace the cached whole chain.
+      expect(fieldsOf(await buildContinuityLedger({ dataDir, storyId: story.id, activeProseFragments: [first, second] })))
+        .toEqual({ Where: 'the archive', Wants: 'to leave the city' })
     })
   })
 })

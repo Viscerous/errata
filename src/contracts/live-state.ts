@@ -29,7 +29,7 @@ export type LiveStateVisibility = 'outward' | 'inner'
 export const LIVE_STATE_HAPPENED = ['revealed', 'changed', 'resolved'] as const
 export type LiveStateHappened = typeof LIVE_STATE_HAPPENED[number]
 
-export const LIVE_STATE_ENTITY_CATEGORIES = ['location', 'artefact', 'faction', 'other'] as const
+export const LIVE_STATE_ENTITY_CATEGORIES = ['location', 'artefact', 'faction', 'group', 'other'] as const
 export type LiveStateEntityCategory = typeof LIVE_STATE_ENTITY_CATEGORIES[number]
 
 export interface LiveStateFieldDefinition {
@@ -39,17 +39,22 @@ export interface LiveStateFieldDefinition {
   description: string
 }
 
+/** A catalog record's kind: a character sheet is a character, any other record an entity. */
+export function liveStateKindOf(fragmentType: string): LiveStateKind {
+  return fragmentType === 'character' ? 'character' : 'entity'
+}
+
 /** The field every subject has for what is true this moment. */
 export const MOMENT_FIELD = 'Currently'
 
 export const DEFAULT_LIVE_STATE_FIELDS: Record<LiveStateKind, LiveStateFieldDefinition[]> = {
   character: [
-    { field: MOMENT_FIELD, holds: 'moment', visibility: 'outward', description: 'what they are doing or how they are positioned at this moment' },
+    { field: MOMENT_FIELD, holds: 'moment', visibility: 'outward', description: 'what they are doing, noticing, or feeling at this moment' },
     { field: 'Where', holds: 'lastKnown', visibility: 'outward', description: 'the place they are in' },
     { field: 'Appearance', holds: 'lastKnown', visibility: 'outward', description: 'clothing and visible look' },
     { field: 'Condition', holds: 'lastKnown', visibility: 'outward', description: 'injuries, exhaustion, or another physical or mental condition' },
     { field: 'Wants', holds: 'lastKnown', visibility: 'inner', description: 'what they are pursuing now' },
-    { field: 'Knows', holds: 'lasting', visibility: 'inner', description: 'what they know or believe that matters to the story' },
+    { field: 'Knows', holds: 'lasting', visibility: 'inner', description: 'a fact they learned or a belief they now hold, which later scenes must respect; never what they do, notice, or feel in the moment' },
     { field: 'Secrets', holds: 'lasting', visibility: 'inner', description: 'what they hide or lie about' },
   ],
   entity: [

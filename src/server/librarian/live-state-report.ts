@@ -6,6 +6,7 @@ import {
   LIVE_STATE_ENTITY_CATEGORIES,
   LIVE_STATE_HAPPENED,
   liveStateFieldDefinition,
+  liveStateKindOf,
   liveStateItemId,
   type LiveStateKind,
   type LiveStateRegistryEntry,
@@ -50,26 +51,28 @@ function changesShape(kind: LiveStateKind) {
     set: forgivingList(z.object({ field: fieldInput, value: z.string().trim().max(160) }), 5)
       .describe(`Fields this passage establishes or changes. Suggested: ${describeFields(kind, 'value')}. Other field names are allowed. An empty value clears a field.`),
     add: forgivingList(z.object({ field: fieldInput, text: textInput }), 3)
-      .describe(`New entries this passage establishes for a lasting list. Suggested: ${describeFields(kind, 'list')}. Numbered entries already shown stay recorded without repeating them.`),
+      .describe(`New entries this passage establishes for a lasting list, each still true after this scene ends. Suggested: ${describeFields(kind, 'list')}. Numbered entries already shown stay recorded without repeating them.`),
   }
 }
 
 /**
  * Endings sit beside the characters rather than under one: the number already
  * says whose entry it is, and the bound is per passage rather than per person.
+ * Named for what they are: a list named for updating reads as the place to
+ * restate where things stand, which turns a standing fact into the moment.
  */
-export const LiveStateUpdatesInputSchema = forgivingList(z.object({
+export const LiveStateEndingsInputSchema = forgivingList(z.object({
   item: itemNumber.describe('The number of an entry shown under "Where things stand".'),
   happened: z.enum(LIVE_STATE_HAPPENED)
-    .describe('revealed: a hidden entry, usually a secret, became known to others (name them in to); changed: it no longer holds as written (say what holds in now); resolved: it no longer matters.'),
+    .describe('revealed: a hidden entry, usually a secret, became known to others (name them in to); changed: the story made it untrue, and a new fact of the same kind replaces it (say it in now); resolved: it no longer matters.'),
   to: forgivingList(z.string().trim().min(1).max(80), 3)
     .describe('For revealed: who learned it, by catalog ID or name.'),
   now: z.string().trim().max(160).optional()
-    .describe('For changed: what is true instead.'),
+    .describe('For changed: the fact that is true instead.'),
 }), 6)
-  .describe('Numbered entries this passage ends, with what happened to them. Use empty [] if none.')
+  .describe('Numbered entries this passage ends because the story ended them. An entry stays true until then; what someone is doing now belongs in their moment field, never here. Use empty [] if none.')
 
-export type LiveStateUpdatesInput = z.infer<typeof LiveStateUpdatesInputSchema>
+export type LiveStateEndingsInput = z.infer<typeof LiveStateEndingsInputSchema>
 
 /**
  * The scene roster is a list of references, apart from the changes: a crowd
@@ -80,13 +83,14 @@ export const LiveStatePresentInputSchema = forgivingList(z.string().trim().min(1
   .describe('Every character in the scene of this passage, by catalog ID or name, whether or not anything changed for them.')
 
 export const CharacterReportInputSchema = z.object({
-  character: z.string().trim().min(1).max(80).describe('Catalog ID when available; otherwise the name.'),
+  character: z.string().trim().min(1).max(80).describe('One individual person: catalog ID when available, otherwise the name. A crowd or other collective is an entity.'),
   ...changesShape('character'),
 })
 
 export const EntityReportInputSchema = z.object({
   entity: z.string().trim().min(1).max(80).describe('Catalog ID when available; otherwise the name.'),
-  category: z.enum(LIVE_STATE_ENTITY_CATEGORIES).optional(),
+  category: z.enum(LIVE_STATE_ENTITY_CATEGORIES).optional()
+    .describe('group for a crowd, audience, or other collective of people.'),
   ...changesShape('entity'),
 })
 
@@ -117,12 +121,13 @@ export interface LiveStateSkip {
 /**
  * Entry numbers are how the prompt addresses entries, never part of one. A
  * model copying a shown entry brings its number along, and one adding new
- * entries may continue the numbering ("6] ..."). Stripping it gives a copy the
- * identity of the entry it copied and a new entry its plain text.
+ * entries may continue the numbering ("6] ...", "6. ..."). Stripping it gives a
+ * copy the identity of the entry it copied and a new entry its plain text.
  */
 function statementText(text: string): string {
   return text
     .replace(/^\s*(?:\[?\d+\]\s*)+/, '')
+    .replace(/^\s*\d{1,2}[.)]\s+/, '')
     // Sentence citations are how evidence is addressed, not part of a statement.
     .replace(/\s*\[\d+(?:\s*[,–-]\s*\d+)*\s*[,\]]?\s*$/, '')
     .replace(/\s*\[\d+(?:\s*[,–-]\s*\d+)*\]/g, '')
@@ -134,8 +139,10 @@ function subjectKeyFor(name: string): string {
 }
 
 /**
- * Resolve a reference to a subject: a catalog ID of the right type, a catalog
- * name, a name the registry already knows, or else a new named subject.
+ * Resolve a reference to a subject: a catalog record by ID or name, a name the
+ * registry already knows, or else a new named subject. A catalog record decides
+ * its own kind, and a name is one subject whichever list reported it, so the
+ * same person reported as a character and as an entity stays one subject.
  */
 function resolveSubject(
   kind: LiveStateKind,
@@ -146,24 +153,25 @@ function resolveSubject(
   // A parenthetical is commentary on the reference ("Victoria (narrator)"), not part of the name.
   const trimmed = ref.replace(/\s*\([^)]*\)/g, '').trim()
   if (!trimmed) return null
-  const typeMatches = (fragment: Fragment) => (kind === 'character' ? fragment.type === 'character' : fragment.type !== 'character' && fragment.type !== 'prose')
+  const catalogSubject = (id: string, fragment: Fragment): SubjectIdentity | null => (
+    fragment.type === 'prose' ? null : { kind: liveStateKindOf(fragment.type), key: id, fragmentId: id, name: fragment.name }
+  )
   if (FragmentIdSchema.safeParse(trimmed).success) {
     const fragment = checkedFragments?.get(trimmed)
-    if (fragment && typeMatches(fragment)) return { kind, key: trimmed, fragmentId: trimmed, name: fragment.name }
-    const registered = known.find((subject) => subject.kind === kind && subject.key === trimmed)
+    if (fragment) return catalogSubject(trimmed, fragment)
+    const registered = known.find((subject) => subject.key === trimmed)
     if (registered) return registered
     if (!checkedFragments) return { kind, key: trimmed, fragmentId: trimmed, name: trimmed }
     return null
   }
   const lowered = trimmed.toLocaleLowerCase()
-  for (const [id, fragment] of checkedFragments ?? []) {
-    if (typeMatches(fragment) && fragment.name.trim().toLocaleLowerCase() === lowered) {
-      return { kind, key: id, fragmentId: id, name: fragment.name }
-    }
-  }
+  const named = [...checkedFragments ?? []]
+    .filter(([, fragment]) => fragment.type !== 'prose' && fragment.name.trim().toLocaleLowerCase() === lowered)
+  const [id, fragment] = named.find(([, candidate]) => liveStateKindOf(candidate.type) === kind) ?? named[0] ?? []
+  if (id && fragment) return catalogSubject(id, fragment)
   const key = subjectKeyFor(trimmed)
   if (!key) return null
-  const registered = known.find((subject) => subject.kind === kind && (subject.key === key || subject.name.toLocaleLowerCase() === lowered))
+  const registered = known.find((subject) => subject.key === key || subject.name.toLocaleLowerCase() === lowered)
   return registered ?? { kind, key, name: trimmed }
 }
 
@@ -177,7 +185,7 @@ function resolveSubject(
  * reported without being placed in the scene.
  */
 export function normalizeLiveStateReports(
-  input: { present?: string[]; characters?: unknown[]; entities?: unknown[]; update?: LiveStateUpdatesInput },
+  input: { present?: string[]; characters?: unknown[]; entities?: unknown[]; endedEntries?: LiveStateEndingsInput },
   registryItems: LiveStateRegistryEntry[],
   checkedFragments?: Map<string, Fragment>,
 ): { reports: LiveStateReport[]; skipped: LiveStateSkip[] } {
@@ -185,7 +193,7 @@ export function normalizeLiveStateReports(
   const reports = new Map<string, LiveStateReport>()
   const known: SubjectIdentity[] = []
   for (const item of registryItems) {
-    if (known.some((subject) => subject.kind === item.kind && subject.key === item.subjectKey)) continue
+    if (known.some((subject) => subject.key === item.subjectKey)) continue
     known.push({
       kind: item.kind,
       key: item.subjectKey,
@@ -194,7 +202,7 @@ export function normalizeLiveStateReports(
     })
   }
   const reportFor = (subject: SubjectIdentity, present: boolean): LiveStateReport => {
-    const mapKey = `${subject.kind}:${subject.key}`
+    const mapKey = subject.key
     const existing = reports.get(mapKey)
     if (existing) {
       if (present) existing.present = true
@@ -211,7 +219,7 @@ export function normalizeLiveStateReports(
       update: [],
     }
     reports.set(mapKey, created)
-    if (!known.some((entry) => entry.kind === subject.kind && entry.key === subject.key)) known.push(subject)
+    if (!known.some((entry) => entry.key === subject.key)) known.push(subject)
     return created
   }
 
@@ -263,19 +271,21 @@ export function normalizeLiveStateReports(
     }
   }
 
+  // The roster places known subjects; it cannot introduce one. A bare name with
+  // nothing reported about it would be a subject with nothing to say.
   for (const ref of input.present ?? []) {
     const subject = resolveSubject('character', ref, checkedFragments, known)
-    if (subject) reportFor(subject, true)
-    else skipped.push({ kind: 'character', key: ref, reason: `"${ref}" is not a character in the catalog; use its catalog ID or its name.` })
+    if (subject && (subject.fragmentId || known.some((entry) => entry.key === subject.key))) reportFor(subject, true)
+    else skipped.push({ kind: 'character', key: ref, reason: `"${ref}" is not a known character; report them under characters with what this passage establishes.` })
   }
 
-  for (const update of input.update ?? []) {
+  for (const update of input.endedEntries ?? []) {
     const item = registryItems.find((candidate) => candidate.index === update.item)
     if (!item) {
       skipped.push({ kind: 'item', key: String(update.item), reason: `No entry [${update.item}] is shown under "Where things stand".` })
       continue
     }
-    const owner = known.find((candidate) => candidate.kind === item.kind && candidate.key === item.subjectKey)
+    const owner = known.find((candidate) => candidate.key === item.subjectKey)
       ?? { kind: item.kind, key: item.subjectKey, name: item.subjectName }
     const ownerReport = reportFor(owner, false)
     if (ownerReport.update.some((existing) => existing.id === item.id)) continue

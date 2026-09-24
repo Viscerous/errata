@@ -406,7 +406,7 @@ describe('reportPassage', () => {
       summary: 'Thorne learned the truth.',
       characters: [{ character: 'ch-0002', set: [{ field: 'Currently', value: 'kneeling by the dais' }] }],
       // Only Thorne is present; the revealed secret is Victoria's.
-      update: [
+      endedEntries: [
         { item: 1, happened: 'revealed', to: ['Aris Thorne'] },
         { item: 2, happened: 'changed', now: 'the baseline is the source' },
         { item: 9, happened: 'resolved' },
@@ -435,7 +435,7 @@ describe('reportPassage', () => {
     expect(result.skippedContinuity).toEqual([expect.objectContaining({ kind: 'item', key: '9' })])
   })
 
-  it('treats threads as a foreground snapshot and resolves existing keys explicitly', async () => {
+  it('treats threads as a foreground snapshot addressed by label, and resolves them explicitly', async () => {
     const collector = createEmptyCollector()
     const tools = createAnalysisTools(collector, {
       dataDir: '/tmp',
@@ -451,8 +451,8 @@ describe('reportPassage', () => {
 
     const result = await report(tools.reportPassage, {
       summary: 'The map turned up.',
-      threads: ['who_unlocked_the_gate', 'Who lit the beacon?'],
-      resolvedThreads: ['Where is the map?', 'unknown_question'],
+      openQuestions: ['who unlocked the gate?', 'Who lit the beacon?'],
+      answeredQuestions: ['Where is the map?', 'why_the_bells_rang'],
     })
 
     expect(result.ok).toBe(true)
@@ -466,7 +466,7 @@ describe('reportPassage', () => {
       { threadKey: 'who_lit_the_beacon', visibility: 'foreground' },
       { threadKey: 'why_the_bells_rang', visibility: 'dormant' },
     ])
-    expect(result.skippedContinuity).toEqual([expect.objectContaining({ kind: 'thread', key: 'unknown_question' })])
+    expect(result.skippedContinuity).toEqual([expect.objectContaining({ kind: 'thread', key: 'why_the_bells_rang' })])
   })
 })
 
@@ -527,6 +527,8 @@ describe('reportMaintenance', () => {
 
   function maintenanceTools(numberedFragmentIds: string[] = ['ch-0001']) {
     const collector = createEmptyCollector()
+    // Corrections repair a contradicted record; the passage report found one.
+    collector.contradictions.push({ description: 'Alice left the guard.', fragmentIds: ['ch-0001'] })
     const tools = createAnalysisTools(collector, {
       dataDir: '/tmp', storyId: 'story-test', proseFragmentId: prose.id,
       disableDirections: true, numberedFragmentIds,
@@ -556,14 +558,14 @@ describe('reportMaintenance', () => {
     expect(collector.fragmentChangeProposals[0].operations[0]).toMatchObject({ occurrence: 2 })
   })
 
-  it('keeps replacement text exactly as authored', async () => {
+  it('keeps the sentence number it was shown out of the replacement text', async () => {
     const { collector, tools } = maintenanceTools()
     await report(tools.reportMaintenance, {
       evidenceSegments: [1],
       corrections: [{ fragmentId: record.id, segment: 1, newText: '[1] Alice resigned. She now advises the guard.' }],
     })
     expect(collector.fragmentChangeProposals[0].operations[0]).toMatchObject({
-      newText: '[1] Alice resigned. She now advises the guard.',
+      newText: 'Alice resigned. She now advises the guard.',
     })
   })
 
@@ -578,6 +580,18 @@ describe('reportMaintenance', () => {
     })
     expect(result).toMatchObject({ queuedOperationCount: 0, invalid: 1 })
     expect(collector.fragmentChangeProposals).toEqual([])
+  })
+
+  it('refuses a correction to a record no contradiction cites', async () => {
+    const { collector, tools } = maintenanceTools()
+    collector.contradictions.length = 0
+    const result = await report(tools.reportMaintenance, {
+      evidenceSegments: [1],
+      corrections: [{ fragmentId: record.id, segment: 1, newText: 'Alice is captain of the guard, and keeps the gate.' }],
+    })
+    expect(result).toMatchObject({ queuedOperationCount: 0 })
+    expect(collector.fragmentChangeProposals).toEqual([])
+    expect(JSON.stringify(result.skippedProposals)).toContain('No contradiction in this passage cites')
   })
 
   it('requires the target record to have been shown with numbered sentences', async () => {
@@ -642,7 +656,7 @@ describe('report schemas', () => {
     const maintenance = z.toJSONSchema(reportMaintenanceInputSchema) as any
     expect(Object.keys(passage.properties)).toEqual([
       'summary', 'events', 'scene', 'mentions', 'contradictions', 'newRecordNames',
-      'present', 'characters', 'entities', 'update', 'threads', 'resolvedThreads', 'directions',
+      'present', 'characters', 'entities', 'endedEntries', 'openQuestions', 'answeredQuestions', 'directions',
     ])
     expect(passage.required).toEqual(Object.keys(passage.properties))
     expect(passage.properties.characters.items.required).toContain('character')
@@ -660,18 +674,18 @@ describe('report schemas', () => {
         { character: 'Victoria', set: { field: 'Currently', value: 'standing' }, add: '' },
         { character: 'Hiddema', set: null },
       ],
-      update: [{ item: '[2]', happened: 'resolved' }, { item: 'x', happened: 'resolved' }],
+      endedEntries: [{ item: '[2]', happened: 'resolved' }, { item: 'x', happened: 'resolved' }],
       entities: '',
-      threads: 'Who poisoned the king?',
+      openQuestions: 'Who poisoned the king?',
     })
     expect(passage.mentions).toEqual([])
     expect(passage.contradictions).toEqual([])
     expect(passage.characters[0].set).toEqual([{ field: 'Currently', value: 'standing' }])
     expect(passage.characters[0].add).toEqual([])
     expect(passage.characters[1].set).toEqual([])
-    expect(passage.update).toEqual([{ item: 2, happened: 'resolved' }])
+    expect(passage.endedEntries).toEqual([{ item: 2, happened: 'resolved' }])
     expect(passage.entities).toEqual([])
-    expect(passage.threads).toEqual(['Who poisoned the king?'])
+    expect(passage.openQuestions).toEqual(['Who poisoned the king?'])
 
     expect(reportMaintenanceInputSchema.parse({ evidenceSegments: '', corrections: '', newRecords: null }))
       .toEqual({ evidenceSegments: [], corrections: [], newRecords: [] })

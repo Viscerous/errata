@@ -6,7 +6,8 @@ import {
   type LibrarianAnalysis,
   type LibrarianAnalysisIndex,
 } from './storage'
-import { LiveStateFold } from './live-state-fold'
+import { LiveStateFold, type LiveStateCatalogRecord } from './live-state-fold'
+import { listFragments } from '../fragments/storage'
 import {
   type FoldedLiveState,
   type LiveStateEdit,
@@ -165,12 +166,21 @@ function projectionCurrent(projection: CachedProjection, fragment: Fragment): bo
  * Deterministically folds the latest source-current Analysis projections on the
  * active branch. Narrative events and scene rosters have their own consumers;
  * this fold reads only the first-class continuity projection.
+ *
+ * `throughFragmentId` stops the fold after that passage: continuity as it stood
+ * there. Author corrections keep their place in the whole chain, so one made
+ * later in the story does not reach back into it.
+ *
+ * `catalog` is the story's records, which decide who a reported subject is; a
+ * caller that already holds them passes them, otherwise they are read here.
  */
 export async function buildContinuityLedger(params: {
   dataDir: string
   storyId: string
   activeProseFragments: Fragment[]
   analysisIndex?: LibrarianAnalysisIndex | null
+  throughFragmentId?: string
+  catalog?: LiveStateCatalogRecord[]
 }): Promise<ContinuityLedger | undefined> {
   const index = ('analysisIndex' in params
     ? params.analysisIndex
@@ -184,6 +194,8 @@ export async function buildContinuityLedger(params: {
     }
 
   const editLog = await getLiveStateEditLog(params.dataDir, params.storyId)
+  const catalog = (params.catalog ?? await listFragments(params.dataDir, params.storyId))
+    .filter((record) => record.type !== 'prose')
   const fragmentHashes = new Map(
     params.activeProseFragments.map((fragment) => [fragment.id, proseContentHash(fragment)]),
   )
@@ -192,12 +204,22 @@ export async function buildContinuityLedger(params: {
       `${fragment.id}:${fragmentHashes.get(fragment.id)}:${index.latestProjectionByFragmentId[fragment.id]?.analysisId ?? ''}`
     )),
     `edits:${editLog.edits.length}:${editLog.edits.at(-1)?.id ?? ''}`,
+    // A record created or renamed changes who a reported name belongs to.
+    `catalog:${catalog.map((record) => `${record.id}:${record.type}:${record.name}`).join(',')}`,
   ].join('|')
-  const cacheKey = `${params.dataDir}\u0000${params.storyId}`
-  const cached = ledgerCache.get(cacheKey)
+  const chainPositions = new Map(params.activeProseFragments.map((fragment, indexInChain) => [fragment.id, indexInChain + 1]))
+  const chainEnd = params.activeProseFragments.length
+  const through = params.throughFragmentId === undefined
+    ? chainEnd
+    : chainPositions.get(params.throughFragmentId) ?? 0
+  // Only the whole chain is cached: it is what every generation reads, and a
+  // partial fold must not evict it.
+  const cacheKey = through === chainEnd ? `${params.dataDir}\u0000${params.storyId}` : undefined
+  const cached = cacheKey ? ledgerCache.get(cacheKey) : undefined
   if (cached?.signature === signature) return cloneLedger(cached.ledger)
 
   const sources = params.activeProseFragments
+    .slice(0, through)
     .map((source, indexInChain) => ({
       source,
       narrativePosition: indexInChain + 1,
@@ -221,25 +243,25 @@ export async function buildContinuityLedger(params: {
   let frame: SceneFrame | undefined
   const suspended: Array<SceneFrame | undefined> = []
   const liveThreads = new Map<string, LiveThreadEntry>()
-  const liveStates = new LiveStateFold()
+  const liveStates = new LiveStateFold(catalog)
   const threadVisibility = new Map<string, LiveThreadEntry['visibility']>()
   let staleProjectionCount = 0
 
   // Author corrections apply after the passage they were made at, so a later
   // passage builds on them and a rerun analysis of an earlier one cannot erase
   // them. A correction whose passage has left the chain applies at the end.
-  const chainPositions = new Map(params.activeProseFragments.map((fragment, indexInChain) => [fragment.id, indexInChain + 1]))
   const pendingEdits = editLog.edits
     .map((edit) => ({
       edit,
       position: edit.afterFragmentId === null ? 0 : chainPositions.get(edit.afterFragmentId) ?? Number.POSITIVE_INFINITY,
     }))
+    .filter(({ position }) => position <= through || through === chainEnd)
     .sort((left, right) => left.position - right.position)
   let nextEdit = 0
   const applyEditsBefore = (position: number) => {
     while (nextEdit < pendingEdits.length && (pendingEdits[nextEdit].position < position || position === Number.POSITIVE_INFINITY)) {
       const { edit, position: editPosition } = pendingEdits[nextEdit]
-      liveStates.applyEdit(edit, editSource(edit, Number.isFinite(editPosition) ? editPosition : params.activeProseFragments.length))
+      liveStates.applyEdit(edit, editSource(edit, Number.isFinite(editPosition) ? editPosition : chainEnd))
       nextEdit += 1
     }
   }
@@ -349,7 +371,7 @@ export async function buildContinuityLedger(params: {
       staleProjectionCount,
     } : undefined
 
-  cacheSet(cacheKey, signature, cloneLedger(ledger))
+  if (cacheKey) cacheSet(cacheKey, signature, cloneLedger(ledger))
   return ledger
 }
 
@@ -375,8 +397,11 @@ export function projectContinuityView(
     ? ledger.liveThreads
     : ledger.liveThreads.filter((thread) => thread.visibility !== 'dormant' || retainedDormant.has(thread))
 
-  const liveStates = ledger.liveStates
-    ? takeMostRecentlySourced(ledger.liveStates, MAX_LIVE_STATES)
+  // A subject with nothing to say is a heading in the prompt and a slot taken
+  // from one that has something.
+  const informative = ledger.liveStates?.filter((subject) => subject.fields.length > 0 || subject.items.length > 0)
+  const liveStates = informative?.length
+    ? takeMostRecentlySourced(informative, MAX_LIVE_STATES)
     : undefined
 
   return {
@@ -440,6 +465,14 @@ const POLICY_BY_READER: Record<ContinuityReader, ContinuityPolicy> = {
   // Second person, own knowledge only. This reader *is* the character, and one
   // given the authorial records starts answering from offstage facts.
   'character-chat.chat': { presentation: 'self' },
+}
+
+const THREAD_VISIBILITY_ORDER = ['foreground', 'background', 'dormant'] as const satisfies ReadonlyArray<LiveThreadEntry['visibility']>
+
+const THREAD_VISIBILITY_LABELS: Record<LiveThreadEntry['visibility'], string> = {
+  foreground: 'Foreground',
+  background: 'Background',
+  dormant: 'Dormant',
 }
 
 interface AuthorialPresentationCopy {
@@ -555,7 +588,7 @@ function renderAuthorialContinuity(
   view: ContinuityView,
   presentation: AuthorialPresentation,
   characterIds: Set<string>,
-  /** The analyst reports against keys, ids, and item numbers; no other reader needs them. */
+  /** The analyst reports against ids and item numbers; no other reader needs them. */
   forAnalyst: boolean,
 ): string {
   const copy = AUTHORIAL_PRESENTATION_COPY[presentation]
@@ -577,10 +610,18 @@ function renderAuthorialContinuity(
     ? view.liveThreads
     : view.liveThreads.filter((thread) => thread.visibility !== 'dormant')
   if (threads.length > 0) {
+    // Grouped rather than tagged, and addressed by label alone: a thread line
+    // carries nothing but the text a reader would repeat to name it.
+    const groups = THREAD_VISIBILITY_ORDER
+      .map((visibility) => [visibility, threads.filter((thread) => thread.visibility === visibility)] as const)
+      .filter(([, members]) => members.length > 0)
     parts.push([
       copy.threadHeading,
       copy.threadGuidance,
-      ...threads.map((thread) => `- [${thread.visibility}]${forAnalyst ? ` [${thread.threadKey}]` : ''} ${thread.label}`),
+      ...groups.flatMap(([visibility, members]) => [
+        `**${THREAD_VISIBILITY_LABELS[visibility]}**`,
+        ...members.map((thread) => `- ${thread.label}`),
+      ]),
     ].join('\n'))
   }
 

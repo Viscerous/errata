@@ -53,14 +53,16 @@ const summaryGapWarning: Record<SummaryGapReason, string> = {
   'old-contract': 'Analysis uses an older story-summary format',
 }
 
-async function branchContinuity(dataDir: string, storyId: string) {
+async function branchContinuity(dataDir: string, storyId: string, throughFragmentId?: string) {
   const [activeProseIds, analysisIndex] = await Promise.all([
     getActiveProseIds(dataDir, storyId),
     getAnalysisIndex(dataDir, storyId),
   ])
   const activeProse = (await Promise.all(activeProseIds.map((id) => getFragment(dataDir, storyId, id))))
     .filter((fragment): fragment is NonNullable<typeof fragment> => fragment?.type === 'prose' && !fragment.archived)
-  const ledger = await buildContinuityLedger({ dataDir, storyId, activeProseFragments: activeProse, analysisIndex })
+  const ledger = await buildContinuityLedger({
+    dataDir, storyId, activeProseFragments: activeProse, analysisIndex, throughFragmentId,
+  })
   return { ledger, analysisIndex, activeProse }
 }
 
@@ -127,15 +129,19 @@ export function librarianRoutes(dataDir: string) {
       } satisfies LibrarianAnalysisStatusResponse
     }, { detail: { summary: 'Get passage-analysis and story-summary coverage' } })
 
-    .get('/stories/:storyId/librarian/continuity', async ({ params, set }) => {
+    .get('/stories/:storyId/librarian/continuity', async ({ params, query, set }) => {
       const story = await getStory(dataDir, params.storyId)
       if (!story) {
         set.status = 404
         return { error: 'Story not found' }
       }
-      const { ledger, analysisIndex, activeProse } = await branchContinuity(dataDir, params.storyId)
+      const { ledger, analysisIndex, activeProse } = await branchContinuity(dataDir, params.storyId, query.at)
+      if (query.at && !activeProse.some((fragment) => fragment.id === query.at)) {
+        set.status = 404
+        return { error: 'That passage is not on the active timeline' }
+      }
       const view = projectContinuityView(ledger)
-      const latestProseId = activeProse.at(-1)?.id
+      const latestProseId = query.at ?? activeProse.at(-1)?.id
       const latestAnalysisId = latestProseId
         ? analysisIndex?.latestProjectionByFragmentId[latestProseId]?.analysisId ?? analysisIndex?.latestByFragmentId[latestProseId]?.analysisId ?? null
         : null
@@ -144,7 +150,10 @@ export function librarianRoutes(dataDir: string) {
         view: view ?? null,
         latestAnalysisId,
       }
-    }, { detail: { summary: 'Get branch folded continuity ledger and view' } })
+    }, {
+      query: t.Object({ at: t.Optional(t.String()) }),
+      detail: { summary: 'Get branch folded continuity ledger and view, optionally as it stood after one passage' },
+    })
 
     // The author corrects the record here; analyses stay as the model reported
     // them, and the correction applies after the latest passage.

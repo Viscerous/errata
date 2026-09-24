@@ -26,6 +26,38 @@ describe('live-state report boundary', () => {
     expect(reports[0].set).toEqual([{ field: 'Currently', value: 'smiling' }])
   })
 
+  it('drops list numbering in the dotted form too, but not a year', () => {
+    const { reports } = normalizeLiveStateReports({
+      characters: [{
+        character: 'Victoria',
+        add: [
+          { field: 'Knows', text: '7. An entry continuing the list' },
+          { field: 'Knows', text: '1991. The year the dike broke' },
+        ],
+      }],
+    }, [])
+
+    expect(reports[0].add.map((entry) => entry.text)).toEqual(['An entry continuing the list', '1991. The year the dike broke'])
+  })
+
+  it('lets a catalog record decide its kind, and keeps one name one subject', () => {
+    const catalog = new Map<string, Fragment>([
+      ['ch-0009', { id: 'ch-0009', type: 'character', name: 'Dr. Aris' } as Fragment],
+    ])
+    const { reports } = normalizeLiveStateReports({
+      characters: [{ character: 'the gallery', set: [{ field: 'Currently', value: 'silent' }] }],
+      entities: [
+        { entity: 'Dr. Aris', add: [{ field: 'Notes', text: 'Driven by fear' }] },
+        { entity: 'The Gallery', category: 'group' },
+      ],
+    }, [], catalog)
+
+    expect(reports.map((report) => [report.kind, report.key])).toEqual([
+      ['character', 'the_gallery'],
+      ['character', 'ch-0009'],
+    ])
+  })
+
   it('files a value written to a list as an entry, and an entry written to a value as its value', () => {
     const { reports } = normalizeLiveStateReports({
       characters: [{
@@ -39,12 +71,12 @@ describe('live-state report boundary', () => {
     expect(reports[0].add).toEqual([{ id: liveStateItemId('Secrets', 'craves ruin'), field: 'Secrets', text: 'craves ruin' }])
   })
 
-  it('places the roster in the scene apart from the changes, and reads past commentary on a name', () => {
+  it('places known characters from the roster in the scene, and reads past commentary on a name', () => {
     const catalog = new Map<string, Fragment>([
       ['ch-0001', { id: 'ch-0001', type: 'character', name: 'Victoria' } as Fragment],
       ['ch-0002', { id: 'ch-0002', type: 'character', name: 'Secunda' } as Fragment],
     ])
-    const { reports } = normalizeLiveStateReports({
+    const { reports, skipped } = normalizeLiveStateReports({
       present: ['ch-0002', 'an onlooker'],
       characters: [{ character: 'Victoria (implied narrator)', set: [{ field: 'Currently', value: 'at the lectern' }] }],
     }, [], catalog)
@@ -52,8 +84,9 @@ describe('live-state report boundary', () => {
     expect(reports.map((report) => [report.key, report.present, report.set.length])).toEqual([
       ['ch-0001', true, 1],
       ['ch-0002', true, 0],
-      ['an_onlooker', true, 0],
     ])
+    // A bare name in the roster would be a subject with nothing to say.
+    expect(skipped).toEqual([expect.objectContaining({ key: 'an onlooker' })])
   })
 
   it('keeps citations out of entries and a reveal with no one to reveal it to out of the reveals', () => {
@@ -63,7 +96,7 @@ describe('live-state report boundary', () => {
         { field: 'Knows', text: 'Her body is a perfected machine [36, 39, 46,' },
         { field: 'Knows', text: 'The seal holds [12] as designed' },
       ] }],
-      update: [{ item: 1, happened: 'revealed' }],
+      endedEntries: [{ item: 1, happened: 'revealed' }],
     }, [shown])
 
     expect(reports[0].add.map((entry) => entry.text)).toEqual(['Her body is a perfected machine', 'The seal holds as designed'])
